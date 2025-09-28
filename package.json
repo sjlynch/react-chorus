@@ -1,0 +1,32 @@
+{
+  "name": "react-chorus",
+  "version": "0.0.1",
+  "description": "Composable chat UI components for React.",
+  "type": "module",
+  "main": "./dist/react-chorus.cjs.js",
+  "module": "./dist/react-chorus.es.js",
+  "types": "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/react-chorus.es.js",
+      "require": "./dist/react-chorus.cjs.js"
+    },
+    "./styles.css": "./dist/styles.css"
+  },
+  "files": ["dist"],
+  "sideEffects": ["./dist/styles.css"],
+  "peerDependencies": {
+    "react": "^18 || ^19",
+    "react-dom": "^18 || ^19"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.0.0",
+    "typescript": "^5.0.0",
+    "vite": "^5.0.0"
+  },
+  "scripts": {
+    "build": "vite build && tsc -p tsconfig.json --emitDeclarationOnly",
+    "prepublishOnly": "npm run build"
+  }
+}

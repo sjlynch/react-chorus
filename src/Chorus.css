@@ -1,0 +1,6 @@
+.chorus-window { border: 1px solid #ddd; padding: 12px; border-radius: 8px; }
+.chorus-msg { margin: 6px 0; }
+.chorus-user { text-align: right; }
+.chorus-assistant { text-align: left; opacity: .9; }
+.chorus-input { display: flex; gap: 8px; margin-top: 8px; }
+.chorus-input input { flex: 1; }
