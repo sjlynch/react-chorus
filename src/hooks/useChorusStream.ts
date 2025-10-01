@@ -52,7 +52,13 @@ export function useChorusStream(transport: Transport) {
       const emitPayload = (payload: string) => {
         const sentinel = payload.replace(/\r?\n/g, '');
         if (sentinel === '[DONE]' || sentinel === 'done') return;
-        if (!started) { started = true; cb.onStart && cb.onStart(payload); }
+        // Deliver the first chunk to onStart OR onChunk (not both) to avoid duplication
+        if (!started) {
+          started = true;
+          if (cb.onStart) cb.onStart(payload);
+          else cb.onChunk(payload);
+          return;
+        }
         cb.onChunk(payload);
       };
 
