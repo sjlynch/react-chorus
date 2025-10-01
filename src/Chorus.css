@@ -1,6 +1,29 @@
-.chorus-window { border: 1px solid #ddd; padding: 12px; border-radius: 8px; }
-.chorus-msg { margin: 6px 0; }
-.chorus-user { text-align: right; }
-.chorus-assistant { text-align: left; opacity: .9; }
-.chorus-input { display: flex; gap: 8px; margin-top: 8px; }
-.chorus-input input { flex: 1; }
+/* Dark theme defaults + CSS variables for palette overrides (no blue) */
+.chorus-window { background: var(--chorus-chat-bg, #161616); border: 1px solid var(--chorus-border, #2a2a2a); border-radius: 12px; padding: 12px; color: var(--chorus-chat-text, #f3f4f6); }
+.chorus-msg { display: flex; margin: 8px 0; }
+.chorus-bubble { max-width: 80%; padding: 10px 12px; border-radius: 12px; font-size: 14px; line-height: 1.4; }
+
+/* Roles */
+.chorus-assistant { justify-content: flex-start; }
+.chorus-assistant .chorus-bubble { background: var(--chorus-assistant-bg, rgb(237 115 46)); border: 1px solid var(--chorus-assistant-border, #c95e22); color: var(--chorus-assistant-text, #ffffff); }
+.chorus-user { justify-content: flex-end; }
+.chorus-user .chorus-bubble { background: var(--chorus-user-bg, #dddddd); border: 1px solid var(--chorus-user-border, #cccccc); color: var(--chorus-user-text, #111111); }
+
+/* Input area (multiline textarea) */
+.chorus-input { position: relative; display: flex; align-items: center; margin-top: 12px; background: var(--chorus-input-area-bg, transparent); }
+.chorus-input textarea { width: 100%; min-height: 44px; max-height: 160px; padding: 12px 50px 12px 14px; border-radius: 12px; border: 1px solid var(--chorus-input-border, #333333); background: var(--chorus-input-bg, #1a1a1a); color: var(--chorus-input-text, #f3f4f6); outline: none; resize: none; line-height: 1.4; }
+.chorus-input textarea::placeholder { color: #a3a3a3; }
+.chorus-input textarea:focus { border-color: var(--chorus-send-bg, #ffffff); box-shadow: 0 0 0 3px var(--chorus-focus-ring, rgba(255,255,255,0.2)); }
+
+/* Send/Stop button (white circle, black icon) */
+.chorus-send { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); width: 36px; height: 36px; padding: 0; line-height: 0; border-radius: 9999px; border: none; background: var(--chorus-send-bg, #ffffff); color: var(--chorus-send-text, #111111); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; z-index: 2; }
+.chorus-send:disabled { opacity: .5; cursor: default; }
+.chorus-send svg { width: 18px; height: 18px; display: block; color: inherit; }
+.chorus-stop-fill { width: 18px; height: 18px; background: currentColor; border-radius: 2px; display: block; }
+
+/* Typing indicator (assistant replying) */
+.chorus-typing .chorus-bubble { display: inline-flex; align-items: center; gap: 4px; }
+.chorus-dot { width: 6px; height: 6px; border-radius: 9999px; background: var(--chorus-assistant-text, #ffffff); opacity: .6; animation: chorus-typing 1.2s infinite ease-in-out; }
+.chorus-dot:nth-child(2) { animation-delay: .15s; }
+.chorus-dot:nth-child(3) { animation-delay: .3s; }
+@keyframes chorus-typing { 0%, 80%, 100% { transform: translateY(0); opacity: .6; } 40% { transform: translateY(-3px); opacity: 1; } }

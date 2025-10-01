@@ -14,8 +14,12 @@
     },
     "./styles.css": "./dist/styles.css"
   },
-  "files": ["dist"],
-  "sideEffects": ["./dist/styles.css"],
+  "files": [
+    "dist"
+  ],
+  "sideEffects": [
+    "./dist/styles.css"
+  ],
   "peerDependencies": {
     "react": "^18 || ^19",
     "react-dom": "^18 || ^19"
@@ -28,5 +32,8 @@
   "scripts": {
     "build": "vite build && tsc -p tsconfig.json --emitDeclarationOnly",
     "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "lucide-react": "^0.544.0"
   }
 }
