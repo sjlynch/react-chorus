@@ -1,5 +1,6 @@
 import React from 'react';
 import type { Message } from '../types';
+import { getConnector, type Connector } from '../connectors/connectors';
 
 export interface SendCallbacks {
   onStart?: (firstChunk: string) => void;
@@ -11,7 +12,69 @@ export interface SendCallbacks {
 
 export type Transport = (text: string, history: Message[], signal: AbortSignal) => Promise<Response>;
 
-export function useChorusStream(transport: Transport) {
+export interface StreamOptions {
+  connector?: Connector | 'auto' | 'openai';
+}
+
+/**
+ * Robust SSE reader:
+ * - Parses the stream line-by-line (handles CR, LF, and chunk boundaries)
+ * - Collects "data:" lines for an event; dispatches on a blank line
+ * - Preserves empty data lines (blank lines inside payloads)
+ */
+function readSSEStream(res: Response, onEvent: (payload: string) => void): Promise<void> {
+  if (!res.body) return Promise.resolve();
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+
+  let buf = '';
+  let dataLines: string[] = [];
+
+  const flushEvent = () => {
+    if (!dataLines.length) return;
+    onEvent(dataLines.join('\n'));
+    dataLines = [];
+  };
+
+  const processLine = (line: string) => {
+    if (line.endsWith('\r')) line = line.slice(0, -1);
+    if (line === '') { flushEvent(); return; }
+    if (line.startsWith('data:')) {
+      let v = line.slice(5);
+      if (v.startsWith(' ')) v = v.slice(1);
+      dataLines.push(v);
+    }
+  };
+
+  return new Promise<void>((resolve, reject) => {
+    (async () => {
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+
+          let idx: number;
+          while ((idx = buf.indexOf('\n')) !== -1) {
+            const line = buf.slice(0, idx);
+            buf = buf.slice(idx + 1);
+            processLine(line);
+          }
+        }
+        buf += decoder.decode();
+        if (buf.length) processLine(buf);
+        flushEvent();
+        resolve();
+      } catch (err) {
+        reject(err);
+      }
+    })();
+  });
+}
+
+export function useChorusStream(transport: Transport, opts?: StreamOptions) {
+  const connector = getConnector(opts?.connector);
+
   const [sending, setSending] = React.useState(false);
   const controllerRef = React.useRef<AbortController | null>(null);
 
@@ -44,48 +107,23 @@ export function useChorusStream(transport: Transport) {
     try {
       const res = await transport(text, history, signal);
       if (!res.ok || !res.body) throw new Error(`Bad response (${res.status}) or missing body`);
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let started = false;
 
-      const emitPayload = (payload: string) => {
-        const sentinel = payload.replace(/\r?\n/g, '');
-        if (sentinel === '[DONE]' || sentinel === 'done') return;
-        // Deliver the first chunk to onStart OR onChunk (not both) to avoid duplication
+      let started = false;
+      await readSSEStream(res, (payload) => {
+        const out = connector.extract(payload);
+        if (!out) return;
+        if (out.done) return; // ignore sentinel; finalize on stream end
+
+        const chunk = out.text || '';
+        if (!chunk) return;
+
         if (!started) {
           started = true;
-          if (cb.onStart) cb.onStart(payload);
-          else cb.onChunk(payload);
+          if (cb.onStart) cb.onStart(chunk); else cb.onChunk(chunk);
           return;
         }
-        cb.onChunk(payload);
-      };
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const events = buffer.split('\n\n');
-        buffer = events.pop() || '';
-        for (const ev of events) {
-          const dataLines: string[] = [];
-          for (const line of ev.split('\n')) if (line.startsWith('data:')) dataLines.push(line.slice(5));
-          if (dataLines.length) emitPayload(dataLines.join('\n'));
-        }
-      }
-
-      buffer += decoder.decode();
-      if (buffer) {
-        const maybeLines = buffer.split('\n');
-        if (maybeLines.some(l => l.startsWith('data:'))) {
-          const dataLines: string[] = [];
-          for (const l of maybeLines) if (l.startsWith('data:')) dataLines.push(l.slice(5));
-          if (dataLines.length) emitPayload(dataLines.join('\n'));
-        } else {
-          emitPayload(buffer);
-        }
-      }
+        cb.onChunk(chunk);
+      });
 
       await finish();
     } catch (e: any) {
@@ -93,7 +131,7 @@ export function useChorusStream(transport: Transport) {
       setSending(false);
       if (controllerRef.current === controller) controllerRef.current = null;
     }
-  }, [sending, transport]);
+  }, [sending, transport, connector]);
 
   const abort = React.useCallback(() => { controllerRef.current?.abort(); }, []);
   return { send, abort, sending };

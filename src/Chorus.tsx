@@ -15,9 +15,10 @@ export interface ChorusProps {
   palette?: Palette;
   sending?: boolean;
   minAssistantDelayMs?: number;
+  codeBlockTheme?: 'dark' | 'light';
 }
 
-export function Chorus({ messages, value, onChange, onSend, placeholder, palette, sending: sendingProp, minAssistantDelayMs = 1000 }: ChorusProps) {
+export function Chorus({ messages, value, onChange, onSend, placeholder, palette, sending: sendingProp, minAssistantDelayMs = 1000, codeBlockTheme = 'dark' }: ChorusProps) {
   const [internalMsgs, setInternalMsgs] = React.useState<Message[]>(() => messages || []);
   const msgs = value !== undefined ? value : internalMsgs;
 
@@ -35,27 +36,54 @@ export function Chorus({ messages, value, onChange, onSend, placeholder, palette
   const sending = sendingProp ?? internalSending;
 
   const controllerRef = React.useRef<AbortController | null>(null);
+
   const hasStartedAssistantRef = React.useRef(false);
   const pendingAssistantIdRef = React.useRef<string | null>(null);
 
-  const startAssistantIfNeeded = (firstChunk: string) => {
-    if (!hasStartedAssistantRef.current) {
-      const id = 'assistant-' + Date.now();
-      pendingAssistantIdRef.current = id;
-      hasStartedAssistantRef.current = true;
-      updateMsgs(prev => prev.concat({ id, role: 'assistant', text: firstChunk }));
-    } else if (pendingAssistantIdRef.current) {
-      updateMsgs(prev => prev.map(m => m.id === pendingAssistantIdRef.current ? { ...m, text: m.text + firstChunk } : m));
-    }
+  // Frame-batched queue to avoid any chance of interleaving/races dropping tokens
+  const chunkQueueRef = React.useRef<string[]>([]);
+  const rafIdRef = React.useRef<number | null>(null);
+
+  const flushQueue = () => {
+    if (!pendingAssistantIdRef.current) return;
+    const q = chunkQueueRef.current;
+    if (q.length === 0) return;
+    const add = q.join('');
+    q.length = 0;
+    updateMsgs(prev => prev.map(m => m.id === pendingAssistantIdRef.current ? { ...m, text: m.text + add } : m));
+  };
+
+  const scheduleFlush = () => {
+    if (rafIdRef.current != null) return;
+    rafIdRef.current = typeof window !== 'undefined' ? window.requestAnimationFrame(() => {
+      rafIdRef.current = null;
+      flushQueue();
+    }) : null;
+  };
+
+  const startAssistant = (firstChunk: string) => {
+    const id = 'assistant-' + Date.now();
+    pendingAssistantIdRef.current = id;
+    hasStartedAssistantRef.current = true;
+    chunkQueueRef.current.length = 0;
+    updateMsgs(prev => prev.concat({ id, role: 'assistant', text: firstChunk }));
   };
 
   const appendAssistant = (chunk: string) => {
     if (!chunk) return;
-    if (!hasStartedAssistantRef.current) startAssistantIfNeeded(chunk);
-    else if (pendingAssistantIdRef.current) updateMsgs(prev => prev.map(m => m.id === pendingAssistantIdRef.current ? { ...m, text: m.text + chunk } : m));
+    if (!hasStartedAssistantRef.current) startAssistant(chunk);
+    else {
+      chunkQueueRef.current.push(chunk);
+      scheduleFlush();
+    }
   };
 
   const finalizeAssistant = () => {
+    flushQueue();
+    if (rafIdRef.current != null && typeof window !== 'undefined') {
+      window.cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
     hasStartedAssistantRef.current = false;
     pendingAssistantIdRef.current = null;
     setInternalSending(false);
@@ -79,6 +107,7 @@ export function Chorus({ messages, value, onChange, onSend, placeholder, palette
       setInternalSending(true);
       hasStartedAssistantRef.current = false;
       pendingAssistantIdRef.current = null;
+      chunkQueueRef.current.length = 0;
 
       const start = Date.now();
       const res = await onSend(text, msgsRef.current, { appendAssistant, finalizeAssistant, signal: controllerRef.current.signal });
@@ -104,7 +133,7 @@ export function Chorus({ messages, value, onChange, onSend, placeholder, palette
   return (
     <ChorusTheme palette={palette}>
       <div className="chorus">
-        <ChatWindow messages={msgs} typing={!!onSend && sending && !hasStartedAssistantRef.current} />
+        <ChatWindow messages={msgs} typing={!!onSend && sending && !hasStartedAssistantRef.current} codeTheme={codeBlockTheme} />
         <ChatInput value={draft} onChange={setDraft} onSend={send} onStop={stop} sending={sending} placeholder={placeholder} />
       </div>
     </ChorusTheme>
