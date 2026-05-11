@@ -35,6 +35,9 @@ export function Chorus({ messages, value, onChange, onSend, placeholder, palette
   const [internalSending, setInternalSending] = React.useState(false);
   const sending = sendingProp ?? internalSending;
 
+  const [streamError, setStreamError] = React.useState<string | null>(null);
+  const lastUserTextRef = React.useRef<string>('');
+
   const controllerRef = React.useRef<AbortController | null>(null);
 
   const hasStartedAssistantRef = React.useRef(false);
@@ -89,22 +92,15 @@ export function Chorus({ messages, value, onChange, onSend, placeholder, palette
     setInternalSending(false);
   };
 
-  const send = async () => {
-    if (sending) return;
-    const text = draft.trim();
-    if (!text) return;
+  const runSend = async (text: string) => {
+    if (!onSend) return;
 
     controllerRef.current?.abort();
     controllerRef.current = new AbortController();
 
-    const userMsg: Message = { id: String(Date.now()), role: 'user', text };
-    setDraft('');
-    updateMsgs(prev => prev.concat(userMsg));
-
-    if (!onSend) return;
-
     try {
       setInternalSending(true);
+      setStreamError(null);
       hasStartedAssistantRef.current = false;
       pendingAssistantIdRef.current = null;
       chunkQueueRef.current.length = 0;
@@ -118,10 +114,33 @@ export function Chorus({ messages, value, onChange, onSend, placeholder, palette
         if (wait) await new Promise(r => setTimeout(r, wait));
         updateMsgs(prev => prev.concat({ id: (res as any).id || String(Date.now() + 1), role: 'assistant', text: (res as any).text }));
       }
-    } catch {}
-    finally {
+    } catch (e: any) {
+      const partialId = pendingAssistantIdRef.current;
+      if (partialId) updateMsgs(prev => prev.filter(m => m.id !== partialId));
+      hasStartedAssistantRef.current = false;
+      pendingAssistantIdRef.current = null;
+      if (e?.name !== 'AbortError') setStreamError('Something went wrong. Please try again.');
+    } finally {
       if (!hasStartedAssistantRef.current) setInternalSending(false);
     }
+  };
+
+  const send = async () => {
+    if (sending) return;
+    const text = draft.trim();
+    if (!text) return;
+
+    setDraft('');
+    lastUserTextRef.current = text;
+    updateMsgs(prev => prev.concat({ id: String(Date.now()), role: 'user', text }));
+
+    await runSend(text);
+  };
+
+  const retry = async () => {
+    const text = lastUserTextRef.current;
+    if (!text || sending) return;
+    await runSend(text);
   };
 
   const stop = () => {
@@ -133,7 +152,7 @@ export function Chorus({ messages, value, onChange, onSend, placeholder, palette
   return (
     <ChorusTheme palette={palette}>
       <div className="chorus">
-        <ChatWindow messages={msgs} typing={!!onSend && sending && !hasStartedAssistantRef.current} codeTheme={codeBlockTheme} />
+        <ChatWindow messages={msgs} typing={!!onSend && sending && !hasStartedAssistantRef.current} codeTheme={codeBlockTheme} error={streamError} onRetry={retry} />
         <ChatInput value={draft} onChange={setDraft} onSend={send} onStop={stop} sending={sending} placeholder={placeholder} />
       </div>
     </ChorusTheme>

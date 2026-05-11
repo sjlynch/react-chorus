@@ -2,7 +2,7 @@ import React from 'react';
 import type { Message } from '../types';
 import { Markdown } from './Markdown';
 
-export function ChatWindow({ messages, typing, codeTheme = 'dark' }: { messages: Message[]; typing?: boolean; codeTheme?: 'dark' | 'light' }) {
+export function ChatWindow({ messages, typing, codeTheme = 'dark', error, onRetry }: { messages: Message[]; typing?: boolean; codeTheme?: 'dark' | 'light'; error?: string | null; onRetry?: () => void }) {
   return (
     <div className="chorus-window">
       {messages.map(m =>
@@ -13,6 +13,12 @@ export function ChatWindow({ messages, typing, codeTheme = 'dark' }: { messages:
       {typing &&
         <div className="chorus-msg chorus-assistant chorus-typing">
           <div className="chorus-bubble"><span className="chorus-dot"></span><span className="chorus-dot"></span><span className="chorus-dot"></span></div>
+        </div>
+      }
+      {error &&
+        <div className="chorus-error">
+          <span className="chorus-error-text">{error}</span>
+          {onRetry && <button className="chorus-retry-btn" onClick={onRetry}>Retry</button>}
         </div>
       }
     </div>
