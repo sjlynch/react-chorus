@@ -10,6 +10,8 @@ export type { ChorusProps } from './Chorus';
 export type { Message, Role } from './types';
 export { useChorusStream } from './hooks/useChorusStream';
 export { createFetchSSETransport } from './streaming/createFetchSSETransport';
+export { createWebSocketTransport } from './streaming/createWebSocketTransport';
+export type { WebSocketTransportOptions } from './streaming/createWebSocketTransport';
 export { Markdown } from './components/Markdown';
 
 export type { Connector, ConnectorResult } from './connectors/connectors';

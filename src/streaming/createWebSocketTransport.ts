@@ -1,0 +1,100 @@
+import type { Message } from '../types';
+import type { Transport } from '../hooks/useChorusStream';
+
+export interface WebSocketTransportOptions {
+  /** WebSocket sub-protocols forwarded to the WebSocket constructor. */
+  protocols?: string | string[];
+  /**
+   * Serialize the outgoing request.
+   * Defaults to `JSON.stringify({ prompt, history })`, matching the fetch SSE transport.
+   */
+  formatMessage?: (text: string, history: Message[]) => string;
+}
+
+/**
+ * Creates a Transport backed by a native WebSocket connection.
+ *
+ * Each incoming WS message is treated as one SSE payload so the rest of the
+ * Chorus pipeline (connector extraction, chunk callbacks) works unchanged.
+ * The server should send one message per token/chunk in the same JSON format
+ * that an SSE server would put in a `data:` line.
+ *
+ * The connection is opened fresh for each call and closed when the stream ends
+ * or when the AbortSignal fires.
+ *
+ * @example
+ * ```tsx
+ * const transport = createWebSocketTransport('wss://api.example.com/chat');
+ * ```
+ */
+export function createWebSocketTransport(
+  url: string,
+  opts?: WebSocketTransportOptions,
+): Transport {
+  const formatMessage =
+    opts?.formatMessage ??
+    ((text, history) => JSON.stringify({ prompt: text, history }));
+
+  return (text: string, history: Message[], signal: AbortSignal) =>
+    new Promise<Response>((resolve, reject) => {
+      if (signal.aborted) {
+        reject(new DOMException('Aborted', 'AbortError'));
+        return;
+      }
+
+      const ws = new WebSocket(url, opts?.protocols);
+      const encoder = new TextEncoder();
+      let streamController: ReadableStreamDefaultController<Uint8Array>;
+      let resolved = false;
+
+      const body = new ReadableStream<Uint8Array>({
+        start(c) {
+          streamController = c;
+        },
+        cancel() {
+          ws.close();
+        },
+      });
+
+      const cleanup = () => signal.removeEventListener('abort', onAbort);
+
+      const onAbort = () => {
+        ws.close();
+        if (resolved) {
+          try { streamController.error(new DOMException('Aborted', 'AbortError')); } catch {}
+        } else {
+          reject(new DOMException('Aborted', 'AbortError'));
+        }
+      };
+
+      signal.addEventListener('abort', onAbort, { once: true });
+
+      ws.onopen = () => {
+        if (signal.aborted) { ws.close(); return; }
+        ws.send(formatMessage(text, history));
+        resolved = true;
+        resolve(new Response(body, { status: 200 }));
+      };
+
+      ws.onmessage = (event: MessageEvent) => {
+        const data = typeof event.data === 'string' ? event.data : '';
+        // Wrap as an SSE event so readSSEStream can parse it downstream.
+        streamController.enqueue(encoder.encode(`data: ${data}\n\n`));
+      };
+
+      ws.onclose = () => {
+        cleanup();
+        try { streamController?.close(); } catch {}
+      };
+
+      ws.onerror = () => {
+        cleanup();
+        const err = new Error('WebSocket connection error');
+        if (resolved) {
+          try { streamController.error(err); } catch {}
+        } else {
+          reject(err);
+        }
+      };
+    });
+}
