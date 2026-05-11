@@ -1,27 +1,41 @@
 import React from 'react';
 import { marked } from 'marked';
 import { markedHighlight } from 'marked-highlight';
-import hljs from 'highlight.js';
 import DOMPurify from 'dompurify';
 
-// Marked configuration:
-// - Use GFM + single-line breaks
-// - Add syntax highlighting via marked-highlight + highlight.js
+type HLJSApi = typeof import('highlight.js').default;
+
+// Module-level singleton — loaded once, shared across all Markdown instances.
+let hljsInstance: HLJSApi | null = null;
+let hljsLoadPromise: Promise<HLJSApi> | null = null;
+
+function loadHljs(): Promise<HLJSApi> {
+  if (hljsInstance) return Promise.resolve(hljsInstance);
+  if (!hljsLoadPromise) {
+    hljsLoadPromise = import('highlight.js').then(m => {
+      hljsInstance = m.default;
+      return hljsInstance;
+    });
+  }
+  return hljsLoadPromise;
+}
+
 marked.setOptions({ gfm: true, breaks: true, mangle: false, headerIds: false });
 marked.use(markedHighlight({
   langPrefix: 'hljs language-',
   highlight(code: string, lang?: string) {
+    // hljsInstance is null until the first code block triggers the lazy load.
+    // Return plain code in the meantime; the component re-renders once it loads.
+    if (!hljsInstance) return code;
     try {
-      if (lang && hljs.getLanguage(lang)) return hljs.highlight(code, { language: lang }).value;
-      return hljs.highlightAuto(code).value;
+      if (lang && hljsInstance.getLanguage(lang)) return hljsInstance.highlight(code, { language: lang }).value;
+      return hljsInstance.highlightAuto(code).value;
     } catch {
       return code;
     }
   }
 }));
 
-// During streaming, a code fence can be opened but not yet closed.
-// We temporarily append a closing fence so code renders as a block mid-stream.
 function normalizeStreamingMarkdown(text: string) {
   let out = text;
   const patchFence = (fence: '```' | '~~~') => {
@@ -38,11 +52,21 @@ function normalizeStreamingMarkdown(text: string) {
   return out;
 }
 
-export function Markdown({ text, codeTheme = 'dark' }: { text: string; codeTheme?: 'dark' | 'light' }) {
+export function Markdown({ text, codeTheme = 'dark', headless = false }: { text: string; codeTheme?: 'dark' | 'light'; headless?: boolean }) {
   const containerRef = React.useRef<HTMLDivElement>(null);
+  // Tracks whether hljs has been loaded so the useMemo re-runs after the import resolves.
+  const [hljsReady, setHljsReady] = React.useState(hljsInstance !== null);
+
+  // Lazy-load highlight.js the first time a code fence appears in the text.
+  React.useEffect(() => {
+    if (hljsReady) return;
+    if (!text.includes('```') && !text.includes('~~~')) return;
+    loadHljs().then(() => setHljsReady(true));
+  }, [text, hljsReady]);
 
   // Inject minimal CSS once per page for code blocks + copy button
   React.useEffect(() => {
+    if (headless) return;
     if (typeof document === 'undefined') return;
     if (document.getElementById('chorus-md-styles')) return;
     const style = document.createElement('style');
@@ -57,25 +81,24 @@ export function Markdown({ text, codeTheme = 'dark' }: { text: string; codeTheme
        .chorus-md .chorus-codeblock-light .chorus-copy-btn{background:#fff;border:1px solid rgba(31,35,40,0.15);color:#24292f}
        .chorus-md .chorus-copy-btn.copied{opacity:.85}`;
     document.head.appendChild(style);
-  }, []);
+  }, [headless]);
 
   const html = React.useMemo(() => {
     const balanced = normalizeStreamingMarkdown(text);
 
-    // 1) render markdown with highlighting
+    // 1) render markdown with highlighting (highlighting is a no-op until hljs loads)
     let raw = '';
     try {
       raw = marked.parse(balanced) as string;
     } catch {
-      // If marked throws (rare mid-stream), show plain text inside <pre>
       raw = `<pre><code>${balanced}</code></pre>`;
     }
 
-    // 2) sanitize
     const sanitized = typeof window === 'undefined' ? raw : DOMPurify.sanitize(raw);
 
-    // 3) post-process <pre><code> to wrap with our codeblock container + copy button
-    if (typeof window === 'undefined') return sanitized;
+    // In headless mode skip DOM post-processing — no codeblock wrappers or copy buttons injected
+    if (headless || typeof window === 'undefined') return sanitized;
+
     const root = document.createElement('div');
     root.innerHTML = sanitized;
 
@@ -102,7 +125,8 @@ export function Markdown({ text, codeTheme = 'dark' }: { text: string; codeTheme
     });
 
     return root.innerHTML;
-  }, [text, codeTheme]);
+  // hljsReady is a dependency so the memo re-runs once hljs finishes loading.
+  }, [text, codeTheme, headless, hljsReady]);
 
   // Event delegation for copy buttons
   React.useEffect(() => {

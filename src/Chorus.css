@@ -5,7 +5,7 @@
 /* Dark theme defaults + CSS variables for palette overrides (no blue) */
 .chorus-window { background: var(--chorus-chat-bg, #161616); border: 1px solid var(--chorus-border, #2a2a2a); border-radius: 12px; padding: 12px; color: var(--chorus-chat-text, #f3f4f6); }
 .chorus-msg { display: flex; margin: 8px 0; }
-.chorus-bubble { max-width: 80%; padding: 10px 12px; border-radius: 12px; font-size: 14px; line-height: 1.4; }
+.chorus-bubble { padding: 10px 12px; border-radius: 12px; font-size: 14px; line-height: 1.4; }
 
 /* Roles */
 .chorus-assistant { justify-content: flex-start; }
@@ -13,11 +13,23 @@
 .chorus-user { justify-content: flex-end; }
 .chorus-user .chorus-bubble { background: var(--chorus-user-bg, #dddddd); border: 1px solid var(--chorus-user-border, #cccccc); color: var(--chorus-user-text, #111111); }
 
-/* Input area (multiline textarea) */
-.chorus-input { position: relative; display: flex; align-items: center; margin-top: 12px; background: var(--chorus-input-area-bg, transparent); }
-.chorus-input textarea { width: 100%; min-height: 44px; max-height: 160px; padding: 12px 50px 12px 14px; border-radius: 12px; border: 1px solid var(--chorus-input-border, #333333); background: var(--chorus-input-bg, #1a1a1a); color: var(--chorus-input-text, #f3f4f6); outline: none; resize: none; line-height: 1.4; }
-.chorus-input textarea::placeholder { color: #a3a3a3; }
-.chorus-input textarea:focus { border-color: var(--chorus-send-bg, #ffffff); box-shadow: 0 0 0 3px var(--chorus-focus-ring, rgba(255,255,255,0.2)); }
+/* Attachment rendering in message bubbles */
+.chorus-msg-attachments { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.chorus-msg-img { max-width: 100%; max-height: 300px; border-radius: 8px; display: block; }
+.chorus-msg-file { display: inline-block; padding: 4px 10px; background: rgba(0,0,0,.15); border-radius: 6px; font-size: 12px; }
+
+/* Input area — column flex to stack attachment previews above the input row */
+.chorus-input { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; background: var(--chorus-input-area-bg, transparent); }
+.chorus-input-row { position: relative; display: flex; align-items: center; }
+.chorus-input-row textarea { width: 100%; min-height: 44px; max-height: 160px; padding: 12px 50px 12px 14px; border-radius: 12px; border: 1px solid var(--chorus-input-border, #333333); background: var(--chorus-input-bg, #1a1a1a); color: var(--chorus-input-text, #f3f4f6); outline: none; resize: none; line-height: 1.4; }
+.chorus-input-row textarea::placeholder { color: #a3a3a3; }
+.chorus-input-row textarea:focus { border-color: var(--chorus-send-bg, #ffffff); box-shadow: 0 0 0 3px var(--chorus-focus-ring, rgba(255,255,255,0.2)); }
+.chorus-input-row--has-attach textarea { padding-left: 44px; }
+
+/* Attach button (paperclip, left side) */
+.chorus-attach { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); width: 28px; height: 28px; padding: 0; border: none; background: transparent; color: var(--chorus-input-text, #f3f4f6); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; z-index: 2; opacity: .6; border-radius: 6px; }
+.chorus-attach:hover { opacity: 1; background: rgba(255,255,255,.1); }
+.chorus-attach svg { width: 18px; height: 18px; display: block; }
 
 /* Send/Stop button (white circle, black icon) */
 .chorus-send { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); width: 36px; height: 36px; padding: 0; line-height: 0; border-radius: 9999px; border: none; background: var(--chorus-send-bg, #ffffff); color: var(--chorus-send-text, #111111); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; z-index: 2; }
@@ -25,9 +37,55 @@
 .chorus-send svg { width: 18px; height: 18px; display: block; color: inherit; }
 .chorus-stop-fill { width: 18px; height: 18px; background: currentColor; border-radius: 2px; display: block; }
 
+/* Attachment preview chips above the input row */
+.chorus-attachments { display: flex; flex-wrap: wrap; gap: 8px; }
+.chorus-attachment-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; background: var(--chorus-input-bg, #1a1a1a); border: 1px solid var(--chorus-input-border, #333333); border-radius: 8px; max-width: 200px; }
+.chorus-attachment-thumb { width: 40px; height: 40px; object-fit: cover; border-radius: 4px; flex-shrink: 0; }
+.chorus-attachment-name { font-size: 12px; color: var(--chorus-input-text, #f3f4f6); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px; }
+.chorus-attachment-remove { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; padding: 0; border: none; background: rgba(255,255,255,.15); color: var(--chorus-input-text, #f3f4f6); border-radius: 9999px; cursor: pointer; flex-shrink: 0; }
+.chorus-attachment-remove:hover { background: rgba(255,255,255,.3); }
+
+/* Message content wrapper (stacks bubble + actions vertically) */
+.chorus-msg-content { display: flex; flex-direction: column; max-width: 80%; }
+.chorus-user .chorus-msg-content { align-items: flex-end; }
+.chorus-assistant .chorus-msg-content { align-items: flex-start; }
+.chorus-msg-content .chorus-bubble { max-width: 100%; }
+
+/* Hover-revealed action buttons */
+.chorus-actions { display: flex; gap: 2px; padding: 3px 2px 0; opacity: 0; pointer-events: none; transition: opacity 0.15s; }
+.chorus-msg:hover .chorus-actions { opacity: 1; pointer-events: auto; }
+.chorus-action-btn { display: inline-flex; align-items: center; justify-content: center; padding: 4px 6px; border: none; border-radius: 6px; background: transparent; color: var(--chorus-action-text, #666); cursor: pointer; transition: background 0.15s, color 0.15s; line-height: 0; }
+.chorus-action-btn:hover { background: var(--chorus-action-hover-bg, rgba(255,255,255,0.15)); color: var(--chorus-action-hover-text, #eee); }
+
+/* Inline message editing */
+.chorus-edit-wrap { display: flex; flex-direction: column; gap: 6px; width: min(80%, 520px); }
+.chorus-user .chorus-edit-wrap { align-self: flex-end; }
+.chorus-edit-textarea { padding: 10px 12px; border-radius: 12px; border: 1px solid var(--chorus-input-border, #333333); background: var(--chorus-input-bg, #1a1a1a); color: var(--chorus-input-text, #f3f4f6); font-size: 14px; font-family: inherit; line-height: 1.4; resize: vertical; min-height: 60px; outline: none; }
+.chorus-edit-textarea:focus { border-color: var(--chorus-send-bg, #ffffff); box-shadow: 0 0 0 3px var(--chorus-focus-ring, rgba(255,255,255,0.2)); }
+.chorus-edit-actions { display: flex; gap: 4px; justify-content: flex-end; }
+
+/* Tool call blocks */
+.chorus-tool { justify-content: flex-start; }
+.chorus-tool-call { width: 100%; border: 1px solid var(--chorus-tool-border, #2a2a2a); border-radius: 8px; overflow: hidden; font-size: 13px; }
+.chorus-tool-call-header { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 12px; background: var(--chorus-tool-header-bg, #1a1a1a); color: var(--chorus-tool-header-text, #a3a3a3); border: none; cursor: pointer; text-align: left; }
+.chorus-tool-call-header:hover:not(:disabled) { background: var(--chorus-tool-header-hover, #222222); }
+.chorus-tool-call-header:disabled { cursor: default; }
+.chorus-tool-call-name { flex: 1; font-family: monospace; font-weight: 600; color: var(--chorus-tool-name-text, #e6edf3); }
+.chorus-tool-call-chevron { font-size: 10px; }
+.chorus-tool-call-body { background: var(--chorus-tool-body-bg, #111111); }
+.chorus-tool-call-section { border-top: 1px solid var(--chorus-tool-border, #2a2a2a); padding: 8px 12px; }
+.chorus-tool-call-label { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--chorus-tool-label-text, #666666); margin-bottom: 6px; }
+.chorus-tool-call-pre { margin: 0; font-family: monospace; font-size: 12px; color: var(--chorus-tool-code-text, #e6edf3); white-space: pre-wrap; word-break: break-all; max-height: 240px; overflow: auto; }
+
 /* Typing indicator (assistant replying) */
 .chorus-typing .chorus-bubble { display: inline-flex; align-items: center; gap: 4px; }
 .chorus-dot { width: 6px; height: 6px; border-radius: 9999px; background: var(--chorus-assistant-text, #ffffff); opacity: .6; animation: chorus-typing 1.2s infinite ease-in-out; }
 .chorus-dot:nth-child(2) { animation-delay: .15s; }
 .chorus-dot:nth-child(3) { animation-delay: .3s; }
 @keyframes chorus-typing { 0%, 80%, 100% { transform: translateY(0); opacity: .6; } 40% { transform: translateY(-3px); opacity: 1; } }
+
+/* Error message + retry button */
+.chorus-error { display: flex; align-items: center; gap: 8px; margin: 8px 0; padding: 8px 12px; border-radius: 8px; background: var(--chorus-error-bg, rgba(220, 38, 38, 0.15)); border: 1px solid var(--chorus-error-border, rgba(220, 38, 38, 0.4)); }
+.chorus-error-text { font-size: 13px; color: var(--chorus-error-text, #fca5a5); flex: 1; }
+.chorus-retry-btn { font-size: 12px; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--chorus-error-border, rgba(220, 38, 38, 0.4)); background: transparent; color: var(--chorus-error-text, #fca5a5); cursor: pointer; white-space: nowrap; }
+.chorus-retry-btn:hover { background: var(--chorus-error-bg, rgba(220, 38, 38, 0.15)); opacity: 0.8; }

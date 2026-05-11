@@ -1,38 +1,404 @@
-# Chorus
+# react-chorus
 
-A React chat UI library with streaming support.
+A React chat UI component with built-in SSE streaming support.
+
+## Install
+
+```bash
+npm install react-chorus
+```
+
+Import the stylesheet once at your app entry point:
+
+```tsx
+import 'react-chorus/styles.css';
+```
 
 ## Quick start
 
 ```tsx
-import { Chorus } from 'chorus';
+import { Chorus } from 'react-chorus';
 
-<Chorus onSend={async (text, messages, { appendAssistant, finalizeAssistant, signal }) => {
-  // call your LLM here, pipe chunks via appendAssistant(chunk)
-  finalizeAssistant();
-}} />
+// That's it — point it at your streaming API endpoint
+<Chorus transport="/api/chat" />
 ```
 
-## Custom message rendering
+Chorus POSTs `{ prompt: string, history: Message[] }` to the URL and streams the SSE response into the assistant message automatically.
 
-### `renderMessage` render prop
+## Two usage paths
 
-Pass `renderMessage` to `Chorus` or `ChatWindow` to fully replace how each message is rendered. The function receives a `Message` and must return a `ReactNode`.
+### Simple path — `transport` prop
+
+Pass a URL string or `Transport` function. Chorus handles everything:
 
 ```tsx
-import { Chorus, MessageBubble } from 'chorus';
+// String: Chorus POSTs { prompt, history } and reads the SSE stream
+<Chorus transport="/api/chat" />
 
-<Chorus
-  renderMessage={(message) => (
-    <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-      <img src={message.role === 'user' ? userAvatar : botAvatar} style={{ width: 32, borderRadius: '50%' }} />
-      <div>
-        <span style={{ fontSize: 11, color: '#888' }}>{new Date().toLocaleTimeString()}</span>
-        <MessageBubble message={message} />
-      </div>
+// Custom Transport function
+import { createFetchSSETransport } from 'react-chorus';
+
+const transport = createFetchSSETransport('/api/chat', {
+  headers: { Authorization: `Bearer ${token}` },
+});
+
+<Chorus transport={transport} />
+```
+
+### Advanced path — `onSend` callback
+
+Use `onSend` when you need direct control: proxying through a custom client, handling non-SSE transports, or modifying messages before they're added.
+
+```tsx
+import 'react-chorus/styles.css';
+import React from 'react';
+import { Chorus, createFetchSSETransport, useChorusStream } from 'react-chorus';
+import type { Message } from 'react-chorus';
+
+const transport = createFetchSSETransport('/api/chat');
+
+export default function App() {
+  const [messages, setMessages] = React.useState<Message[]>([]);
+  const { send, sending } = useChorusStream(transport, { connector: 'openai' });
+
+  return (
+    <div style={{ height: '100dvh' }}>
+      <Chorus
+        value={messages}
+        onChange={setMessages}
+        sending={sending}
+        onSend={(text, msgs, { appendAssistant, finalizeAssistant, signal }) =>
+          send(text, msgs, { onChunk: appendAssistant, onDone: finalizeAssistant }, signal)
+        }
+        placeholder="Type a message…"
+      />
     </div>
-  )}
+  );
+}
+```
+
+`createFetchSSETransport(url)` posts `{ prompt, history }` to your endpoint and reads the response as a Server-Sent Events stream. The `openai` connector parses the standard `choices[*].delta.content` shape.
+
+### Minimal Express + OpenAI backend
+
+```js
+// server/index.js
+import express from 'express';
+import OpenAI from 'openai';
+
+const app = express();
+const openai = new OpenAI(); // reads OPENAI_API_KEY from env
+
+app.use(express.json());
+
+app.post('/api/chat', async (req, res) => {
+  const { prompt, history = [] } = req.body;
+
+  const messages = [
+    ...history.map((m) => ({ role: m.role, content: m.text })),
+    { role: 'user', content: prompt },
+  ];
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+
+  const stream = await openai.chat.completions.create({ model: 'gpt-4o-mini', messages, stream: true });
+
+  for await (const chunk of stream) {
+    res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+  }
+
+  res.write('data: [DONE]\n\n');
+  res.end();
+});
+
+app.listen(3001);
+```
+
+## Using the WebSocket transport
+
+For backends built on Socket.IO, `ws`, Ably, Pusher, or any other WebSocket server, use `createWebSocketTransport`:
+
+```tsx
+import 'react-chorus/styles.css';
+import React from 'react';
+import { Chorus, createWebSocketTransport, useChorusStream } from 'react-chorus';
+import type { Message } from 'react-chorus';
+
+const transport = createWebSocketTransport('wss://api.example.com/chat');
+
+export default function App() {
+  const [messages, setMessages] = React.useState<Message[]>([]);
+  const { send, sending } = useChorusStream(transport, { connector: 'anthropic' });
+
+  return (
+    <div style={{ height: '100dvh' }}>
+      <Chorus
+        value={messages}
+        onChange={setMessages}
+        sending={sending}
+        onSend={(text, msgs, { appendAssistant, finalizeAssistant, signal }) =>
+          send(text, msgs, { onChunk: appendAssistant, onDone: finalizeAssistant }, signal)
+        }
+        placeholder="Type a message…"
+      />
+    </div>
+  );
+}
+```
+
+Each incoming WebSocket message is treated as one SSE payload, so the same connector/extraction pipeline applies unchanged.
+
+### Minimal Node.js `ws` + Claude backend
+
+```js
+// server.js  —  npm install ws @anthropic-ai/sdk
+import { WebSocketServer } from 'ws';
+import Anthropic from '@anthropic-ai/sdk';
+
+const wss = new WebSocketServer({ port: 8080 });
+const client = new Anthropic();
+
+wss.on('connection', (ws) => {
+  ws.on('message', async (raw) => {
+    const { prompt, history } = JSON.parse(raw.toString());
+
+    const messages = [
+      ...history.map((m) => ({ role: m.role, content: m.text })),
+      { role: 'user', content: prompt },
+    ];
+
+    const stream = await client.messages.stream({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1024,
+      messages,
+    });
+
+    for await (const event of stream) {
+      if (
+        event.type === 'content_block_delta' &&
+        event.delta.type === 'text_delta'
+      ) {
+        // Each message must be valid JSON that your connector can parse.
+        ws.send(JSON.stringify({ type: 'text', text: event.delta.text }));
+      }
+    }
+
+    ws.send(JSON.stringify({ type: 'done' }));
+    // ws.close() — optional; leaving it open allows reuse for the next turn.
+  });
+});
+```
+
+The front-end default connector expects `{ type: 'text', text: '...' }` chunks and a `{ type: 'done' }` sentinel, matching the SSE connector format.
+
+## Connectors
+
+Connectors tell Chorus how to parse the streaming response from different AI providers. Pass a connector name or object via `useChorusStream`'s `connector` option.
+
+### Built-in connectors
+
+| Name | Provider | SSE format |
+|------|----------|------------|
+| `'openai'` | OpenAI Chat Completions | `choices[*].delta.content` |
+| `'anthropic'` | Anthropic Messages API | `content_block_delta` / `delta.text` |
+| `'auto'` *(default)* | Auto-detect | Tries OpenAI, then Anthropic, then plain text |
+
+### Usage
+
+```tsx
+import { useChorusStream, createFetchSSETransport } from 'react-chorus';
+
+// OpenAI
+const { send } = useChorusStream(transport, { connector: 'openai' });
+
+// Anthropic (Claude)
+const { send } = useChorusStream(transport, { connector: 'anthropic' });
+
+// Auto-detect (default)
+const { send } = useChorusStream(transport);
+```
+
+## Anthropic SSE format
+
+The Anthropic Messages API streams server-sent events. The `anthropicConnector` extracts text from `content_block_delta` events and signals completion on `message_stop`:
+
+```
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}
+
+event: message_stop
+data: {"type":"message_stop"}
+```
+
+## Examples
+
+Runnable examples live in the [`/examples`](./examples) directory:
+
+| Example | Description |
+|---------|-------------|
+| [`examples/basic`](./examples/basic) | Zero-backend demo using a simulated streaming response — great for local development |
+| [`examples/with-openai`](./examples/with-openai) | Full-stack example: Vite frontend + Express backend proxying to OpenAI |
+
+### Running the basic example
+
+```bash
+# Build the library first
+npm run build
+
+# Install and start
+cd examples/basic
+npm install
+npm run dev
+```
+
+### Running the OpenAI example
+
+```bash
+# Build the library first
+npm run build
+
+# Terminal 1 — backend
+cd examples/with-openai/server
+npm install
+OPENAI_API_KEY=sk-... node index.js
+
+# Terminal 2 — frontend (proxies /api to http://localhost:3001)
+cd examples/with-openai
+npm install
+npm run dev
+```
+
+## Bundle size
+
+`highlight.js` (the syntax-highlighting engine used by the `Markdown` component) is ~600 KB minified. To keep initial page load fast, **react-chorus lazy-loads highlight.js at runtime** — it is only fetched the first time a fenced code block (` ``` ` or `~~~`) appears in the rendered text.
+
+**Impact:**
+- Pages that never render code blocks pay zero cost — highlight.js is never downloaded.
+- Pages that do render code blocks load highlight.js asynchronously on demand. The code renders immediately as plain text and is re-rendered with syntax highlighting once the chunk arrives (typically one extra render, imperceptible during streaming).
+- Bundlers (Vite, webpack, Rollup) will automatically split highlight.js into a separate async chunk, so it does not inflate the main bundle.
+
+## API
+
+### `<Chorus>`
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `transport` | `string \| Transport` | — | Simple path: URL to POST to, or a custom Transport function. Chorus handles all streaming. |
+| `onSend` | `(text, messages, helpers) => Promise<void>` | — | Advanced path: called when the user submits a message. Use `helpers.appendAssistant` to stream tokens and `helpers.finalizeAssistant` when done. |
+| `value` | `Message[]` | — | Controlled message list. |
+| `onChange` | `(messages: Message[]) => void` | — | Called whenever the message list changes (controlled mode). |
+| `messages` | `Message[]` | — | Initial messages (uncontrolled mode). |
+| `placeholder` | `string` | `"Message…"` | Input placeholder text. |
+| `sending` | `boolean` | — | Override the sending state (useful when you manage it externally via `useChorusStream`). |
+| `palette` | `Palette` | dark theme | Custom color palette for theming. |
+| `codeBlockTheme` | `'dark' \| 'light'` | `'dark'` | Code block syntax-highlight theme. |
+| `minAssistantDelayMs` | `number` | `1000` | Minimum ms before showing the first assistant token. |
+| `persistenceKey` | `string` | — | When set, automatically saves and restores messages using the given key. Defaults to localStorage. |
+| `persistenceStorage` | `StorageAdapter` | `localStorage` | Custom storage adapter for persistenceKey. |
+| `headless` | `boolean` | `false` | Strip all default styles and inline style injection. |
+| `renderMessage` | `(message: Message) => ReactNode` | — | Custom per-message renderer. Return `null` to fall back to default rendering. |
+
+### `helpers` (passed to `onSend`)
+
+| Helper | Description |
+|--------|-------------|
+| `appendAssistant(chunk)` | Append a text chunk to the current assistant message. |
+| `finalizeAssistant()` | Mark the assistant message complete. |
+| `signal` | `AbortSignal` — aborted when the user hits Stop. |
+
+### `useChorusStream(transport, opts?)`
+
+```ts
+const { send, abort, sending } = useChorusStream(transport, { connector: 'openai' });
+```
+
+- `transport` — async function `(text, history, signal) => Promise<Response>`. Use `createFetchSSETransport(url)` or write your own.
+- `opts.connector` — `'openai'` | `'anthropic'` | `'auto'` | custom `Connector`. Defaults to `'auto'` which handles both OpenAI JSON and plain-text SSE.
+
+### `createFetchSSETransport(url, init?)`
+
+Returns a `Transport` that POSTs `{ prompt, history }` as JSON and returns the raw `Response` for SSE reading.
+
+### `createWebSocketTransport(url, opts?)`
+
+Returns a `Transport` that connects over a native WebSocket. Each incoming message is wrapped as an SSE `data:` line so the existing connector pipeline works unchanged.
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `protocols` | `string \| string[]` | – | WebSocket sub-protocols passed to the constructor |
+| `formatMessage` | `(text, history) => string` | `JSON.stringify({ prompt, history })` | Serialise the outgoing request |
+
+Supports `AbortSignal` cancellation — closing the socket when the user hits Stop.
+
+### Custom connector
+
+```ts
+import type { Connector } from 'react-chorus';
+
+const myConnector: Connector = {
+  name: 'my-api',
+  extract(data) {
+    if (data === '[DONE]') return { done: true };
+    const obj = JSON.parse(data);
+    return obj.token ? { text: obj.token } : null;
+  },
+};
+```
+
+## Tool calls and agent steps
+
+For agentic UIs, react-chorus provides first-class support for tool call rendering via the `role: 'tool'` message type.
+
+### Built-in rendering
+
+Push a message with `role: 'tool'` and a `toolCall` payload. `ChatWindow` renders it as a collapsible block automatically:
+
+```tsx
+setMessages(prev => [
+  ...prev,
+  {
+    id: crypto.randomUUID(),
+    role: 'tool',
+    text: '',
+    toolCall: {
+      name: 'search_web',
+      input: { query: 'react streaming SSE' },
+      output: { results: ['...'] },
+    },
+  },
+]);
+```
+
+The block shows the tool name in a header. Clicking expands it to reveal the input and output formatted as JSON.
+
+### Custom renderer via `renderMessage`
+
+Supply a `renderMessage` render-prop to take full control of how any message is displayed. Return `null` to fall back to the default renderer for that message.
+
+```tsx
+<Chorus
+  messages={messages}
+  renderMessage={(msg) => {
+    if (msg.role === 'tool' && msg.toolCall) {
+      return (
+        <div key={msg.id} className="my-tool-step">
+          <strong>{msg.toolCall.name}</strong>
+          <pre>{JSON.stringify(msg.toolCall.output, null, 2)}</pre>
+        </div>
+      );
+    }
+    return null; // use default rendering for other messages
+  }}
 />
+```
+
+Or use the exported `<ToolCallBlock>` component directly in your own layout:
+
+```tsx
+import { ToolCallBlock } from 'react-chorus';
+
+<ToolCallBlock toolCall={{ name: 'read_file', input: { path: '/etc/hosts' }, output: '127.0.0.1 localhost' }} />
 ```
 
 ### `MessageBubble` component
@@ -40,7 +406,7 @@ import { Chorus, MessageBubble } from 'chorus';
 `MessageBubble` renders the default bubble for a single message. Import it to use as a base when you only need to add decoration (avatars, timestamps, status badges) around the existing look.
 
 ```tsx
-import { MessageBubble } from 'chorus';
+import { MessageBubble } from 'react-chorus';
 
 // props
 interface MessageBubbleProps {
@@ -78,28 +444,75 @@ Target these classes in your CSS to restyle without a render prop:
 .chorus-msg.chorus-assistant .chorus-bubble { background: #f0f0f0; color: #111; }
 ```
 
-## Props
+### CSS custom properties for tool blocks
 
-### `Chorus`
+Override the look of built-in tool call blocks via CSS variables:
 
-| Prop | Type | Default | Description |
-|------|------|---------|-------------|
-| `messages` | `Message[]` | `[]` | Initial messages (uncontrolled) |
-| `value` | `Message[]` | — | Controlled message list |
-| `onChange` | `(msgs: Message[]) => void` | — | Called on every message update |
-| `onSend` | `(text, messages, helpers) => Promise<void>` | — | Called when user sends a message |
-| `placeholder` | `string` | — | Input placeholder text |
-| `palette` | `Palette` | — | Theme color overrides |
-| `sending` | `boolean` | — | Controlled sending state |
-| `minAssistantDelayMs` | `number` | `1000` | Minimum delay before showing assistant response |
-| `codeBlockTheme` | `'dark' \| 'light'` | `'dark'` | Code block syntax highlight theme |
-| `renderMessage` | `(message: Message) => ReactNode` | — | Custom message renderer |
+```css
+:root {
+  --chorus-tool-border: #333;
+  --chorus-tool-header-bg: #1a1a1a;
+  --chorus-tool-header-text: #999;
+  --chorus-tool-header-hover: #222;
+  --chorus-tool-name-text: #e6edf3;
+  --chorus-tool-body-bg: #111;
+  --chorus-tool-label-text: #666;
+  --chorus-tool-code-text: #e6edf3;
+}
+```
 
-### `ChatWindow`
+## Theming
 
-| Prop | Type | Default | Description |
-|------|------|---------|-------------|
-| `messages` | `Message[]` | — | Messages to display |
-| `typing` | `boolean` | — | Show typing indicator |
-| `codeTheme` | `'dark' \| 'light'` | `'dark'` | Code block theme |
-| `renderMessage` | `(message: Message) => ReactNode` | — | Custom message renderer |
+Pass a `palette` prop to `<Chorus>` (or wrap components in `<ChorusTheme palette={…}>`):
+
+```tsx
+<Chorus
+  palette={{
+    chatBg: '#0f0f0f',
+    assistantBubbleBg: '#6366f1',
+    assistantText: '#ffffff',
+    userBubbleBg: '#e5e7eb',
+  }}
+  onSend={…}
+/>
+```
+
+Available palette keys: `chatBg`, `chatText`, `border`, `assistantBubbleBg`, `assistantText`, `assistantBorder`, `userBubbleBg`, `userText`, `userBorder`, `inputAreaBg`, `inputBg`, `inputText`, `inputBorder`, `sendButtonBg`, `sendButtonText`, `focusRing`.
+
+## Individual Components
+
+You can compose the UI from smaller pieces:
+
+```tsx
+import { ChatWindow, ChatInput, ChorusTheme, Markdown } from 'react-chorus';
+```
+
+- **`<ChatWindow messages={…} typing={…} />`** — renders the message list with a typing indicator.
+- **`<ChatInput value onSend onStop placeholder sending />`** — the text input and send/stop button.
+- **`<ChorusTheme palette={…}>`** — applies theme CSS variables to any subtree.
+- **`<Markdown text={…} codeTheme="dark" />`** — standalone markdown renderer with syntax highlighting and copy buttons.
+- **`<MessageBubble message={…} />`** — renders the default bubble for one message. Accepts `className`, `style`, and `codeTheme` for decoration without replacing the full renderer.
+
+## Message Shape
+
+```ts
+type Role = 'user' | 'assistant' | 'system' | 'tool';
+
+interface ToolCall {
+  name: string;
+  input?: unknown;
+  output?: unknown;
+}
+
+interface Message {
+  id: string;
+  role: Role;
+  text: string; // supports CommonMark + GFM
+  toolCall?: ToolCall; // populated when role === 'tool'
+  metadata?: Record<string, unknown>; // optional arbitrary data (timestamps, model, latency, etc.)
+}
+```
+
+## License
+
+MIT
