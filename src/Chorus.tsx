@@ -18,9 +18,10 @@ export interface ChorusProps {
   codeBlockTheme?: 'dark' | 'light';
   /** Strip all default styles and inline style injection — same effect as using react-chorus/headless */
   headless?: boolean;
+  renderMessage?: (message: Message) => React.ReactNode;
 }
 
-export function Chorus({ messages, value, onChange, onSend, placeholder, palette, sending: sendingProp, minAssistantDelayMs = 1000, codeBlockTheme = 'dark', headless = false }: ChorusProps) {
+export function Chorus({ messages, value, onChange, onSend, placeholder, palette, sending: sendingProp, minAssistantDelayMs = 1000, codeBlockTheme = 'dark', headless = false, renderMessage }: ChorusProps) {
   const [internalMsgs, setInternalMsgs] = React.useState<Message[]>(() => messages || []);
   const msgs = value !== undefined ? value : internalMsgs;
 
@@ -135,7 +136,7 @@ export function Chorus({ messages, value, onChange, onSend, placeholder, palette
   return (
     <ChorusTheme palette={palette}>
       <div className="chorus">
-        <ChatWindow messages={msgs} typing={!!onSend && sending && !hasStartedAssistantRef.current} codeTheme={codeBlockTheme} headless={headless} />
+        <ChatWindow messages={msgs} typing={!!onSend && sending && !hasStartedAssistantRef.current} codeTheme={codeBlockTheme} headless={headless} renderMessage={renderMessage} />
         <ChatInput value={draft} onChange={setDraft} onSend={send} onStop={stop} sending={sending} placeholder={placeholder} />
       </div>
     </ChorusTheme>
