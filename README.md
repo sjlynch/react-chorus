@@ -1,6 +1,6 @@
 # react-chorus
 
-Composable chat UI components for React. Handles streaming SSE responses, markdown rendering with syntax highlighting, a typing indicator, and an abort button — so you can focus on the backend.
+A composable, streaming-first chat UI library for React. Drop in a `<Chorus>` component, wire up your AI endpoint, and get a fully rendered chat interface with markdown, syntax highlighting, and streaming out of the box.
 
 ## Install
 
@@ -164,17 +164,25 @@ npm run dev
 
 ### `<Chorus>`
 
-| Prop | Type | Description |
-|------|------|-------------|
-| `onSend` | `(text, messages, helpers) => Promise<void>` | Called when the user submits a message. Use `helpers.appendAssistant` to stream tokens and `helpers.finalizeAssistant` when done. |
-| `value` | `Message[]` | Controlled message list. |
-| `onChange` | `(messages: Message[]) => void` | Called whenever the message list changes (controlled mode). |
-| `messages` | `Message[]` | Initial messages (uncontrolled mode). |
-| `placeholder` | `string` | Input placeholder text. |
-| `sending` | `boolean` | Override the sending state (useful when you manage it externally via `useChorusStream`). |
-| `palette` | `Palette` | Custom color palette for theming. |
-| `codeBlockTheme` | `'dark' \| 'light'` | Code block syntax-highlight theme (default `'dark'`). |
-| `minAssistantDelayMs` | `number` | Minimum ms before showing the first assistant token (default `1000`). |
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `onSend` | `(text, messages, helpers) => Promise<void>` | — | Called when the user submits a message. Use `helpers.appendAssistant` to stream tokens and `helpers.finalizeAssistant` when done. |
+| `value` | `Message[]` | — | Controlled message list. |
+| `onChange` | `(messages: Message[]) => void` | — | Called whenever the message list changes (controlled mode). |
+| `messages` | `Message[]` | — | Initial messages (uncontrolled mode). |
+| `placeholder` | `string` | `"Message…"` | Input placeholder text. |
+| `sending` | `boolean` | — | Override the sending state (useful when you manage it externally via `useChorusStream`). |
+| `palette` | `Palette` | dark theme | Custom color palette for theming. |
+| `codeBlockTheme` | `'dark' \| 'light'` | `'dark'` | Code block syntax-highlight theme. |
+| `minAssistantDelayMs` | `number` | `1000` | Minimum ms before showing the first assistant token. |
+
+### `helpers` (passed to `onSend`)
+
+| Helper | Description |
+|--------|-------------|
+| `appendAssistant(chunk)` | Append a text chunk to the current assistant message. |
+| `finalizeAssistant()` | Mark the assistant message complete. |
+| `signal` | `AbortSignal` — aborted when the user hits Stop. |
 
 ### `useChorusStream(transport, opts?)`
 
@@ -202,6 +210,47 @@ const myConnector: Connector = {
     return obj.token ? { text: obj.token } : null;
   },
 };
+```
+
+## Theming
+
+Pass a `palette` prop to `<Chorus>` (or wrap components in `<ChorusTheme palette={…}>`):
+
+```tsx
+<Chorus
+  palette={{
+    chatBg: '#0f0f0f',
+    assistantBubbleBg: '#6366f1',
+    assistantText: '#ffffff',
+    userBubbleBg: '#e5e7eb',
+  }}
+  onSend={…}
+/>
+```
+
+Available palette keys: `chatBg`, `chatText`, `border`, `assistantBubbleBg`, `assistantText`, `assistantBorder`, `userBubbleBg`, `userText`, `userBorder`, `inputAreaBg`, `inputBg`, `inputText`, `inputBorder`, `sendButtonBg`, `sendButtonText`, `focusRing`.
+
+## Individual Components
+
+You can compose the UI from smaller pieces:
+
+```tsx
+import { ChatWindow, ChatInput, ChorusTheme, Markdown } from 'react-chorus';
+```
+
+- **`<ChatWindow messages={…} typing={…} />`** — renders the message list with a typing indicator.
+- **`<ChatInput value onSend onStop placeholder sending />`** — the text input and send/stop button.
+- **`<ChorusTheme palette={…}>`** — applies theme CSS variables to any subtree.
+- **`<Markdown text={…} codeTheme="dark" />`** — standalone markdown renderer with syntax highlighting and copy buttons.
+
+## Message Shape
+
+```ts
+interface Message {
+  id: string;
+  role: 'user' | 'assistant';
+  text: string; // supports CommonMark + GFM
+}
 ```
 
 ## License
