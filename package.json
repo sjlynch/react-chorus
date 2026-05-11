@@ -12,6 +12,11 @@
       "import": "./dist/react-chorus.es.js",
       "require": "./dist/react-chorus.cjs.js"
     },
+    "./headless": {
+      "types": "./dist/types/headless.d.ts",
+      "import": "./dist/react-chorus-headless.es.js",
+      "require": "./dist/react-chorus-headless.cjs.js"
+    },
     "./styles.css": "./dist/styles.css"
   },
   "files": [
