@@ -186,7 +186,7 @@ export function Chorus({
       doStream(text, msgsRef.current, {
         onChunk: appendAssistant,
         onDone: finalizeAssistant,
-        onError: resetStreamState,
+        onError: (err) => { resetStreamState(); setStreamError(err.message || 'Something went wrong. Please try again.'); },
         minDelayMs: minAssistantDelayMs,
       });
       return;
@@ -283,8 +283,8 @@ export function Chorus({
           codeTheme={codeBlockTheme}
           headless={headless}
           renderMessage={renderMessage}
-          onEdit={onSend ? handleEdit : undefined}
-          onRegenerate={onSend ? handleRegenerate : undefined}
+          onEdit={(transport || onSend) ? handleEdit : undefined}
+          onRegenerate={(transport || onSend) ? handleRegenerate : undefined}
           onDelete={handleDelete}
           error={streamError}
           onRetry={retry}
