@@ -36,7 +36,7 @@ marked.use(markedHighlight({
   }
 }));
 
-function normalizeStreamingMarkdown(text: string) {
+export function normalizeStreamingMarkdown(text: string) {
   let out = text;
   const patchFence = (fence: '```' | '~~~') => {
     let count = 0, i = 0;
