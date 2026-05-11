@@ -61,6 +61,12 @@ export interface ChorusProps {
   errorMessage?: string;
   /** Called when a send or stream fails for a non-abort error. */
   onError?: (error: Error) => void;
+  /**
+   * Observation hook called for each streamed token. Receives the chunk and the
+   * assistant message id so callers can associate chunks with a specific message.
+   * Does not affect streaming behaviour — Chorus still appends and renders the chunk.
+   */
+  onChunk?: (chunk: string, messageId: string) => void;
   codeBlockTheme?: 'dark' | 'light';
   accept?: string;
   /** When set, automatically saves and restores messages using the given key. Defaults to localStorage; pass persistenceStorage to swap the backend. */
@@ -89,6 +95,7 @@ export function Chorus({
   minAssistantDelayMs = 300,
   errorMessage,
   onError,
+  onChunk,
   codeBlockTheme = 'dark',
   accept,
   persistenceKey,
@@ -110,10 +117,17 @@ export function Chorus({
   const msgsRef = React.useRef<Message[]>(msgs);
   React.useEffect(() => { msgsRef.current = msgs; }, [msgs]);
 
+  // Keep latest unstable callbacks in refs so RAF-scheduled flushes always invoke the
+  // current render's callback rather than a stale one captured at schedule time.
+  const onChangeRef = React.useRef(onChange);
+  React.useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
+  const onChunkRef = React.useRef(onChunk);
+  React.useEffect(() => { onChunkRef.current = onChunk; }, [onChunk]);
+
   const updateMsgs = (updater: (prev: Message[]) => Message[]) => {
     const next = updater(msgsRef.current);
     msgsRef.current = next;
-    if (value !== undefined) { onChange?.(next); }
+    if (value !== undefined) { onChangeRef.current?.(next); }
     else if (persistenceKey) { persisted.onChange(next); }
     else { setInternalMsgs(next); }
   };
@@ -158,6 +172,7 @@ export function Chorus({
     hasStartedAssistantRef.current = true;
     chunkQueueRef.current.length = 0;
     updateMsgs(prev => prev.concat({ id, role: 'assistant', text: firstChunk }));
+    onChunkRef.current?.(firstChunk, id);
   };
 
   const appendAssistant = (chunk: string) => {
@@ -166,6 +181,8 @@ export function Chorus({
     else {
       chunkQueueRef.current.push(chunk);
       scheduleFlush();
+      const id = pendingAssistantIdRef.current;
+      if (id) onChunkRef.current?.(chunk, id);
     }
   };
 
@@ -209,7 +226,7 @@ export function Chorus({
       doStream(text, msgsRef.current, {
         onChunk: appendAssistant,
         onDone: finalizeAssistant,
-        onError: (err) => { resetStreamState(); onError?.(err); setStreamError(errorMessage ?? (err.message || fallbackErrorMessage)); },
+        onError: (err) => { resetStreamState(); onError?.(err); setStreamError(fallbackErrorMessage); },
         minDelayMs: minAssistantDelayMs,
       });
       return;

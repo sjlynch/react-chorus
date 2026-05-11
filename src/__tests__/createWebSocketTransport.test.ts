@@ -81,4 +81,57 @@ describe('createWebSocketTransport', () => {
     await expect(promise).rejects.toThrow('WebSocket connection error');
     expect(events).toEqual(['error']);
   });
+
+  it('enqueues each WS message as an SSE-formatted chunk on the response body', async () => {
+    const transport = createWebSocketTransport('wss://api.example.com/chat');
+    const promise = transport('hello', [], new AbortController().signal);
+    const ws = MockWebSocket.instances[0];
+
+    ws.emitOpen();
+    const response = await promise;
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+
+    ws.onmessage?.({ data: '{"chunk":"hi"}' } as MessageEvent);
+    const first = await reader.read();
+    expect(first.done).toBe(false);
+    expect(decoder.decode(first.value)).toBe('data: {"chunk":"hi"}\n\n');
+
+    ws.onmessage?.({ data: '{"chunk":" there"}' } as MessageEvent);
+    const second = await reader.read();
+    expect(decoder.decode(second.value)).toBe('data: {"chunk":" there"}\n\n');
+  });
+
+  it('closes the response stream when the WS closes', async () => {
+    const transport = createWebSocketTransport('wss://api.example.com/chat');
+    const promise = transport('hello', [], new AbortController().signal);
+    const ws = MockWebSocket.instances[0];
+
+    ws.emitOpen();
+    const response = await promise;
+    const reader = response.body!.getReader();
+
+    ws.emitClose(1000, 'done');
+
+    const result = await reader.read();
+    expect(result.done).toBe(true);
+    expect(result.value).toBeUndefined();
+  });
+
+  it('closes the WS and errors the stream when the AbortSignal fires after open', async () => {
+    const controller = new AbortController();
+    const transport = createWebSocketTransport('wss://api.example.com/chat');
+    const promise = transport('hello', [], controller.signal);
+    const ws = MockWebSocket.instances[0];
+    const closeSpy = vi.spyOn(ws, 'close');
+
+    ws.emitOpen();
+    const response = await promise;
+    const reader = response.body!.getReader();
+
+    controller.abort();
+
+    expect(closeSpy).toHaveBeenCalled();
+    await expect(reader.read()).rejects.toThrow('Aborted');
+  });
 });
