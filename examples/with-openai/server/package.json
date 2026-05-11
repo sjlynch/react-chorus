@@ -1,0 +1,13 @@
+{
+  "name": "react-chorus-example-openai-server",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.19.0",
+    "openai": "^4.0.0"
+  }
+}
