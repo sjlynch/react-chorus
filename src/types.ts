@@ -13,12 +13,12 @@ export interface ToolCall {
   output?: unknown;
 }
 
-export interface Message {
+export interface Message<TMeta = Record<string, unknown>> {
   id: string;
   role: Role;
   text: string;
   attachments?: Attachment[];
-  metadata?: Record<string, unknown>;
+  metadata?: TMeta;
   toolCall?: ToolCall;
 }
 
