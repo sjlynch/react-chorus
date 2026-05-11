@@ -2,8 +2,7 @@ import React from 'react';
 import './Chorus.css';
 import { ChatWindow } from './components/ChatWindow';
 import { ChatInput } from './components/ChatInput';
-import { ChorusTheme } from './components/ChorusTheme';
-import type { Palette } from './components/ChorusTheme';
+import { styleVarsFromPalette, type Palette } from './components/ChorusTheme';
 import type { Message, Attachment, StorageAdapter } from './types';
 import { useChorusStream, type Transport } from './hooks/useChorusStream';
 import { createFetchSSETransport } from './streaming/createFetchSSETransport';
@@ -189,6 +188,7 @@ export function Chorus({
   const { send: doStream, abort: streamAbort, sending: streamSending } = useChorusStream(resolvedTransport, { connector });
 
   const sending = sendingProp ?? (transport ? streamSending : internalSending);
+  const paletteVars = React.useMemo(() => styleVarsFromPalette(palette), [palette]);
 
   const resetStreamState = () => {
     hasStartedAssistantRef.current = false;
@@ -299,23 +299,21 @@ export function Chorus({
   };
 
   return (
-    <ChorusTheme palette={palette}>
-      <div className={["chorus", className].filter(Boolean).join(" ")} style={style}>
-        <ChatWindow
-          messages={msgs}
-          typing={!!(transport || onSend) && sending && !hasStartedAssistantRef.current}
-          codeTheme={codeBlockTheme}
-          headless={headless}
-          renderMessage={renderMessage}
-          onEdit={(transport || onSend) ? handleEdit : undefined}
-          onRegenerate={(transport || onSend) ? handleRegenerate : undefined}
-          onDelete={handleDelete}
-          error={streamError}
-          onRetry={retry}
-        />
-        <ChatInput value={draft} onChange={setDraft} onSend={send} onStop={stop} sending={sending} placeholder={placeholder} accept={accept} />
-      </div>
-    </ChorusTheme>
+    <div className={["chorus", className].filter(Boolean).join(" ")} style={{ ...paletteVars, ...style }}>
+      <ChatWindow
+        messages={msgs}
+        typing={!!(transport || onSend) && sending && !hasStartedAssistantRef.current}
+        codeTheme={codeBlockTheme}
+        headless={headless}
+        renderMessage={renderMessage}
+        onEdit={(transport || onSend) ? handleEdit : undefined}
+        onRegenerate={(transport || onSend) ? handleRegenerate : undefined}
+        onDelete={handleDelete}
+        error={streamError}
+        onRetry={retry}
+      />
+      <ChatInput value={draft} onChange={setDraft} onSend={send} onStop={stop} sending={sending} placeholder={placeholder} accept={accept} />
+    </div>
   );
 }
 
