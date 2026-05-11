@@ -1,0 +1,115 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { renderHook, act } from '@testing-library/react';
+import { useChorusPersistence } from '../hooks/useChorusPersistence';
+import type { Message, StorageAdapter } from '../types';
+
+const MSG: Message = { id: '1', role: 'user', text: 'hello' };
+const MSGS: Message[] = [MSG, { id: '2', role: 'assistant', text: 'world' }];
+
+function makeSyncStorage(initial?: string): StorageAdapter & { store: Record<string, string> } {
+  const store: Record<string, string> = initial !== undefined ? { key: initial } : {};
+  return {
+    store,
+    getItem: (k) => store[k] ?? null,
+    setItem: (k, v) => { store[k] = v; },
+  };
+}
+
+// ---------------------------------------------------------------------------
+
+describe('useChorusPersistence', () => {
+  it('returns empty array when key is empty string', () => {
+    const { result } = renderHook(() => useChorusPersistence(''));
+    expect(result.current.value).toEqual([]);
+  });
+
+  it('returns empty array when storage is null (SSR)', () => {
+    const { result } = renderHook(() =>
+      useChorusPersistence('key', { storage: null as unknown as StorageAdapter })
+    );
+    expect(result.current.value).toEqual([]);
+  });
+
+  it('reads initial value from synchronous storage', () => {
+    const storage = makeSyncStorage(JSON.stringify(MSGS));
+    const { result } = renderHook(() => useChorusPersistence('key', { storage }));
+    expect(result.current.value).toEqual(MSGS);
+  });
+
+  it('returns empty array when stored value is invalid JSON', () => {
+    const storage = makeSyncStorage('not json {{');
+    const { result } = renderHook(() => useChorusPersistence('key', { storage }));
+    expect(result.current.value).toEqual([]);
+  });
+
+  it('returns empty array when storage has no value for the key', () => {
+    const storage = makeSyncStorage();
+    const { result } = renderHook(() => useChorusPersistence('key', { storage }));
+    expect(result.current.value).toEqual([]);
+  });
+
+  it('onChange updates local state', () => {
+    const storage = makeSyncStorage();
+    const { result } = renderHook(() => useChorusPersistence('key', { storage }));
+
+    act(() => result.current.onChange(MSGS));
+
+    expect(result.current.value).toEqual(MSGS);
+  });
+
+  it('onChange writes serialized messages to storage', () => {
+    const storage = makeSyncStorage();
+    const { result } = renderHook(() => useChorusPersistence('key', { storage }));
+
+    act(() => result.current.onChange(MSGS));
+
+    expect(storage.store['key']).toBe(JSON.stringify(MSGS));
+  });
+
+  it('onChange is stable across re-renders', () => {
+    const storage = makeSyncStorage();
+    const { result, rerender } = renderHook(() => useChorusPersistence('key', { storage }));
+    const first = result.current.onChange;
+    rerender();
+    expect(result.current.onChange).toBe(first);
+  });
+
+  it('onChange is a no-op when storage is null', () => {
+    const { result } = renderHook(() =>
+      useChorusPersistence('key', { storage: null as unknown as StorageAdapter })
+    );
+    expect(() => act(() => result.current.onChange(MSGS))).not.toThrow();
+  });
+
+  it('loads initial value from async storage adapter via useEffect', async () => {
+    const asyncStorage: StorageAdapter = {
+      getItem: vi.fn().mockResolvedValue(JSON.stringify([MSG])),
+      setItem: vi.fn(),
+    };
+
+    const { result } = renderHook(() => useChorusPersistence('key', { storage: asyncStorage }));
+
+    // Initial state before effect resolves
+    expect(result.current.value).toEqual([]);
+
+    // Wait for the async effect to settle
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(result.current.value).toEqual([MSG]);
+  });
+
+  it('silently handles rejected async storage on read', async () => {
+    const asyncStorage: StorageAdapter = {
+      getItem: vi.fn().mockRejectedValue(new Error('storage unavailable')),
+      setItem: vi.fn(),
+    };
+
+    const { result } = renderHook(() => useChorusPersistence('key', { storage: asyncStorage }));
+
+    await act(async () => { await Promise.resolve(); });
+
+    expect(result.current.value).toEqual([]);
+  });
+});

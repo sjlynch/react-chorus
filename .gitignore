@@ -38,3 +38,8 @@ Thumbs.db
 # Caches
 .eslintcache
 .cache/
+
+# lattice-managed (do not remove)
+.claude/settings.local.json
+.lattice/
+.pi/extensions/lattice-complete.ts

@@ -22,7 +22,7 @@ export interface StreamOptions {
  * - Collects "data:" lines for an event; dispatches on a blank line
  * - Preserves empty data lines (blank lines inside payloads)
  */
-function readSSEStream(res: Response, onEvent: (payload: string) => void): Promise<void> {
+export function readSSEStream(res: Response, onEvent: (payload: string) => void): Promise<void> {
   if (!res.body) return Promise.resolve();
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
