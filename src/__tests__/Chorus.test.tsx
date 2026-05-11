@@ -7,7 +7,7 @@ import type { Message } from '../types';
 type OnSendHelpers = Parameters<NonNullable<ChorusProps['onSend']>>[2];
 
 vi.mock('../components/Markdown', () => ({
-  Markdown: ({ text }: { text: string }) => <span>{text}</span>,
+  Markdown: ({ text }: { text: string }) => <span data-testid="markdown">{text}</span>,
 }));
 
 function sseResponse(chunks: string[], status = 200) {
@@ -35,6 +35,22 @@ function deferred<T = void>() {
 }
 
 describe('Chorus', () => {
+  it('applies className, style, and palette variables to the root element', () => {
+    const { container } = render(
+      <Chorus
+        className="my-chat"
+        style={{ height: '500px' }}
+        palette={{ chatBg: '#000' }}
+      />
+    );
+
+    const root = container.firstElementChild as HTMLElement;
+
+    expect(root).toHaveClass('chorus', 'my-chat');
+    expect(root.style.height).toBe('500px');
+    expect(root.style.getPropertyValue('--chorus-chat-bg')).toBe('#000');
+  });
+
   it('transport path send() fires transport and streams tokens into the message list', async () => {
     const user = userEvent.setup();
     const transport = vi.fn(async () => sseResponse(['Hel', 'lo']));
