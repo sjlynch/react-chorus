@@ -89,29 +89,17 @@ export function Chorus({ messages, value, onChange, onSend, placeholder, palette
     setInternalSending(false);
   };
 
-  const send = async () => {
-    if (sending) return;
-    const text = draft.trim();
-    if (!text) return;
-
+  const triggerAssistant = async (text: string) => {
+    if (!onSend) return;
     controllerRef.current?.abort();
     controllerRef.current = new AbortController();
-
-    const userMsg: Message = { id: String(Date.now()), role: 'user', text };
-    setDraft('');
-    updateMsgs(prev => prev.concat(userMsg));
-
-    if (!onSend) return;
-
     try {
       setInternalSending(true);
       hasStartedAssistantRef.current = false;
       pendingAssistantIdRef.current = null;
       chunkQueueRef.current.length = 0;
-
       const start = Date.now();
       const res = await onSend(text, msgsRef.current, { appendAssistant, finalizeAssistant, signal: controllerRef.current.signal });
-
       if (res && typeof res === 'object' && !hasStartedAssistantRef.current) {
         const elapsed = Date.now() - start;
         const wait = Math.max(0, minAssistantDelayMs - elapsed);
@@ -124,16 +112,62 @@ export function Chorus({ messages, value, onChange, onSend, placeholder, palette
     }
   };
 
+  const send = async () => {
+    if (sending) return;
+    const text = draft.trim();
+    if (!text) return;
+
+    const userMsg: Message = { id: String(Date.now()), role: 'user', text };
+    setDraft('');
+    updateMsgs(prev => prev.concat(userMsg));
+
+    await triggerAssistant(text);
+  };
+
   const stop = () => {
     if (!sending) return;
     controllerRef.current?.abort();
     finalizeAssistant();
   };
 
+  const handleEdit = async (id: string, newText: string) => {
+    if (sending) return;
+    const current = msgsRef.current;
+    const idx = current.findIndex(m => m.id === id);
+    if (idx === -1) return;
+    const edited: Message = { ...current[idx], text: newText };
+    updateMsgs(prev => [...prev.slice(0, idx), edited]);
+    await triggerAssistant(newText);
+  };
+
+  const handleRegenerate = async (id: string) => {
+    if (sending) return;
+    const current = msgsRef.current;
+    const idx = current.findIndex(m => m.id === id);
+    if (idx === -1) return;
+    let userIdx = idx - 1;
+    while (userIdx >= 0 && current[userIdx].role !== 'user') userIdx--;
+    if (userIdx < 0) return;
+    const userMsg = current[userIdx];
+    updateMsgs(prev => prev.slice(0, userIdx + 1));
+    await triggerAssistant(userMsg.text);
+  };
+
+  const handleDelete = (id: string) => {
+    updateMsgs(prev => prev.filter(m => m.id !== id));
+  };
+
   return (
     <ChorusTheme palette={palette}>
       <div className="chorus">
-        <ChatWindow messages={msgs} typing={!!onSend && sending && !hasStartedAssistantRef.current} codeTheme={codeBlockTheme} />
+        <ChatWindow
+          messages={msgs}
+          typing={!!onSend && sending && !hasStartedAssistantRef.current}
+          codeTheme={codeBlockTheme}
+          onEdit={onSend ? handleEdit : undefined}
+          onRegenerate={onSend ? handleRegenerate : undefined}
+          onDelete={handleDelete}
+        />
         <ChatInput value={draft} onChange={setDraft} onSend={send} onStop={stop} sending={sending} placeholder={placeholder} />
       </div>
     </ChorusTheme>
