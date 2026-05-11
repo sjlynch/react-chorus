@@ -1,5 +1,5 @@
 import React from 'react';
-import { marked } from 'marked';
+import { Marked } from 'marked';
 import { markedHighlight } from 'marked-highlight';
 import DOMPurify from 'dompurify';
 
@@ -54,11 +54,10 @@ function loadHljsTheme(theme: CodeTheme): Promise<void> {
   return hljsThemeLoadPromises[theme];
 }
 
-marked.setOptions({ gfm: true, breaks: true, mangle: false, headerIds: false } as Parameters<typeof marked.setOptions>[0] & {
-  mangle: boolean;
-  headerIds: boolean;
-});
-marked.use(markedHighlight({
+// Private Marked instance — avoids mutating the global `marked` singleton that
+// host apps may be using with their own configuration.
+const markedInstance = new Marked({ gfm: true, breaks: true });
+markedInstance.use(markedHighlight({
   langPrefix: 'hljs language-',
   highlight(code: string, lang?: string) {
     // hljsInstance is null until the first code block triggers the lazy load.
@@ -76,11 +75,16 @@ marked.use(markedHighlight({
 export function normalizeStreamingMarkdown(text: string) {
   let out = text;
   const patchFence = (fence: '```' | '~~~') => {
+    // GFM fences are only valid at the start of a line (CommonMark allows
+    // 0–3 leading spaces, but treating "start of line" as column 0 covers
+    // every fence written by `marked` itself and avoids inline-backtick
+    // false positives like "use ``` on its own line").
+    const isAtLineStart = (pos: number) => pos === 0 || out[pos - 1] === '\n';
     let count = 0, i = 0;
     while (true) {
       const pos = out.indexOf(fence, i);
       if (pos === -1) break;
-      count++;
+      if (isAtLineStart(pos)) count++;
       i = pos + fence.length;
     }
     if (count % 2 === 1) out += `\n${fence}`;
@@ -127,7 +131,7 @@ export function Markdown({ text, codeTheme = 'dark', headless = false }: { text:
     // 1) render markdown with highlighting (highlighting is a no-op until hljs loads)
     let raw = '';
     try {
-      raw = marked.parse(balanced) as string;
+      raw = markedInstance.parse(balanced) as string;
     } catch {
       raw = `<pre><code>${balanced}</code></pre>`;
     }

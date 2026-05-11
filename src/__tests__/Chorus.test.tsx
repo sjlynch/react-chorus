@@ -138,7 +138,111 @@ describe('Chorus', () => {
     await user.type(screen.getByPlaceholderText('Send a message'), 'boom');
     await user.click(screen.getByRole('button', { name: /send/i }));
 
-    expect(await screen.findByText(/Bad response \(500\) or missing body/i)).toBeInTheDocument();
+    expect(await screen.findByText('Something went wrong. Please try again.')).toBeInTheDocument();
+  });
+
+  it('transport path passes the raw error to onError while keeping the UI banner generic', async () => {
+    const user = userEvent.setup();
+    const transport = vi.fn(async () => sseResponse([], 500));
+    const onError = vi.fn();
+
+    render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} onError={onError} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'boom');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    await waitFor(() => expect(onError).toHaveBeenCalledOnce());
+    expect(onError.mock.calls[0][0]).toBeInstanceOf(Error);
+    expect(onError.mock.calls[0][0].message).toMatch(/Bad response \(500\) or missing body/i);
+    expect(await screen.findByText('Something went wrong. Please try again.')).toBeInTheDocument();
+    expect(screen.queryByText(/Bad response \(500\) or missing body/i)).not.toBeInTheDocument();
+  });
+
+  it('onSend non-abort error invokes onError with the Error object', async () => {
+    const user = userEvent.setup();
+    const onError = vi.fn();
+    const onSend = vi.fn(async () => {
+      throw new Error('upstream boom');
+    });
+
+    render(<Chorus onSend={onSend} onError={onError} minAssistantDelayMs={0} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'trigger error');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    await waitFor(() => expect(onError).toHaveBeenCalledOnce());
+    const passed = onError.mock.calls[0][0];
+    expect(passed).toBeInstanceOf(Error);
+    expect(passed.message).toBe('upstream boom');
+  });
+
+  it('onSend non-abort error without an onError prop falls back to the UI banner', async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn(async () => {
+      throw new Error('upstream boom');
+    });
+
+    render(<Chorus onSend={onSend} minAssistantDelayMs={0} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'trigger error');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByText('Something went wrong. Please try again.')).toBeInTheDocument();
+    expect(screen.queryByText(/upstream boom/i)).not.toBeInTheDocument();
+  });
+
+  it('onSend abort (user stop) does not invoke onError and shows no banner', async () => {
+    const user = userEvent.setup();
+    const onError = vi.fn();
+    let capturedSignal: AbortSignal | undefined;
+    const onSend = vi.fn((_text: string, _messages: Message[], helpers: OnSendHelpers) => {
+      capturedSignal = helpers.signal;
+      return new Promise<void>((_resolve, reject) => {
+        helpers.signal.addEventListener('abort', () => {
+          const err = new Error('Aborted');
+          err.name = 'AbortError';
+          reject(err);
+        });
+      });
+    });
+
+    render(<Chorus onSend={onSend} onError={onError} minAssistantDelayMs={0} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'stop me');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /stop/i })).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: /stop/i }));
+
+    await waitFor(() => expect(capturedSignal?.aborted).toBe(true));
+    await waitFor(() => expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument());
+    expect(onError).not.toHaveBeenCalled();
+    expect(screen.queryByText('Something went wrong. Please try again.')).not.toBeInTheDocument();
+  });
+
+  it('controlled mode forwards new messages via onChange and renders the externally-controlled list', async () => {
+    const user = userEvent.setup();
+    const initial: Message[] = [{ id: 'seed', role: 'assistant', text: 'seeded reply' }];
+    const onChange = vi.fn<(next: Message[]) => void>();
+    const onSend = vi.fn(async () => undefined);
+
+    render(<Chorus value={initial} onChange={onChange} onSend={onSend} minAssistantDelayMs={0} />);
+
+    // The externally-controlled list is rendered as-is.
+    expect(screen.getByText('seeded reply')).toBeInTheDocument();
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'hello there');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    await waitFor(() => expect(onChange).toHaveBeenCalled());
+    const latestCall = onChange.mock.calls[onChange.mock.calls.length - 1][0];
+    expect(latestCall).toEqual(
+      expect.arrayContaining([
+        initial[0],
+        expect.objectContaining({ role: 'user', text: 'hello there' }),
+      ]),
+    );
+    expect(onSend).toHaveBeenCalledOnce();
   });
 
   it('Retry re-triggers the assistant with the last user text', async () => {

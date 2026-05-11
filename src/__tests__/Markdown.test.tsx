@@ -63,6 +63,18 @@ describe('normalizeStreamingMarkdown', () => {
 
     expect(normalizeStreamingMarkdown(text)).toBe(`${text}\n\`\`\`\n~~~`);
   });
+
+  it('ignores inline triple-backticks that are not at the start of a line', () => {
+    const text = 'Use ``` for code';
+
+    expect(normalizeStreamingMarkdown(text)).toBe(text);
+  });
+
+  it('still closes a real fence even when inline backticks appear before it', () => {
+    const text = 'Use ``` on its own line, like:\n```ts\nconst x = 1;';
+
+    expect(normalizeStreamingMarkdown(text)).toBe(`${text}\n\`\`\``);
+  });
 });
 
 describe('Markdown', () => {
