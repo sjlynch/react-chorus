@@ -2,6 +2,34 @@
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
+## Message Type
+
+The `Message` type represents a chat message:
+
+```ts
+interface Message {
+  id: string;
+  role: 'user' | 'assistant';
+  text: string;
+  metadata?: Record<string, unknown>;
+}
+```
+
+The optional `metadata` field lets you attach arbitrary data to a message — timestamps, delivery status, citation references, model name, latency info, feedback scores, etc. — without needing a parallel data structure:
+
+```ts
+const msg: Message = {
+  id: '1',
+  role: 'assistant',
+  text: 'Hello!',
+  metadata: {
+    timestamp: Date.now(),
+    model: 'claude-sonnet-4-6',
+    latencyMs: 312,
+  },
+};
+```
+
 Currently, two official plugins are available:
 
 - [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
