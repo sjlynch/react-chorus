@@ -1,6 +1,17 @@
-export type Role = 'user' | 'assistant';
+export type Role = 'user' | 'assistant' | 'system' | 'tool';
 
-export interface Message { id: string; role: Role; text: string }
+export interface ToolCall {
+  name: string;
+  input?: unknown;
+  output?: unknown;
+}
+
+export interface Message {
+  id: string;
+  role: Role;
+  text: string;
+  toolCall?: ToolCall;
+}
 
 /** Pluggable storage adapter. Mirrors the localStorage API; getItem/setItem may return Promises for async backends (e.g. IndexedDB). */
 export interface StorageAdapter {
