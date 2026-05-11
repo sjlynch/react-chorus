@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { openaiConnector } from '../connectors/openai';
 import { anthropicConnector } from '../connectors/anthropic';
+import { geminiConnector } from '../connectors/gemini';
 import { autoConnector, getConnector } from '../connectors/connectors';
 import type { Connector } from '../connectors/connectors';
 
@@ -113,6 +114,75 @@ describe('anthropicConnector', () => {
 });
 
 // ---------------------------------------------------------------------------
+// geminiConnector
+// ---------------------------------------------------------------------------
+
+describe('geminiConnector', () => {
+  it('extracts text from candidates content parts', () => {
+    const data = JSON.stringify({
+      candidates: [{ content: { parts: [{ text: 'Hello' }] } }],
+    });
+    expect(geminiConnector.extract(data)).toEqual({ text: 'Hello' });
+  });
+
+  it('concatenates text across multiple parts', () => {
+    const data = JSON.stringify({
+      candidates: [{ content: { parts: [{ text: 'foo' }, { text: 'bar' }] } }],
+    });
+    expect(geminiConnector.extract(data)).toEqual({ text: 'foobar' });
+  });
+
+  it('concatenates text across multiple candidates', () => {
+    const data = JSON.stringify({
+      candidates: [
+        { content: { parts: [{ text: 'a' }] } },
+        { content: { parts: [{ text: 'b' }] } },
+      ],
+    });
+    expect(geminiConnector.extract(data)).toEqual({ text: 'ab' });
+  });
+
+  it('returns done when finishReason is set with no text', () => {
+    const data = JSON.stringify({
+      candidates: [{ finishReason: 'STOP', content: { parts: [] } }],
+    });
+    expect(geminiConnector.extract(data)).toEqual({ done: true });
+  });
+
+  it('returns text and done when finishReason is set alongside text', () => {
+    const data = JSON.stringify({
+      candidates: [{ finishReason: 'STOP', content: { parts: [{ text: 'end' }] } }],
+    });
+    expect(geminiConnector.extract(data)).toEqual({ text: 'end', done: true });
+  });
+
+  it('returns null when candidates array is empty', () => {
+    const data = JSON.stringify({ candidates: [] });
+    expect(geminiConnector.extract(data)).toBeNull();
+  });
+
+  it('returns null for JSON without candidates', () => {
+    const data = JSON.stringify({ choices: [{ delta: { content: 'hi' } }] });
+    expect(geminiConnector.extract(data)).toBeNull();
+  });
+
+  it('returns null for invalid JSON', () => {
+    expect(geminiConnector.extract('not json')).toBeNull();
+  });
+
+  it('returns null for empty string', () => {
+    expect(geminiConnector.extract('')).toBeNull();
+  });
+
+  it('returns null for candidate with empty parts text', () => {
+    const data = JSON.stringify({
+      candidates: [{ content: { parts: [{ text: '' }] } }],
+    });
+    expect(geminiConnector.extract(data)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // autoConnector
 // ---------------------------------------------------------------------------
 
@@ -136,6 +206,20 @@ describe('autoConnector', () => {
 
   it('handles message_stop from Anthropic', () => {
     const data = JSON.stringify({ type: 'message_stop' });
+    expect(autoConnector.extract(data)).toEqual({ done: true });
+  });
+
+  it('delegates to geminiConnector for Gemini-shaped JSON', () => {
+    const data = JSON.stringify({
+      candidates: [{ content: { parts: [{ text: 'hi' }] } }],
+    });
+    expect(autoConnector.extract(data)).toEqual({ text: 'hi' });
+  });
+
+  it('handles finishReason STOP from Gemini', () => {
+    const data = JSON.stringify({
+      candidates: [{ finishReason: 'STOP', content: { parts: [] } }],
+    });
     expect(autoConnector.extract(data)).toEqual({ done: true });
   });
 
@@ -171,6 +255,11 @@ describe('getConnector', () => {
     expect(c.name).toBe('anthropic');
   });
 
+  it('returns geminiConnector for "gemini"', () => {
+    const c = getConnector('gemini');
+    expect(c.name).toBe('gemini');
+  });
+
   it('returns a custom connector object as-is', () => {
     const custom: Connector = { name: 'custom', extract: vi.fn() };
     expect(getConnector(custom)).toBe(custom);
@@ -178,6 +267,6 @@ describe('getConnector', () => {
 
   it('falls back to autoConnector for unknown string', () => {
     // @ts-expect-error intentional unknown string
-    expect(getConnector('gemini')).toBe(autoConnector);
+    expect(getConnector('unknown-provider')).toBe(autoConnector);
   });
 });
