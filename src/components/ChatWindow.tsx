@@ -3,17 +3,21 @@ import type { Message } from '../types';
 import { Markdown } from './Markdown';
 import { ToolCallBlock } from './ToolCallBlock';
 
+const HIDDEN_ROLES = new Set(['system', 'tool'] as const);
+
 export interface ChatWindowProps {
   messages: Message[];
   typing?: boolean;
   codeTheme?: 'dark' | 'light';
   renderMessage?: (message: Message) => React.ReactNode;
+  showSystemMessages?: boolean;
 }
 
-export function ChatWindow({ messages, typing, codeTheme = 'dark', renderMessage }: ChatWindowProps) {
+export function ChatWindow({ messages, typing, codeTheme = 'dark', renderMessage, showSystemMessages = false }: ChatWindowProps) {
+  const visible = showSystemMessages ? messages : messages.filter(m => !HIDDEN_ROLES.has(m.role as 'system' | 'tool'));
   return (
     <div className="chorus-window">
-      {messages.map(m => {
+      {visible.map(m => {
         const custom = renderMessage?.(m);
         if (custom != null) return <React.Fragment key={m.id}>{custom}</React.Fragment>;
 

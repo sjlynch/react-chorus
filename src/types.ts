@@ -1,4 +1,4 @@
-export type Role = 'user' | 'assistant' | 'tool';
+export type Role = 'user' | 'assistant' | 'system' | 'tool';
 
 export interface ToolCall {
   name: string;
