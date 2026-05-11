@@ -555,14 +555,39 @@ interface ToolCall {
   output?: unknown;
 }
 
-interface Message {
+interface Message<TMeta = Record<string, unknown>> {
   id: string;
   role: Role;
   text: string; // supports CommonMark + GFM
   toolCall?: ToolCall; // populated when role === 'tool'
-  metadata?: Record<string, unknown>; // optional arbitrary data (timestamps, model, latency, etc.)
+  metadata?: TMeta; // optional typed data (timestamps, model, latency, etc.)
 }
 ```
+
+`Message` defaults to arbitrary metadata for backwards compatibility. Pass a type argument when your app stores structured metadata:
+
+```ts
+type ChatMessage = Message<{
+  timestamp: Date;
+  model: string;
+  latencyMs: number;
+}>;
+
+const message: ChatMessage = {
+  id: '1',
+  role: 'assistant',
+  text: 'Hello!',
+  metadata: {
+    timestamp: new Date(),
+    model: 'gpt-4o-mini',
+    latencyMs: 420,
+  },
+};
+
+const latency = message.metadata?.latencyMs;
+```
+
+The generic `Message` declaration shape is a minor semver-level type declaration change while remaining source-compatible.
 
 ## License
 
