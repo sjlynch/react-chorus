@@ -125,21 +125,36 @@ import React from 'react';
 import { Chorus, createWebSocketTransport, useChorusStream } from 'react-chorus';
 import type { Message } from 'react-chorus';
 
-const transport = createWebSocketTransport('wss://api.example.com/chat');
-
 export default function App() {
   const [messages, setMessages] = React.useState<Message[]>([]);
+  const [connectionStatus, setConnectionStatus] = React.useState('idle');
+
+  const transport = React.useMemo(
+    () => createWebSocketTransport('wss://api.example.com/chat', {
+      onOpen: () => setConnectionStatus('open'),
+      onClose: (code, reason) =>
+        setConnectionStatus(
+          code === 1000 ? 'closed' : `disconnected (${code}: ${reason || 'no reason'})`,
+        ),
+      onError: () => setConnectionStatus('error'),
+    }),
+    [],
+  );
+
   const { send, sending } = useChorusStream(transport, { connector: 'anthropic' });
 
   return (
     <div style={{ height: '100dvh' }}>
+      {connectionStatus === 'connecting' && <div role="status">Connecting…</div>}
+      {connectionStatus.startsWith('disconnected') && <div role="alert">Disconnected</div>}
       <Chorus
         value={messages}
         onChange={setMessages}
         sending={sending}
-        onSend={(text, msgs, { appendAssistant, finalizeAssistant, signal }) =>
-          send(text, msgs, { onChunk: appendAssistant, onDone: finalizeAssistant }, signal)
-        }
+        onSend={async (text, msgs, { appendAssistant, finalizeAssistant, signal }) => {
+          setConnectionStatus('connecting');
+          await send(text, msgs, { onChunk: appendAssistant, onDone: finalizeAssistant }, signal);
+        }}
         placeholder="Type a message…"
       />
     </div>
@@ -379,6 +394,9 @@ Returns a `Transport` that connects over a native WebSocket. Each incoming messa
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `protocols` | `string \| string[]` | – | WebSocket sub-protocols passed to the constructor |
+| `onOpen` | `() => void` | – | Called when the WebSocket connection opens |
+| `onClose` | `(code: number, reason: string) => void` | – | Called when the WebSocket closes, with the close code and reason |
+| `onError` | `(event: Event) => void` | – | Called when the WebSocket reports an error |
 | `formatMessage` | `(text, history) => string` | `JSON.stringify({ prompt, history })` | Serialise the outgoing request |
 
 Supports `AbortSignal` cancellation — closing the socket when the user hits Stop.
@@ -557,14 +575,39 @@ interface ToolCall {
   output?: unknown;
 }
 
-interface Message {
+interface Message<TMeta = Record<string, unknown>> {
   id: string;
   role: Role;
   text: string; // supports CommonMark + GFM
   toolCall?: ToolCall; // populated when role === 'tool'
-  metadata?: Record<string, unknown>; // optional arbitrary data (timestamps, model, latency, etc.)
+  metadata?: TMeta; // optional typed data (timestamps, model, latency, etc.)
 }
 ```
+
+`Message` defaults to arbitrary metadata for backwards compatibility. Pass a type argument when your app stores structured metadata:
+
+```ts
+type ChatMessage = Message<{
+  timestamp: Date;
+  model: string;
+  latencyMs: number;
+}>;
+
+const message: ChatMessage = {
+  id: '1',
+  role: 'assistant',
+  text: 'Hello!',
+  metadata: {
+    timestamp: new Date(),
+    model: 'gpt-4o-mini',
+    latencyMs: 420,
+  },
+};
+
+const latency = message.metadata?.latencyMs;
+```
+
+The generic `Message` declaration shape is a minor semver-level type declaration change while remaining source-compatible.
 
 ## License
 

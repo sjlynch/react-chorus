@@ -54,7 +54,10 @@ function loadHljsTheme(theme: CodeTheme): Promise<void> {
   return hljsThemeLoadPromises[theme];
 }
 
-marked.setOptions({ gfm: true, breaks: true, mangle: false, headerIds: false });
+marked.setOptions({ gfm: true, breaks: true, mangle: false, headerIds: false } as Parameters<typeof marked.setOptions>[0] & {
+  mangle: boolean;
+  headerIds: boolean;
+});
 marked.use(markedHighlight({
   langPrefix: 'hljs language-',
   highlight(code: string, lang?: string) {
@@ -70,7 +73,7 @@ marked.use(markedHighlight({
   }
 }));
 
-function normalizeStreamingMarkdown(text: string) {
+export function normalizeStreamingMarkdown(text: string) {
   let out = text;
   const patchFence = (fence: '```' | '~~~') => {
     let count = 0, i = 0;

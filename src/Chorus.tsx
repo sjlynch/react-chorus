@@ -2,8 +2,7 @@ import React from 'react';
 import './Chorus.css';
 import { ChatWindow } from './components/ChatWindow';
 import { ChatInput } from './components/ChatInput';
-import { ChorusTheme } from './components/ChorusTheme';
-import type { Palette } from './components/ChorusTheme';
+import { styleVarsFromPalette, type Palette } from './components/ChorusTheme';
 import type { Message, Attachment, StorageAdapter, Role } from './types';
 import { useChorusStream, type Transport } from './hooks/useChorusStream';
 import { createFetchSSETransport } from './streaming/createFetchSSETransport';
@@ -27,14 +26,14 @@ export interface ChorusProps {
   transport?: string | Transport;
   /**
    * SSE connector to use when parsing the stream. Defaults to `'auto'` which
-   * detects OpenAI and Anthropic formats automatically. Pass `'anthropic'` when
+   * detects OpenAI, Anthropic, and Gemini formats automatically. Pass `'anthropic'` when
    * pointing `transport` at an Anthropic backend to skip auto-detection and
    * parse `event: content_block_delta` events correctly.
    *
    * @example
    * <Chorus transport="/api/chat" connector="anthropic" />
    */
-  connector?: Connector | 'auto' | 'openai' | 'anthropic';
+  connector?: Connector | 'auto' | 'openai' | 'anthropic' | 'gemini';
   /**
    * Advanced path: called on every send. Receives streaming helpers so you
    * can drive the assistant message manually or handle non-SSE responses.
@@ -52,7 +51,16 @@ export interface ChorusProps {
   placeholder?: string;
   palette?: Palette;
   sending?: boolean;
+  /**
+   * Minimum time to keep the assistant typing state visible before showing a
+   * complete assistant response. This gives the typing animation time to play;
+   * increase it (for example to 1000) if you want a more deliberate pause.
+   */
   minAssistantDelayMs?: number;
+  /** Error message shown when a send or stream fails. Defaults to a generic retry prompt. */
+  errorMessage?: string;
+  /** Called when a send or stream fails for a non-abort error. */
+  onError?: (error: Error) => void;
   codeBlockTheme?: 'dark' | 'light';
   accept?: string;
   /** When set, automatically saves and restores messages using the given key. Defaults to localStorage; pass persistenceStorage to swap the backend. */
@@ -78,7 +86,9 @@ export function Chorus({
   placeholder,
   palette,
   sending: sendingProp,
-  minAssistantDelayMs = 1000,
+  minAssistantDelayMs = 300,
+  errorMessage,
+  onError,
   codeBlockTheme = 'dark',
   accept,
   persistenceKey,
@@ -112,6 +122,7 @@ export function Chorus({
   const [internalSending, setInternalSending] = React.useState(false);
 
   const [streamError, setStreamError] = React.useState<string | null>(null);
+  const fallbackErrorMessage = errorMessage ?? 'Something went wrong. Please try again.';
   const lastUserTextRef = React.useRef<string>('');
 
 
@@ -180,6 +191,7 @@ export function Chorus({
   const { send: doStream, abort: streamAbort, sending: streamSending } = useChorusStream(resolvedTransport, { connector });
 
   const sending = sendingProp ?? (transport ? streamSending : internalSending);
+  const paletteVars = React.useMemo(() => styleVarsFromPalette(palette), [palette]);
 
   const resetStreamState = () => {
     hasStartedAssistantRef.current = false;
@@ -193,10 +205,11 @@ export function Chorus({
         console.warn('[Chorus] Both `transport` and `onSend` props were provided. `transport` takes precedence and `onSend` will be ignored. Remove one of the two props to silence this warning.');
       }
       resetStreamState();
+      setStreamError(null);
       doStream(text, msgsRef.current, {
         onChunk: appendAssistant,
         onDone: finalizeAssistant,
-        onError: (err) => { resetStreamState(); setStreamError(err.message || 'Something went wrong. Please try again.'); },
+        onError: (err) => { resetStreamState(); onError?.(err); setStreamError(errorMessage ?? (err.message || fallbackErrorMessage)); },
         minDelayMs: minAssistantDelayMs,
       });
       return;
@@ -222,7 +235,11 @@ export function Chorus({
       if (partialId) updateMsgs(prev => prev.filter(m => m.id !== partialId));
       hasStartedAssistantRef.current = false;
       pendingAssistantIdRef.current = null;
-      if (e?.name !== 'AbortError') setStreamError('Something went wrong. Please try again.');
+      if (e?.name !== 'AbortError') {
+        const error = e instanceof Error ? e : new Error(String(e));
+        onError?.(error);
+        setStreamError(fallbackErrorMessage);
+      }
     } finally {
       if (!hasStartedAssistantRef.current) setInternalSending(false);
     }
@@ -285,24 +302,22 @@ export function Chorus({
   };
 
   return (
-    <ChorusTheme palette={palette}>
-      <div className={["chorus", className].filter(Boolean).join(" ")} style={style}>
-        <ChatWindow
-          messages={msgs}
-          typing={!!(transport || onSend) && sending && !hasStartedAssistantRef.current}
-          codeTheme={codeBlockTheme}
-          headless={headless}
-          renderMessage={renderMessage}
-          hiddenRoles={hiddenRoles}
-          onEdit={(transport || onSend) ? handleEdit : undefined}
-          onRegenerate={(transport || onSend) ? handleRegenerate : undefined}
-          onDelete={handleDelete}
-          error={streamError}
-          onRetry={retry}
-        />
-        <ChatInput value={draft} onChange={setDraft} onSend={send} onStop={stop} sending={sending} placeholder={placeholder} accept={accept} />
-      </div>
-    </ChorusTheme>
+    <div className={["chorus", className].filter(Boolean).join(" ")} style={{ ...paletteVars, ...style }}>
+      <ChatWindow
+        messages={msgs}
+        typing={!!(transport || onSend) && sending && !hasStartedAssistantRef.current}
+        codeTheme={codeBlockTheme}
+        headless={headless}
+        renderMessage={renderMessage}
+        hiddenRoles={hiddenRoles}
+        onEdit={(transport || onSend) ? handleEdit : undefined}
+        onRegenerate={(transport || onSend) ? handleRegenerate : undefined}
+        onDelete={handleDelete}
+        error={streamError}
+        onRetry={retry}
+      />
+      <ChatInput value={draft} onChange={setDraft} onSend={send} onStop={stop} sending={sending} placeholder={placeholder} accept={accept} />
+    </div>
   );
 }
 

@@ -13,7 +13,7 @@ export interface SendCallbacks {
 export type Transport = (text: string, history: Message[], signal: AbortSignal) => Promise<Response>;
 
 export interface StreamOptions {
-  connector?: Connector | 'auto' | 'openai' | 'anthropic';
+  connector?: Connector | 'auto' | 'openai' | 'anthropic' | 'gemini';
 }
 
 /**
@@ -76,10 +76,12 @@ export function useChorusStream(transport: Transport, opts?: StreamOptions) {
   const connector = getConnector(opts?.connector);
 
   const [sending, setSending] = React.useState(false);
+  const isSendingRef = React.useRef(false);
   const controllerRef = React.useRef<AbortController | null>(null);
 
   const send = React.useCallback(async (text: string, history: Message[], cb: SendCallbacks, externalSignal?: AbortSignal) => {
-    if (sending) return;
+    if (isSendingRef.current) return;
+    isSendingRef.current = true;
 
     let controller: AbortController | null = null;
     let signal: AbortSignal;
@@ -100,6 +102,7 @@ export function useChorusStream(transport: Transport, opts?: StreamOptions) {
       const wait = Math.max(0, (cb.minDelayMs ?? 0) - (Date.now() - startedAt));
       if (wait) await new Promise(r => setTimeout(r, wait));
       cb.onDone && cb.onDone();
+      isSendingRef.current = false;
       setSending(false);
       if (controllerRef.current === controller) controllerRef.current = null;
     };
@@ -128,10 +131,11 @@ export function useChorusStream(transport: Transport, opts?: StreamOptions) {
       await finish();
     } catch (e: any) {
       if (e?.name !== 'AbortError') cb.onError && cb.onError(e instanceof Error ? e : new Error(String(e)));
+      isSendingRef.current = false;
       setSending(false);
       if (controllerRef.current === controller) controllerRef.current = null;
     }
-  }, [sending, transport, connector]);
+  }, [transport, connector]);
 
   const abort = React.useCallback(() => { controllerRef.current?.abort(); }, []);
   return { send, abort, sending };
