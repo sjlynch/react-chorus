@@ -77,7 +77,7 @@ export default function App() {
 }
 ```
 
-`createFetchSSETransport(url)` posts `{ prompt, history }` to your endpoint and reads the response as a Server-Sent Events stream. The `openai` connector parses the standard `choices[*].delta.content` shape.
+`createFetchSSETransport(url)` posts `{ prompt, history }` to your endpoint and reads the response as a Server-Sent Events stream. Pass a `formatBody` option to customise the request shape for OpenAI, FastAPI, or any other backend. The `openai` connector parses the standard `choices[*].delta.content` shape.
 
 ### Minimal Express + OpenAI backend
 
@@ -318,7 +318,25 @@ const { send, abort, sending } = useChorusStream(transport, { connector: 'openai
 
 ### `createFetchSSETransport(url, init?)`
 
-Returns a `Transport` that POSTs `{ prompt, history }` as JSON and returns the raw `Response` for SSE reading.
+Returns a `Transport` that POSTs JSON to `url` and reads the response as a Server-Sent Events stream.
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `formatBody` | `(text, history) => BodyInit` | `JSON.stringify({ prompt, history })` | Serialise the outgoing request body |
+| *(any `RequestInit` field)* | | | Forwarded to `fetch` (e.g. `headers`, `credentials`) |
+
+```ts
+// OpenAI-compatible backend
+const transport = createFetchSSETransport('/api/chat', {
+  formatBody: (text, history) =>
+    JSON.stringify({ model: 'gpt-4o', messages: history, stream: true }),
+});
+
+// FastAPI / LangChain backend
+const transport = createFetchSSETransport('/api/chat', {
+  formatBody: (text, history) => JSON.stringify({ messages: history }),
+});
+```
 
 ### `createWebSocketTransport(url, opts?)`
 

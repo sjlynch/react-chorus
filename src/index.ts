@@ -14,6 +14,7 @@ export { useChorusStream } from './hooks/useChorusStream';
 export type { Transport } from './hooks/useChorusStream';
 export { useChorusPersistence } from './hooks/useChorusPersistence';
 export { createFetchSSETransport } from './streaming/createFetchSSETransport';
+export type { FetchSSETransportOptions } from './streaming/createFetchSSETransport';
 export { createWebSocketTransport } from './streaming/createWebSocketTransport';
 export type { WebSocketTransportOptions } from './streaming/createWebSocketTransport';
 export { Markdown } from './components/Markdown';
