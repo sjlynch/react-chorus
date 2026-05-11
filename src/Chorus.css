@@ -25,6 +25,19 @@
 .chorus-send svg { width: 18px; height: 18px; display: block; color: inherit; }
 .chorus-stop-fill { width: 18px; height: 18px; background: currentColor; border-radius: 2px; display: block; }
 
+/* Tool call blocks */
+.chorus-tool { justify-content: flex-start; }
+.chorus-tool-call { width: 100%; border: 1px solid var(--chorus-tool-border, #2a2a2a); border-radius: 8px; overflow: hidden; font-size: 13px; }
+.chorus-tool-call-header { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 12px; background: var(--chorus-tool-header-bg, #1a1a1a); color: var(--chorus-tool-header-text, #a3a3a3); border: none; cursor: pointer; text-align: left; }
+.chorus-tool-call-header:hover:not(:disabled) { background: var(--chorus-tool-header-hover, #222222); }
+.chorus-tool-call-header:disabled { cursor: default; }
+.chorus-tool-call-name { flex: 1; font-family: monospace; font-weight: 600; color: var(--chorus-tool-name-text, #e6edf3); }
+.chorus-tool-call-chevron { font-size: 10px; }
+.chorus-tool-call-body { background: var(--chorus-tool-body-bg, #111111); }
+.chorus-tool-call-section { border-top: 1px solid var(--chorus-tool-border, #2a2a2a); padding: 8px 12px; }
+.chorus-tool-call-label { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--chorus-tool-label-text, #666666); margin-bottom: 6px; }
+.chorus-tool-call-pre { margin: 0; font-family: monospace; font-size: 12px; color: var(--chorus-tool-code-text, #e6edf3); white-space: pre-wrap; word-break: break-all; max-height: 240px; overflow: auto; }
+
 /* Typing indicator (assistant replying) */
 .chorus-typing .chorus-bubble { display: inline-flex; align-items: center; gap: 4px; }
 .chorus-dot { width: 6px; height: 6px; border-radius: 9999px; background: var(--chorus-assistant-text, #ffffff); opacity: .6; animation: chorus-typing 1.2s infinite ease-in-out; }

@@ -1,3 +1,14 @@
-export type Role = 'user' | 'assistant';
+export type Role = 'user' | 'assistant' | 'tool';
 
-export interface Message { id: string; role: Role; text: string }
+export interface ToolCall {
+  name: string;
+  input?: unknown;
+  output?: unknown;
+}
+
+export interface Message {
+  id: string;
+  role: Role;
+  text: string;
+  toolCall?: ToolCall;
+}

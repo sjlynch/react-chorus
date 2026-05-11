@@ -16,9 +16,10 @@ export interface ChorusProps {
   sending?: boolean;
   minAssistantDelayMs?: number;
   codeBlockTheme?: 'dark' | 'light';
+  renderMessage?: (message: Message) => React.ReactNode;
 }
 
-export function Chorus({ messages, value, onChange, onSend, placeholder, palette, sending: sendingProp, minAssistantDelayMs = 1000, codeBlockTheme = 'dark' }: ChorusProps) {
+export function Chorus({ messages, value, onChange, onSend, placeholder, palette, sending: sendingProp, minAssistantDelayMs = 1000, codeBlockTheme = 'dark', renderMessage }: ChorusProps) {
   const [internalMsgs, setInternalMsgs] = React.useState<Message[]>(() => messages || []);
   const msgs = value !== undefined ? value : internalMsgs;
 
@@ -133,7 +134,7 @@ export function Chorus({ messages, value, onChange, onSend, placeholder, palette
   return (
     <ChorusTheme palette={palette}>
       <div className="chorus">
-        <ChatWindow messages={msgs} typing={!!onSend && sending && !hasStartedAssistantRef.current} codeTheme={codeBlockTheme} />
+        <ChatWindow messages={msgs} typing={!!onSend && sending && !hasStartedAssistantRef.current} codeTheme={codeBlockTheme} renderMessage={renderMessage} />
         <ChatInput value={draft} onChange={setDraft} onSend={send} onStop={stop} sending={sending} placeholder={placeholder} />
       </div>
     </ChorusTheme>
