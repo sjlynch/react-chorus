@@ -189,23 +189,20 @@ wss.on('connection', (ws) => {
       messages,
     });
 
+    // Forward raw Anthropic SDK events verbatim — the front-end
+    // `anthropic` connector parses `content_block_delta` / `message_stop`
+    // directly, so no server-side reshaping is needed.
     for await (const event of stream) {
-      if (
-        event.type === 'content_block_delta' &&
-        event.delta.type === 'text_delta'
-      ) {
-        // Each message must be valid JSON that your connector can parse.
-        ws.send(JSON.stringify({ type: 'text', text: event.delta.text }));
-      }
+      ws.send(JSON.stringify(event));
     }
-
-    ws.send(JSON.stringify({ type: 'done' }));
+    // `client.messages.stream` already emits a `message_stop` event,
+    // which the anthropic connector treats as the done sentinel.
     // ws.close() — optional; leaving it open allows reuse for the next turn.
   });
 });
 ```
 
-The front-end default connector expects `{ type: 'text', text: '...' }` chunks and a `{ type: 'done' }` sentinel, matching the SSE connector format.
+The front-end pairs this with `connector: 'anthropic'` (see the React snippet above) so it reads `content_block_delta` / `message_stop` events out of each WebSocket frame the same way it would over an SSE stream.
 
 ## Connectors
 
@@ -333,20 +330,25 @@ npm run dev
 | Prop | Type | Default | Description |
 |------|------|---------|-------------|
 | `transport` | `string \| Transport` | — | Simple path: URL to POST to, or a custom Transport function. Chorus handles all streaming. |
+| `connector` | `Connector \| 'auto' \| 'openai' \| 'anthropic' \| 'gemini'` | `'auto'` | SSE connector used to parse the stream. `'auto'` detects OpenAI, Anthropic, and Gemini; pass an explicit name when the format is known. |
 | `onSend` | `(text, messages, helpers) => Promise<void>` | — | Advanced path: called when the user submits a message. Use `helpers.appendAssistant` to stream tokens and `helpers.finalizeAssistant` when done. |
 | `value` | `Message[]` | — | Controlled message list. |
 | `onChange` | `(messages: Message[]) => void` | — | Called whenever the message list changes (controlled mode). |
 | `messages` | `Message[]` | — | Initial messages (uncontrolled mode). |
 | `placeholder` | `string` | `"Message…"` | Input placeholder text. |
+| `accept` | `string` | — | Forwarded to the file-picker `<input accept>`. Omitting the prop hides the attach button entirely. |
 | `sending` | `boolean` | — | Override the sending state (useful when you manage it externally via `useChorusStream`). |
 | `palette` | `Palette` | dark theme | Custom color palette for theming. |
 | `codeBlockTheme` | `'dark' \| 'light'` | `'dark'` | Code block syntax-highlight theme. |
-| `minAssistantDelayMs` | `number` | `1000` | Minimum ms before showing the first assistant token. |
+| `minAssistantDelayMs` | `number` | `300` | Minimum ms before showing the first assistant token. |
+| `errorMessage` | `string` | `'Something went wrong. Please try again.'` | Friendly message shown in the error banner. Raw transport errors are never surfaced in the UI. |
+| `onError` | `(error: Error) => void` | — | Called for any non-abort error from a send or stream. The raw `Error` goes here; the UI shows `errorMessage`. |
+| `onChunk` | `(chunk: string, messageId: string) => void` | — | Observation hook called for each streamed token. Receives the assistant `messageId` so callers can correlate chunks with a specific message. Does **not** affect streaming behaviour. |
 | `persistenceKey` | `string` | — | When set, automatically saves and restores messages using the given key. Defaults to localStorage. |
 | `persistenceStorage` | `StorageAdapter` | `localStorage` | Custom storage adapter for persistenceKey. |
 | `headless` | `boolean` | `false` | Strip all default styles and inline style injection. |
 | `renderMessage` | `(message: Message) => ReactNode` | — | Custom per-message renderer. Return `null` to fall back to default rendering. |
-| `hiddenRoles` | `Role[]` | `['system', 'tool']` | Message roles hidden from the transcript. Pass `['system']` to show tool calls while hiding system prompts, or `[]` to show all roles. |
+| `hiddenRoles` | `Role[]` | `['system', 'tool']` | Message roles hidden from the transcript. Pass `['system']` to show tool calls while hiding system prompts, or `[]` to show all roles. `<Chorus>` accepts `hiddenRoles` only — `showSystemMessages` exists on `<ChatWindow>` for backwards compatibility. |
 
 ### `helpers` (passed to `onSend`)
 
@@ -355,6 +357,36 @@ npm run dev
 | `appendAssistant(chunk)` | Append a text chunk to the current assistant message. |
 | `finalizeAssistant()` | Mark the assistant message complete. |
 | `signal` | `AbortSignal` — aborted when the user hits Stop. |
+
+### Observing streamed tokens with `onChunk`
+
+`onChunk` fires once per streamed token on both the `transport` and `onSend` paths. It's a pure observation hook — it does not interfere with rendering — so it's the right place for live token counting, analytics, or mirroring the stream into an external store:
+
+```tsx
+const tokensRef = React.useRef(0);
+
+<Chorus
+  transport="/api/chat"
+  onChunk={(chunk, messageId) => {
+    tokensRef.current += 1;
+    // Mirror into an external store keyed by the assistant messageId.
+    store.append(messageId, chunk);
+  }}
+/>
+```
+
+### Hiding system messages while showing tool calls
+
+`<Chorus>` uses `hiddenRoles` to control which roles appear in the transcript (`showSystemMessages` is only available on `<ChatWindow>`, for backwards compatibility). A common agent-UI pattern is to render tool call blocks while still hiding system prompts:
+
+```tsx
+<Chorus
+  transport="/api/chat"
+  hiddenRoles={['system']} // show user, assistant, and tool — hide system prompts
+/>
+```
+
+Pass `hiddenRoles={[]}` to show every role, or omit it to keep the default `['system', 'tool']`.
 
 ### `useChorusStream(transport, opts?)`
 
