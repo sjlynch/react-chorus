@@ -5,12 +5,37 @@ import { ChatInput } from './components/ChatInput';
 import { ChorusTheme } from './components/ChorusTheme';
 import type { Palette } from './components/ChorusTheme';
 import type { Message } from './types';
+import { useChorusStream, type Transport } from './hooks/useChorusStream';
+import { createFetchSSETransport } from './streaming/createFetchSSETransport';
+
+export type { Transport };
 
 export interface ChorusProps {
   messages?: Message[];
   value?: Message[];
   onChange?: (messages: Message[]) => void;
-  onSend?: (text: string, messages: Message[], helpers: { appendAssistant: (chunk: string) => void; finalizeAssistant: () => void; signal: AbortSignal }) => Promise<Message | void> | Message | void;
+  /**
+   * Simple path: a URL string (POST'd with `{ prompt, history }`) or a Transport
+   * function. Chorus handles all streaming internally — no helpers needed.
+   *
+   * @example
+   * <Chorus transport="/api/chat" />
+   */
+  transport?: string | Transport;
+  /**
+   * Advanced path: called on every send. Receives streaming helpers so you
+   * can drive the assistant message manually or handle non-SSE responses.
+   * Use `transport` instead for the common SSE case.
+   */
+  onSend?: (
+    text: string,
+    messages: Message[],
+    helpers: {
+      appendAssistant: (chunk: string) => void;
+      finalizeAssistant: () => void;
+      signal: AbortSignal;
+    }
+  ) => Promise<Message | void> | Message | void;
   placeholder?: string;
   palette?: Palette;
   sending?: boolean;
@@ -18,7 +43,18 @@ export interface ChorusProps {
   codeBlockTheme?: 'dark' | 'light';
 }
 
-export function Chorus({ messages, value, onChange, onSend, placeholder, palette, sending: sendingProp, minAssistantDelayMs = 1000, codeBlockTheme = 'dark' }: ChorusProps) {
+export function Chorus({
+  messages,
+  value,
+  onChange,
+  transport,
+  onSend,
+  placeholder,
+  palette,
+  sending: sendingProp,
+  minAssistantDelayMs = 1000,
+  codeBlockTheme = 'dark',
+}: ChorusProps) {
   const [internalMsgs, setInternalMsgs] = React.useState<Message[]>(() => messages || []);
   const msgs = value !== undefined ? value : internalMsgs;
 
@@ -33,8 +69,8 @@ export function Chorus({ messages, value, onChange, onSend, placeholder, palette
 
   const [draft, setDraft] = React.useState('');
   const [internalSending, setInternalSending] = React.useState(false);
-  const sending = sendingProp ?? internalSending;
 
+  // Only used by the onSend (advanced) path
   const controllerRef = React.useRef<AbortController | null>(null);
 
   const hasStartedAssistantRef = React.useRef(false);
@@ -89,25 +125,54 @@ export function Chorus({ messages, value, onChange, onSend, placeholder, palette
     setInternalSending(false);
   };
 
+  // --- Transport (simple) path ---
+  // Always call the hook (Rules of Hooks); a dummy transport is used when `transport` prop is absent.
+  const resolvedTransport = React.useMemo((): Transport => {
+    if (typeof transport === 'string') return createFetchSSETransport(transport);
+    if (typeof transport === 'function') return transport;
+    return () => Promise.resolve(new Response(null, { status: 200 }));
+  }, [transport]);
+
+  const { send: doStream, abort: streamAbort, sending: streamSending } = useChorusStream(resolvedTransport);
+
+  const sending = sendingProp ?? (transport ? streamSending : internalSending);
+
+  const resetStreamState = () => {
+    hasStartedAssistantRef.current = false;
+    pendingAssistantIdRef.current = null;
+    chunkQueueRef.current.length = 0;
+  };
+
   const send = async () => {
     if (sending) return;
     const text = draft.trim();
     if (!text) return;
 
-    controllerRef.current?.abort();
-    controllerRef.current = new AbortController();
-
     const userMsg: Message = { id: String(Date.now()), role: 'user', text };
     setDraft('');
     updateMsgs(prev => prev.concat(userMsg));
 
+    // Simple transport path: Chorus drives streaming internally
+    if (transport) {
+      resetStreamState();
+      doStream(text, msgsRef.current, {
+        onChunk: appendAssistant,
+        onDone: finalizeAssistant,
+        onError: resetStreamState,
+        minDelayMs: minAssistantDelayMs,
+      });
+      return;
+    }
+
+    // Advanced onSend path
     if (!onSend) return;
+
+    controllerRef.current?.abort();
+    controllerRef.current = new AbortController();
 
     try {
       setInternalSending(true);
-      hasStartedAssistantRef.current = false;
-      pendingAssistantIdRef.current = null;
-      chunkQueueRef.current.length = 0;
+      resetStreamState();
 
       const start = Date.now();
       const res = await onSend(text, msgsRef.current, { appendAssistant, finalizeAssistant, signal: controllerRef.current.signal });
@@ -126,14 +191,19 @@ export function Chorus({ messages, value, onChange, onSend, placeholder, palette
 
   const stop = () => {
     if (!sending) return;
-    controllerRef.current?.abort();
-    finalizeAssistant();
+    if (transport) {
+      streamAbort();
+      finalizeAssistant();
+    } else {
+      controllerRef.current?.abort();
+      finalizeAssistant();
+    }
   };
 
   return (
     <ChorusTheme palette={palette}>
       <div className="chorus">
-        <ChatWindow messages={msgs} typing={!!onSend && sending && !hasStartedAssistantRef.current} codeTheme={codeBlockTheme} />
+        <ChatWindow messages={msgs} typing={!!(transport || onSend) && sending && !hasStartedAssistantRef.current} codeTheme={codeBlockTheme} />
         <ChatInput value={draft} onChange={setDraft} onSend={send} onStop={stop} sending={sending} placeholder={placeholder} />
       </div>
     </ChorusTheme>

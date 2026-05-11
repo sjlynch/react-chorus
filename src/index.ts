@@ -9,6 +9,7 @@ export type { ChorusProps } from './Chorus';
 
 export type { Message, Role } from './types';
 export { useChorusStream } from './hooks/useChorusStream';
+export type { Transport } from './hooks/useChorusStream';
 export { createFetchSSETransport } from './streaming/createFetchSSETransport';
 export { Markdown } from './components/Markdown';
 
