@@ -1,69 +1,105 @@
-# React + TypeScript + Vite
+# Chorus
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A React chat UI library with streaming support.
 
-Currently, two official plugins are available:
+## Quick start
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+```tsx
+import { Chorus } from 'chorus';
 
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+<Chorus onSend={async (text, messages, { appendAssistant, finalizeAssistant, signal }) => {
+  // call your LLM here, pipe chunks via appendAssistant(chunk)
+  finalizeAssistant();
+}} />
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Custom message rendering
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+### `renderMessage` render prop
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+Pass `renderMessage` to `Chorus` or `ChatWindow` to fully replace how each message is rendered. The function receives a `Message` and must return a `ReactNode`.
+
+```tsx
+import { Chorus, MessageBubble } from 'chorus';
+
+<Chorus
+  renderMessage={(message) => (
+    <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+      <img src={message.role === 'user' ? userAvatar : botAvatar} style={{ width: 32, borderRadius: '50%' }} />
+      <div>
+        <span style={{ fontSize: 11, color: '#888' }}>{new Date().toLocaleTimeString()}</span>
+        <MessageBubble message={message} />
+      </div>
+    </div>
+  )}
+/>
 ```
+
+### `MessageBubble` component
+
+`MessageBubble` renders the default bubble for a single message. Import it to use as a base when you only need to add decoration (avatars, timestamps, status badges) around the existing look.
+
+```tsx
+import { MessageBubble } from 'chorus';
+
+// props
+interface MessageBubbleProps {
+  message: Message;           // the message to render
+  className?: string;         // merged onto the outer .chorus-msg element
+  style?: React.CSSProperties; // merged onto the outer .chorus-msg element
+  codeTheme?: 'dark' | 'light'; // defaults to 'dark'
+}
+```
+
+Example — custom bubble color per role without changing layout:
+
+```tsx
+<MessageBubble
+  message={message}
+  className="my-bubble"
+  style={{ opacity: message.role === 'assistant' ? 0.9 : 1 }}
+/>
+```
+
+### Default renderer
+
+When neither `renderMessage` nor a custom `MessageBubble` is used, each message renders as:
+
+```html
+<div class="chorus-msg chorus-{role}">
+  <div class="chorus-bubble"><!-- Markdown content --></div>
+</div>
+```
+
+Target these classes in your CSS to restyle without a render prop:
+
+```css
+.chorus-msg.chorus-user   .chorus-bubble { background: #0070f3; color: #fff; }
+.chorus-msg.chorus-assistant .chorus-bubble { background: #f0f0f0; color: #111; }
+```
+
+## Props
+
+### `Chorus`
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `messages` | `Message[]` | `[]` | Initial messages (uncontrolled) |
+| `value` | `Message[]` | — | Controlled message list |
+| `onChange` | `(msgs: Message[]) => void` | — | Called on every message update |
+| `onSend` | `(text, messages, helpers) => Promise<void>` | — | Called when user sends a message |
+| `placeholder` | `string` | — | Input placeholder text |
+| `palette` | `Palette` | — | Theme color overrides |
+| `sending` | `boolean` | — | Controlled sending state |
+| `minAssistantDelayMs` | `number` | `1000` | Minimum delay before showing assistant response |
+| `codeBlockTheme` | `'dark' \| 'light'` | `'dark'` | Code block syntax highlight theme |
+| `renderMessage` | `(message: Message) => ReactNode` | — | Custom message renderer |
+
+### `ChatWindow`
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `messages` | `Message[]` | — | Messages to display |
+| `typing` | `boolean` | — | Show typing indicator |
+| `codeTheme` | `'dark' \| 'light'` | `'dark'` | Code block theme |
+| `renderMessage` | `(message: Message) => ReactNode` | — | Custom message renderer |

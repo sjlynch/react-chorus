@@ -1,4 +1,5 @@
-export { ChatWindow } from './components/ChatWindow';
+export { ChatWindow, MessageBubble } from './components/ChatWindow';
+export type { ChatWindowProps, MessageBubbleProps } from './components/ChatWindow';
 export { ChatInput } from './components/ChatInput';
 export type { ChatInputProps } from './components/ChatInput';
 
