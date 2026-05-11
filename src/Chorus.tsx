@@ -50,6 +50,8 @@ export interface ChorusProps {
   /** Strip all default styles and inline style injection — same effect as using react-chorus/headless */
   headless?: boolean;
   renderMessage?: (message: Message) => React.ReactNode;
+  className?: string;
+  style?: React.CSSProperties;
 }
 
 export function Chorus({
@@ -68,6 +70,8 @@ export function Chorus({
   persistenceStorage,
   headless = false,
   renderMessage,
+  className,
+  style,
 }: ChorusProps) {
   // Always called (rules of hooks) — no-op when persistenceKey is absent
   const persisted = useChorusPersistence(persistenceKey ?? '', { storage: persistenceStorage });
@@ -263,7 +267,7 @@ export function Chorus({
 
   return (
     <ChorusTheme palette={palette}>
-      <div className="chorus">
+      <div className={["chorus", className].filter(Boolean).join(" ")} style={style}>
         <ChatWindow
           messages={msgs}
           typing={!!(transport || onSend) && sending && !hasStartedAssistantRef.current}
