@@ -8,7 +8,7 @@ export interface Palette {
   sendButtonBg?: string; sendButtonText?: string; focusRing?: string;
 }
 
-function styleVarsFromPalette(p?: Palette): React.CSSProperties {
+export function styleVarsFromPalette(p?: Palette): React.CSSProperties {
   const v: React.CSSProperties = {};
   const set = (k: string, val?: string) => { if (val) (v as any)[k] = val; };
   if (!p) return v;

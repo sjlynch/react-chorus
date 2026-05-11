@@ -4,6 +4,12 @@ import type { Transport } from '../hooks/useChorusStream';
 export interface WebSocketTransportOptions {
   /** WebSocket sub-protocols forwarded to the WebSocket constructor. */
   protocols?: string | string[];
+  /** Called after the WebSocket opens, in addition to resolving the transport response. */
+  onOpen?: () => void;
+  /** Called when the WebSocket closes, in addition to ending the response stream. */
+  onClose?: (code: number, reason: string) => void;
+  /** Called when the WebSocket reports an error, in addition to rejecting/erroring the transport. */
+  onError?: (event: Event) => void;
   /**
    * Serialize the outgoing request.
    * Defaults to `JSON.stringify({ prompt, history })`, matching the fetch SSE transport.
@@ -74,6 +80,7 @@ export function createWebSocketTransport(
         ws.send(formatMessage(text, history));
         resolved = true;
         resolve(new Response(body, { status: 200 }));
+        opts?.onOpen?.();
       };
 
       ws.onmessage = (event: MessageEvent) => {
@@ -82,12 +89,13 @@ export function createWebSocketTransport(
         streamController.enqueue(encoder.encode(`data: ${data}\n\n`));
       };
 
-      ws.onclose = () => {
+      ws.onclose = (event: CloseEvent) => {
         cleanup();
         try { streamController?.close(); } catch {}
+        opts?.onClose?.(event.code, event.reason);
       };
 
-      ws.onerror = () => {
+      ws.onerror = (event: Event) => {
         cleanup();
         const err = new Error('WebSocket connection error');
         if (resolved) {
@@ -95,6 +103,7 @@ export function createWebSocketTransport(
         } else {
           reject(err);
         }
+        opts?.onError?.(event);
       };
     });
 }
