@@ -13,17 +13,37 @@
 .chorus-user { justify-content: flex-end; }
 .chorus-user .chorus-bubble { background: var(--chorus-user-bg, #dddddd); border: 1px solid var(--chorus-user-border, #cccccc); color: var(--chorus-user-text, #111111); }
 
-/* Input area (multiline textarea) */
-.chorus-input { position: relative; display: flex; align-items: center; margin-top: 12px; background: var(--chorus-input-area-bg, transparent); }
-.chorus-input textarea { width: 100%; min-height: 44px; max-height: 160px; padding: 12px 50px 12px 14px; border-radius: 12px; border: 1px solid var(--chorus-input-border, #333333); background: var(--chorus-input-bg, #1a1a1a); color: var(--chorus-input-text, #f3f4f6); outline: none; resize: none; line-height: 1.4; }
-.chorus-input textarea::placeholder { color: #a3a3a3; }
-.chorus-input textarea:focus { border-color: var(--chorus-send-bg, #ffffff); box-shadow: 0 0 0 3px var(--chorus-focus-ring, rgba(255,255,255,0.2)); }
+/* Attachment rendering in message bubbles */
+.chorus-msg-attachments { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.chorus-msg-img { max-width: 100%; max-height: 300px; border-radius: 8px; display: block; }
+.chorus-msg-file { display: inline-block; padding: 4px 10px; background: rgba(0,0,0,.15); border-radius: 6px; font-size: 12px; }
+
+/* Input area — column flex to stack attachment previews above the input row */
+.chorus-input { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; background: var(--chorus-input-area-bg, transparent); }
+.chorus-input-row { position: relative; display: flex; align-items: center; }
+.chorus-input-row textarea { width: 100%; min-height: 44px; max-height: 160px; padding: 12px 50px 12px 14px; border-radius: 12px; border: 1px solid var(--chorus-input-border, #333333); background: var(--chorus-input-bg, #1a1a1a); color: var(--chorus-input-text, #f3f4f6); outline: none; resize: none; line-height: 1.4; }
+.chorus-input-row textarea::placeholder { color: #a3a3a3; }
+.chorus-input-row textarea:focus { border-color: var(--chorus-send-bg, #ffffff); box-shadow: 0 0 0 3px var(--chorus-focus-ring, rgba(255,255,255,0.2)); }
+.chorus-input-row--has-attach textarea { padding-left: 44px; }
+
+/* Attach button (paperclip, left side) */
+.chorus-attach { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); width: 28px; height: 28px; padding: 0; border: none; background: transparent; color: var(--chorus-input-text, #f3f4f6); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; z-index: 2; opacity: .6; border-radius: 6px; }
+.chorus-attach:hover { opacity: 1; background: rgba(255,255,255,.1); }
+.chorus-attach svg { width: 18px; height: 18px; display: block; }
 
 /* Send/Stop button (white circle, black icon) */
 .chorus-send { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); width: 36px; height: 36px; padding: 0; line-height: 0; border-radius: 9999px; border: none; background: var(--chorus-send-bg, #ffffff); color: var(--chorus-send-text, #111111); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; z-index: 2; }
 .chorus-send:disabled { opacity: .5; cursor: default; }
 .chorus-send svg { width: 18px; height: 18px; display: block; color: inherit; }
 .chorus-stop-fill { width: 18px; height: 18px; background: currentColor; border-radius: 2px; display: block; }
+
+/* Attachment preview chips above the input row */
+.chorus-attachments { display: flex; flex-wrap: wrap; gap: 8px; }
+.chorus-attachment-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; background: var(--chorus-input-bg, #1a1a1a); border: 1px solid var(--chorus-input-border, #333333); border-radius: 8px; max-width: 200px; }
+.chorus-attachment-thumb { width: 40px; height: 40px; object-fit: cover; border-radius: 4px; flex-shrink: 0; }
+.chorus-attachment-name { font-size: 12px; color: var(--chorus-input-text, #f3f4f6); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px; }
+.chorus-attachment-remove { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; padding: 0; border: none; background: rgba(255,255,255,.15); color: var(--chorus-input-text, #f3f4f6); border-radius: 9999px; cursor: pointer; flex-shrink: 0; }
+.chorus-attachment-remove:hover { background: rgba(255,255,255,.3); }
 
 /* Typing indicator (assistant replying) */
 .chorus-typing .chorus-bubble { display: inline-flex; align-items: center; gap: 4px; }

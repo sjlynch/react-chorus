@@ -4,7 +4,7 @@ import { ChatWindow } from './components/ChatWindow';
 import { ChatInput } from './components/ChatInput';
 import { ChorusTheme } from './components/ChorusTheme';
 import type { Palette } from './components/ChorusTheme';
-import type { Message } from './types';
+import type { Message, Attachment } from './types';
 
 export interface ChorusProps {
   messages?: Message[];
@@ -16,9 +16,10 @@ export interface ChorusProps {
   sending?: boolean;
   minAssistantDelayMs?: number;
   codeBlockTheme?: 'dark' | 'light';
+  accept?: string;
 }
 
-export function Chorus({ messages, value, onChange, onSend, placeholder, palette, sending: sendingProp, minAssistantDelayMs = 1000, codeBlockTheme = 'dark' }: ChorusProps) {
+export function Chorus({ messages, value, onChange, onSend, placeholder, palette, sending: sendingProp, minAssistantDelayMs = 1000, codeBlockTheme = 'dark', accept }: ChorusProps) {
   const [internalMsgs, setInternalMsgs] = React.useState<Message[]>(() => messages || []);
   const msgs = value !== undefined ? value : internalMsgs;
 
@@ -89,15 +90,15 @@ export function Chorus({ messages, value, onChange, onSend, placeholder, palette
     setInternalSending(false);
   };
 
-  const send = async () => {
+  const send = async (attachments: Attachment[]) => {
     if (sending) return;
     const text = draft.trim();
-    if (!text) return;
+    if (!text && !attachments.length) return;
 
     controllerRef.current?.abort();
     controllerRef.current = new AbortController();
 
-    const userMsg: Message = { id: String(Date.now()), role: 'user', text };
+    const userMsg: Message = { id: String(Date.now()), role: 'user', text, attachments: attachments.length > 0 ? attachments : undefined };
     setDraft('');
     updateMsgs(prev => prev.concat(userMsg));
 
@@ -134,7 +135,7 @@ export function Chorus({ messages, value, onChange, onSend, placeholder, palette
     <ChorusTheme palette={palette}>
       <div className="chorus">
         <ChatWindow messages={msgs} typing={!!onSend && sending && !hasStartedAssistantRef.current} codeTheme={codeBlockTheme} />
-        <ChatInput value={draft} onChange={setDraft} onSend={send} onStop={stop} sending={sending} placeholder={placeholder} />
+        <ChatInput value={draft} onChange={setDraft} onSend={send} onStop={stop} sending={sending} placeholder={placeholder} accept={accept} />
       </div>
     </ChorusTheme>
   );

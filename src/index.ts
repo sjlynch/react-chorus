@@ -7,7 +7,7 @@ export { ChorusTheme } from './components/ChorusTheme';
 export type { Palette } from './components/ChorusTheme';
 export type { ChorusProps } from './Chorus';
 
-export type { Message, Role } from './types';
+export type { Message, Role, Attachment } from './types';
 export { useChorusStream } from './hooks/useChorusStream';
 export { createFetchSSETransport } from './streaming/createFetchSSETransport';
 export { Markdown } from './components/Markdown';

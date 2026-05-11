@@ -7,7 +7,18 @@ export function ChatWindow({ messages, typing, codeTheme = 'dark' }: { messages:
     <div className="chorus-window">
       {messages.map(m =>
         <div key={m.id} className={`chorus-msg chorus-${m.role}`}>
-          <div className="chorus-bubble"><Markdown text={m.text} codeTheme={codeTheme} /></div>
+          <div className="chorus-bubble">
+            {m.attachments && m.attachments.length > 0 && (
+              <div className="chorus-msg-attachments">
+                {m.attachments.map((att, i) => (
+                  att.type.startsWith('image/')
+                    ? <img key={i} src={att.data} alt={att.name} className="chorus-msg-img" />
+                    : <span key={i} className="chorus-msg-file">{att.name}</span>
+                ))}
+              </div>
+            )}
+            {m.text && <Markdown text={m.text} codeTheme={codeTheme} />}
+          </div>
         </div>
       )}
       {typing &&
