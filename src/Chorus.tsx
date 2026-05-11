@@ -8,8 +8,10 @@ import type { Message, Attachment, StorageAdapter } from './types';
 import { useChorusStream, type Transport } from './hooks/useChorusStream';
 import { createFetchSSETransport } from './streaming/createFetchSSETransport';
 import { useChorusPersistence } from './hooks/useChorusPersistence';
+import type { Connector } from './connectors/connectors';
 
 export type { Transport };
+export type { Connector };
 
 export interface ChorusProps {
   messages?: Message[];
@@ -23,6 +25,16 @@ export interface ChorusProps {
    * <Chorus transport="/api/chat" />
    */
   transport?: string | Transport;
+  /**
+   * SSE connector to use when parsing the stream. Defaults to `'auto'` which
+   * detects OpenAI and Anthropic formats automatically. Pass `'anthropic'` when
+   * pointing `transport` at an Anthropic backend to skip auto-detection and
+   * parse `event: content_block_delta` events correctly.
+   *
+   * @example
+   * <Chorus transport="/api/chat" connector="anthropic" />
+   */
+  connector?: Connector | 'auto' | 'openai' | 'anthropic';
   /**
    * Advanced path: called on every send. Receives streaming helpers so you
    * can drive the assistant message manually or handle non-SSE responses.
@@ -57,6 +69,7 @@ export function Chorus({
   value,
   onChange,
   transport,
+  connector,
   onSend,
   placeholder,
   palette,
@@ -157,7 +170,7 @@ export function Chorus({
     return () => Promise.resolve(new Response(null, { status: 200 }));
   }, [transport]);
 
-  const { send: doStream, abort: streamAbort, sending: streamSending } = useChorusStream(resolvedTransport);
+  const { send: doStream, abort: streamAbort, sending: streamSending } = useChorusStream(resolvedTransport, { connector });
 
   const sending = sendingProp ?? (transport ? streamSending : internalSending);
 
