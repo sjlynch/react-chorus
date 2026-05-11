@@ -1,12 +1,13 @@
 import React from 'react';
-import './Chorus.css';
 import { ChatWindow } from './components/ChatWindow';
 import { ChatInput } from './components/ChatInput';
 import { ChorusTheme } from './components/ChorusTheme';
 import type { Palette } from './components/ChorusTheme';
 import type { Message } from './types';
 
-export interface ChorusProps {
+// No CSS import — this module intentionally ships without any default styles.
+
+export interface ChorusHeadlessProps {
   messages?: Message[];
   value?: Message[];
   onChange?: (messages: Message[]) => void;
@@ -16,12 +17,9 @@ export interface ChorusProps {
   sending?: boolean;
   minAssistantDelayMs?: number;
   codeBlockTheme?: 'dark' | 'light';
-  /** Strip all default styles and inline style injection — same effect as using react-chorus/headless */
-  headless?: boolean;
-  renderMessage?: (message: Message) => React.ReactNode;
 }
 
-export function Chorus({ messages, value, onChange, onSend, placeholder, palette, sending: sendingProp, minAssistantDelayMs = 1000, codeBlockTheme = 'dark', headless = false, renderMessage }: ChorusProps) {
+export function ChorusHeadless({ messages, value, onChange, onSend, placeholder, palette, sending: sendingProp, minAssistantDelayMs = 1000, codeBlockTheme = 'dark' }: ChorusHeadlessProps) {
   const [internalMsgs, setInternalMsgs] = React.useState<Message[]>(() => messages || []);
   const msgs = value !== undefined ? value : internalMsgs;
 
@@ -43,7 +41,6 @@ export function Chorus({ messages, value, onChange, onSend, placeholder, palette
   const hasStartedAssistantRef = React.useRef(false);
   const pendingAssistantIdRef = React.useRef<string | null>(null);
 
-  // Frame-batched queue to avoid any chance of interleaving/races dropping tokens
   const chunkQueueRef = React.useRef<string[]>([]);
   const rafIdRef = React.useRef<number | null>(null);
 
@@ -136,11 +133,9 @@ export function Chorus({ messages, value, onChange, onSend, placeholder, palette
   return (
     <ChorusTheme palette={palette}>
       <div className="chorus">
-        <ChatWindow messages={msgs} typing={!!onSend && sending && !hasStartedAssistantRef.current} codeTheme={codeBlockTheme} headless={headless} renderMessage={renderMessage} />
+        <ChatWindow messages={msgs} typing={!!onSend && sending && !hasStartedAssistantRef.current} codeTheme={codeBlockTheme} headless={true} />
         <ChatInput value={draft} onChange={setDraft} onSend={send} onStop={stop} sending={sending} placeholder={placeholder} />
       </div>
     </ChorusTheme>
   );
 }
-
-export default Chorus;

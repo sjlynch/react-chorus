@@ -52,7 +52,7 @@ function normalizeStreamingMarkdown(text: string) {
   return out;
 }
 
-export function Markdown({ text, codeTheme = 'dark' }: { text: string; codeTheme?: 'dark' | 'light' }) {
+export function Markdown({ text, codeTheme = 'dark', headless = false }: { text: string; codeTheme?: 'dark' | 'light'; headless?: boolean }) {
   const containerRef = React.useRef<HTMLDivElement>(null);
   // Tracks whether hljs has been loaded so the useMemo re-runs after the import resolves.
   const [hljsReady, setHljsReady] = React.useState(hljsInstance !== null);
@@ -66,6 +66,7 @@ export function Markdown({ text, codeTheme = 'dark' }: { text: string; codeTheme
 
   // Inject minimal CSS once per page for code blocks + copy button
   React.useEffect(() => {
+    if (headless) return;
     if (typeof document === 'undefined') return;
     if (document.getElementById('chorus-md-styles')) return;
     const style = document.createElement('style');
@@ -80,7 +81,7 @@ export function Markdown({ text, codeTheme = 'dark' }: { text: string; codeTheme
        .chorus-md .chorus-codeblock-light .chorus-copy-btn{background:#fff;border:1px solid rgba(31,35,40,0.15);color:#24292f}
        .chorus-md .chorus-copy-btn.copied{opacity:.85}`;
     document.head.appendChild(style);
-  }, []);
+  }, [headless]);
 
   const html = React.useMemo(() => {
     const balanced = normalizeStreamingMarkdown(text);
@@ -93,11 +94,11 @@ export function Markdown({ text, codeTheme = 'dark' }: { text: string; codeTheme
       raw = `<pre><code>${balanced}</code></pre>`;
     }
 
-    // 2) sanitize
     const sanitized = typeof window === 'undefined' ? raw : DOMPurify.sanitize(raw);
 
-    // 3) post-process <pre><code> to wrap with our codeblock container + copy button
-    if (typeof window === 'undefined') return sanitized;
+    // In headless mode skip DOM post-processing — no codeblock wrappers or copy buttons injected
+    if (headless || typeof window === 'undefined') return sanitized;
+
     const root = document.createElement('div');
     root.innerHTML = sanitized;
 
@@ -125,7 +126,7 @@ export function Markdown({ text, codeTheme = 'dark' }: { text: string; codeTheme
 
     return root.innerHTML;
   // hljsReady is a dependency so the memo re-runs once hljs finishes loading.
-  }, [text, codeTheme, hljsReady]);
+  }, [text, codeTheme, headless, hljsReady]);
 
   // Event delegation for copy buttons
   React.useEffect(() => {
