@@ -4,7 +4,8 @@ import { ChatWindow } from './components/ChatWindow';
 import { ChatInput } from './components/ChatInput';
 import { ChorusTheme } from './components/ChorusTheme';
 import type { Palette } from './components/ChorusTheme';
-import type { Message } from './types';
+import type { Message, StorageAdapter } from './types';
+import { useChorusPersistence } from './hooks/useChorusPersistence';
 
 export interface ChorusProps {
   messages?: Message[];
@@ -16,11 +17,18 @@ export interface ChorusProps {
   sending?: boolean;
   minAssistantDelayMs?: number;
   codeBlockTheme?: 'dark' | 'light';
+  /** When set, automatically saves and restores messages using the given key. Defaults to localStorage; pass persistenceStorage to swap the backend. */
+  persistenceKey?: string;
+  /** Custom storage adapter for persistenceKey. Must implement { getItem, setItem }. Sync (localStorage/sessionStorage) and async (IndexedDB, etc.) adapters are both supported. */
+  persistenceStorage?: StorageAdapter;
 }
 
-export function Chorus({ messages, value, onChange, onSend, placeholder, palette, sending: sendingProp, minAssistantDelayMs = 1000, codeBlockTheme = 'dark' }: ChorusProps) {
+export function Chorus({ messages, value, onChange, onSend, placeholder, palette, sending: sendingProp, minAssistantDelayMs = 1000, codeBlockTheme = 'dark', persistenceKey, persistenceStorage }: ChorusProps) {
+  // Always called (rules of hooks) — no-op when persistenceKey is absent
+  const persisted = useChorusPersistence(persistenceKey ?? '', { storage: persistenceStorage });
+
   const [internalMsgs, setInternalMsgs] = React.useState<Message[]>(() => messages || []);
-  const msgs = value !== undefined ? value : internalMsgs;
+  const msgs = value !== undefined ? value : persistenceKey ? persisted.value : internalMsgs;
 
   const msgsRef = React.useRef<Message[]>(msgs);
   React.useEffect(() => { msgsRef.current = msgs; }, [msgs]);
@@ -28,7 +36,9 @@ export function Chorus({ messages, value, onChange, onSend, placeholder, palette
   const updateMsgs = (updater: (prev: Message[]) => Message[]) => {
     const next = updater(msgsRef.current);
     msgsRef.current = next;
-    if (value !== undefined) { onChange && onChange(next); } else { setInternalMsgs(next); }
+    if (value !== undefined) { onChange?.(next); }
+    else if (persistenceKey) { persisted.onChange(next); }
+    else { setInternalMsgs(next); }
   };
 
   const [draft, setDraft] = React.useState('');
