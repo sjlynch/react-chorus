@@ -308,7 +308,7 @@ npm run dev
 
 **Impact:**
 - Pages that never render code blocks pay zero cost — highlight.js is never downloaded.
-- Pages that do render code blocks load highlight.js asynchronously on demand. The code renders immediately as plain text and is re-rendered with syntax highlighting once the chunk arrives (typically one extra render, imperceptible during streaming).
+- Pages that do render code blocks load highlight.js asynchronously on demand. The matching GitHub dark/light token-color stylesheet is also injected on demand based on `codeBlockTheme`. The code renders immediately as plain text and is re-rendered with syntax highlighting once the chunk arrives (typically one extra render, imperceptible during streaming).
 - Bundlers (Vite, webpack, Rollup) will automatically split highlight.js into a separate async chunk, so it does not inflate the main bundle.
 
 ## API
@@ -331,6 +331,7 @@ npm run dev
 | `persistenceStorage` | `StorageAdapter` | `localStorage` | Custom storage adapter for persistenceKey. |
 | `headless` | `boolean` | `false` | Strip all default styles and inline style injection. |
 | `renderMessage` | `(message: Message) => ReactNode` | — | Custom per-message renderer. Return `null` to fall back to default rendering. |
+| `hiddenRoles` | `Role[]` | `['system', 'tool']` | Message roles hidden from the transcript. Pass `['system']` to show tool calls while hiding system prompts, or `[]` to show all roles. |
 
 ### `helpers` (passed to `onSend`)
 
@@ -421,7 +422,7 @@ setMessages(prev => [
 ]);
 ```
 
-The block shows the tool name in a header. Clicking expands it to reveal the input and output formatted as JSON.
+The block shows the tool name in a header. Clicking expands it to reveal the input and output formatted as JSON. Tool messages are hidden by default alongside system messages; pass `hiddenRoles={['system']}` to `<Chorus>` or `<ChatWindow>` to display tool calls while keeping system prompts hidden.
 
 ### Custom renderer via `renderMessage`
 
@@ -430,6 +431,7 @@ Supply a `renderMessage` render-prop to take full control of how any message is 
 ```tsx
 <Chorus
   messages={messages}
+  hiddenRoles={['system']} // show tool calls while still hiding system prompts
   renderMessage={(msg) => {
     if (msg.role === 'tool' && msg.toolCall) {
       return (
@@ -538,7 +540,7 @@ You can compose the UI from smaller pieces:
 import { ChatWindow, ChatInput, ChorusTheme, Markdown } from 'react-chorus';
 ```
 
-- **`<ChatWindow messages={…} typing={…} />`** — renders the message list with a typing indicator.
+- **`<ChatWindow messages={…} typing={…} />`** — renders the scrollable message list with a typing indicator. It accepts `hiddenRoles?: Role[]` (default `['system', 'tool']`); `showSystemMessages` is deprecated but remains supported as an alias for showing all roles.
 - **`<ChatInput value onSend onStop placeholder sending />`** — the text input and send/stop button.
 - **`<ChorusTheme palette={…}>`** — applies theme CSS variables to any subtree.
 - **`<Markdown text={…} codeTheme="dark" />`** — standalone markdown renderer with syntax highlighting and copy buttons.

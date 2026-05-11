@@ -29,14 +29,32 @@ describe('ChatWindow', () => {
   });
 
   it('hides system and tool messages by default', () => {
-    render(<ChatWindow messages={[SYS_MSG, USER_MSG]} />);
+    render(<ChatWindow messages={[SYS_MSG, TOOL_MSG, USER_MSG]} />);
     expect(screen.queryByText('You are helpful.')).not.toBeInTheDocument();
+    expect(screen.queryByText('search')).not.toBeInTheDocument();
     expect(screen.getByText('Hello')).toBeInTheDocument();
   });
 
-  it('shows system messages when showSystemMessages=true', () => {
-    render(<ChatWindow messages={[SYS_MSG, USER_MSG]} showSystemMessages />);
+  it('shows system and tool messages when deprecated showSystemMessages=true', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    render(<ChatWindow messages={[SYS_MSG, TOOL_MSG, USER_MSG]} showSystemMessages />);
     expect(screen.getByText('You are helpful.')).toBeInTheDocument();
+    expect(screen.getByText('search')).toBeInTheDocument();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('showSystemMessages'));
+    warn.mockRestore();
+  });
+
+  it('allows tool messages while hiding system messages with hiddenRoles', () => {
+    render(<ChatWindow messages={[SYS_MSG, TOOL_MSG, USER_MSG]} hiddenRoles={['system']} />);
+    expect(screen.queryByText('You are helpful.')).not.toBeInTheDocument();
+    expect(screen.getByText('search')).toBeInTheDocument();
+    expect(screen.getByText('Hello')).toBeInTheDocument();
+  });
+
+  it('shows all roles when hiddenRoles is empty', () => {
+    render(<ChatWindow messages={[SYS_MSG, TOOL_MSG, USER_MSG]} hiddenRoles={[]} />);
+    expect(screen.getByText('You are helpful.')).toBeInTheDocument();
+    expect(screen.getByText('search')).toBeInTheDocument();
   });
 
   it('renders the typing indicator when typing=true', () => {

@@ -1,9 +1,10 @@
-@import 'highlight.js/styles/github-dark.css';
 /* Optional: make code blocks scroll when long */
 /*.chorus-md pre { overflow: auto; }*/
 
 /* Dark theme defaults + CSS variables for palette overrides (no blue) */
-.chorus-window { background: var(--chorus-chat-bg, #161616); border: 1px solid var(--chorus-border, #2a2a2a); border-radius: 12px; padding: 12px; color: var(--chorus-chat-text, #f3f4f6); }
+.chorus { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden; }
+.chorus-window { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; background: var(--chorus-chat-bg, #161616); border: 1px solid var(--chorus-border, #2a2a2a); border-radius: 12px; padding: 12px; color: var(--chorus-chat-text, #f3f4f6); }
+.chorus-scroll-sentinel { height: 1px; }
 .chorus-msg { display: flex; margin: 8px 0; }
 .chorus-bubble { padding: 10px 12px; border-radius: 12px; font-size: 14px; line-height: 1.4; }
 

@@ -4,7 +4,7 @@ import { ChatWindow } from './components/ChatWindow';
 import { ChatInput } from './components/ChatInput';
 import { ChorusTheme } from './components/ChorusTheme';
 import type { Palette } from './components/ChorusTheme';
-import type { Message, Attachment, StorageAdapter } from './types';
+import type { Message, Attachment, StorageAdapter, Role } from './types';
 import { useChorusStream, type Transport } from './hooks/useChorusStream';
 import { createFetchSSETransport } from './streaming/createFetchSSETransport';
 import { useChorusPersistence } from './hooks/useChorusPersistence';
@@ -62,6 +62,8 @@ export interface ChorusProps {
   /** Strip all default styles and inline style injection — same effect as using react-chorus/headless */
   headless?: boolean;
   renderMessage?: (message: Message) => React.ReactNode;
+  /** Message roles hidden from the transcript. Defaults to ['system', 'tool']; pass ['system'] to show tool calls while hiding system prompts, or [] to show every role. */
+  hiddenRoles?: Role[];
   className?: string;
   style?: React.CSSProperties;
 }
@@ -83,6 +85,7 @@ export function Chorus({
   persistenceStorage,
   headless = false,
   renderMessage,
+  hiddenRoles,
   className,
   style,
 }: ChorusProps) {
@@ -290,6 +293,7 @@ export function Chorus({
           codeTheme={codeBlockTheme}
           headless={headless}
           renderMessage={renderMessage}
+          hiddenRoles={hiddenRoles}
           onEdit={(transport || onSend) ? handleEdit : undefined}
           onRegenerate={(transport || onSend) ? handleRegenerate : undefined}
           onDelete={handleDelete}

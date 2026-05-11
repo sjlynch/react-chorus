@@ -4,10 +4,12 @@ import { markedHighlight } from 'marked-highlight';
 import DOMPurify from 'dompurify';
 
 type HLJSApi = typeof import('highlight.js').default;
+type CodeTheme = 'dark' | 'light';
 
-// Module-level singleton — loaded once, shared across all Markdown instances.
+// Module-level singletons — loaded once, shared across all Markdown instances.
 let hljsInstance: HLJSApi | null = null;
 let hljsLoadPromise: Promise<HLJSApi> | null = null;
+const hljsThemeLoadPromises: Partial<Record<CodeTheme, Promise<void>>> = {};
 
 function loadHljs(): Promise<HLJSApi> {
   if (hljsInstance) return Promise.resolve(hljsInstance);
@@ -18,6 +20,38 @@ function loadHljs(): Promise<HLJSApi> {
     });
   }
   return hljsLoadPromise;
+}
+
+function scopeHljsThemeCss(css: string, theme: CodeTheme) {
+  const scope = `.chorus-codeblock-${theme}`;
+  return css
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|})\s*([^@{}][^{]+)\s*\{/g, (_match, brace: string, selectors: string) => {
+      const scoped = selectors
+        .split(',')
+        .map(selector => `${scope} ${selector.trim()}`)
+        .join(', ');
+      return `${brace} ${scoped} {`;
+    });
+}
+
+function loadHljsTheme(theme: CodeTheme): Promise<void> {
+  if (typeof document === 'undefined') return Promise.resolve();
+  const styleId = `chorus-hljs-theme-${theme}`;
+  if (document.getElementById(styleId)) return Promise.resolve();
+  if (!hljsThemeLoadPromises[theme]) {
+    hljsThemeLoadPromises[theme] = (theme === 'light'
+      ? import('highlight.js/styles/github.css?raw')
+      : import('highlight.js/styles/github-dark.css?raw'))
+      .then((m: { default: string }) => {
+        if (document.getElementById(styleId)) return;
+        const style = document.createElement('style');
+        style.id = styleId;
+        style.textContent = scopeHljsThemeCss(m.default, theme);
+        document.head.appendChild(style);
+      });
+  }
+  return hljsThemeLoadPromises[theme];
 }
 
 marked.setOptions({ gfm: true, breaks: true, mangle: false, headerIds: false });
@@ -52,17 +86,17 @@ function normalizeStreamingMarkdown(text: string) {
   return out;
 }
 
-export function Markdown({ text, codeTheme = 'dark', headless = false }: { text: string; codeTheme?: 'dark' | 'light'; headless?: boolean }) {
+export function Markdown({ text, codeTheme = 'dark', headless = false }: { text: string; codeTheme?: CodeTheme; headless?: boolean }) {
   const containerRef = React.useRef<HTMLDivElement>(null);
   // Tracks whether hljs has been loaded so the useMemo re-runs after the import resolves.
   const [hljsReady, setHljsReady] = React.useState(hljsInstance !== null);
 
-  // Lazy-load highlight.js the first time a code fence appears in the text.
+  // Lazy-load highlight.js and the matching token-color theme the first time a code fence appears.
   React.useEffect(() => {
-    if (hljsReady) return;
     if (!text.includes('```') && !text.includes('~~~')) return;
-    loadHljs().then(() => setHljsReady(true));
-  }, [text, hljsReady]);
+    if (!headless) loadHljsTheme(codeTheme);
+    if (!hljsReady) loadHljs().then(() => setHljsReady(true));
+  }, [text, codeTheme, headless, hljsReady]);
 
   // Inject minimal CSS once per page for code blocks + copy button
   React.useEffect(() => {
@@ -74,6 +108,7 @@ export function Markdown({ text, codeTheme = 'dark', headless = false }: { text:
     style.textContent =
       `.chorus-md .chorus-codeblock{position:relative;margin:8px 0;border-radius:8px;overflow:auto;border:1px solid var(--chorus-code-border,#30363d)}
        .chorus-md .chorus-codeblock pre{margin:0;padding:12px 16px;background:transparent}
+       .chorus-md .chorus-codeblock pre code.hljs{display:block;overflow-x:auto;padding:0;background:transparent}
        .chorus-md .chorus-codeblock-dark{background:#0d1117;--chorus-code-border:#30363d;color:#e6edf3}
        .chorus-md .chorus-codeblock-light{background:#f6f8fa;--chorus-code-border:#d0d7de;color:#24292f}
        .chorus-md .chorus-copy-btn{position:absolute;top:8px;right:8px;font-size:12px;padding:4px 8px;border-radius:6px;cursor:pointer;user-select:none}
