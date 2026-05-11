@@ -13,7 +13,7 @@ export interface SendCallbacks {
 export type Transport = (text: string, history: Message[], signal: AbortSignal) => Promise<Response>;
 
 export interface StreamOptions {
-  connector?: Connector | 'auto' | 'openai' | 'anthropic';
+  connector?: Connector | 'auto' | 'openai' | 'anthropic' | 'gemini';
 }
 
 /**
