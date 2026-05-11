@@ -202,7 +202,8 @@ Connectors tell Chorus how to parse the streaming response from different AI pro
 |------|----------|------------|
 | `'openai'` | OpenAI Chat Completions | `choices[*].delta.content` |
 | `'anthropic'` | Anthropic Messages API | `content_block_delta` / `delta.text` |
-| `'auto'` *(default)* | Auto-detect | Tries OpenAI, then Anthropic, then plain text |
+| `'gemini'` | Google Gemini (AI / Vertex AI) | `candidates[*].content.parts[*].text` |
+| `'auto'` *(default)* | Auto-detect | Tries OpenAI, then Gemini, then Anthropic, then plain text |
 
 ### Usage
 
@@ -214,6 +215,9 @@ const { send } = useChorusStream(transport, { connector: 'openai' });
 
 // Anthropic (Claude)
 const { send } = useChorusStream(transport, { connector: 'anthropic' });
+
+// Google Gemini
+const { send } = useChorusStream(transport, { connector: 'gemini' });
 
 // Auto-detect (default)
 const { send } = useChorusStream(transport);
@@ -229,6 +233,35 @@ data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text
 
 event: message_stop
 data: {"type":"message_stop"}
+```
+
+## Gemini SSE format
+
+The Google Gemini streaming API (Google AI and Vertex AI) sends server-sent events where each chunk contains a `candidates` array. The `geminiConnector` collects text from `candidates[*].content.parts[*].text` and signals completion when any candidate has a `finishReason`:
+
+```
+data: {"candidates":[{"content":{"parts":[{"text":"Hello"}]},"index":0}]}
+
+data: {"candidates":[{"content":{"parts":[{"text":" world"}]},"finishReason":"STOP","index":0}],"usageMetadata":{...}}
+```
+
+Example backend proxy (Express + `@google/generative-ai`):
+
+```js
+import { GoogleGenerativeAI } from '@google/generative-ai';
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+
+app.post('/api/chat', async (req, res) => {
+  const { prompt } = req.body;
+  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+  const result = await model.generateContentStream(prompt);
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  for await (const chunk of result.stream) {
+    res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+  }
+  res.end();
+});
 ```
 
 ## Examples
@@ -314,7 +347,7 @@ const { send, abort, sending } = useChorusStream(transport, { connector: 'openai
 ```
 
 - `transport` — async function `(text, history, signal) => Promise<Response>`. Use `createFetchSSETransport(url)` or write your own.
-- `opts.connector` — `'openai'` | `'anthropic'` | `'auto'` | custom `Connector`. Defaults to `'auto'` which handles both OpenAI JSON and plain-text SSE.
+- `opts.connector` — `'openai'` | `'anthropic'` | `'gemini'` | `'auto'` | custom `Connector`. Defaults to `'auto'` which handles OpenAI, Gemini, Anthropic JSON, and plain-text SSE.
 
 ### `createFetchSSETransport(url, init?)`
 
