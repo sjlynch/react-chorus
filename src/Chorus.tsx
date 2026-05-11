@@ -173,7 +173,7 @@ export function Chorus({
       doStream(text, msgsRef.current, {
         onChunk: appendAssistant,
         onDone: finalizeAssistant,
-        onError: resetStreamState,
+        onError: (err) => { resetStreamState(); setStreamError(err.message || 'Something went wrong. Please try again.'); },
         minDelayMs: minAssistantDelayMs,
       });
       return;
