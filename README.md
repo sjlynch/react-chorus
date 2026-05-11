@@ -1,68 +1,88 @@
-# React + TypeScript + Vite
+# Chorus
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A React streaming chat UI library with SSE support and provider connectors.
 
-Currently, two official plugins are available:
+## Connectors
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+Connectors tell Chorus how to parse the streaming response from different AI providers. Pass a connector name or object via `useChorusStream`'s `connector` option.
 
-## Expanding the ESLint configuration
+### Built-in connectors
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+| Name | Provider | SSE format |
+|------|----------|------------|
+| `'openai'` | OpenAI Chat Completions | `choices[*].delta.content` |
+| `'anthropic'` | Anthropic Messages API | `content_block_delta` / `delta.text` |
+| `'auto'` *(default)* | Auto-detect | Tries OpenAI, then Anthropic, then plain text |
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+### Usage
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+```tsx
+import { useChorusStream, createFetchSSETransport } from 'chorus';
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+// OpenAI
+const { send } = useChorusStream(transport, { connector: 'openai' });
+
+// Anthropic (Claude)
+const { send } = useChorusStream(transport, { connector: 'anthropic' });
+
+// Auto-detect (default)
+const { send } = useChorusStream(transport);
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+### Custom connector
+
+```tsx
+import type { Connector } from 'chorus';
+
+const myConnector: Connector = {
+  name: 'my-provider',
+  extract(data: string) {
+    if (data === 'DONE') return { done: true };
+    const obj = JSON.parse(data);
+    return obj.text ? { text: obj.text } : null;
+  }
+};
+
+const { send } = useChorusStream(transport, { connector: myConnector });
+```
+
+## Anthropic SSE format
+
+The Anthropic Messages API streams server-sent events. The `anthropicConnector` extracts text from `content_block_delta` events and signals completion on `message_stop`:
+
+```
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}
+
+event: message_stop
+data: {"type":"message_stop"}
+```
+
+---
+
+## Development
+
+This project uses React + TypeScript + Vite.
+
+### ESLint
+
+For production applications, enable type-aware lint rules:
 
 ```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
 export default defineConfig([
   globalIgnores(['dist']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
+      tseslint.configs.recommendedTypeChecked,
+      tseslint.configs.strictTypeChecked,
+      tseslint.configs.stylisticTypeChecked,
     ],
     languageOptions: {
       parserOptions: {
         project: ['./tsconfig.node.json', './tsconfig.app.json'],
         tsconfigRootDir: import.meta.dirname,
       },
-      // other options...
     },
   },
 ])
