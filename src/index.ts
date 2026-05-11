@@ -24,3 +24,4 @@ export type { Connector, ConnectorResult } from './connectors/connectors';
 export { getConnector, autoConnector } from './connectors/connectors';
 export { openaiConnector } from './connectors/openai';
 export { anthropicConnector } from './connectors/anthropic';
+export { geminiConnector } from './connectors/gemini';
