@@ -77,7 +77,7 @@ export default function App() {
 }
 ```
 
-`createFetchSSETransport(url)` posts `{ prompt, history }` to your endpoint and reads the response as a Server-Sent Events stream. The `openai` connector parses the standard `choices[*].delta.content` shape.
+`createFetchSSETransport(url)` posts `{ prompt, history }` to your endpoint and reads the response as a Server-Sent Events stream. Pass a `formatBody` option to customise the request shape for OpenAI, FastAPI, or any other backend. The `openai` connector parses the standard `choices[*].delta.content` shape.
 
 ### Minimal Express + OpenAI backend
 
@@ -202,7 +202,8 @@ Connectors tell Chorus how to parse the streaming response from different AI pro
 |------|----------|------------|
 | `'openai'` | OpenAI Chat Completions | `choices[*].delta.content` |
 | `'anthropic'` | Anthropic Messages API | `content_block_delta` / `delta.text` |
-| `'auto'` *(default)* | Auto-detect | Tries OpenAI, then Anthropic, then plain text |
+| `'gemini'` | Google Gemini (AI / Vertex AI) | `candidates[*].content.parts[*].text` |
+| `'auto'` *(default)* | Auto-detect | Tries OpenAI, then Gemini, then Anthropic, then plain text |
 
 ### Usage
 
@@ -214,6 +215,9 @@ const { send } = useChorusStream(transport, { connector: 'openai' });
 
 // Anthropic (Claude)
 const { send } = useChorusStream(transport, { connector: 'anthropic' });
+
+// Google Gemini
+const { send } = useChorusStream(transport, { connector: 'gemini' });
 
 // Auto-detect (default)
 const { send } = useChorusStream(transport);
@@ -229,6 +233,35 @@ data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text
 
 event: message_stop
 data: {"type":"message_stop"}
+```
+
+## Gemini SSE format
+
+The Google Gemini streaming API (Google AI and Vertex AI) sends server-sent events where each chunk contains a `candidates` array. The `geminiConnector` collects text from `candidates[*].content.parts[*].text` and signals completion when any candidate has a `finishReason`:
+
+```
+data: {"candidates":[{"content":{"parts":[{"text":"Hello"}]},"index":0}]}
+
+data: {"candidates":[{"content":{"parts":[{"text":" world"}]},"finishReason":"STOP","index":0}],"usageMetadata":{...}}
+```
+
+Example backend proxy (Express + `@google/generative-ai`):
+
+```js
+import { GoogleGenerativeAI } from '@google/generative-ai';
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+
+app.post('/api/chat', async (req, res) => {
+  const { prompt } = req.body;
+  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+  const result = await model.generateContentStream(prompt);
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  for await (const chunk of result.stream) {
+    res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+  }
+  res.end();
+});
 ```
 
 ## Examples
@@ -314,11 +347,29 @@ const { send, abort, sending } = useChorusStream(transport, { connector: 'openai
 ```
 
 - `transport` — async function `(text, history, signal) => Promise<Response>`. Use `createFetchSSETransport(url)` or write your own.
-- `opts.connector` — `'openai'` | `'anthropic'` | `'auto'` | custom `Connector`. Defaults to `'auto'` which handles both OpenAI JSON and plain-text SSE.
+- `opts.connector` — `'openai'` | `'anthropic'` | `'gemini'` | `'auto'` | custom `Connector`. Defaults to `'auto'` which handles OpenAI, Gemini, Anthropic JSON, and plain-text SSE.
 
 ### `createFetchSSETransport(url, init?)`
 
-Returns a `Transport` that POSTs `{ prompt, history }` as JSON and returns the raw `Response` for SSE reading.
+Returns a `Transport` that POSTs JSON to `url` and reads the response as a Server-Sent Events stream.
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `formatBody` | `(text, history) => BodyInit` | `JSON.stringify({ prompt, history })` | Serialise the outgoing request body |
+| *(any `RequestInit` field)* | | | Forwarded to `fetch` (e.g. `headers`, `credentials`) |
+
+```ts
+// OpenAI-compatible backend
+const transport = createFetchSSETransport('/api/chat', {
+  formatBody: (text, history) =>
+    JSON.stringify({ model: 'gpt-4o', messages: history, stream: true }),
+});
+
+// FastAPI / LangChain backend
+const transport = createFetchSSETransport('/api/chat', {
+  formatBody: (text, history) => JSON.stringify({ messages: history }),
+});
+```
 
 ### `createWebSocketTransport(url, opts?)`
 
