@@ -6,9 +6,12 @@ export default defineConfig({
   plugins: [react()],
   build: {
     lib: {
-      entry: path.resolve(__dirname, 'src/index.ts'),
+      entry: {
+        'react-chorus': path.resolve(__dirname, 'src/index.ts'),
+        'react-chorus-headless': path.resolve(__dirname, 'src/headless.ts'),
+      },
       name: 'ReactChorus',
-      fileName: (format) => `react-chorus.${format}.js`,
+      fileName: (format, entryName) => `${entryName}.${format}.js`,
       formats: ['es', 'cjs']
     },
     rollupOptions: {
