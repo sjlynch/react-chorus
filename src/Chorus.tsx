@@ -169,6 +169,9 @@ export function Chorus({
 
   const triggerAssistant = async (text: string) => {
     if (transport) {
+      if (process.env.NODE_ENV !== 'production' && onSend) {
+        console.warn('[Chorus] Both `transport` and `onSend` props were provided. `transport` takes precedence and `onSend` will be ignored. Remove one of the two props to silence this warning.');
+      }
       resetStreamState();
       doStream(text, msgsRef.current, {
         onChunk: appendAssistant,
