@@ -54,4 +54,97 @@ describe('useChorusStream', () => {
     expect(result.current.sending).toBe(false);
     expect(result.current.send).toBe(initialSend);
   });
+
+  it('calls onDone immediately after the last chunk when minDelayMs is 0', async () => {
+    const transport = vi.fn<Transport>(async () => makeResponse());
+    const onChunk = vi.fn();
+    const onDone = vi.fn();
+    const { result } = renderHook(() => useChorusStream(transport));
+
+    await act(async () => {
+      await result.current.send('hello', [], { onChunk, onDone, minDelayMs: 0 });
+    });
+
+    expect(onChunk).toHaveBeenCalledTimes(1);
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
+  it('delays onDone until minDelayMs has elapsed when the transport resolves faster', async () => {
+    vi.useFakeTimers();
+    try {
+      let resolveTransport!: (response: Response) => void;
+      const transport = vi.fn<Transport>(() => new Promise<Response>(resolve => {
+        resolveTransport = resolve;
+      }));
+      const onChunk = vi.fn();
+      const onDone = vi.fn();
+      const { result } = renderHook(() => useChorusStream(transport));
+
+      let sendPromise!: Promise<void>;
+      act(() => {
+        sendPromise = result.current.send('hello', [], { onChunk, onDone, minDelayMs: 500 });
+      });
+
+      // Transport resolves quickly (10ms elapsed), then SSE stream is read.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10);
+        resolveTransport(makeResponse());
+        // Flush microtasks so readSSEStream completes and finish() schedules its setTimeout.
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      expect(onChunk).toHaveBeenCalledTimes(1);
+      expect(onDone).not.toHaveBeenCalled();
+
+      // Partway through the remaining ~490ms wait — onDone still pending.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(400);
+      });
+      expect(onDone).not.toHaveBeenCalled();
+
+      // Finish the delay; onDone should fire once total elapsed reaches minDelayMs.
+      await act(async () => {
+        await vi.runAllTimersAsync();
+        await sendPromise;
+      });
+      expect(onDone).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('calls onDone without extra delay when the transport is slower than minDelayMs', async () => {
+    vi.useFakeTimers();
+    try {
+      let resolveTransport!: (response: Response) => void;
+      const transport = vi.fn<Transport>(() => new Promise<Response>(resolve => {
+        resolveTransport = resolve;
+      }));
+      const onChunk = vi.fn();
+      const onDone = vi.fn();
+      const { result } = renderHook(() => useChorusStream(transport));
+
+      let sendPromise!: Promise<void>;
+      act(() => {
+        sendPromise = result.current.send('hello', [], { onChunk, onDone, minDelayMs: 200 });
+      });
+
+      // Transport itself takes 600ms — longer than minDelayMs.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(600);
+      });
+      expect(onDone).not.toHaveBeenCalled();
+
+      // Resolving the transport must finalize without scheduling any further timer:
+      // if finish() had set a setTimeout, awaiting sendPromise here would hang since
+      // no timers are advanced after this point.
+      await act(async () => {
+        resolveTransport(makeResponse());
+        await sendPromise;
+      });
+      expect(onDone).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

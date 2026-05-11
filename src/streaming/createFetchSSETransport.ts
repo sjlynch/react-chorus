@@ -19,11 +19,11 @@ export function createFetchSSETransport(url: string, init?: FetchSSETransportOpt
     init?.formatBody ??
     ((text, history) => JSON.stringify({ prompt: text, history }));
 
-  const { formatBody: _removed, ...rest } = init ?? {};
-  const headers = { 'Content-Type': 'application/json', ...(rest?.headers ?? {}) };
+  const { formatBody: _removed, headers: initHeaders, ...rest } = init ?? {};
+  const headers = { 'Content-Type': 'application/json', ...(initHeaders ?? {}) };
 
   return async (text: string, history: Message[], signal: AbortSignal) => {
     const body = formatBody(text, history);
-    return fetch(url, { method: 'POST', headers, body, signal, ...rest });
+    return fetch(url, { ...rest, method: 'POST', headers, body, signal });
   };
 }
