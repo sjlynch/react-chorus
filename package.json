@@ -40,6 +40,7 @@
     "vitest": "^4.1.5"
   },
   "scripts": {
+    "dev": "vite",
     "build": "vite build && tsc -p tsconfig.json --emitDeclarationOnly",
     "prepublishOnly": "npm run build",
     "test": "vitest run",

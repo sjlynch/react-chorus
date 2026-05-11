@@ -1,14 +1,17 @@
 import { openaiConnector, type Connector, type ConnectorResult } from './openai';
 import { anthropicConnector } from './anthropic';
+import { geminiConnector } from './gemini';
 
 export type { Connector, ConnectorResult } from './openai';
 export { anthropicConnector } from './anthropic';
+export { geminiConnector } from './gemini';
 
 /**
  * Auto connector:
  * - If data === "[DONE]" => { done: true }
  * - If data parses as JSON and looks like OpenAI Chat => extract delta.content
  * - If data parses as JSON and looks like Anthropic Messages => extract text delta
+ * - If data parses as JSON and looks like Gemini => extract candidates text
  * - Else, treat as plain text
  */
 export const autoConnector: Connector = {
@@ -18,17 +21,19 @@ export const autoConnector: Connector = {
     try {
       const obj = JSON.parse(data);
       if (obj && Array.isArray(obj.choices)) return openaiConnector.extract(data);
+      if (obj && Array.isArray(obj.candidates)) return geminiConnector.extract(data);
       if (obj && typeof obj.type === 'string') return anthropicConnector.extract(data);
     } catch {}
     return data ? { text: data } : null;
   }
 };
 
-export function getConnector(connector?: Connector | 'auto' | 'openai' | 'anthropic'): Connector {
+export function getConnector(connector?: Connector | 'auto' | 'openai' | 'anthropic' | 'gemini'): Connector {
   if (!connector) return autoConnector;
   if (typeof connector === 'string') {
     if (connector === 'openai') return openaiConnector;
     if (connector === 'anthropic') return anthropicConnector;
+    if (connector === 'gemini') return geminiConnector;
     return autoConnector;
   }
   return connector;
