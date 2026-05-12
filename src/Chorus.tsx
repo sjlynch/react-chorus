@@ -21,6 +21,20 @@ interface ChorusSendHelpers {
 }
 
 const DEFAULT_MIN_ASSISTANT_DELAY_MS = 300;
+let fallbackMessageIdCounter = 0;
+
+function createMessageId() {
+  const randomUUID = globalThis.crypto?.randomUUID;
+  if (typeof randomUUID === 'function') return randomUUID.call(globalThis.crypto);
+
+  fallbackMessageIdCounter += 1;
+  return `chorus-${Date.now()}-${fallbackMessageIdCounter}`;
+}
+
+function dropTrailingAssistant(history: Message[]) {
+  const last = history[history.length - 1];
+  return last?.role === 'assistant' ? history.slice(0, -1) : history;
+}
 
 export interface ChorusProps {
   messages?: Message[];
@@ -90,6 +104,18 @@ export function Chorus({
     onChunk,
   });
 
+  React.useEffect(() => {
+    if (process.env.NODE_ENV === 'production') return;
+
+    if (messages !== undefined && onChange) {
+      console.warn('[Chorus] `messages` is initial-only and does not make <Chorus> controlled. Use `value` + `onChange` for controlled mode, or rename `messages` to `initialMessages` when you only want to seed uncontrolled state.');
+    }
+
+    if (value !== undefined && persistenceKey) {
+      console.warn('[Chorus] Both `value` and `persistenceKey` were provided. `value` makes the message list controlled, so built-in persistence is ignored and message changes are not saved automatically. Remove `persistenceKey` or manage persistence in your controlled state.');
+    }
+  }, [messages, onChange, value, persistenceKey]);
+
   const [draft, setDraft] = React.useState('');
   const [internalSending, setInternalSending] = React.useState(false);
   const [streamError, setStreamError] = React.useState<string | null>(null);
@@ -106,7 +132,7 @@ export function Chorus({
   });
 
   const startAssistant = (firstChunk: string) => {
-    const id = 'assistant-' + Date.now();
+    const id = createMessageId();
     pendingAssistantIdRef.current = id;
     hasStartedAssistantRef.current = true;
     cancelPending(false);
@@ -140,11 +166,18 @@ export function Chorus({
   const { send: doStream, abort: streamAbort, sending: streamSending } = useChorusStream(resolvedTransport, { connector });
   const sending = sendingProp ?? (transport ? streamSending : internalSending);
   const paletteVars = React.useMemo(() => styleVarsFromPalette(palette), [palette]);
+  const activeStreamingMessageId = sending && hasStartedAssistantRef.current ? pendingAssistantIdRef.current : null;
 
   const resetStreamState = () => {
     hasStartedAssistantRef.current = false;
     pendingAssistantIdRef.current = null;
     cancelPending(false);
+  };
+
+  const removePendingAssistant = () => {
+    const partialId = pendingAssistantIdRef.current;
+    resetStreamState();
+    if (partialId) updateMsgs(prev => prev.filter(m => m.id !== partialId));
   };
 
   const historyForTransport = (history: Message[]) => (
@@ -161,7 +194,7 @@ export function Chorus({
       doStream(text, historyForTransport(history), {
         onChunk: appendAssistant,
         onDone: finalizeAssistant,
-        onError: (err) => { resetStreamState(); onError?.(err); setStreamError(fallbackErrorMessage); },
+        onError: (err) => { removePendingAssistant(); onError?.(err); setStreamError(fallbackErrorMessage); },
         minDelayMs: minAssistantDelayMs,
       });
       return;
@@ -180,7 +213,13 @@ export function Chorus({
       if (res && typeof res === 'object' && !hasStartedAssistantRef.current) {
         const wait = Math.max(0, minAssistantDelayMs - (Date.now() - start));
         if (wait) await new Promise(r => setTimeout(r, wait));
-        updateMsgs(prev => prev.concat({ id: (res as Message).id || String(Date.now() + 1), role: 'assistant', text: (res as Message).text }));
+        const returnedMessage = res as Message;
+        updateMsgs(prev => prev.concat({
+          ...returnedMessage,
+          id: returnedMessage.id || createMessageId(),
+          role: returnedMessage.role ?? 'assistant',
+          text: returnedMessage.text ?? '',
+        }));
       }
     } catch (e: any) {
       const partialId = pendingAssistantIdRef.current;
@@ -204,14 +243,17 @@ export function Chorus({
 
     setDraft('');
     lastUserTextRef.current = text;
-    const next = updateMsgs(prev => prev.concat({ id: String(Date.now()), role: 'user', text, attachments: attachments.length > 0 ? attachments : undefined }));
+    const next = updateMsgs(prev => prev.concat({ id: createMessageId(), role: 'user', text, attachments: attachments.length > 0 ? attachments : undefined }));
     await triggerAssistant(text, next);
   };
 
   const retry = async () => {
     const text = lastUserTextRef.current;
     if (!text || sending) return;
-    await triggerAssistant(text);
+    const history = streamError && msgs[msgs.length - 1]?.role === 'assistant'
+      ? updateMsgs(prev => dropTrailingAssistant(prev))
+      : msgs;
+    await triggerAssistant(text, history);
   };
 
   const stop = () => {
@@ -238,7 +280,10 @@ export function Chorus({
     while (userIdx >= 0 && msgs[userIdx].role !== 'user') userIdx--;
     if (userIdx < 0) return;
     const userMsg = msgs[userIdx];
-    const next = updateMsgs(prev => prev.slice(0, userIdx + 1));
+    const next = updateMsgs(prev => {
+      const history = streamError ? dropTrailingAssistant(prev) : prev;
+      return history.slice(0, userIdx + 1);
+    });
     await triggerAssistant(userMsg.text, next);
   };
 
@@ -246,7 +291,7 @@ export function Chorus({
 
   return (
     <div className={["chorus", className].filter(Boolean).join(" ")} style={{ ...paletteVars, ...style }}>
-      <ChatWindow messages={msgs} typing={!!(transport || onSend) && sending && !hasStartedAssistantRef.current} codeTheme={codeBlockTheme} headless={headless} renderMessage={renderMessage} hiddenRoles={hiddenRoles} onEdit={(transport || onSend) ? handleEdit : undefined} onRegenerate={(transport || onSend) ? handleRegenerate : undefined} onDelete={handleDelete} error={streamError} onRetry={retry} />
+      <ChatWindow messages={msgs} typing={!!(transport || onSend) && sending && !hasStartedAssistantRef.current} codeTheme={codeBlockTheme} headless={headless} renderMessage={renderMessage} hiddenRoles={hiddenRoles} streamingMessageId={activeStreamingMessageId} onEdit={(transport || onSend) ? handleEdit : undefined} onRegenerate={(transport || onSend) ? handleRegenerate : undefined} onDelete={handleDelete} error={streamError} onRetry={retry} />
       <ChatInput value={draft} onChange={setDraft} onSend={send} onStop={stop} sending={sending} placeholder={placeholder} accept={accept} />
     </div>
   );

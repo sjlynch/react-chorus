@@ -1,3 +1,5 @@
+import { renderToString } from 'react-dom/server';
+import DOMPurify from 'dompurify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { Markdown, normalizeStreamingMarkdown } from '../components/Markdown';
@@ -113,6 +115,46 @@ describe('Markdown', () => {
     expect(screen.getByText('bold')).toBeInTheDocument();
     expect(mocks.sanitizeMock).toHaveBeenCalledWith(expect.stringContaining('<strong>bold</strong>'));
     expect(mocks.highlightModuleLoads.value).toBe(0);
+  });
+
+  it('sanitizes SSR output when window is unavailable', () => {
+    const originalWindow = globalThis.window;
+    const domPurifyMock = DOMPurify as unknown as { sanitize?: (html: string) => string };
+    const originalSanitize = domPurifyMock.sanitize;
+    domPurifyMock.sanitize = undefined;
+    Object.defineProperty(globalThis, 'window', { value: undefined, configurable: true, writable: true });
+
+    try {
+      const html = renderToString(<Markdown text={'<script>alert(1)</script>\n<img src=x onerror="alert(2)">'} />);
+
+      expect(html).not.toMatch(/<script/i);
+      expect(html).not.toMatch(/onerror/i);
+      expect(html).not.toContain('alert(');
+      expect(html).toContain('<img src=x>');
+    } finally {
+      domPurifyMock.sanitize = originalSanitize;
+      Object.defineProperty(globalThis, 'window', { value: originalWindow, configurable: true, writable: true });
+    }
+  });
+
+  it('renders escaped plain text while streaming and parses markdown once finalized', () => {
+    const first = 'Hello <img src=x onerror="boom"> **bold**';
+    const { container, rerender } = render(<Markdown text={first} streaming />);
+
+    expect(container.querySelector('.chorus-md-streaming')).toBeInTheDocument();
+    expect(container.innerHTML).toContain('&lt;img src=x onerror="boom"&gt;');
+    expect(container.innerHTML).not.toContain('<img src=x');
+    expect(container).toHaveTextContent('**bold**');
+    expect(mocks.sanitizeMock).not.toHaveBeenCalled();
+
+    rerender(<Markdown text={`${first}\n${'more text '.repeat(2000)}`} streaming />);
+
+    expect(mocks.sanitizeMock).not.toHaveBeenCalled();
+
+    rerender(<Markdown text={'Hello **bold**'} headless />);
+
+    expect(mocks.sanitizeMock).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('bold')).toBeInTheDocument();
   });
 
   it('does not inject component styles when headless=true', () => {
