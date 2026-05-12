@@ -7,6 +7,7 @@ function fmt(v: unknown): string {
 
 export function ToolCallBlock({ toolCall }: { toolCall: ToolCall }) {
   const [open, setOpen] = React.useState(false);
+  const bodyId = React.useId();
   const hasBody = toolCall.input !== undefined || toolCall.output !== undefined;
 
   return (
@@ -15,24 +16,29 @@ export function ToolCallBlock({ toolCall }: { toolCall: ToolCall }) {
         className="chorus-tool-call-header"
         onClick={() => setOpen(o => !o)}
         aria-expanded={open}
+        aria-controls={hasBody ? bodyId : undefined}
         disabled={!hasBody}
       >
         <span className="chorus-tool-call-name">{toolCall.name}</span>
         {hasBody && <span className="chorus-tool-call-chevron" aria-hidden="true">{open ? '▲' : '▼'}</span>}
       </button>
-      {open && hasBody && (
-        <div className="chorus-tool-call-body">
-          {toolCall.input !== undefined && (
-            <div className="chorus-tool-call-section">
-              <div className="chorus-tool-call-label">Input</div>
-              <pre className="chorus-tool-call-pre">{fmt(toolCall.input)}</pre>
-            </div>
-          )}
-          {toolCall.output !== undefined && (
-            <div className="chorus-tool-call-section">
-              <div className="chorus-tool-call-label">Output</div>
-              <pre className="chorus-tool-call-pre">{fmt(toolCall.output)}</pre>
-            </div>
+      {hasBody && (
+        <div className="chorus-tool-call-body" id={bodyId} hidden={!open}>
+          {open && (
+            <>
+              {toolCall.input !== undefined && (
+                <div className="chorus-tool-call-section">
+                  <div className="chorus-tool-call-label">Input</div>
+                  <pre className="chorus-tool-call-pre">{fmt(toolCall.input)}</pre>
+                </div>
+              )}
+              {toolCall.output !== undefined && (
+                <div className="chorus-tool-call-section">
+                  <div className="chorus-tool-call-label">Output</div>
+                  <pre className="chorus-tool-call-pre">{fmt(toolCall.output)}</pre>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}

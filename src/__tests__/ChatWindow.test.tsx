@@ -28,6 +28,13 @@ describe('ChatWindow', () => {
     expect(screen.getByText('Hi there')).toBeInTheDocument();
   });
 
+  it('exposes the transcript as a polite live log region', () => {
+    render(<ChatWindow messages={[USER_MSG, ASST_MSG]} />);
+    const transcript = screen.getByRole('log', { name: /chat transcript/i });
+    expect(transcript).toHaveAttribute('aria-live', 'polite');
+    expect(transcript).toHaveClass('chorus-window');
+  });
+
   it('hides system and tool messages by default', () => {
     render(<ChatWindow messages={[SYS_MSG, TOOL_MSG, USER_MSG]} />);
     expect(screen.queryByText('You are helpful.')).not.toBeInTheDocument();
@@ -60,6 +67,7 @@ describe('ChatWindow', () => {
   it('renders the typing indicator when typing=true', () => {
     const { container } = render(<ChatWindow messages={[]} typing />);
     expect(container.querySelector('.chorus-typing')).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: /assistant is typing/i })).toBeInTheDocument();
   });
 
   it('does not render the typing indicator when typing=false', () => {
@@ -67,9 +75,9 @@ describe('ChatWindow', () => {
     expect(container.querySelector('.chorus-typing')).not.toBeInTheDocument();
   });
 
-  it('renders an error message when error is provided', () => {
+  it('renders an alert error message when error is provided', () => {
     render(<ChatWindow messages={[]} error="Network error" />);
-    expect(screen.getByText('Network error')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('Network error');
   });
 
   it('shows a retry button when onRetry is provided alongside an error', () => {

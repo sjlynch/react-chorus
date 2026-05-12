@@ -19,11 +19,16 @@ import 'react-chorus/styles.css';
 ```tsx
 import { Chorus } from 'react-chorus';
 
-// That's it — point it at your streaming API endpoint
-<Chorus transport="/api/chat" />
+export default function App() {
+  return (
+    <div style={{ height: '100dvh' }}>
+      <Chorus transport="/api/chat" />
+    </div>
+  );
+}
 ```
 
-Chorus POSTs `{ prompt: string, history: Message[] }` to the URL and streams the SSE response into the assistant message automatically.
+Chorus fills its parent, so give the wrapper an explicit height (for example `100dvh`) to make the transcript scroll internally. Chorus POSTs `{ prompt: string, history: Message[] }` to the URL and streams the SSE response into the assistant message automatically.
 
 ## Two usage paths
 
