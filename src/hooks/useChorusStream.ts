@@ -1,6 +1,7 @@
 import React from 'react';
-import type { Message } from '../types';
+import type { ConnectorName, Message } from '../types';
 import { getConnector, type Connector } from '../connectors/connectors';
+import { useLatestRef } from './useLatestRef';
 
 export interface SendCallbacks {
   /**
@@ -18,7 +19,7 @@ export interface SendCallbacks {
 export type Transport = (text: string, history: Message[], signal: AbortSignal) => Promise<Response>;
 
 export interface StreamOptions {
-  connector?: Connector | 'auto' | 'openai' | 'anthropic' | 'gemini';
+  connector?: Connector | ConnectorName;
 }
 
 /**
@@ -79,6 +80,8 @@ export function readSSEStream(res: Response, onEvent: (payload: string) => void)
 
 export function useChorusStream(transport: Transport, opts?: StreamOptions) {
   const connector = getConnector(opts?.connector);
+  const transportRef = useLatestRef(transport);
+  const connectorRef = useLatestRef(connector);
 
   const [sending, setSending] = React.useState(false);
   const isSendingRef = React.useRef(false);
@@ -113,12 +116,12 @@ export function useChorusStream(transport: Transport, opts?: StreamOptions) {
     };
 
     try {
-      const res = await transport(text, history, signal);
+      const res = await transportRef.current(text, history, signal);
       if (!res.ok || !res.body) throw new Error(`Bad response (${res.status}) or missing body`);
 
       let started = false;
       await readSSEStream(res, (payload) => {
-        const out = connector.extract(payload);
+        const out = connectorRef.current.extract(payload);
         if (!out) return;
         if (out.done) return; // ignore sentinel; finalize on stream end
 
@@ -141,7 +144,7 @@ export function useChorusStream(transport: Transport, opts?: StreamOptions) {
       setSending(false);
       if (controllerRef.current === controller) controllerRef.current = null;
     }
-  }, [transport, connector]);
+  }, [transportRef, connectorRef]);
 
   const abort = React.useCallback(() => { controllerRef.current?.abort(); }, []);
   return { send, abort, sending };

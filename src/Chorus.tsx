@@ -3,80 +3,50 @@ import './Chorus.css';
 import { ChatWindow } from './components/ChatWindow';
 import { ChatInput } from './components/ChatInput';
 import { styleVarsFromPalette, type Palette } from './components/ChorusTheme';
-import type { Message, Attachment, StorageAdapter, Role } from './types';
+import type { Attachment, ConnectorName, Message, Role, StorageAdapter } from './types';
 import { useChorusStream, type Transport } from './hooks/useChorusStream';
 import { createFetchSSETransport } from './streaming/createFetchSSETransport';
 import { useChorusPersistence } from './hooks/useChorusPersistence';
+import { useChorusMessages } from './hooks/useChorusMessages';
+import { useRAFQueue } from './hooks/useRAFQueue';
 import type { Connector } from './connectors/connectors';
 
 export type { Transport };
 export type { Connector };
 
+interface ChorusSendHelpers {
+  appendAssistant: (chunk: string) => void;
+  finalizeAssistant: () => void;
+  signal: AbortSignal;
+}
+
+const DEFAULT_MIN_ASSISTANT_DELAY_MS = 300;
+
 export interface ChorusProps {
   messages?: Message[];
+  /** Initial messages for uncontrolled mode. Useful for welcome messages. */
+  initialMessages?: Message[];
   value?: Message[];
   onChange?: (messages: Message[]) => void;
-  /**
-   * Simple path: a URL string (POST'd with `{ prompt, history }`) or a Transport
-   * function. Chorus handles all streaming internally — no helpers needed.
-   *
-   * @example
-   * <Chorus transport="/api/chat" />
-   */
+  /** Simple path: URL or Transport function. */
   transport?: string | Transport;
-  /**
-   * SSE connector to use when parsing the stream. Defaults to `'auto'` which
-   * detects OpenAI, Anthropic, and Gemini formats automatically. Pass `'anthropic'` when
-   * pointing `transport` at an Anthropic backend to skip auto-detection and
-   * parse `event: content_block_delta` events correctly.
-   *
-   * @example
-   * <Chorus transport="/api/chat" connector="anthropic" />
-   */
-  connector?: Connector | 'auto' | 'openai' | 'anthropic' | 'gemini';
-  /**
-   * Advanced path: called on every send. Receives streaming helpers so you
-   * can drive the assistant message manually or handle non-SSE responses.
-   * Use `transport` instead for the common SSE case.
-   */
-  onSend?: (
-    text: string,
-    messages: Message[],
-    helpers: {
-      appendAssistant: (chunk: string) => void;
-      finalizeAssistant: () => void;
-      signal: AbortSignal;
-    }
-  ) => Promise<Message | void> | Message | void;
+  /** Hidden system prompt prepended to transport request history. */
+  systemPrompt?: string;
+  connector?: Connector | ConnectorName;
+  onSend?: (text: string, messages: Message[], helpers: ChorusSendHelpers) => Promise<Message | void> | Message | void;
   placeholder?: string;
   palette?: Palette;
   sending?: boolean;
-  /**
-   * Minimum time to keep the assistant typing state visible before showing a
-   * complete assistant response. This gives the typing animation time to play;
-   * increase it (for example to 1000) if you want a more deliberate pause.
-   */
   minAssistantDelayMs?: number;
-  /** Error message shown when a send or stream fails. Defaults to a generic retry prompt. */
   errorMessage?: string;
-  /** Called when a send or stream fails for a non-abort error. */
   onError?: (error: Error) => void;
-  /**
-   * Observation hook called for each streamed token. Receives the chunk and the
-   * assistant message id so callers can associate chunks with a specific message.
-   * Does not affect streaming behaviour — Chorus still appends and renders the chunk.
-   */
   onChunk?: (chunk: string, messageId: string) => void;
   codeBlockTheme?: 'dark' | 'light';
   accept?: string;
-  /** When set, automatically saves and restores messages using the given key. Defaults to localStorage; pass persistenceStorage to swap the backend. */
   persistenceKey?: string;
-  /** Custom storage adapter for persistenceKey. Must implement { getItem, setItem }. Sync (localStorage/sessionStorage) and async (IndexedDB, etc.) adapters are both supported. */
   persistenceStorage?: StorageAdapter;
-  /** Strip all default styles and inline style injection — same effect as using react-chorus/headless */
   headless?: boolean;
   renderMessage?: (message: Message) => React.ReactNode;
-  /** Message roles hidden from the transcript. Defaults to ['system', 'tool']; pass ['system'] to show tool calls while hiding system prompts, or [] to show every role. */
   hiddenRoles?: Role[];
   className?: string;
   style?: React.CSSProperties;
@@ -84,15 +54,17 @@ export interface ChorusProps {
 
 export function Chorus({
   messages,
+  initialMessages,
   value,
   onChange,
   transport,
+  systemPrompt,
   connector,
   onSend,
   placeholder,
   palette,
   sending: sendingProp,
-  minAssistantDelayMs = 300,
+  minAssistantDelayMs = DEFAULT_MIN_ASSISTANT_DELAY_MS,
   errorMessage,
   onError,
   onChunk,
@@ -106,71 +78,38 @@ export function Chorus({
   className,
   style,
 }: ChorusProps) {
-  // Always called (rules of hooks) — no-op when persistenceKey is absent
   const persisted = useChorusPersistence(persistenceKey ?? '', { storage: persistenceStorage });
-
-
-
-  const [internalMsgs, setInternalMsgs] = React.useState<Message[]>(() => messages || []);
-  const msgs = value !== undefined ? value : persistenceKey ? persisted.value : internalMsgs;
-
-  const msgsRef = React.useRef<Message[]>(msgs);
-  React.useEffect(() => { msgsRef.current = msgs; }, [msgs]);
-
-  // Keep latest unstable callbacks in refs so RAF-scheduled flushes always invoke the
-  // current render's callback rather than a stale one captured at schedule time.
-  const onChangeRef = React.useRef(onChange);
-  React.useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
-  const onChunkRef = React.useRef(onChunk);
-  React.useEffect(() => { onChunkRef.current = onChunk; }, [onChunk]);
-
-  const updateMsgs = (updater: (prev: Message[]) => Message[]) => {
-    const next = updater(msgsRef.current);
-    msgsRef.current = next;
-    if (value !== undefined) { onChangeRef.current?.(next); }
-    else if (persistenceKey) { persisted.onChange(next); }
-    else { setInternalMsgs(next); }
-  };
+  const { msgs, updateMsgs, onChunkRef } = useChorusMessages({
+    value,
+    messages,
+    initialMessages,
+    onChange,
+    persistenceKey,
+    persistedMessages: persisted.value,
+    onPersistedChange: persisted.onChange,
+    onChunk,
+  });
 
   const [draft, setDraft] = React.useState('');
   const [internalSending, setInternalSending] = React.useState(false);
-
   const [streamError, setStreamError] = React.useState<string | null>(null);
   const fallbackErrorMessage = errorMessage ?? 'Something went wrong. Please try again.';
   const lastUserTextRef = React.useRef<string>('');
-
-
   const controllerRef = React.useRef<AbortController | null>(null);
-
   const hasStartedAssistantRef = React.useRef(false);
   const pendingAssistantIdRef = React.useRef<string | null>(null);
 
-  // Frame-batched queue to avoid any chance of interleaving/races dropping tokens
-  const chunkQueueRef = React.useRef<string[]>([]);
-  const rafIdRef = React.useRef<number | null>(null);
-
-  const flushQueue = () => {
-    if (!pendingAssistantIdRef.current) return;
-    const q = chunkQueueRef.current;
-    if (q.length === 0) return;
-    const add = q.join('');
-    q.length = 0;
-    updateMsgs(prev => prev.map(m => m.id === pendingAssistantIdRef.current ? { ...m, text: m.text + add } : m));
-  };
-
-  const scheduleFlush = () => {
-    if (rafIdRef.current != null) return;
-    rafIdRef.current = typeof window !== 'undefined' ? window.requestAnimationFrame(() => {
-      rafIdRef.current = null;
-      flushQueue();
-    }) : null;
-  };
+  const { enqueue: enqueueChunk, cancelPending } = useRAFQueue((add) => {
+    const id = pendingAssistantIdRef.current;
+    if (!id) return;
+    updateMsgs(prev => prev.map(m => m.id === id ? { ...m, text: m.text + add } : m));
+  });
 
   const startAssistant = (firstChunk: string) => {
     const id = 'assistant-' + Date.now();
     pendingAssistantIdRef.current = id;
     hasStartedAssistantRef.current = true;
-    chunkQueueRef.current.length = 0;
+    cancelPending(false);
     updateMsgs(prev => prev.concat({ id, role: 'assistant', text: firstChunk }));
     onChunkRef.current?.(firstChunk, id);
   };
@@ -179,26 +118,19 @@ export function Chorus({
     if (!chunk) return;
     if (!hasStartedAssistantRef.current) startAssistant(chunk);
     else {
-      chunkQueueRef.current.push(chunk);
-      scheduleFlush();
+      enqueueChunk(chunk);
       const id = pendingAssistantIdRef.current;
       if (id) onChunkRef.current?.(chunk, id);
     }
   };
 
   const finalizeAssistant = () => {
-    flushQueue();
-    if (rafIdRef.current != null && typeof window !== 'undefined') {
-      window.cancelAnimationFrame(rafIdRef.current);
-      rafIdRef.current = null;
-    }
+    cancelPending(true);
     hasStartedAssistantRef.current = false;
     pendingAssistantIdRef.current = null;
     setInternalSending(false);
   };
 
-  // --- Transport (simple) path ---
-  // Always call the hook (Rules of Hooks); a dummy transport is used when `transport` prop is absent.
   const resolvedTransport = React.useMemo((): Transport => {
     if (typeof transport === 'string') return createFetchSSETransport(transport);
     if (typeof transport === 'function') return transport;
@@ -206,24 +138,27 @@ export function Chorus({
   }, [transport]);
 
   const { send: doStream, abort: streamAbort, sending: streamSending } = useChorusStream(resolvedTransport, { connector });
-
   const sending = sendingProp ?? (transport ? streamSending : internalSending);
   const paletteVars = React.useMemo(() => styleVarsFromPalette(palette), [palette]);
 
   const resetStreamState = () => {
     hasStartedAssistantRef.current = false;
     pendingAssistantIdRef.current = null;
-    chunkQueueRef.current.length = 0;
+    cancelPending(false);
   };
 
-  const triggerAssistant = async (text: string) => {
+  const historyForTransport = (history: Message[]) => (
+    systemPrompt ? [{ id: 'chorus-system-prompt', role: 'system' as const, text: systemPrompt }, ...history] : history
+  );
+
+  const triggerAssistant = async (text: string, history: Message[] = msgs) => {
     if (transport) {
       if (process.env.NODE_ENV !== 'production' && onSend) {
         console.warn('[Chorus] Both `transport` and `onSend` props were provided. `transport` takes precedence and `onSend` will be ignored. Remove one of the two props to silence this warning.');
       }
       resetStreamState();
       setStreamError(null);
-      doStream(text, msgsRef.current, {
+      doStream(text, historyForTransport(history), {
         onChunk: appendAssistant,
         onDone: finalizeAssistant,
         onError: (err) => { resetStreamState(); onError?.(err); setStreamError(fallbackErrorMessage); },
@@ -231,6 +166,7 @@ export function Chorus({
       });
       return;
     }
+
     if (!onSend) return;
     controllerRef.current?.abort();
     controllerRef.current = new AbortController();
@@ -240,12 +176,11 @@ export function Chorus({
       resetStreamState();
 
       const start = Date.now();
-      const res = await onSend(text, msgsRef.current, { appendAssistant, finalizeAssistant, signal: controllerRef.current.signal });
+      const res = await onSend(text, history, { appendAssistant, finalizeAssistant, signal: controllerRef.current.signal });
       if (res && typeof res === 'object' && !hasStartedAssistantRef.current) {
-        const elapsed = Date.now() - start;
-        const wait = Math.max(0, minAssistantDelayMs - elapsed);
+        const wait = Math.max(0, minAssistantDelayMs - (Date.now() - start));
         if (wait) await new Promise(r => setTimeout(r, wait));
-        updateMsgs(prev => prev.concat({ id: (res as any).id || String(Date.now() + 1), role: 'assistant', text: (res as any).text }));
+        updateMsgs(prev => prev.concat({ id: (res as Message).id || String(Date.now() + 1), role: 'assistant', text: (res as Message).text }));
       }
     } catch (e: any) {
       const partialId = pendingAssistantIdRef.current;
@@ -269,9 +204,8 @@ export function Chorus({
 
     setDraft('');
     lastUserTextRef.current = text;
-    updateMsgs(prev => prev.concat({ id: String(Date.now()), role: 'user', text, attachments: attachments.length > 0 ? attachments : undefined }));
-
-    await triggerAssistant(text);
+    const next = updateMsgs(prev => prev.concat({ id: String(Date.now()), role: 'user', text, attachments: attachments.length > 0 ? attachments : undefined }));
+    await triggerAssistant(text, next);
   };
 
   const retry = async () => {
@@ -282,57 +216,37 @@ export function Chorus({
 
   const stop = () => {
     if (!sending) return;
-    if (transport) {
-      streamAbort();
-      finalizeAssistant();
-    } else {
-      controllerRef.current?.abort();
-      finalizeAssistant();
-    }
+    if (transport) streamAbort();
+    else controllerRef.current?.abort();
+    finalizeAssistant();
   };
 
   const handleEdit = async (id: string, newText: string) => {
     if (sending) return;
-    const current = msgsRef.current;
-    const idx = current.findIndex(m => m.id === id);
+    const idx = msgs.findIndex(m => m.id === id);
     if (idx === -1) return;
-    const edited: Message = { ...current[idx], text: newText };
-    updateMsgs(prev => [...prev.slice(0, idx), edited]);
-    await triggerAssistant(newText);
+    const edited: Message = { ...msgs[idx], text: newText };
+    const next = updateMsgs(prev => [...prev.slice(0, idx), edited]);
+    await triggerAssistant(newText, next);
   };
 
   const handleRegenerate = async (id: string) => {
     if (sending) return;
-    const current = msgsRef.current;
-    const idx = current.findIndex(m => m.id === id);
+    const idx = msgs.findIndex(m => m.id === id);
     if (idx === -1) return;
     let userIdx = idx - 1;
-    while (userIdx >= 0 && current[userIdx].role !== 'user') userIdx--;
+    while (userIdx >= 0 && msgs[userIdx].role !== 'user') userIdx--;
     if (userIdx < 0) return;
-    const userMsg = current[userIdx];
-    updateMsgs(prev => prev.slice(0, userIdx + 1));
-    await triggerAssistant(userMsg.text);
+    const userMsg = msgs[userIdx];
+    const next = updateMsgs(prev => prev.slice(0, userIdx + 1));
+    await triggerAssistant(userMsg.text, next);
   };
 
-  const handleDelete = (id: string) => {
-    updateMsgs(prev => prev.filter(m => m.id !== id));
-  };
+  const handleDelete = (id: string) => updateMsgs(prev => prev.filter(m => m.id !== id));
 
   return (
     <div className={["chorus", className].filter(Boolean).join(" ")} style={{ ...paletteVars, ...style }}>
-      <ChatWindow
-        messages={msgs}
-        typing={!!(transport || onSend) && sending && !hasStartedAssistantRef.current}
-        codeTheme={codeBlockTheme}
-        headless={headless}
-        renderMessage={renderMessage}
-        hiddenRoles={hiddenRoles}
-        onEdit={(transport || onSend) ? handleEdit : undefined}
-        onRegenerate={(transport || onSend) ? handleRegenerate : undefined}
-        onDelete={handleDelete}
-        error={streamError}
-        onRetry={retry}
-      />
+      <ChatWindow messages={msgs} typing={!!(transport || onSend) && sending && !hasStartedAssistantRef.current} codeTheme={codeBlockTheme} headless={headless} renderMessage={renderMessage} hiddenRoles={hiddenRoles} onEdit={(transport || onSend) ? handleEdit : undefined} onRegenerate={(transport || onSend) ? handleRegenerate : undefined} onDelete={handleDelete} error={streamError} onRetry={retry} />
       <ChatInput value={draft} onChange={setDraft} onSend={send} onStop={stop} sending={sending} placeholder={placeholder} accept={accept} />
     </div>
   );

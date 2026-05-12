@@ -45,6 +45,18 @@ const transport = createFetchSSETransport('/api/chat', {
 <Chorus transport={transport} />
 ```
 
+Seed an uncontrolled chat with a welcome message and include a hidden system prompt in every transport request:
+
+```tsx
+<Chorus
+  transport="/api/chat"
+  initialMessages={[{ id: 'welcome', role: 'assistant', text: 'Hi! How can I help?' }]}
+  systemPrompt="You are a concise support assistant."
+/>
+```
+
+`systemPrompt` is prepended to the request `history` sent through the `transport` prop but is not rendered in the transcript.
+
 ### Advanced path — `onSend` callback
 
 Use `onSend` when you need direct control: proxying through a custom client, handling non-SSE transports, or modifying messages before they're added.
@@ -330,15 +342,17 @@ npm run dev
 | Prop | Type | Default | Description |
 |------|------|---------|-------------|
 | `transport` | `string \| Transport` | — | Simple path: URL to POST to, or a custom Transport function. Chorus handles all streaming. |
+| `systemPrompt` | `string` | — | Transport-path convenience prop. Prepends a hidden `system` message to the request history for every send. |
 | `connector` | `Connector \| 'auto' \| 'openai' \| 'anthropic' \| 'gemini'` | `'auto'` | SSE connector used to parse the stream. `'auto'` detects OpenAI, Anthropic, and Gemini; pass an explicit name when the format is known. |
 | `onSend` | `(text, messages, helpers) => Promise<void>` | — | Advanced path: called when the user submits a message. Use `helpers.appendAssistant` to stream tokens and `helpers.finalizeAssistant` when done. |
 | `value` | `Message[]` | — | Controlled message list. |
 | `onChange` | `(messages: Message[]) => void` | — | Called whenever the message list changes (controlled mode). |
-| `messages` | `Message[]` | — | Initial messages (uncontrolled mode). |
+| `messages` | `Message[]` | — | Initial messages (uncontrolled mode; retained for compatibility). |
+| `initialMessages` | `Message[]` | — | Initial messages for uncontrolled mode. Useful for welcome messages; `system` and `tool` messages are hidden by default via `hiddenRoles`. |
 | `placeholder` | `string` | `"Message…"` | Input placeholder text. |
 | `accept` | `string` | — | Forwarded to the file-picker `<input accept>`. Omitting the prop hides the attach button entirely. |
 | `sending` | `boolean` | — | Override the sending state (useful when you manage it externally via `useChorusStream`). |
-| `palette` | `Palette` | dark theme | Custom color palette for theming. |
+| `palette` | `Palette` | dark theme | Custom color palette for theming, including `actionText`, `actionHoverBg`, `actionHoverText`, `errorBg`, `errorBorder`, and `errorText`. |
 | `codeBlockTheme` | `'dark' \| 'light'` | `'dark'` | Code block syntax-highlight theme. |
 | `minAssistantDelayMs` | `number` | `300` | Minimum ms before showing the first assistant token. |
 | `errorMessage` | `string` | `'Something went wrong. Please try again.'` | Friendly message shown in the error banner. Raw transport errors are never surfaced in the UI. |
@@ -387,6 +401,17 @@ const tokensRef = React.useRef(0);
 ```
 
 Pass `hiddenRoles={[]}` to show every role, or omit it to keep the default `['system', 'tool']`.
+
+For controlled mode, seed your own state instead of using `initialMessages`, and include hidden system/tool messages directly when you want full control over the request history:
+
+```tsx
+const [messages, setMessages] = React.useState<Message[]>([
+  { id: 'sys', role: 'system', text: 'You are a concise support assistant.' },
+  { id: 'welcome', role: 'assistant', text: 'Hi! How can I help?' },
+]);
+
+<Chorus value={messages} onChange={setMessages} transport="/api/chat" />
+```
 
 ### `useChorusStream(transport, opts?)`
 
@@ -506,17 +531,18 @@ import { ToolCallBlock } from 'react-chorus';
 
 ### `MessageBubble` component
 
-`MessageBubble` renders the default bubble for a single message. Import it to use as a base when you only need to add decoration (avatars, timestamps, status badges) around the existing look.
+`MessageBubble` renders the default bubble for a single message, including attachments. Import it to use as a base when you only need to add decoration (avatars, timestamps, status badges) around the existing look. It respects `headless` mode by forwarding `headless` to Markdown.
 
 ```tsx
 import { MessageBubble } from 'react-chorus';
 
 // props
 interface MessageBubbleProps {
-  message: Message;           // the message to render
-  className?: string;         // merged onto the outer .chorus-msg element
+  message: Message;            // the message to render, including attachments
+  className?: string;          // merged onto the outer .chorus-msg element
   style?: React.CSSProperties; // merged onto the outer .chorus-msg element
   codeTheme?: 'dark' | 'light'; // defaults to 'dark'
+  headless?: boolean;          // forwards headless mode to Markdown; defaults to false
 }
 ```
 
@@ -580,7 +606,7 @@ Pass a `palette` prop to `<Chorus>` (or wrap components in `<ChorusTheme palette
 />
 ```
 
-Available palette keys: `chatBg`, `chatText`, `border`, `assistantBubbleBg`, `assistantText`, `assistantBorder`, `userBubbleBg`, `userText`, `userBorder`, `inputAreaBg`, `inputBg`, `inputText`, `inputBorder`, `sendButtonBg`, `sendButtonText`, `focusRing`.
+Available palette keys: `chatBg`, `chatText`, `border`, `assistantBubbleBg`, `assistantText`, `assistantBorder`, `userBubbleBg`, `userText`, `userBorder`, `inputAreaBg`, `inputBg`, `inputText`, `inputBorder`, `sendButtonBg`, `sendButtonText`, `focusRing`, `actionText`, `actionHoverBg`, `actionHoverText`, `errorBg`, `errorBorder`, `errorText`.
 
 ## Individual Components
 
@@ -594,7 +620,7 @@ import { ChatWindow, ChatInput, ChorusTheme, Markdown } from 'react-chorus';
 - **`<ChatInput value onSend onStop placeholder sending />`** — the text input and send/stop button.
 - **`<ChorusTheme palette={…}>`** — applies theme CSS variables to any subtree.
 - **`<Markdown text={…} codeTheme="dark" />`** — standalone markdown renderer with syntax highlighting and copy buttons.
-- **`<MessageBubble message={…} />`** — renders the default bubble for one message. Accepts `className`, `style`, and `codeTheme` for decoration without replacing the full renderer.
+- **`<MessageBubble message={…} />`** — renders the default bubble for one message, including attachments. Accepts `className`, `style`, `codeTheme`, and `headless` for decoration without replacing the full renderer.
 
 ## Message Shape
 

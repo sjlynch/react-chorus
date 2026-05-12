@@ -2,110 +2,29 @@ import React from 'react';
 import { Marked } from 'marked';
 import { markedHighlight } from 'marked-highlight';
 import DOMPurify from 'dompurify';
+import { getHljs, highlightCode, isHljsLoaded, loadHljsTheme, type CodeTheme } from '../utils/hljsLoader';
+import { normalizeStreamingMarkdown } from '../utils/markdownNormalizer';
 
-type HLJSApi = typeof import('highlight.js').default;
-type CodeTheme = 'dark' | 'light';
+export { normalizeStreamingMarkdown };
 
-// Module-level singletons — loaded once, shared across all Markdown instances.
-let hljsInstance: HLJSApi | null = null;
-let hljsLoadPromise: Promise<HLJSApi> | null = null;
-const hljsThemeLoadPromises: Partial<Record<CodeTheme, Promise<void>>> = {};
+const COPY_FEEDBACK_DURATION_MS = 1200;
 
-function loadHljs(): Promise<HLJSApi> {
-  if (hljsInstance) return Promise.resolve(hljsInstance);
-  if (!hljsLoadPromise) {
-    hljsLoadPromise = import('highlight.js').then(m => {
-      hljsInstance = m.default;
-      return hljsInstance;
-    });
-  }
-  return hljsLoadPromise;
-}
-
-function scopeHljsThemeCss(css: string, theme: CodeTheme) {
-  const scope = `.chorus-codeblock-${theme}`;
-  return css
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/(^|})\s*([^@{}][^{]+)\s*\{/g, (_match, brace: string, selectors: string) => {
-      const scoped = selectors
-        .split(',')
-        .map(selector => `${scope} ${selector.trim()}`)
-        .join(', ');
-      return `${brace} ${scoped} {`;
-    });
-}
-
-function loadHljsTheme(theme: CodeTheme): Promise<void> {
-  if (typeof document === 'undefined') return Promise.resolve();
-  const styleId = `chorus-hljs-theme-${theme}`;
-  if (document.getElementById(styleId)) return Promise.resolve();
-  if (!hljsThemeLoadPromises[theme]) {
-    hljsThemeLoadPromises[theme] = (theme === 'light'
-      ? import('highlight.js/styles/github.css?raw')
-      : import('highlight.js/styles/github-dark.css?raw'))
-      .then((m: { default: string }) => {
-        if (document.getElementById(styleId)) return;
-        const style = document.createElement('style');
-        style.id = styleId;
-        style.textContent = scopeHljsThemeCss(m.default, theme);
-        document.head.appendChild(style);
-      });
-  }
-  return hljsThemeLoadPromises[theme];
-}
-
-// Private Marked instance — avoids mutating the global `marked` singleton that
-// host apps may be using with their own configuration.
 const markedInstance = new Marked({ gfm: true, breaks: true });
 markedInstance.use(markedHighlight({
   langPrefix: 'hljs language-',
-  highlight(code: string, lang?: string) {
-    // hljsInstance is null until the first code block triggers the lazy load.
-    // Return plain code in the meantime; the component re-renders once it loads.
-    if (!hljsInstance) return code;
-    try {
-      if (lang && hljsInstance.getLanguage(lang)) return hljsInstance.highlight(code, { language: lang }).value;
-      return hljsInstance.highlightAuto(code).value;
-    } catch {
-      return code;
-    }
-  }
+  highlight: highlightCode,
 }));
-
-export function normalizeStreamingMarkdown(text: string) {
-  let out = text;
-  const patchFence = (fence: '```' | '~~~') => {
-    // GFM fences are only valid at the start of a line (CommonMark allows
-    // 0–3 leading spaces, but treating "start of line" as column 0 covers
-    // every fence written by `marked` itself and avoids inline-backtick
-    // false positives like "use ``` on its own line").
-    const isAtLineStart = (pos: number) => pos === 0 || out[pos - 1] === '\n';
-    let count = 0, i = 0;
-    while (true) {
-      const pos = out.indexOf(fence, i);
-      if (pos === -1) break;
-      if (isAtLineStart(pos)) count++;
-      i = pos + fence.length;
-    }
-    if (count % 2 === 1) out += `\n${fence}`;
-  };
-  patchFence('```'); patchFence('~~~');
-  return out;
-}
 
 export function Markdown({ text, codeTheme = 'dark', headless = false }: { text: string; codeTheme?: CodeTheme; headless?: boolean }) {
   const containerRef = React.useRef<HTMLDivElement>(null);
-  // Tracks whether hljs has been loaded so the useMemo re-runs after the import resolves.
-  const [hljsReady, setHljsReady] = React.useState(hljsInstance !== null);
+  const [hljsReady, setHljsReady] = React.useState(isHljsLoaded());
 
-  // Lazy-load highlight.js and the matching token-color theme the first time a code fence appears.
   React.useEffect(() => {
     if (!text.includes('```') && !text.includes('~~~')) return;
     if (!headless) loadHljsTheme(codeTheme);
-    if (!hljsReady) loadHljs().then(() => setHljsReady(true));
+    if (!hljsReady) getHljs().then(() => setHljsReady(true));
   }, [text, codeTheme, headless, hljsReady]);
 
-  // Inject minimal CSS once per page for code blocks + copy button
   React.useEffect(() => {
     if (headless) return;
     if (typeof document === 'undefined') return;
@@ -128,7 +47,6 @@ export function Markdown({ text, codeTheme = 'dark', headless = false }: { text:
   const html = React.useMemo(() => {
     const balanced = normalizeStreamingMarkdown(text);
 
-    // 1) render markdown with highlighting (highlighting is a no-op until hljs loads)
     let raw = '';
     try {
       raw = markedInstance.parse(balanced) as string;
@@ -138,7 +56,6 @@ export function Markdown({ text, codeTheme = 'dark', headless = false }: { text:
 
     const sanitized = typeof window === 'undefined' ? raw : DOMPurify.sanitize(raw);
 
-    // In headless mode skip DOM post-processing — no codeblock wrappers or copy buttons injected
     if (headless || typeof window === 'undefined') return sanitized;
 
     const root = document.createElement('div');
@@ -167,10 +84,8 @@ export function Markdown({ text, codeTheme = 'dark', headless = false }: { text:
     });
 
     return root.innerHTML;
-  // hljsReady is a dependency so the memo re-runs once hljs finishes loading.
   }, [text, codeTheme, headless, hljsReady]);
 
-  // Event delegation for copy buttons
   React.useEffect(() => {
     const el = containerRef.current;
     if (!el || typeof window === 'undefined' || typeof document === 'undefined' || !navigator?.clipboard) return;
@@ -184,19 +99,17 @@ export function Markdown({ text, codeTheme = 'dark', headless = false }: { text:
         const prev = btn.textContent;
         btn.textContent = 'Copied!';
         btn.classList.add('copied');
-        setTimeout(() => { btn.textContent = prev || 'Copy'; btn.classList.remove('copied'); }, 1200);
+        setTimeout(() => { btn.textContent = prev || 'Copy'; btn.classList.remove('copied'); }, COPY_FEEDBACK_DURATION_MS);
       } catch {}
     };
 
     const onClick = (e: MouseEvent) => {
-      const tgt = e.target as HTMLElement;
-      const btn = tgt?.closest?.('.chorus-copy-btn') as HTMLElement | null;
+      const btn = (e.target as HTMLElement)?.closest?.('.chorus-copy-btn') as HTMLElement | null;
       if (btn) handleCopy(btn);
     };
 
     const onKeyDown = (e: KeyboardEvent) => {
-      const tgt = e.target as HTMLElement;
-      const btn = tgt?.closest?.('.chorus-copy-btn') as HTMLElement | null;
+      const btn = (e.target as HTMLElement)?.closest?.('.chorus-copy-btn') as HTMLElement | null;
       if (!btn) return;
       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleCopy(btn); }
     };
