@@ -418,8 +418,8 @@ Message source modes are mutually exclusive:
 
 | Helper | Description |
 |--------|-------------|
-| `appendAssistant(chunk)` | Append a text chunk to the current assistant message. |
-| `finalizeAssistant()` | Mark the assistant message complete. |
+| `appendAssistant(chunk)` | Append a text chunk to the current assistant message. Chunks are buffered until `minAssistantDelayMs` has elapsed before the first token is shown. |
+| `finalizeAssistant()` | Mark the assistant message complete. If first-token chunks are still buffered, completion waits until they flush. |
 | `signal` | `AbortSignal` — aborted when the user hits Stop. |
 
 ### Observing streamed tokens with `onChunk`
@@ -470,6 +470,7 @@ const { send, abort, sending } = useChorusStream(transport, { connector: 'openai
 ```
 
 - `transport` — async function `(text, history, signal) => Promise<Response>`. Use `createFetchSSETransport(url)` or write your own.
+- `send(..., { minDelayMs })` buffers the first streamed chunks until that many milliseconds have elapsed from send start, then flushes them before continuing normally.
 - `opts.connector` — `'openai'` | `'anthropic'` | `'gemini'` | `'auto'` | custom `Connector`. Defaults to `'auto'` which handles OpenAI, Gemini, Anthropic JSON, plain-text SSE, and in-band `{ error }` payloads.
 
 ### `createFetchSSETransport(url, init?)`

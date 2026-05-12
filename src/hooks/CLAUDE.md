@@ -7,7 +7,7 @@ Core streaming hook for the simple `transport` path.
 - Accepts a `Transport` and optional connector (`auto`, `openai`, `anthropic`, `gemini`, or custom `Connector`).
 - Manages the send lifecycle: sets `sending`, creates/stores an `AbortController`, streams SSE events, and finalizes or reports errors.
 - Uses `isSendingRef` as a guard so overlapping sends are ignored.
-- Supports `minDelayMs` in callbacks to keep typing UI visible for a minimum duration.
+- Supports `minDelayMs` in callbacks by buffering the first streamed chunks until the first-token delay elapses.
 - `readSSEStream` handles line-by-line SSE parsing across chunk boundaries.
 
 ## `useChorusPersistence`

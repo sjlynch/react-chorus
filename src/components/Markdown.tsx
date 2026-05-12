@@ -64,7 +64,7 @@ function resolveSanitizer(sanitizer?: MarkdownSanitizer) {
 function renderMarkdown(text: string, sanitizer?: MarkdownSanitizer) {
   const balanced = normalizeStreamingMarkdown(text);
 
-  let raw = '';
+  let raw: string;
   try {
     raw = markedInstance.parse(balanced) as string;
   } catch {
