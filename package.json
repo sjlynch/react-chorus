@@ -30,6 +30,7 @@
     "react-dom": "^18 || ^19"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
@@ -37,15 +38,22 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4.0.0",
+    "eslint": "^10.2.1",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "globals": "^17.5.0",
     "jsdom": "^29.1.1",
-    "typescript": "^5.0.0",
+    "typescript": "^5.8.0",
+    "typescript-eslint": "^8.59.1",
     "vite": "^5.0.0",
     "vitest": "^4.1.5"
   },
   "scripts": {
     "dev": "vite",
+    "lint": "eslint .",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
     "build": "vite build && tsc -p tsconfig.json --emitDeclarationOnly",
-    "prepublishOnly": "npm run build",
+    "prepublishOnly": "npm run lint && npm run typecheck && npm run build",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
@@ -56,5 +64,25 @@
     "lucide-react": "^0.544.0",
     "marked": "^16.3.0",
     "marked-highlight": "^2.2.2"
-  }
+  },
+  "license": "MIT",
+  "author": "sjlynch",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sjlynch/react-chorus.git"
+  },
+  "homepage": "https://github.com/sjlynch/react-chorus#readme",
+  "bugs": {
+    "url": "https://github.com/sjlynch/react-chorus/issues"
+  },
+  "keywords": [
+    "react",
+    "chat",
+    "chatbot",
+    "streaming",
+    "sse",
+    "ai",
+    "ui",
+    "components"
+  ]
 }

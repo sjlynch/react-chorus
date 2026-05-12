@@ -1,15 +1,24 @@
 {
   "compilerOptions": {
-    "target": "ES2019",
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext",
+    "skipLibCheck": true,
     "moduleResolution": "bundler",
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
     "jsx": "react-jsx",
     "declaration": true,
-    "declarationMap": true,
     "outDir": "dist/types",
     "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "erasableSyntaxOnly": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true,
+    "esModuleInterop": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/__tests__", "src/main.tsx", "src/vite-env.d.ts"]
 }

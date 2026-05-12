@@ -22,6 +22,10 @@ interface ChorusSendHelpers {
 
 const DEFAULT_MIN_ASSISTANT_DELAY_MS = 300;
 
+function isAbortError(error: unknown) {
+  return typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError';
+}
+
 export interface ChorusProps {
   messages?: Message[];
   /** Initial messages for uncontrolled mode. Useful for welcome messages. */
@@ -182,12 +186,12 @@ export function Chorus({
         if (wait) await new Promise(r => setTimeout(r, wait));
         updateMsgs(prev => prev.concat({ id: (res as Message).id || String(Date.now() + 1), role: 'assistant', text: (res as Message).text }));
       }
-    } catch (e: any) {
+    } catch (e: unknown) {
       const partialId = pendingAssistantIdRef.current;
       if (partialId) updateMsgs(prev => prev.filter(m => m.id !== partialId));
       hasStartedAssistantRef.current = false;
       pendingAssistantIdRef.current = null;
-      if (e?.name !== 'AbortError') {
+      if (!isAbortError(e)) {
         const error = e instanceof Error ? e : new Error(String(e));
         onError?.(error);
         setStreamError(fallbackErrorMessage);

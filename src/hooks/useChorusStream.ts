@@ -22,6 +22,10 @@ export interface StreamOptions {
   connector?: Connector | ConnectorName;
 }
 
+function isAbortError(error: unknown) {
+  return typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError';
+}
+
 /**
  * Robust SSE reader:
  * - Parses the stream line-by-line (handles CR, LF, and chunk boundaries)
@@ -109,7 +113,7 @@ export function useChorusStream(transport: Transport, opts?: StreamOptions) {
     const finish = async () => {
       const wait = Math.max(0, (cb.minDelayMs ?? 0) - (Date.now() - startedAt));
       if (wait) await new Promise(r => setTimeout(r, wait));
-      cb.onDone && cb.onDone();
+      cb.onDone?.();
       isSendingRef.current = false;
       setSending(false);
       if (controllerRef.current === controller) controllerRef.current = null;
@@ -138,8 +142,8 @@ export function useChorusStream(transport: Transport, opts?: StreamOptions) {
       });
 
       await finish();
-    } catch (e: any) {
-      if (e?.name !== 'AbortError') cb.onError && cb.onError(e instanceof Error ? e : new Error(String(e)));
+    } catch (e: unknown) {
+      if (!isAbortError(e)) cb.onError?.(e instanceof Error ? e : new Error(String(e)));
       isSendingRef.current = false;
       setSending(false);
       if (controllerRef.current === controller) controllerRef.current = null;

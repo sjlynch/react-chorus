@@ -46,8 +46,9 @@ export function Markdown({ text, codeTheme = 'dark', headless = false }: { text:
 
   const html = React.useMemo(() => {
     const balanced = normalizeStreamingMarkdown(text);
+    void hljsReady;
 
-    let raw = '';
+    let raw: string;
     try {
       raw = markedInstance.parse(balanced) as string;
     } catch {

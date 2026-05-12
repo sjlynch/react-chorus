@@ -11,8 +11,8 @@ export interface Palette {
 }
 
 export function styleVarsFromPalette(p?: Palette): React.CSSProperties {
-  const v: React.CSSProperties = {};
-  const set = (k: string, val?: string) => { if (val) (v as any)[k] = val; };
+  const v: React.CSSProperties & Record<`--${string}`, string> = {};
+  const set = (k: `--${string}`, val?: string) => { if (val) v[k] = val; };
   if (!p) return v;
   set('--chorus-chat-bg', p.chatBg); set('--chorus-chat-text', p.chatText); set('--chorus-border', p.border);
   set('--chorus-assistant-bg', p.assistantBubbleBg); set('--chorus-assistant-text', p.assistantText); set('--chorus-assistant-border', p.assistantBorder);

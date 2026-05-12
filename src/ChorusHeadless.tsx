@@ -1,4 +1,3 @@
-import React from 'react';
 import { Chorus } from './Chorus';
 import type { ChorusProps } from './Chorus';
 

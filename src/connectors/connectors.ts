@@ -1,5 +1,5 @@
 import type { ConnectorName } from '../types';
-import { openaiConnector, type Connector, type ConnectorResult } from './openai';
+import { openaiConnector, type Connector } from './openai';
 import { anthropicConnector } from './anthropic';
 import { geminiConnector } from './gemini';
 
