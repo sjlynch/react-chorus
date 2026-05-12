@@ -20,7 +20,7 @@ export type { Palette } from './components/ChorusTheme';
 export type { Message } from './types';
 export type { Role, Attachment, ConnectorName, StorageAdapter, ToolCall } from './types';
 export { useChorusStream } from './hooks/useChorusStream';
-export type { Transport } from './hooks/useChorusStream';
+export type { SendCallbacks, StreamOptions, Transport } from './hooks/useChorusStream';
 export { useChorusPersistence } from './hooks/useChorusPersistence';
 export { createFetchSSETransport } from './streaming/createFetchSSETransport';
 export type { FetchSSETransportOptions } from './streaming/createFetchSSETransport';

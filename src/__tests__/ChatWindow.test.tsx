@@ -1,12 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { ChatWindow } from '../components/ChatWindow';
+import { ChatWindow, MessageBubble } from '../components/ChatWindow';
 import type { Message } from '../types';
 
 // Mock Markdown to avoid DOMPurify/highlight.js complexity in unit tests
 vi.mock('../components/Markdown', () => ({
-  Markdown: ({ text }: { text: string }) => <span data-testid="markdown">{text}</span>,
+  Markdown: ({ text, headless }: { text: string; headless?: boolean }) => <span data-testid="markdown" data-headless={String(headless)}>{text}</span>,
 }));
 
 const USER_MSG: Message = { id: 'u1', role: 'user', text: 'Hello' };
@@ -137,5 +137,41 @@ describe('ChatWindow', () => {
     render(<ChatWindow messages={[ASST_MSG]} onRegenerate={onRegenerate} />);
     await user.click(screen.getByTitle('Regenerate'));
     expect(onRegenerate).toHaveBeenCalledWith('a1');
+  });
+
+  it('preserves local edit state when messages stream in', async () => {
+    const user = userEvent.setup();
+    const onEdit = vi.fn();
+    const { rerender } = render(<ChatWindow messages={[USER_MSG, { ...ASST_MSG, text: 'H' }]} onEdit={onEdit} />);
+
+    await user.click(screen.getByTitle('Edit'));
+    await user.type(screen.getByRole('textbox'), ' draft');
+
+    rerender(<ChatWindow messages={[USER_MSG, { ...ASST_MSG, text: 'Hi there streaming' }]} onEdit={onEdit} />);
+
+    expect(screen.getByRole('textbox')).toHaveValue('Hello draft');
+  });
+
+  it('MessageBubble renders message attachments', () => {
+    const message: Message = {
+      id: 'u2',
+      role: 'user',
+      text: 'See attachments',
+      attachments: [
+        { name: 'photo.png', type: 'image/png', data: 'data:image/png;base64,abc', size: 3 },
+        { name: 'notes.txt', type: 'text/plain', data: 'data:text/plain;base64,abc', size: 3 },
+      ],
+    };
+
+    const { container } = render(<MessageBubble message={message} />);
+
+    expect(screen.getByAltText('photo.png')).toHaveAttribute('src', 'data:image/png;base64,abc');
+    expect(screen.getByText('notes.txt')).toBeInTheDocument();
+    expect(container.querySelector('.chorus-msg-attachments')).toBeInTheDocument();
+  });
+
+  it('MessageBubble forwards headless to Markdown', () => {
+    render(<MessageBubble message={USER_MSG} headless />);
+    expect(screen.getByTestId('markdown')).toHaveAttribute('data-headless', 'true');
   });
 });

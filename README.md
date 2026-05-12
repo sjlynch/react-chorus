@@ -531,17 +531,18 @@ import { ToolCallBlock } from 'react-chorus';
 
 ### `MessageBubble` component
 
-`MessageBubble` renders the default bubble for a single message. Import it to use as a base when you only need to add decoration (avatars, timestamps, status badges) around the existing look.
+`MessageBubble` renders the default bubble for a single message, including attachments. Import it to use as a base when you only need to add decoration (avatars, timestamps, status badges) around the existing look. It respects `headless` mode by forwarding `headless` to Markdown.
 
 ```tsx
 import { MessageBubble } from 'react-chorus';
 
 // props
 interface MessageBubbleProps {
-  message: Message;           // the message to render
-  className?: string;         // merged onto the outer .chorus-msg element
+  message: Message;            // the message to render, including attachments
+  className?: string;          // merged onto the outer .chorus-msg element
   style?: React.CSSProperties; // merged onto the outer .chorus-msg element
   codeTheme?: 'dark' | 'light'; // defaults to 'dark'
+  headless?: boolean;          // forwards headless mode to Markdown; defaults to false
 }
 ```
 
@@ -619,7 +620,7 @@ import { ChatWindow, ChatInput, ChorusTheme, Markdown } from 'react-chorus';
 - **`<ChatInput value onSend onStop placeholder sending />`** — the text input and send/stop button.
 - **`<ChorusTheme palette={…}>`** — applies theme CSS variables to any subtree.
 - **`<Markdown text={…} codeTheme="dark" />`** — standalone markdown renderer with syntax highlighting and copy buttons.
-- **`<MessageBubble message={…} />`** — renders the default bubble for one message. Accepts `className`, `style`, and `codeTheme` for decoration without replacing the full renderer.
+- **`<MessageBubble message={…} />`** — renders the default bubble for one message, including attachments. Accepts `className`, `style`, `codeTheme`, and `headless` for decoration without replacing the full renderer.
 
 ## Message Shape
 

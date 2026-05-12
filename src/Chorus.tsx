@@ -20,6 +20,8 @@ interface ChorusSendHelpers {
   signal: AbortSignal;
 }
 
+const DEFAULT_MIN_ASSISTANT_DELAY_MS = 300;
+
 export interface ChorusProps {
   messages?: Message[];
   /** Initial messages for uncontrolled mode. Useful for welcome messages. */
@@ -62,7 +64,7 @@ export function Chorus({
   placeholder,
   palette,
   sending: sendingProp,
-  minAssistantDelayMs = 300,
+  minAssistantDelayMs = DEFAULT_MIN_ASSISTANT_DELAY_MS,
   errorMessage,
   onError,
   onChunk,
