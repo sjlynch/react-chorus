@@ -1,3 +1,4 @@
+import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -23,6 +24,23 @@ function sseResponse(chunks: string[], status = 200) {
   });
 
   return new Response(body, { status });
+}
+
+function erroringSSEResponse(chunks: string[]) {
+  const encoder = new TextEncoder();
+  let index = 0;
+  const body = new ReadableStream({
+    pull(controller) {
+      if (index < chunks.length) {
+        controller.enqueue(encoder.encode(`data: ${chunks[index]}\n\n`));
+        index += 1;
+        return;
+      }
+      controller.error(new Error('stream exploded'));
+    },
+  });
+
+  return new Response(body, { status: 200 });
 }
 
 function deferred<T = void>() {
@@ -118,6 +136,46 @@ describe('Chorus', () => {
     await user.click(screen.getByRole('button', { name: /send/i }));
 
     await waitFor(() => expect(warn).toHaveBeenCalledWith('[Chorus] Duplicate message IDs detected:', ['dup']));
+    warn.mockRestore();
+  });
+
+  it('generates unique message IDs for rapid sends in the same millisecond', async () => {
+    const user = userEvent.setup();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    let latestMessages: Message[] = [];
+
+    function Harness() {
+      const [messages, setMessages] = React.useState<Message[]>([]);
+      return (
+        <Chorus
+          value={messages}
+          onChange={(next) => {
+            latestMessages = next;
+            setMessages(next);
+          }}
+          onSend={() => ({ role: 'assistant', text: 'ok' } as Message)}
+          minAssistantDelayMs={0}
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'one');
+    const firstNow = vi.spyOn(Date, 'now').mockReturnValue(12345);
+    await user.click(screen.getByRole('button', { name: /send/i }));
+    await waitFor(() => expect(latestMessages).toHaveLength(2));
+    firstNow.mockRestore();
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'two');
+    const secondNow = vi.spyOn(Date, 'now').mockReturnValue(12345);
+    await user.click(screen.getByRole('button', { name: /send/i }));
+    await waitFor(() => expect(latestMessages).toHaveLength(4));
+    secondNow.mockRestore();
+
+    const ids = latestMessages.map(m => m.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();
   });
 
@@ -315,6 +373,34 @@ describe('Chorus', () => {
     await waitFor(() => expect(transport).toHaveBeenCalledTimes(2));
     expect(transport.mock.calls[0][0]).toBe('try again');
     expect(transport.mock.calls[1][0]).toBe('try again');
+  });
+
+  it('removes a failed partial transport response before retrying', async () => {
+    const user = userEvent.setup();
+    const transport = vi.fn<Transport>(async () => (
+      transport.mock.calls.length === 1
+        ? erroringSSEResponse(['partial answer'])
+        : sseResponse(['fresh answer'])
+    ));
+
+    render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'try again');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByText('Something went wrong. Please try again.')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText('partial answer')).not.toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: /retry/i }));
+
+    await waitFor(() => expect(transport).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getAllByText('fresh answer')).toHaveLength(1));
+    expect(transport.mock.calls[1][1]).toEqual([
+      expect.objectContaining({ role: 'user', text: 'try again' }),
+    ]);
+    expect(transport.mock.calls[1][1]).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ text: 'partial answer' })]),
+    );
   });
 
   it('Stop button aborts the active transport stream', async () => {
