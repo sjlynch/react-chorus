@@ -89,7 +89,7 @@ export function ChatWindow({ messages, typing, codeTheme = 'dark', headless = fa
   }, []);
 
   return (
-    <div className="chorus-window" ref={windowRef}>
+    <div className="chorus-window" ref={windowRef} role="log" aria-live="polite" aria-label="Chat transcript">
       {visible.map(m => {
         const custom = renderMessage?.(m);
         if (custom != null) return <React.Fragment key={m.id}>{custom}</React.Fragment>;
@@ -108,12 +108,12 @@ export function ChatWindow({ messages, typing, codeTheme = 'dark', headless = fa
       })}
 
       {typing &&
-        <div className="chorus-msg chorus-assistant chorus-typing">
-          <div className="chorus-bubble"><span className="chorus-dot"></span><span className="chorus-dot"></span><span className="chorus-dot"></span></div>
+        <div className="chorus-msg chorus-assistant chorus-typing" role="status" aria-label="Assistant is typing">
+          <div className="chorus-bubble" aria-hidden="true"><span className="chorus-dot"></span><span className="chorus-dot"></span><span className="chorus-dot"></span></div>
         </div>
       }
       {error &&
-        <div className="chorus-error">
+        <div className="chorus-error" role="alert">
           <span className="chorus-error-text">{error}</span>
           {onRetry && <button className="chorus-retry-btn" onClick={onRetry}>Retry</button>}
         </div>
