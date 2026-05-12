@@ -23,7 +23,7 @@ import { Chorus } from 'react-chorus';
 <Chorus transport="/api/chat" />
 ```
 
-Chorus POSTs `{ prompt: string, history: Message[] }` to the URL and streams the SSE response into the assistant message automatically.
+Chorus POSTs `{ prompt: string, history: Message[] }` to the URL and streams the SSE response into the assistant message automatically. `history` already includes the current user turn; `prompt` is a convenience copy of that latest user text.
 
 ## Two usage paths
 
@@ -89,7 +89,7 @@ export default function App() {
 }
 ```
 
-`createFetchSSETransport(url)` posts `{ prompt, history }` to your endpoint and reads the response as a Server-Sent Events stream. Pass a `formatBody` option to customise the request shape for OpenAI, FastAPI, or any other backend. The `openai` connector parses the standard `choices[*].delta.content` shape.
+`createFetchSSETransport(url)` posts `{ prompt, history }` to your endpoint and reads the response as a Server-Sent Events stream. `history` includes the latest user message, so backend examples should map `history` directly instead of appending `prompt` again. Pass a `formatBody` option to customise the request shape for OpenAI, FastAPI, or any other backend. The `openai` connector parses the standard `choices[*].delta.content` shape.
 
 ### Minimal Express + OpenAI backend
 
@@ -104,24 +104,26 @@ const openai = new OpenAI(); // reads OPENAI_API_KEY from env
 app.use(express.json());
 
 app.post('/api/chat', async (req, res) => {
-  const { prompt, history = [] } = req.body;
-
-  const messages = [
-    ...history.map((m) => ({ role: m.role, content: m.text })),
-    { role: 'user', content: prompt },
-  ];
+  const { history = [] } = req.body;
+  const messages = history.map((m) => ({ role: m.role, content: m.text }));
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
 
-  const stream = await openai.chat.completions.create({ model: 'gpt-4o-mini', messages, stream: true });
+  try {
+    const stream = await openai.chat.completions.create({ model: 'gpt-4o-mini', messages, stream: true });
 
-  for await (const chunk of stream) {
-    res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+    for await (const chunk of stream) {
+      res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+    }
+
+    res.write('data: [DONE]\n\n');
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
+  } finally {
+    res.end();
   }
-
-  res.write('data: [DONE]\n\n');
-  res.end();
 });
 
 app.listen(3001);
@@ -188,28 +190,30 @@ const client = new Anthropic();
 
 wss.on('connection', (ws) => {
   ws.on('message', async (raw) => {
-    const { prompt, history } = JSON.parse(raw.toString());
+    const { history = [] } = JSON.parse(raw.toString());
+    const messages = history.map((m) => ({ role: m.role, content: m.text }));
 
-    const messages = [
-      ...history.map((m) => ({ role: m.role, content: m.text })),
-      { role: 'user', content: prompt },
-    ];
+    try {
+      const stream = await client.messages.stream({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1024,
+        messages,
+      });
 
-    const stream = await client.messages.stream({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 1024,
-      messages,
-    });
-
-    // Forward raw Anthropic SDK events verbatim — the front-end
-    // `anthropic` connector parses `content_block_delta` / `message_stop`
-    // directly, so no server-side reshaping is needed.
-    for await (const event of stream) {
-      ws.send(JSON.stringify(event));
+      // Forward raw Anthropic SDK events verbatim — the front-end
+      // `anthropic` connector parses `content_block_delta` / `message_stop`
+      // directly, so no server-side reshaping is needed.
+      for await (const event of stream) {
+        ws.send(JSON.stringify(event));
+      }
+      // `client.messages.stream` already emits a `message_stop` event,
+      // which the anthropic connector treats as the done sentinel. The
+      // react-chorus WebSocket transport opens a fresh socket per send and
+      // closes it client-side after that sentinel is processed.
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      ws.send(JSON.stringify({ error: message }));
     }
-    // `client.messages.stream` already emits a `message_stop` event,
-    // which the anthropic connector treats as the done sentinel.
-    // ws.close() — optional; leaving it open allows reuse for the next turn.
   });
 });
 ```
@@ -228,6 +232,8 @@ Connectors tell Chorus how to parse the streaming response from different AI pro
 | `'anthropic'` | Anthropic Messages API | `content_block_delta` / `delta.text` |
 | `'gemini'` | Google Gemini (AI / Vertex AI) | `candidates[*].content.parts[*].text` |
 | `'auto'` *(default)* | Auto-detect | Tries OpenAI, then Gemini, then Anthropic, then plain text |
+
+All built-in connectors also recognise in-band stream errors. If a backend has already started a `200` SSE/WebSocket stream, send `data: {"error":"message"}` (or `{"error":{"message":"message"}}`) to abort the response, call `onError` with an `Error`, and show the configured error banner.
 
 ### Usage
 
@@ -276,15 +282,24 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 app.post('/api/chat', async (req, res) => {
-  const { prompt } = req.body;
+  const { history = [] } = req.body;
   const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-  const result = await model.generateContentStream(prompt);
+  const contents = history
+    .filter((m) => m.role === 'user' || m.role === 'assistant')
+    .map((m) => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.text }] }));
 
   res.setHeader('Content-Type', 'text/event-stream');
-  for await (const chunk of result.stream) {
-    res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+  try {
+    const result = await model.generateContentStream({ contents });
+    for await (const chunk of result.stream) {
+      res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
+  } finally {
+    res.end();
   }
-  res.end();
 });
 ```
 
@@ -420,7 +435,7 @@ const { send, abort, sending } = useChorusStream(transport, { connector: 'openai
 ```
 
 - `transport` — async function `(text, history, signal) => Promise<Response>`. Use `createFetchSSETransport(url)` or write your own.
-- `opts.connector` — `'openai'` | `'anthropic'` | `'gemini'` | `'auto'` | custom `Connector`. Defaults to `'auto'` which handles OpenAI, Gemini, Anthropic JSON, and plain-text SSE.
+- `opts.connector` — `'openai'` | `'anthropic'` | `'gemini'` | `'auto'` | custom `Connector`. Defaults to `'auto'` which handles OpenAI, Gemini, Anthropic JSON, plain-text SSE, and in-band `{ error }` payloads.
 
 ### `createFetchSSETransport(url, init?)`
 
@@ -468,6 +483,7 @@ const myConnector: Connector = {
   extract(data) {
     if (data === '[DONE]') return { done: true };
     const obj = JSON.parse(data);
+    if (obj.error) return { error: typeof obj.error === 'string' ? obj.error : obj.error.message };
     return obj.token ? { text: obj.token } : null;
   },
 };

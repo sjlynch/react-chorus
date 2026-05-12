@@ -28,21 +28,24 @@ export interface StreamOptions {
  * - Collects "data:" lines for an event; dispatches on a blank line
  * - Preserves empty data lines (blank lines inside payloads)
  */
-export function readSSEStream(res: Response, onEvent: (payload: string) => void): Promise<void> {
+export function readSSEStream(res: Response, onEvent: (payload: string) => unknown): Promise<void> {
   if (!res.body) return Promise.resolve();
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
 
   let buf = '';
   let dataLines: string[] = [];
+  let stopped = false;
 
   const flushEvent = () => {
-    if (!dataLines.length) return;
-    onEvent(dataLines.join('\n'));
+    if (!dataLines.length || stopped) return;
+    const payload = dataLines.join('\n');
     dataLines = [];
+    if (onEvent(payload) === false) stopped = true;
   };
 
   const processLine = (line: string) => {
+    if (stopped) return;
     if (line.endsWith('\r')) line = line.slice(0, -1);
     if (line === '') { flushEvent(); return; }
     if (line.startsWith('data:')) {
@@ -55,23 +58,29 @@ export function readSSEStream(res: Response, onEvent: (payload: string) => void)
   return new Promise<void>((resolve, reject) => {
     (async () => {
       try {
-        while (true) {
+        while (!stopped) {
           const { value, done } = await reader.read();
           if (done) break;
           buf += decoder.decode(value, { stream: true });
 
           let idx: number;
-          while ((idx = buf.indexOf('\n')) !== -1) {
+          while (!stopped && (idx = buf.indexOf('\n')) !== -1) {
             const line = buf.slice(0, idx);
             buf = buf.slice(idx + 1);
             processLine(line);
           }
         }
-        buf += decoder.decode();
-        if (buf.length) processLine(buf);
-        flushEvent();
+        if (!stopped) {
+          buf += decoder.decode();
+          if (buf.length) processLine(buf);
+          flushEvent();
+        }
+        if (stopped) {
+          try { await reader.cancel(); } catch {}
+        }
         resolve();
       } catch (err) {
+        try { await reader.cancel(); } catch {}
         reject(err);
       }
     })();
@@ -123,18 +132,20 @@ export function useChorusStream(transport: Transport, opts?: StreamOptions) {
       await readSSEStream(res, (payload) => {
         const out = connectorRef.current.extract(payload);
         if (!out) return;
-        if (out.done) return; // ignore sentinel; finalize on stream end
+        if (out.error) throw new Error(out.error);
 
         const chunk = out.text || '';
-        if (!chunk) return;
-
-        if (!started) {
-          started = true;
-          if (cb.onStart) cb.onStart(chunk);
-          cb.onChunk(chunk);
-          return;
+        if (chunk) {
+          if (!started) {
+            started = true;
+            if (cb.onStart) cb.onStart(chunk);
+            cb.onChunk(chunk);
+          } else {
+            cb.onChunk(chunk);
+          }
         }
-        cb.onChunk(chunk);
+
+        if (out.done) return false;
       });
 
       await finish();

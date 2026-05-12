@@ -13,6 +13,7 @@ export interface WebSocketTransportOptions {
   /**
    * Serialize the outgoing request.
    * Defaults to `JSON.stringify({ prompt, history })`, matching the fetch SSE transport.
+   * `history` includes the current user turn; `prompt` is a convenience copy.
    */
   formatMessage?: (text: string, history: Message[]) => string;
 }
@@ -25,8 +26,8 @@ export interface WebSocketTransportOptions {
  * The server should send one message per token/chunk in the same JSON format
  * that an SSE server would put in a `data:` line.
  *
- * The connection is opened fresh for each call and closed when the stream ends
- * or when the AbortSignal fires.
+ * The connection is opened fresh for each call and closed when the stream ends,
+ * when the connector reports a done sentinel, or when the AbortSignal fires.
  *
  * @example
  * ```tsx

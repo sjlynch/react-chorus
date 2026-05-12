@@ -45,13 +45,13 @@ describe('openaiConnector', () => {
   });
 
   it('falls back to plain text for JSON without choices', () => {
-    // JSON that doesn't have choices array — treated as plain text fallback
     const data = JSON.stringify({ type: 'something' });
-    // The openai connector: if JSON but no choices array, falls into the catch
-    // because it returns null from "if (!Array.isArray(choices)) return null"
-    // Actually it returns null — wait let me re-read the code...
-    // "const choices = obj?.choices; if (!Array.isArray(choices)) return null;"
     expect(openaiConnector.extract(data)).toBeNull();
+  });
+
+  it('returns an in-band error payload', () => {
+    expect(openaiConnector.extract(JSON.stringify({ error: 'upstream failed' }))).toEqual({ error: 'upstream failed' });
+    expect(openaiConnector.extract(JSON.stringify({ error: { message: 'bad request' } }))).toEqual({ error: 'bad request' });
   });
 });
 
@@ -110,6 +110,10 @@ describe('anthropicConnector', () => {
       delta: { type: 'input_json_delta', partial_json: '{"q":' },
     });
     expect(anthropicConnector.extract(data)).toBeNull();
+  });
+
+  it('returns an in-band error payload', () => {
+    expect(anthropicConnector.extract(JSON.stringify({ type: 'error', error: { message: 'anthropic failed' } }))).toEqual({ error: 'anthropic failed' });
   });
 });
 
@@ -180,6 +184,10 @@ describe('geminiConnector', () => {
     });
     expect(geminiConnector.extract(data)).toBeNull();
   });
+
+  it('returns an in-band error payload', () => {
+    expect(geminiConnector.extract(JSON.stringify({ error: { message: 'gemini failed' } }))).toEqual({ error: 'gemini failed' });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -194,6 +202,10 @@ describe('autoConnector', () => {
   it('delegates to openaiConnector for OpenAI-shaped JSON', () => {
     const data = JSON.stringify({ choices: [{ delta: { content: 'hi' } }] });
     expect(autoConnector.extract(data)).toEqual({ text: 'hi' });
+  });
+
+  it('returns an in-band error payload', () => {
+    expect(autoConnector.extract(JSON.stringify({ error: 'stream failed' }))).toEqual({ error: 'stream failed' });
   });
 
   it('delegates to anthropicConnector for Anthropic-shaped JSON', () => {

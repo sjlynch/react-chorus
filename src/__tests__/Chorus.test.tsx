@@ -213,6 +213,25 @@ describe('Chorus', () => {
     expect(screen.queryByText(/Bad response \(500\) or missing body/i)).not.toBeInTheDocument();
   });
 
+  it('transport path surfaces in-band error payloads through onError and the UI banner', async () => {
+    const user = userEvent.setup();
+    const transport = vi.fn<Transport>(async () => sseResponse([
+      JSON.stringify({ choices: [{ delta: { content: 'partial' } }] }),
+      JSON.stringify({ error: 'stream failed' }),
+    ]));
+    const onError = vi.fn();
+
+    render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} onError={onError} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'boom');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    await waitFor(() => expect(onError).toHaveBeenCalledOnce());
+    expect(onError.mock.calls[0][0]).toBeInstanceOf(Error);
+    expect(onError.mock.calls[0][0].message).toBe('stream failed');
+    expect(await screen.findByText('Something went wrong. Please try again.')).toBeInTheDocument();
+  });
+
   it('onSend non-abort error invokes onError with the Error object', async () => {
     const user = userEvent.setup();
     const onError = vi.fn();

@@ -1,4 +1,6 @@
-export interface ConnectorResult { text?: string; done?: boolean }
+import { extractErrorMessage } from './error';
+
+export interface ConnectorResult { text?: string; done?: boolean; error?: string }
 export interface Connector { name: string; extract: (data: string) => ConnectorResult | null }
 
 /**
@@ -11,6 +13,8 @@ export const openaiConnector: Connector = {
     if (data === '[DONE]') return { done: true };
     try {
       const obj = JSON.parse(data);
+      const error = extractErrorMessage(obj);
+      if (error) return { error };
       const choices = obj?.choices;
       if (!Array.isArray(choices)) return null;
       let text = '';
