@@ -17,6 +17,9 @@ export default defineConfig({
     rollupOptions: {
       external: ['react', 'react-dom'],
       output: {
+        // Keep package.json "./styles.css" export aligned with the generated CSS file.
+        assetFileNames: (assetInfo) =>
+          assetInfo.name === 'style.css' ? 'styles.css' : '[name]-[hash][extname]',
         globals: {
           react: 'React',
           'react-dom': 'ReactDOM'
