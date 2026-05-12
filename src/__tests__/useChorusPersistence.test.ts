@@ -36,6 +36,23 @@ describe('useChorusPersistence', () => {
     expect(result.current.value).toEqual(MSGS);
   });
 
+  it('reloads stored messages when the persistence key changes', () => {
+    const storage = makeSyncStorage();
+    storage.store.a = JSON.stringify([MSG]);
+    storage.store.b = JSON.stringify(MSGS);
+
+    const { result, rerender } = renderHook(
+      ({ persistenceKey }) => useChorusPersistence(persistenceKey, { storage }),
+      { initialProps: { persistenceKey: 'a' } },
+    );
+
+    expect(result.current.value).toEqual([MSG]);
+
+    rerender({ persistenceKey: 'b' });
+
+    expect(result.current.value).toEqual(MSGS);
+  });
+
   it('returns empty array when stored value is invalid JSON', () => {
     const storage = makeSyncStorage('not json {{');
     const { result } = renderHook(() => useChorusPersistence('key', { storage }));
