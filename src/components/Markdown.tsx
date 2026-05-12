@@ -15,15 +15,85 @@ markedInstance.use(markedHighlight({
   highlight: highlightCode,
 }));
 
-export function Markdown({ text, codeTheme = 'dark', headless = false }: { text: string; codeTheme?: CodeTheme; headless?: boolean }) {
+export type MarkdownSanitizer = ((html: string) => string) | { sanitize: (html: string) => string };
+
+export interface MarkdownProps {
+  text: string;
+  codeTheme?: CodeTheme;
+  headless?: boolean;
+  /**
+   * Render the growing text as escaped plain text instead of reparsing the
+   * entire markdown document for every streamed chunk. Chorus sets this for
+   * the active assistant message and switches it off when the stream finalizes.
+   */
+  streaming?: boolean;
+  /** Optional sanitizer override, useful for SSR frameworks that provide their own DOMPurify instance. */
+  sanitizer?: MarkdownSanitizer;
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function fallbackSanitizeHtml(html: string) {
+  return html
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, '')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, '')
+    .replace(/<\/?(?:script|style|iframe|object|embed|link|meta|base|template)[^>]*>/gi, '')
+    .replace(/\s+on[\w:-]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?/gi, '')
+    .replace(/\s+(?:srcdoc|style)(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?/gi, '')
+    .replace(/\s+(?:href|src|xlink:href|formaction)\s*=\s*(?:"\s*(?:javascript|vbscript):[^"]*"|'\s*(?:javascript|vbscript):[^']*'|(?:javascript|vbscript):[^\s"'=<>`]+)/gi, '');
+}
+
+function resolveSanitizer(sanitizer?: MarkdownSanitizer) {
+  if (typeof sanitizer === 'function') return sanitizer;
+  if (sanitizer && typeof sanitizer.sanitize === 'function') return sanitizer.sanitize.bind(sanitizer);
+
+  const domPurify = DOMPurify as unknown as { sanitize?: (html: string) => string };
+  if (domPurify && typeof domPurify.sanitize === 'function') return domPurify.sanitize.bind(domPurify);
+
+  return fallbackSanitizeHtml;
+}
+
+function renderMarkdown(text: string, sanitizer?: MarkdownSanitizer) {
+  const balanced = normalizeStreamingMarkdown(text);
+
+  let raw = '';
+  try {
+    raw = markedInstance.parse(balanced) as string;
+  } catch {
+    raw = `<pre><code>${escapeHtml(balanced)}</code></pre>`;
+  }
+
+  return resolveSanitizer(sanitizer)(raw);
+}
+
+function addCodeBlockChrome(html: string, codeTheme: CodeTheme) {
+  const themeClass = codeTheme === 'light' ? 'chorus-codeblock-light' : 'chorus-codeblock-dark';
+  return html.replace(/<pre><code([^>]*)>([\s\S]*?)<\/code><\/pre>/g, (_match, attrs: string, code: string) => (
+    `<div class="chorus-codeblock ${themeClass}">` +
+      '<span class="chorus-copy-btn" role="button" aria-label="Copy code" tabindex="0">Copy</span>' +
+      `<pre><code${attrs}>${code}</code></pre>` +
+    '</div>'
+  ));
+}
+
+export function Markdown({ text, codeTheme = 'dark', headless = false, streaming = false, sanitizer }: MarkdownProps) {
   const containerRef = React.useRef<HTMLDivElement>(null);
   const [hljsReady, setHljsReady] = React.useState(isHljsLoaded());
 
   React.useEffect(() => {
+    if (streaming) return;
     if (!text.includes('```') && !text.includes('~~~')) return;
     if (!headless) loadHljsTheme(codeTheme);
     if (!hljsReady) getHljs().then(() => setHljsReady(true));
-  }, [text, codeTheme, headless, hljsReady]);
+  }, [text, codeTheme, headless, hljsReady, streaming]);
 
   React.useEffect(() => {
     if (headless) return;
@@ -32,7 +102,8 @@ export function Markdown({ text, codeTheme = 'dark', headless = false }: { text:
     const style = document.createElement('style');
     style.id = 'chorus-md-styles';
     style.textContent =
-      `.chorus-md .chorus-codeblock{position:relative;margin:8px 0;border-radius:8px;overflow:auto;border:1px solid var(--chorus-code-border,#30363d)}
+      `.chorus-md.chorus-md-streaming{white-space:pre-wrap}
+       .chorus-md .chorus-codeblock{position:relative;margin:8px 0;border-radius:8px;overflow:auto;border:1px solid var(--chorus-code-border,#30363d)}
        .chorus-md .chorus-codeblock pre{margin:0;padding:12px 16px;background:transparent}
        .chorus-md .chorus-codeblock pre code.hljs{display:block;overflow-x:auto;padding:0;background:transparent}
        .chorus-md .chorus-codeblock-dark{background:#0d1117;--chorus-code-border:#30363d;color:#e6edf3}
@@ -45,50 +116,17 @@ export function Markdown({ text, codeTheme = 'dark', headless = false }: { text:
   }, [headless]);
 
   const html = React.useMemo(() => {
-    const balanced = normalizeStreamingMarkdown(text);
+    if (streaming) return '';
 
-    let raw = '';
-    try {
-      raw = markedInstance.parse(balanced) as string;
-    } catch {
-      raw = `<pre><code>${balanced}</code></pre>`;
-    }
+    const sanitized = renderMarkdown(text, sanitizer);
+    if (headless) return sanitized;
 
-    const sanitized = typeof window === 'undefined' ? raw : DOMPurify.sanitize(raw);
-
-    if (headless || typeof window === 'undefined') return sanitized;
-
-    const root = document.createElement('div');
-    root.innerHTML = sanitized;
-
-    const themeClass = codeTheme === 'light' ? 'chorus-codeblock-light' : 'chorus-codeblock-dark';
-    root.querySelectorAll('pre > code').forEach(codeEl => {
-      const pre = codeEl.parentElement as HTMLElement;
-      if (!pre) return;
-      const alreadyWrapped = pre.parentElement && pre.parentElement.classList.contains('chorus-codeblock');
-      if (alreadyWrapped) return;
-
-      const wrapper = document.createElement('div');
-      wrapper.className = `chorus-codeblock ${themeClass}`;
-
-      const btn = document.createElement('span');
-      btn.className = 'chorus-copy-btn';
-      btn.setAttribute('role', 'button');
-      btn.setAttribute('aria-label', 'Copy code');
-      btn.setAttribute('tabindex', '0');
-      btn.textContent = 'Copy';
-
-      pre.replaceWith(wrapper);
-      wrapper.appendChild(btn);
-      wrapper.appendChild(pre);
-    });
-
-    return root.innerHTML;
-  }, [text, codeTheme, headless, hljsReady]);
+    return addCodeBlockChrome(sanitized, codeTheme);
+  }, [text, codeTheme, headless, hljsReady, streaming, sanitizer]);
 
   React.useEffect(() => {
     const el = containerRef.current;
-    if (!el || typeof window === 'undefined' || typeof document === 'undefined' || !navigator?.clipboard) return;
+    if (!el || typeof window === 'undefined' || typeof document === 'undefined' || typeof navigator === 'undefined' || !navigator?.clipboard) return;
 
     const handleCopy = async (btn: HTMLElement) => {
       const wrapper = btn.closest('.chorus-codeblock') as HTMLElement | null;
@@ -119,5 +157,8 @@ export function Markdown({ text, codeTheme = 'dark', headless = false }: { text:
     return () => { el.removeEventListener('click', onClick); el.removeEventListener('keydown', onKeyDown); };
   }, []);
 
-  return <div ref={containerRef} className="chorus-md" dangerouslySetInnerHTML={{ __html: html }} />;
+  const className = streaming ? 'chorus-md chorus-md-streaming' : 'chorus-md';
+  if (streaming) return <div ref={containerRef} className={className}>{text}</div>;
+
+  return <div ref={containerRef} className={className} dangerouslySetInnerHTML={{ __html: html }} />;
 }

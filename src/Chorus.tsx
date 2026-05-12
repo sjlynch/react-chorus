@@ -104,6 +104,18 @@ export function Chorus({
     onChunk,
   });
 
+  React.useEffect(() => {
+    if (process.env.NODE_ENV === 'production') return;
+
+    if (messages !== undefined && onChange) {
+      console.warn('[Chorus] `messages` is initial-only and does not make <Chorus> controlled. Use `value` + `onChange` for controlled mode, or rename `messages` to `initialMessages` when you only want to seed uncontrolled state.');
+    }
+
+    if (value !== undefined && persistenceKey) {
+      console.warn('[Chorus] Both `value` and `persistenceKey` were provided. `value` makes the message list controlled, so built-in persistence is ignored and message changes are not saved automatically. Remove `persistenceKey` or manage persistence in your controlled state.');
+    }
+  }, [messages, onChange, value, persistenceKey]);
+
   const [draft, setDraft] = React.useState('');
   const [internalSending, setInternalSending] = React.useState(false);
   const [streamError, setStreamError] = React.useState<string | null>(null);
@@ -154,6 +166,7 @@ export function Chorus({
   const { send: doStream, abort: streamAbort, sending: streamSending } = useChorusStream(resolvedTransport, { connector });
   const sending = sendingProp ?? (transport ? streamSending : internalSending);
   const paletteVars = React.useMemo(() => styleVarsFromPalette(palette), [palette]);
+  const activeStreamingMessageId = sending && hasStartedAssistantRef.current ? pendingAssistantIdRef.current : null;
 
   const resetStreamState = () => {
     hasStartedAssistantRef.current = false;
@@ -200,7 +213,13 @@ export function Chorus({
       if (res && typeof res === 'object' && !hasStartedAssistantRef.current) {
         const wait = Math.max(0, minAssistantDelayMs - (Date.now() - start));
         if (wait) await new Promise(r => setTimeout(r, wait));
-        updateMsgs(prev => prev.concat({ id: (res as Message).id || createMessageId(), role: 'assistant', text: (res as Message).text }));
+        const returnedMessage = res as Message;
+        updateMsgs(prev => prev.concat({
+          ...returnedMessage,
+          id: returnedMessage.id || createMessageId(),
+          role: returnedMessage.role ?? 'assistant',
+          text: returnedMessage.text ?? '',
+        }));
       }
     } catch (e: any) {
       const partialId = pendingAssistantIdRef.current;
@@ -272,7 +291,7 @@ export function Chorus({
 
   return (
     <div className={["chorus", className].filter(Boolean).join(" ")} style={{ ...paletteVars, ...style }}>
-      <ChatWindow messages={msgs} typing={!!(transport || onSend) && sending && !hasStartedAssistantRef.current} codeTheme={codeBlockTheme} headless={headless} renderMessage={renderMessage} hiddenRoles={hiddenRoles} onEdit={(transport || onSend) ? handleEdit : undefined} onRegenerate={(transport || onSend) ? handleRegenerate : undefined} onDelete={handleDelete} error={streamError} onRetry={retry} />
+      <ChatWindow messages={msgs} typing={!!(transport || onSend) && sending && !hasStartedAssistantRef.current} codeTheme={codeBlockTheme} headless={headless} renderMessage={renderMessage} hiddenRoles={hiddenRoles} streamingMessageId={activeStreamingMessageId} onEdit={(transport || onSend) ? handleEdit : undefined} onRegenerate={(transport || onSend) ? handleRegenerate : undefined} onDelete={handleDelete} error={streamError} onRetry={retry} />
       <ChatInput value={draft} onChange={setDraft} onSend={send} onStop={stop} sending={sending} placeholder={placeholder} accept={accept} />
     </div>
   );
