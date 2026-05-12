@@ -45,6 +45,33 @@ describe('ChatInput', () => {
     expect(textarea).toHaveValue('Hello\nworld');
   });
 
+  it('has an accessible name from the placeholder or default label', () => {
+    const { rerender } = render(<ChatInput value="" onChange={vi.fn()} onSend={vi.fn()} placeholder="Ask Chorus" />);
+
+    expect(screen.getByRole('textbox', { name: 'Ask Chorus' })).toBeInTheDocument();
+
+    rerender(<ChatInput value="" onChange={vi.fn()} onSend={vi.fn()} />);
+
+    expect(screen.getByRole('textbox', { name: 'Send a message' })).toBeInTheDocument();
+  });
+
+  it('grows as multiple lines are typed and collapses after send', async () => {
+    const user = userEvent.setup();
+    render(<ControlledChatInput />);
+
+    const textarea = screen.getByRole('textbox');
+    Object.defineProperty(textarea, 'scrollHeight', { configurable: true, value: 120 });
+
+    await user.type(textarea, 'Hello{Shift>}{Enter}{/Shift}world');
+
+    expect(textarea).toHaveValue('Hello\nworld');
+    expect(textarea).toHaveStyle({ height: '120px' });
+
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect((textarea as HTMLTextAreaElement).style.height).toBe('');
+  });
+
   it('disables the send button when textarea is empty and no attachments are present', () => {
     render(<ChatInput value="" onChange={vi.fn()} onSend={vi.fn()} />);
 

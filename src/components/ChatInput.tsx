@@ -2,6 +2,8 @@ import React from 'react';
 import { ArrowUp, Paperclip, X } from 'lucide-react';
 import type { Attachment } from '../types';
 
+const MAX_HEIGHT = 160;
+
 export interface ChatInputProps {
   value: string;
   onChange: (v: string) => void;
@@ -15,13 +17,29 @@ export interface ChatInputProps {
 export function ChatInput({ value, onChange, onSend, onStop, placeholder, sending, accept }: ChatInputProps) {
   const [attachments, setAttachments] = React.useState<Attachment[]>([]);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const textareaRef = React.useRef<HTMLTextAreaElement>(null);
 
   const canSend = value.trim().length > 0 || attachments.length > 0;
   const showAttachBtn = accept !== undefined;
 
+  const resizeTextarea = () => {
+    const el = textareaRef.current;
+    if (el) {
+      el.style.height = 'auto';
+      el.style.height = Math.min(el.scrollHeight, MAX_HEIGHT) + 'px';
+    }
+  };
+
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    onChange(e.target.value);
+    resizeTextarea();
+  };
+
   const handleSend = () => {
     onSend(attachments);
     setAttachments([]);
+    const el = textareaRef.current;
+    if (el) el.style.height = '';
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -76,7 +94,14 @@ export function ChatInput({ value, onChange, onSend, onStop, placeholder, sendin
             <Paperclip size={18} strokeWidth={2} />
           </button>
         )}
-        <textarea value={value} onChange={e => onChange(e.target.value)} onKeyDown={onKeyDown} placeholder={placeholder || 'Send a message'} />
+        <textarea
+          ref={textareaRef}
+          value={value}
+          onChange={handleChange}
+          onKeyDown={onKeyDown}
+          placeholder={placeholder || 'Send a message'}
+          aria-label={placeholder || 'Send a message'}
+        />
         <button type="button" className="chorus-send" onClick={handleClick} aria-label={sending ? 'Stop' : 'Send'} title={sending ? 'Stop' : 'Send'} disabled={!sending && !canSend}>
           {sending ? <span className="chorus-stop-fill" /> : <ArrowUp size={18} strokeWidth={2} />}
         </button>

@@ -2,9 +2,11 @@ import { describe, it, expect, vi } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Chorus, type ChorusProps } from '../Chorus';
+import type { Transport } from '../hooks/useChorusStream';
 import type { Message } from '../types';
 
-type OnSendHelpers = Parameters<NonNullable<ChorusProps['onSend']>>[2];
+type OnSend = NonNullable<ChorusProps['onSend']>;
+type OnSendHelpers = Parameters<OnSend>[2];
 
 vi.mock('../components/Markdown', () => ({
   Markdown: ({ text }: { text: string }) => <span data-testid="markdown">{text}</span>,
@@ -40,7 +42,15 @@ describe('Chorus', () => {
       <Chorus
         className="my-chat"
         style={{ height: '500px' }}
-        palette={{ chatBg: '#000' }}
+        palette={{
+          chatBg: '#000',
+          actionText: '#111',
+          actionHoverBg: '#222',
+          actionHoverText: '#333',
+          errorBg: '#444',
+          errorBorder: '#555',
+          errorText: '#666',
+        }}
       />
     );
 
@@ -49,11 +59,17 @@ describe('Chorus', () => {
     expect(root).toHaveClass('chorus', 'my-chat');
     expect(root.style.height).toBe('500px');
     expect(root.style.getPropertyValue('--chorus-chat-bg')).toBe('#000');
+    expect(root.style.getPropertyValue('--chorus-action-text')).toBe('#111');
+    expect(root.style.getPropertyValue('--chorus-action-hover-bg')).toBe('#222');
+    expect(root.style.getPropertyValue('--chorus-action-hover-text')).toBe('#333');
+    expect(root.style.getPropertyValue('--chorus-error-bg')).toBe('#444');
+    expect(root.style.getPropertyValue('--chorus-error-border')).toBe('#555');
+    expect(root.style.getPropertyValue('--chorus-error-text')).toBe('#666');
   });
 
   it('transport path send() fires transport and streams tokens into the message list', async () => {
     const user = userEvent.setup();
-    const transport = vi.fn(async () => sseResponse(['Hel', 'lo']));
+    const transport = vi.fn<Transport>(async () => sseResponse(['Hel', 'lo']));
 
     render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} />);
 
@@ -69,7 +85,7 @@ describe('Chorus', () => {
   it('onSend path calls onSend with text, messages, and helpers', async () => {
     const user = userEvent.setup();
     const initial: Message[] = [{ id: 'm1', role: 'assistant', text: 'Welcome' }];
-    const onSend = vi.fn(async () => undefined);
+    const onSend = vi.fn<OnSend>(async () => undefined);
 
     render(<Chorus messages={initial} onSend={onSend} minAssistantDelayMs={0} />);
 
@@ -247,7 +263,7 @@ describe('Chorus', () => {
 
   it('Retry re-triggers the assistant with the last user text', async () => {
     const user = userEvent.setup();
-    const transport = vi.fn(async () => sseResponse([], 500));
+    const transport = vi.fn<Transport>(async () => sseResponse([], 500));
 
     render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} />);
 
