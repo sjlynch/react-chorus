@@ -3,21 +3,24 @@
   "version": "0.1.0",
   "description": "Composable chat UI components for React.",
   "type": "module",
-  "main": "./dist/react-chorus.cjs.js",
+  "main": "./dist/react-chorus.cjs",
   "module": "./dist/react-chorus.es.js",
   "types": "./dist/types/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/types/index.d.ts",
       "import": "./dist/react-chorus.es.js",
-      "require": "./dist/react-chorus.cjs.js"
+      "require": "./dist/react-chorus.cjs"
     },
     "./headless": {
       "types": "./dist/types/headless.d.ts",
       "import": "./dist/react-chorus-headless.es.js",
-      "require": "./dist/react-chorus-headless.cjs.js"
+      "require": "./dist/react-chorus-headless.cjs"
     },
-    "./styles.css": "./dist/styles.css"
+    "./styles.css": {
+      "types": "./dist/styles.css.d.ts",
+      "default": "./dist/styles.css"
+    }
   },
   "files": [
     "dist"
@@ -52,8 +55,9 @@
     "dev": "vite",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "build": "vite build && tsc -p tsconfig.json --emitDeclarationOnly",
+    "build": "vite build && tsc -p tsconfig.json --emitDeclarationOnly && node scripts/finalize-declarations.mjs",
     "prepublishOnly": "npm run lint && npm run typecheck && npm run build",
+    "typecheck:consumer": "tsc -p fixtures/consumer-typecheck/tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
