@@ -117,7 +117,12 @@ describe('Markdown', () => {
     expect(mocks.highlightModuleLoads.value).toBe(0);
   });
 
-  it('sanitizes SSR output when window is unavailable', () => {
+  it.each([
+    ['script tag', '<script>alert(1)</script>'],
+    ['image event handler', '<img src=x onerror="alert(2)">'],
+    ['malformed SVG/math event handler', '<svg><g/onload=alert(3)//<math><mi xlink:href="javascript:alert(4)">x</mi></math>'],
+    ['JavaScript markdown URLs', '[click](javascript:alert(5))\n\n![alt](javascript:alert(6))\n\n[encoded](jav&#x61;script&colon;alert(7))'],
+  ])('uses SSR safe mode when no real sanitizer is available for %s', (_name, payload) => {
     const originalWindow = globalThis.window;
     const domPurifyMock = DOMPurify as unknown as { sanitize?: (html: string) => string };
     const originalSanitize = domPurifyMock.sanitize;
@@ -125,12 +130,52 @@ describe('Markdown', () => {
     Object.defineProperty(globalThis, 'window', { value: undefined, configurable: true, writable: true });
 
     try {
-      const html = renderToString(<Markdown text={'<script>alert(1)</script>\n<img src=x onerror="alert(2)">'} />);
+      const html = renderToString(<Markdown text={payload} />);
 
       expect(html).not.toMatch(/<script/i);
-      expect(html).not.toMatch(/onerror/i);
-      expect(html).not.toContain('alert(');
-      expect(html).toContain('<img src=x>');
+      expect(html).not.toMatch(/<svg/i);
+      expect(html).not.toMatch(/<math/i);
+      expect(html).not.toMatch(/\son[a-z0-9:-]+\s*=/i);
+      expect(html).not.toMatch(/\s(?:href|src|xlink:href)\s*=\s*["']?\s*(?:javascript|vbscript|data):/i);
+      expect(html).not.toMatch(/srcdoc\s*=/i);
+    } finally {
+      domPurifyMock.sanitize = originalSanitize;
+      Object.defineProperty(globalThis, 'window', { value: originalWindow, configurable: true, writable: true });
+    }
+  });
+
+  it('keeps ordinary markdown stable in SSR safe mode', () => {
+    const originalWindow = globalThis.window;
+    const domPurifyMock = DOMPurify as unknown as { sanitize?: (html: string) => string };
+    const originalSanitize = domPurifyMock.sanitize;
+    domPurifyMock.sanitize = undefined;
+    Object.defineProperty(globalThis, 'window', { value: undefined, configurable: true, writable: true });
+
+    try {
+      const html = renderToString(<Markdown text={'# Hello\n\nThis is **bold** with [a link](https://example.com).'} headless />);
+
+      expect(html).toContain('<h1>Hello</h1>');
+      expect(html).toContain('<strong>bold</strong>');
+      expect(html).toContain('<a href="https://example.com">a link</a>');
+    } finally {
+      domPurifyMock.sanitize = originalSanitize;
+      Object.defineProperty(globalThis, 'window', { value: originalWindow, configurable: true, writable: true });
+    }
+  });
+
+  it('uses a custom sanitizer during SSR when provided', () => {
+    const originalWindow = globalThis.window;
+    const domPurifyMock = DOMPurify as unknown as { sanitize?: (html: string) => string };
+    const originalSanitize = domPurifyMock.sanitize;
+    const customSanitizer = vi.fn((html: string) => html.replace('<custom>', '<em>').replace('</custom>', '</em>'));
+    domPurifyMock.sanitize = undefined;
+    Object.defineProperty(globalThis, 'window', { value: undefined, configurable: true, writable: true });
+
+    try {
+      const html = renderToString(<Markdown text={'<custom>trusted</custom>'} headless sanitizer={customSanitizer} />);
+
+      expect(customSanitizer).toHaveBeenCalledWith(expect.stringContaining('<custom>trusted</custom>'));
+      expect(html).toContain('<em>trusted</em>');
     } finally {
       domPurifyMock.sanitize = originalSanitize;
       Object.defineProperty(globalThis, 'window', { value: originalWindow, configurable: true, writable: true });
