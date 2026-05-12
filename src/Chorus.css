@@ -1,5 +1,6 @@
 /* Optional: make code blocks scroll when long */
 /*.chorus-md pre { overflow: auto; }*/
+.chorus-md.chorus-md-streaming { white-space: pre-wrap; }
 
 /* Dark theme defaults + CSS variables for palette overrides (no blue) */
 .chorus { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden; }

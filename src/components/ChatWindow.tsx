@@ -30,9 +30,11 @@ export interface ChatWindowProps {
   onDelete?: (id: string) => void;
   error?: string | null;
   onRetry?: () => void;
+  /** Internal optimization hint: render the active assistant message as escaped plain text until it finalizes. */
+  streamingMessageId?: string | null;
 }
 
-export function ChatWindow({ messages, typing, codeTheme = 'dark', headless = false, renderMessage, hiddenRoles, showSystemMessages, onEdit, onRegenerate, onDelete, error, onRetry }: ChatWindowProps) {
+export function ChatWindow({ messages, typing, codeTheme = 'dark', headless = false, renderMessage, hiddenRoles, showSystemMessages, onEdit, onRegenerate, onDelete, error, onRetry, streamingMessageId }: ChatWindowProps) {
   React.useEffect(() => {
     if (showSystemMessages === undefined || didWarnShowSystemMessages) return;
     console.warn('[Chorus] `showSystemMessages` is deprecated. Use `hiddenRoles` instead (for example hiddenRoles={[\'system\']} to show tool messages while hiding system prompts).');
@@ -101,7 +103,7 @@ export function ChatWindow({ messages, typing, codeTheme = 'dark', headless = fa
         }
 
         return (
-          <MessageRow key={m.id} m={m} codeTheme={codeTheme} headless={headless} onEdit={onEdit} onRegenerate={onRegenerate} onDelete={onDelete} />
+          <MessageRow key={m.id} m={m} codeTheme={codeTheme} headless={headless} streaming={m.id === streamingMessageId} onEdit={onEdit} onRegenerate={onRegenerate} onDelete={onDelete} />
         );
       })}
 

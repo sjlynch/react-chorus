@@ -332,8 +332,13 @@ npm run dev
 
 **Impact:**
 - Pages that never render code blocks pay zero cost — highlight.js is never downloaded.
-- Pages that do render code blocks load highlight.js asynchronously on demand. The matching GitHub dark/light token-color stylesheet is also injected on demand based on `codeBlockTheme`. The code renders immediately as plain text and is re-rendered with syntax highlighting once the chunk arrives (typically one extra render, imperceptible during streaming).
+- Pages that do render code blocks load highlight.js asynchronously on demand. The matching GitHub dark/light token-color stylesheet is also injected on demand based on `codeBlockTheme`. The code renders immediately as plain text and is re-rendered with syntax highlighting once the chunk arrives.
+- While an assistant message is actively streaming, Chorus renders that growing message as React-escaped plain text and switches to full Markdown parsing/sanitization when the stream finalizes. This avoids reparsing and resanitizing the entire message on every token.
 - Bundlers (Vite, webpack, Rollup) will automatically split highlight.js into a separate async chunk, so it does not inflate the main bundle.
+
+## SSR and Markdown sanitization
+
+`<Markdown>` sanitizes rendered HTML during server-side rendering as well as in the browser before using `dangerouslySetInnerHTML`. If the default `dompurify` export is not usable in a server environment, react-chorus falls back to a conservative sanitizer that removes executable tags, event-handler attributes, and JavaScript URLs. Apps that already create an isomorphic DOMPurify instance can pass it via `<Markdown sanitizer={...} />`.
 
 ## API
 
@@ -543,6 +548,7 @@ interface MessageBubbleProps {
   style?: React.CSSProperties; // merged onto the outer .chorus-msg element
   codeTheme?: 'dark' | 'light'; // defaults to 'dark'
   headless?: boolean;          // forwards headless mode to Markdown; defaults to false
+  streaming?: boolean;         // forwards Markdown's escaped plain-text streaming mode
 }
 ```
 
@@ -619,7 +625,7 @@ import { ChatWindow, ChatInput, ChorusTheme, Markdown } from 'react-chorus';
 - **`<ChatWindow messages={…} typing={…} />`** — renders the scrollable message list with a typing indicator. It accepts `hiddenRoles?: Role[]` (default `['system', 'tool']`); `showSystemMessages` is deprecated but remains supported as an alias for showing all roles.
 - **`<ChatInput value onSend onStop placeholder sending />`** — the text input and send/stop button.
 - **`<ChorusTheme palette={…}>`** — applies theme CSS variables to any subtree.
-- **`<Markdown text={…} codeTheme="dark" />`** — standalone markdown renderer with syntax highlighting and copy buttons.
+- **`<Markdown text={…} codeTheme="dark" />`** — standalone markdown renderer with syntax highlighting and copy buttons. It supports `streaming` to render escaped plain text until finalization and `sanitizer` to provide a custom DOMPurify-compatible sanitizer for SSR.
 - **`<MessageBubble message={…} />`** — renders the default bubble for one message, including attachments. Accepts `className`, `style`, `codeTheme`, and `headless` for decoration without replacing the full renderer.
 
 ## Message Shape
