@@ -91,6 +91,25 @@ export default function App() {
 
 `createFetchSSETransport(url)` posts `{ prompt, history }` to your endpoint and reads the response as a Server-Sent Events stream. Pass a `formatBody` option to customise the request shape for OpenAI, FastAPI, or any other backend. The `openai` connector parses the standard `choices[*].delta.content` shape.
 
+For a non-streaming client, `onSend` may return a complete assistant `Message`. Chorus appends it after the user message (and after `minAssistantDelayMs`):
+
+```tsx
+<Chorus
+  onSend={async (text) => {
+    const r = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: text }),
+    });
+    return {
+      id: crypto.randomUUID(),
+      role: 'assistant',
+      text: (await r.json()).reply,
+    };
+  }}
+/>
+```
+
 ### Minimal Express + OpenAI backend
 
 ```js
@@ -339,16 +358,22 @@ npm run dev
 
 ### `<Chorus>`
 
+Message source modes are mutually exclusive:
+
+- Controlled: pass `value` + `onChange` and keep the canonical message list in your state.
+- Uncontrolled with a seed: pass `initialMessages` (or legacy `messages`) and let Chorus manage subsequent updates internally.
+- Uncontrolled with persistence: pass `persistenceKey` without `value`; passing both makes `value` win, so built-in persistence is bypassed.
+
 | Prop | Type | Default | Description |
 |------|------|---------|-------------|
 | `transport` | `string \| Transport` | — | Simple path: URL to POST to, or a custom Transport function. Chorus handles all streaming. |
 | `systemPrompt` | `string` | — | Transport-path convenience prop. Prepends a hidden `system` message to the request history for every send. |
 | `connector` | `Connector \| 'auto' \| 'openai' \| 'anthropic' \| 'gemini'` | `'auto'` | SSE connector used to parse the stream. `'auto'` detects OpenAI, Anthropic, and Gemini; pass an explicit name when the format is known. |
-| `onSend` | `(text, messages, helpers) => Promise<void>` | — | Advanced path: called when the user submits a message. Use `helpers.appendAssistant` to stream tokens and `helpers.finalizeAssistant` when done. |
-| `value` | `Message[]` | — | Controlled message list. |
-| `onChange` | `(messages: Message[]) => void` | — | Called whenever the message list changes (controlled mode). |
-| `messages` | `Message[]` | — | Initial messages (uncontrolled mode; retained for compatibility). |
-| `initialMessages` | `Message[]` | — | Initial messages for uncontrolled mode. Useful for welcome messages; `system` and `tool` messages are hidden by default via `hiddenRoles`. |
+| `onSend` | `(text, messages, helpers) => Message \| void \| Promise<Message \| void>` | — | Advanced path: called when the user submits a message. Use `helpers.appendAssistant`/`helpers.finalizeAssistant` to stream tokens, or return a complete assistant `Message` for non-streaming replies. |
+| `value` | `Message[]` | — | Controlled message list. Pair with `onChange`; Chorus renders this array as the source of truth. |
+| `onChange` | `(messages: Message[]) => void` | — | Called whenever Chorus wants to change the message list in controlled mode (`value` is provided). Not called for legacy `messages`-only uncontrolled state. |
+| `messages` | `Message[]` | — | Legacy initial-only seed for uncontrolled mode. Read once on mount; later prop changes are ignored. Prefer `initialMessages` for seeding or `value` + `onChange` for controlled mode. |
+| `initialMessages` | `Message[]` | — | Initial-only seed for uncontrolled mode. Useful for welcome messages; `system` and `tool` messages are hidden by default via `hiddenRoles`. |
 | `placeholder` | `string` | `"Message…"` | Input placeholder text. |
 | `accept` | `string` | — | Forwarded to the file-picker `<input accept>`. Omitting the prop hides the attach button entirely. |
 | `sending` | `boolean` | — | Override the sending state (useful when you manage it externally via `useChorusStream`). |
@@ -358,7 +383,7 @@ npm run dev
 | `errorMessage` | `string` | `'Something went wrong. Please try again.'` | Friendly message shown in the error banner. Raw transport errors are never surfaced in the UI. |
 | `onError` | `(error: Error) => void` | — | Called for any non-abort error from a send or stream. The raw `Error` goes here; the UI shows `errorMessage`. |
 | `onChunk` | `(chunk: string, messageId: string) => void` | — | Observation hook called for each streamed token. Receives the assistant `messageId` so callers can correlate chunks with a specific message. Does **not** affect streaming behaviour. |
-| `persistenceKey` | `string` | — | When set, automatically saves and restores messages using the given key. Defaults to localStorage. |
+| `persistenceKey` | `string` | — | Uncontrolled-mode persistence key. When set without `value`, Chorus saves/restores messages using this key (defaults to localStorage). If `value` is provided, controlled state wins and built-in persistence is not used. |
 | `persistenceStorage` | `StorageAdapter` | `localStorage` | Custom storage adapter for persistenceKey. |
 | `headless` | `boolean` | `false` | Strip all default styles and inline style injection. |
 | `renderMessage` | `(message: Message) => ReactNode` | — | Custom per-message renderer. Return `null` to fall back to default rendering. |

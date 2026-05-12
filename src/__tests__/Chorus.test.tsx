@@ -121,6 +121,42 @@ describe('Chorus', () => {
     warn.mockRestore();
   });
 
+  it('warns when messages is paired with onChange instead of value', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    render(<Chorus messages={[]} onChange={vi.fn()} />);
+
+    await waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining('`messages` is initial-only')));
+    warn.mockRestore();
+  });
+
+  it('warns when value and persistenceKey are both provided', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    render(<Chorus value={[]} persistenceKey="chat" />);
+
+    await waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining('Both `value` and `persistenceKey`')));
+    warn.mockRestore();
+  });
+
+  it('onSend can return a message for a non-streaming assistant response', async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn<OnSend>(async () => ({
+      id: 'assistant-1',
+      role: 'assistant',
+      text: 'non-streamed reply',
+      metadata: { source: 'rest' },
+    }));
+
+    render(<Chorus onSend={onSend} minAssistantDelayMs={0} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'hello');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
+    expect(await screen.findByText('non-streamed reply')).toBeInTheDocument();
+  });
+
   it('onSend path calls onSend with text, messages, and helpers', async () => {
     const user = userEvent.setup();
     const initial: Message[] = [{ id: 'm1', role: 'assistant', text: 'Welcome' }];

@@ -90,6 +90,18 @@ export function Chorus({
     onChunk,
   });
 
+  React.useEffect(() => {
+    if (process.env.NODE_ENV === 'production') return;
+
+    if (messages !== undefined && onChange) {
+      console.warn('[Chorus] `messages` is initial-only and does not make <Chorus> controlled. Use `value` + `onChange` for controlled mode, or rename `messages` to `initialMessages` when you only want to seed uncontrolled state.');
+    }
+
+    if (value !== undefined && persistenceKey) {
+      console.warn('[Chorus] Both `value` and `persistenceKey` were provided. `value` makes the message list controlled, so built-in persistence is ignored and message changes are not saved automatically. Remove `persistenceKey` or manage persistence in your controlled state.');
+    }
+  }, [messages, onChange, value, persistenceKey]);
+
   const [draft, setDraft] = React.useState('');
   const [internalSending, setInternalSending] = React.useState(false);
   const [streamError, setStreamError] = React.useState<string | null>(null);
@@ -180,7 +192,13 @@ export function Chorus({
       if (res && typeof res === 'object' && !hasStartedAssistantRef.current) {
         const wait = Math.max(0, minAssistantDelayMs - (Date.now() - start));
         if (wait) await new Promise(r => setTimeout(r, wait));
-        updateMsgs(prev => prev.concat({ id: (res as Message).id || String(Date.now() + 1), role: 'assistant', text: (res as Message).text }));
+        const returnedMessage = res as Message;
+        updateMsgs(prev => prev.concat({
+          ...returnedMessage,
+          id: returnedMessage.id || String(Date.now() + 1),
+          role: returnedMessage.role ?? 'assistant',
+          text: returnedMessage.text ?? '',
+        }));
       }
     } catch (e: any) {
       const partialId = pendingAssistantIdRef.current;
