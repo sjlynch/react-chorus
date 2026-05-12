@@ -104,6 +104,9 @@ export function Chorus({
     onChange,
     persistenceKey,
     persistedMessages: persisted.value,
+    persistenceLoaded: persisted.loaded,
+    hasPersistedValue: persisted.hasStoredValue,
+    canPersist: persisted.canPersist,
     onPersistedChange: persisted.onChange,
     onChunk,
   });

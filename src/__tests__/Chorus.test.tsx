@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Chorus, type ChorusProps, type Transport } from '../Chorus';
-import type { Message } from '../types';
+import type { Message, StorageAdapter } from '../types';
 
 type OnSend = NonNullable<ChorusProps['onSend']>;
 type OnSendHelpers = Parameters<OnSend>[2];
@@ -51,6 +51,15 @@ function deferred<T = void>() {
     reject = rej;
   });
   return { promise, resolve, reject };
+}
+
+function makeSyncStorage(initial: Record<string, string> = {}): StorageAdapter & { store: Record<string, string> } {
+  const store = { ...initial };
+  return {
+    store,
+    getItem: (key) => store[key] ?? null,
+    setItem: (key, value) => { store[key] = value; },
+  };
 }
 
 describe('Chorus', () => {
@@ -103,6 +112,77 @@ describe('Chorus', () => {
     render(<Chorus initialMessages={[{ id: 'welcome', role: 'assistant', text: 'Welcome!' }]} />);
 
     expect(screen.getByText('Welcome!')).toBeInTheDocument();
+  });
+
+  it('renders and persists initialMessages when persistence storage is empty', async () => {
+    const storage = makeSyncStorage();
+    const welcome: Message[] = [{ id: 'welcome', role: 'assistant', text: 'Welcome!' }];
+
+    render(<Chorus persistenceKey="chat" persistenceStorage={storage} initialMessages={welcome} />);
+
+    expect(screen.getByText('Welcome!')).toBeInTheDocument();
+    await waitFor(() => expect(storage.store.chat).toBe(JSON.stringify(welcome)));
+  });
+
+  it('uses legacy messages as a persistence seed when storage is empty', async () => {
+    const storage = makeSyncStorage();
+    const welcome: Message[] = [{ id: 'welcome', role: 'assistant', text: 'Legacy welcome!' }];
+
+    render(<Chorus persistenceKey="chat" persistenceStorage={storage} messages={welcome} />);
+
+    expect(screen.getByText('Legacy welcome!')).toBeInTheDocument();
+    await waitFor(() => expect(storage.store.chat).toBe(JSON.stringify(welcome)));
+  });
+
+  it('lets existing persisted history win over initialMessages', () => {
+    const stored: Message[] = [{ id: 'stored', role: 'assistant', text: 'Stored history' }];
+    const storage = makeSyncStorage({ chat: JSON.stringify(stored) });
+
+    render(
+      <Chorus
+        persistenceKey="chat"
+        persistenceStorage={storage}
+        initialMessages={[{ id: 'welcome', role: 'assistant', text: 'Welcome!' }]}
+      />
+    );
+
+    expect(screen.getByText('Stored history')).toBeInTheDocument();
+    expect(screen.queryByText('Welcome!')).not.toBeInTheDocument();
+  });
+
+  it('keeps the initialMessages seed after an empty async persistence load resolves', async () => {
+    const welcome: Message[] = [{ id: 'welcome', role: 'assistant', text: 'Async welcome!' }];
+    const asyncStorage: StorageAdapter = {
+      getItem: vi.fn().mockResolvedValue(null),
+      setItem: vi.fn(),
+    };
+
+    render(<Chorus persistenceKey="chat" persistenceStorage={asyncStorage} initialMessages={welcome} />);
+
+    expect(screen.getByText('Async welcome!')).toBeInTheDocument();
+    await waitFor(() => expect(asyncStorage.setItem).toHaveBeenCalledWith('chat', JSON.stringify(welcome)));
+    expect(screen.getByText('Async welcome!')).toBeInTheDocument();
+  });
+
+  it('replaces the initialMessages seed when async persistence loads stored history', async () => {
+    const stored: Message[] = [{ id: 'stored', role: 'assistant', text: 'Async stored history' }];
+    const asyncStorage: StorageAdapter = {
+      getItem: vi.fn().mockResolvedValue(JSON.stringify(stored)),
+      setItem: vi.fn(),
+    };
+
+    render(
+      <Chorus
+        persistenceKey="chat"
+        persistenceStorage={asyncStorage}
+        initialMessages={[{ id: 'welcome', role: 'assistant', text: 'Async welcome!' }]}
+      />
+    );
+
+    expect(screen.getByText('Async welcome!')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('Async stored history')).toBeInTheDocument());
+    expect(screen.queryByText('Async welcome!')).not.toBeInTheDocument();
+    expect(asyncStorage.setItem).not.toHaveBeenCalled();
   });
 
   it('prepends systemPrompt to transport history without rendering it', async () => {
