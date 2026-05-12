@@ -614,9 +614,14 @@ When neither `renderMessage` nor a custom `MessageBubble` is used, each message 
 
 ```html
 <div class="chorus-msg chorus-{role}">
-  <div class="chorus-bubble"><!-- Markdown content --></div>
+  <div class="chorus-msg-content">
+    <div class="chorus-bubble"><!-- attachments + Markdown content --></div>
+    <div class="chorus-actions"><!-- optional action buttons --></div>
+  </div>
 </div>
 ```
+
+`<MessageBubble message={message} />` uses the same `.chorus-msg > .chorus-msg-content > .chorus-bubble` structure, so it preserves the default message width and role alignment when used from `renderMessage`.
 
 Target these classes in your CSS to restyle without a render prop:
 

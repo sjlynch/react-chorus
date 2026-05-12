@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -119,23 +120,38 @@ describe('ChatWindow', () => {
     expect(screen.getByText('Hello')).toBeInTheDocument();
   });
 
-  it('shows action buttons when onEdit/onRegenerate/onDelete are provided', () => {
+  it('names all message action controls and the edit textarea', async () => {
+    const user = userEvent.setup();
     render(
       <ChatWindow
-        messages={[USER_MSG]}
+        messages={[USER_MSG, ASST_MSG]}
         onEdit={vi.fn()}
+        onRegenerate={vi.fn()}
         onDelete={vi.fn()}
       />
     );
-    expect(screen.getByTitle('Edit')).toBeInTheDocument();
-    expect(screen.getByTitle('Delete')).toBeInTheDocument();
+
+    expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Regenerate' })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Delete' })).toHaveLength(2);
+
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+
+    expect(screen.getByRole('textbox', { name: 'Edit message' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+  });
+
+  it('reveals message actions on hover and keyboard focus', () => {
+    const css = readFileSync('src/Chorus.css', 'utf8');
+    expect(css).toContain('.chorus-msg:hover .chorus-actions, .chorus-msg:focus-within .chorus-actions');
   });
 
   it('calls onDelete with message id when delete button is clicked', async () => {
     const user = userEvent.setup();
     const onDelete = vi.fn();
     render(<ChatWindow messages={[USER_MSG]} onDelete={onDelete} />);
-    await user.click(screen.getByTitle('Delete'));
+    await user.click(screen.getByRole('button', { name: 'Delete' }));
     expect(onDelete).toHaveBeenCalledWith('u1');
   });
 
@@ -143,7 +159,7 @@ describe('ChatWindow', () => {
     const user = userEvent.setup();
     const onRegenerate = vi.fn();
     render(<ChatWindow messages={[ASST_MSG]} onRegenerate={onRegenerate} />);
-    await user.click(screen.getByTitle('Regenerate'));
+    await user.click(screen.getByRole('button', { name: 'Regenerate' }));
     expect(onRegenerate).toHaveBeenCalledWith('a1');
   });
 
@@ -152,12 +168,24 @@ describe('ChatWindow', () => {
     const onEdit = vi.fn();
     const { rerender } = render(<ChatWindow messages={[USER_MSG, { ...ASST_MSG, text: 'H' }]} onEdit={onEdit} />);
 
-    await user.click(screen.getByTitle('Edit'));
-    await user.type(screen.getByRole('textbox'), ' draft');
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    await user.type(screen.getByRole('textbox', { name: 'Edit message' }), ' draft');
 
     rerender(<ChatWindow messages={[USER_MSG, { ...ASST_MSG, text: 'Hi there streaming' }]} onEdit={onEdit} />);
 
-    expect(screen.getByRole('textbox')).toHaveValue('Hello draft');
+    expect(screen.getByRole('textbox', { name: 'Edit message' })).toHaveValue('Hello draft');
+  });
+
+  it('MessageBubble preserves the default row layout when used from renderMessage', () => {
+    const { container } = render(
+      <ChatWindow
+        messages={[USER_MSG]}
+        renderMessage={(message) => <MessageBubble message={message} />}
+      />
+    );
+
+    const bubble = container.querySelector('.chorus-msg.chorus-user > .chorus-msg-content > .chorus-bubble');
+    expect(bubble).toHaveTextContent('Hello');
   });
 
   it('MessageBubble renders message attachments', () => {

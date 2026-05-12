@@ -55,7 +55,7 @@
 
 /* Hover-revealed action buttons */
 .chorus-actions { display: flex; gap: 2px; padding: 3px 2px 0; opacity: 0; pointer-events: none; transition: opacity 0.15s; }
-.chorus-msg:hover .chorus-actions { opacity: 1; pointer-events: auto; }
+.chorus-msg:hover .chorus-actions, .chorus-msg:focus-within .chorus-actions { opacity: 1; pointer-events: auto; }
 .chorus-action-btn { display: inline-flex; align-items: center; justify-content: center; padding: 4px 6px; border: none; border-radius: 6px; background: transparent; color: var(--chorus-action-text, #666); cursor: pointer; transition: background 0.15s, color 0.15s; line-height: 0; }
 .chorus-action-btn:hover { background: var(--chorus-action-hover-bg, rgba(255,255,255,0.15)); color: var(--chorus-action-hover-text, #eee); }
 

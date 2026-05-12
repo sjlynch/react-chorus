@@ -26,14 +26,29 @@ export interface MessageBubbleProps {
   streaming?: boolean;
 }
 
+function MessageBubbleLayout({ message, codeTheme, headless, streaming = false, children }: {
+  message: Message;
+  codeTheme: 'dark' | 'light';
+  headless?: boolean;
+  streaming?: boolean;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className="chorus-msg-content">
+      <div className="chorus-bubble">
+        <MessageAttachments attachments={message.attachments} />
+        <Markdown text={message.text} codeTheme={codeTheme} headless={headless} streaming={streaming} />
+      </div>
+      {children}
+    </div>
+  );
+}
+
 export function MessageBubble({ message, className, style, codeTheme = 'dark', headless, streaming = false }: MessageBubbleProps) {
   const cls = ['chorus-msg', `chorus-${message.role}`, className].filter(Boolean).join(' ');
   return (
     <div className={cls} style={style}>
-      <div className="chorus-bubble">
-        <MessageAttachments attachments={message.attachments} />
-        <Markdown text={message.text} codeTheme={codeTheme} headless={headless ?? false} streaming={streaming} />
-      </div>
+      <MessageBubbleLayout message={message} codeTheme={codeTheme} headless={headless ?? false} streaming={streaming} />
     </div>
   );
 }
@@ -81,6 +96,7 @@ export function MessageRow({ m, codeTheme, headless, onEdit, onRegenerate, onDel
           <textarea
             ref={textareaRef}
             className="chorus-edit-textarea"
+            aria-label="Edit message"
             value={editText}
             onChange={e => setEditText(e.target.value)}
             onKeyDown={e => {
@@ -89,30 +105,26 @@ export function MessageRow({ m, codeTheme, headless, onEdit, onRegenerate, onDel
             }}
           />
           <div className="chorus-edit-actions">
-            <button type="button" className="chorus-action-btn" onClick={submitEdit} title="Save"><Check size={14} /></button>
-            <button type="button" className="chorus-action-btn" onClick={cancelEdit} title="Cancel"><X size={14} /></button>
+            <button type="button" className="chorus-action-btn" onClick={submitEdit} title="Save" aria-label="Save"><Check size={14} /></button>
+            <button type="button" className="chorus-action-btn" onClick={cancelEdit} title="Cancel" aria-label="Cancel"><X size={14} /></button>
           </div>
         </div>
       ) : (
-        <div className="chorus-msg-content">
-          <div className="chorus-bubble">
-            <MessageAttachments attachments={m.attachments} />
-            <Markdown text={m.text} codeTheme={codeTheme} headless={headless} streaming={streaming} />
-          </div>
+        <MessageBubbleLayout message={m} codeTheme={codeTheme} headless={headless} streaming={streaming}>
           {hasActions && (
             <div className="chorus-actions">
               {m.role === 'user' && onEdit && (
-                <button type="button" className="chorus-action-btn" onClick={() => { setEditText(m.text); setEditing(true); }} title="Edit"><Pencil size={13} /></button>
+                <button type="button" className="chorus-action-btn" onClick={() => { setEditText(m.text); setEditing(true); }} title="Edit" aria-label="Edit"><Pencil size={13} /></button>
               )}
               {m.role === 'assistant' && onRegenerate && (
-                <button type="button" className="chorus-action-btn" onClick={() => onRegenerate(m.id)} title="Regenerate"><RefreshCw size={13} /></button>
+                <button type="button" className="chorus-action-btn" onClick={() => onRegenerate(m.id)} title="Regenerate" aria-label="Regenerate"><RefreshCw size={13} /></button>
               )}
               {onDelete && (
-                <button type="button" className="chorus-action-btn" onClick={() => onDelete(m.id)} title="Delete"><Trash2 size={13} /></button>
+                <button type="button" className="chorus-action-btn" onClick={() => onDelete(m.id)} title="Delete" aria-label="Delete"><Trash2 size={13} /></button>
               )}
             </div>
           )}
-        </div>
+        </MessageBubbleLayout>
       )}
     </div>
   );
