@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { Markdown, normalizeStreamingMarkdown } from '../components/Markdown';
+import { scopeHljsThemeCss } from '../utils/hljsLoader';
 
 const mocks = vi.hoisted(() => {
   const sanitizeMock = vi.fn((html: string) => html);
@@ -74,6 +75,33 @@ describe('normalizeStreamingMarkdown', () => {
     const text = 'Use ``` on its own line, like:\n```ts\nconst x = 1;';
 
     expect(normalizeStreamingMarkdown(text)).toBe(`${text}\n\`\`\``);
+  });
+});
+
+describe('scopeHljsThemeCss', () => {
+  it('scopes modern selectors without splitting functional pseudo-class commas', () => {
+    const css = `
+      /* stripped */
+      .hljs:is(.keyword, .title), pre code.hljs[data-token="{"] { color: red; --token-map: "{,}"; }
+      @media (prefers-color-scheme: dark) {
+        .hljs:has(.attr, .string) { color: blue; }
+      }
+      @keyframes hljs-fade { from { opacity: 0; } to { opacity: 1; } }
+    `;
+
+    const scoped = scopeHljsThemeCss(css, 'dark');
+
+    expect(scoped).toContain('.chorus-codeblock-dark .hljs:is(.keyword, .title), .chorus-codeblock-dark pre code.hljs[data-token="{"]');
+    expect(scoped).toContain('.chorus-codeblock-dark .hljs:has(.attr, .string)');
+    expect(scoped).toContain('@keyframes hljs-fade { from { opacity: 0; } to { opacity: 1; } }');
+    expect(scoped).not.toContain('.chorus-codeblock-dark from');
+  });
+
+  it('scopes the parent selector for native nested CSS rules', () => {
+    const scoped = scopeHljsThemeCss('.hljs { color: red; & .token, &:where(.active, .focus) { font-weight: bold; } }', 'light');
+
+    expect(scoped).toContain('.chorus-codeblock-light .hljs {');
+    expect(scoped).toContain('& .token, &:where(.active, .focus) { font-weight: bold; }');
   });
 });
 
