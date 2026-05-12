@@ -4,6 +4,15 @@ import type { Message, StorageAdapter } from '../types';
 const defaultStorage: StorageAdapter | null =
   typeof window !== 'undefined' ? window.localStorage : null;
 
+function parseStoredMessages(raw: string | null): Message[] {
+  if (!raw) return [];
+  try {
+    return JSON.parse(raw) as Message[];
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Persists Chorus messages to a storage adapter (defaults to localStorage).
  * Returns { value, onChange } which can be spread directly onto <Chorus>.
@@ -38,27 +47,46 @@ export function useChorusPersistence(
     try {
       const raw = storage.getItem(key);
       // Synchronous adapter (localStorage / sessionStorage): init without a render
-      if (typeof raw === 'string') return JSON.parse(raw) as Message[];
+      if (raw instanceof Promise) {
+        raw.catch(() => {});
+        return [];
+      }
+      return parseStoredMessages(raw);
     } catch {}
     return [];
   });
 
-  // Async adapters (IndexedDB etc.) need a useEffect load
   React.useEffect(() => {
-    if (!key || !storage) return;
+    let cancelled = false;
+
+    if (!key || !storage) {
+      setValue([]);
+      return () => { cancelled = true; };
+    }
+
+    // Reset before loading the new key so stale messages are not shown while
+    // async adapters (IndexedDB etc.) resolve.
+    setValue([]);
+
     try {
       const raw = storage.getItem(key);
       if (raw instanceof Promise) {
         raw
           .then(str => {
-            try { if (str) setValue(JSON.parse(str) as Message[]); } catch {}
+            if (!cancelled) setValue(parseStoredMessages(str));
           })
-          .catch(() => {});
+          .catch(() => {
+            if (!cancelled) setValue([]);
+          });
+      } else {
+        setValue(parseStoredMessages(raw));
       }
-    } catch {}
-    // intentionally run once on mount; key/storage changes are an edge case
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    } catch {
+      setValue([]);
+    }
+
+    return () => { cancelled = true; };
+  }, [key, storage]);
 
   const onChange = React.useCallback((messages: Message[]) => {
     setValue(messages);

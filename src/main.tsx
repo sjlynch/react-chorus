@@ -2,6 +2,8 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { Chorus } from './Chorus';
 
+const DEMO_CHUNK_DELAY_MS = 60;
+
 const REPLIES = [
   "That's a great point! Let me think about that...",
   "Interesting question. Here's what I know about it.",
@@ -27,7 +29,7 @@ async function handleSend(
 
   for (const word of words) {
     if (signal.aborted) break;
-    await new Promise((r) => setTimeout(r, 60));
+    await new Promise((r) => setTimeout(r, DEMO_CHUNK_DELAY_MS));
     appendAssistant(word + ' ');
   }
 
