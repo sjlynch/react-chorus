@@ -45,6 +45,18 @@ const transport = createFetchSSETransport('/api/chat', {
 <Chorus transport={transport} />
 ```
 
+Seed an uncontrolled chat with a welcome message and include a hidden system prompt in every transport request:
+
+```tsx
+<Chorus
+  transport="/api/chat"
+  initialMessages={[{ id: 'welcome', role: 'assistant', text: 'Hi! How can I help?' }]}
+  systemPrompt="You are a concise support assistant."
+/>
+```
+
+`systemPrompt` is prepended to the request `history` sent through the `transport` prop but is not rendered in the transcript.
+
 ### Advanced path — `onSend` callback
 
 Use `onSend` when you need direct control: proxying through a custom client, handling non-SSE transports, or modifying messages before they're added.
@@ -330,11 +342,13 @@ npm run dev
 | Prop | Type | Default | Description |
 |------|------|---------|-------------|
 | `transport` | `string \| Transport` | — | Simple path: URL to POST to, or a custom Transport function. Chorus handles all streaming. |
+| `systemPrompt` | `string` | — | Transport-path convenience prop. Prepends a hidden `system` message to the request history for every send. |
 | `connector` | `Connector \| 'auto' \| 'openai' \| 'anthropic' \| 'gemini'` | `'auto'` | SSE connector used to parse the stream. `'auto'` detects OpenAI, Anthropic, and Gemini; pass an explicit name when the format is known. |
 | `onSend` | `(text, messages, helpers) => Promise<void>` | — | Advanced path: called when the user submits a message. Use `helpers.appendAssistant` to stream tokens and `helpers.finalizeAssistant` when done. |
 | `value` | `Message[]` | — | Controlled message list. |
 | `onChange` | `(messages: Message[]) => void` | — | Called whenever the message list changes (controlled mode). |
-| `messages` | `Message[]` | — | Initial messages (uncontrolled mode). |
+| `messages` | `Message[]` | — | Initial messages (uncontrolled mode; retained for compatibility). |
+| `initialMessages` | `Message[]` | — | Initial messages for uncontrolled mode. Useful for welcome messages; `system` and `tool` messages are hidden by default via `hiddenRoles`. |
 | `placeholder` | `string` | `"Message…"` | Input placeholder text. |
 | `accept` | `string` | — | Forwarded to the file-picker `<input accept>`. Omitting the prop hides the attach button entirely. |
 | `sending` | `boolean` | — | Override the sending state (useful when you manage it externally via `useChorusStream`). |
@@ -387,6 +401,17 @@ const tokensRef = React.useRef(0);
 ```
 
 Pass `hiddenRoles={[]}` to show every role, or omit it to keep the default `['system', 'tool']`.
+
+For controlled mode, seed your own state instead of using `initialMessages`, and include hidden system/tool messages directly when you want full control over the request history:
+
+```tsx
+const [messages, setMessages] = React.useState<Message[]>([
+  { id: 'sys', role: 'system', text: 'You are a concise support assistant.' },
+  { id: 'welcome', role: 'assistant', text: 'Hi! How can I help?' },
+]);
+
+<Chorus value={messages} onChange={setMessages} transport="/api/chat" />
+```
 
 ### `useChorusStream(transport, opts?)`
 

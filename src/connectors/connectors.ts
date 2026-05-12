@@ -1,3 +1,4 @@
+import type { ConnectorName } from '../types';
 import { openaiConnector, type Connector, type ConnectorResult } from './openai';
 import { anthropicConnector } from './anthropic';
 import { geminiConnector } from './gemini';
@@ -28,7 +29,7 @@ export const autoConnector: Connector = {
   }
 };
 
-export function getConnector(connector?: Connector | 'auto' | 'openai' | 'anthropic' | 'gemini'): Connector {
+export function getConnector(connector?: Connector | ConnectorName): Connector {
   if (!connector) return autoConnector;
   if (typeof connector === 'string') {
     if (connector === 'openai') return openaiConnector;
