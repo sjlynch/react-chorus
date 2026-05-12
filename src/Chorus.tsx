@@ -12,6 +12,8 @@ import type { Connector } from './connectors/connectors';
 export type { Transport };
 export type { Connector };
 
+const DEFAULT_MIN_ASSISTANT_DELAY_MS = 300;
+
 export interface ChorusProps {
   messages?: Message[];
   value?: Message[];
@@ -92,7 +94,7 @@ export function Chorus({
   placeholder,
   palette,
   sending: sendingProp,
-  minAssistantDelayMs = 300,
+  minAssistantDelayMs = DEFAULT_MIN_ASSISTANT_DELAY_MS,
   errorMessage,
   onError,
   onChunk,
