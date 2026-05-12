@@ -75,6 +75,23 @@ describe('useChorusStream', () => {
     expect(onChunk).toHaveBeenNthCalledWith(3, 'three');
   });
 
+  it('delivers the first chunk to onChunk when onStart is provided', async () => {
+    const transport = vi.fn<Transport>(() => Promise.resolve(makeSseResponse(['first', 'second'])));
+    const onStart = vi.fn();
+    const onChunk = vi.fn();
+    const { result } = renderHook(() => useChorusStream(transport));
+
+    await act(async () => {
+      await result.current.send('hello', [], { onStart, onChunk });
+    });
+
+    expect(onStart).toHaveBeenCalledTimes(1);
+    expect(onStart).toHaveBeenCalledWith('first');
+    expect(onChunk).toHaveBeenCalledTimes(2);
+    expect(onChunk).toHaveBeenNthCalledWith(1, 'first');
+    expect(onChunk).toHaveBeenNthCalledWith(2, 'second');
+  });
+
   it('calls onDone after all tokens', async () => {
     const transport = vi.fn<Transport>(() => Promise.resolve(makeSseResponse(['first', 'last'])));
     const calls: string[] = [];

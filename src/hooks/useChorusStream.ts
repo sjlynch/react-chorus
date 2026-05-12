@@ -3,7 +3,12 @@ import type { Message } from '../types';
 import { getConnector, type Connector } from '../connectors/connectors';
 
 export interface SendCallbacks {
+  /**
+   * Optional notification fired with the first non-empty stream chunk.
+   * The same first chunk is also delivered to onChunk.
+   */
   onStart?: (firstChunk: string) => void;
+  /** Receives every non-empty stream chunk, including the first one. */
   onChunk: (chunk: string) => void;
   onDone?: () => void;
   onError?: (err: Error) => void;
@@ -122,7 +127,8 @@ export function useChorusStream(transport: Transport, opts?: StreamOptions) {
 
         if (!started) {
           started = true;
-          if (cb.onStart) cb.onStart(chunk); else cb.onChunk(chunk);
+          if (cb.onStart) cb.onStart(chunk);
+          cb.onChunk(chunk);
           return;
         }
         cb.onChunk(chunk);
