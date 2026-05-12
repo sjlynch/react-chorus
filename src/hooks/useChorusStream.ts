@@ -16,7 +16,7 @@ export interface SendCallbacks {
   minDelayMs?: number;
 }
 
-export type Transport = (text: string, history: Message[], signal: AbortSignal) => Promise<Response>;
+export type Transport<TMeta = Record<string, unknown>> = (text: string, history: Message<TMeta>[], signal: AbortSignal) => Promise<Response>;
 
 export interface StreamOptions {
   connector?: Connector | ConnectorName;
@@ -91,7 +91,7 @@ export function readSSEStream(res: Response, onEvent: (payload: string) => unkno
   });
 }
 
-export function useChorusStream(transport: Transport, opts?: StreamOptions) {
+export function useChorusStream<TMeta = Record<string, unknown>>(transport: Transport<TMeta>, opts?: StreamOptions) {
   const connector = getConnector(opts?.connector);
   const transportRef = useLatestRef(transport);
   const connectorRef = useLatestRef(connector);
@@ -100,7 +100,7 @@ export function useChorusStream(transport: Transport, opts?: StreamOptions) {
   const isSendingRef = React.useRef(false);
   const controllerRef = React.useRef<AbortController | null>(null);
 
-  const send = React.useCallback(async (text: string, history: Message[], cb: SendCallbacks, externalSignal?: AbortSignal) => {
+  const send = React.useCallback(async (text: string, history: Message<TMeta>[], cb: SendCallbacks, externalSignal?: AbortSignal) => {
     if (isSendingRef.current) return;
     isSendingRef.current = true;
 

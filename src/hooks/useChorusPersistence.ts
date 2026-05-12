@@ -4,10 +4,10 @@ import type { Message, StorageAdapter } from '../types';
 const defaultStorage: StorageAdapter | null =
   typeof window !== 'undefined' ? window.localStorage : null;
 
-function parseStoredMessages(raw: string | null): Message[] {
+function parseStoredMessages<TMeta = Record<string, unknown>>(raw: string | null): Message<TMeta>[] {
   if (!raw) return [];
   try {
-    return JSON.parse(raw) as Message[];
+    return JSON.parse(raw) as Message<TMeta>[];
   } catch {
     return [];
   }
@@ -30,10 +30,10 @@ function parseStoredMessages(raw: string | null): Message[] {
  * @example — async adapter (IndexedDB wrapper, custom backend, etc.)
  * const persist = useChorusPersistence('my-chat', { storage: myAsyncAdapter });
  */
-export function useChorusPersistence(
+export function useChorusPersistence<TMeta = Record<string, unknown>>(
   key: string,
   options?: { storage?: StorageAdapter },
-): { value: Message[]; onChange: (messages: Message[]) => void } {
+): { value: Message<TMeta>[]; onChange: (messages: Message<TMeta>[]) => void } {
   const storage = options?.storage ?? defaultStorage;
 
   // Stable refs so the onChange callback never needs to change
@@ -42,7 +42,7 @@ export function useChorusPersistence(
   const keyRef = React.useRef(key);
   keyRef.current = key;
 
-  const [value, setValue] = React.useState<Message[]>(() => {
+  const [value, setValue] = React.useState<Message<TMeta>[]>(() => {
     if (!key || !storage) return [];
     try {
       const raw = storage.getItem(key);
@@ -51,7 +51,7 @@ export function useChorusPersistence(
         raw.catch(() => {});
         return [];
       }
-      return parseStoredMessages(raw);
+      return parseStoredMessages<TMeta>(raw);
     } catch {}
     return [];
   });
@@ -73,13 +73,13 @@ export function useChorusPersistence(
       if (raw instanceof Promise) {
         raw
           .then(str => {
-            if (!cancelled) setValue(parseStoredMessages(str));
+            if (!cancelled) setValue(parseStoredMessages<TMeta>(str));
           })
           .catch(() => {
             if (!cancelled) setValue([]);
           });
       } else {
-        setValue(parseStoredMessages(raw));
+        setValue(parseStoredMessages<TMeta>(raw));
       }
     } catch {
       setValue([]);
@@ -88,7 +88,7 @@ export function useChorusPersistence(
     return () => { cancelled = true; };
   }, [key, storage]);
 
-  const onChange = React.useCallback((messages: Message[]) => {
+  const onChange = React.useCallback((messages: Message<TMeta>[]) => {
     setValue(messages);
     const k = keyRef.current;
     const s = storageRef.current;

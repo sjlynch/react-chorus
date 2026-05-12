@@ -2,18 +2,18 @@ import React from 'react';
 import type { Message } from '../types';
 import { useLatestRef } from './useLatestRef';
 
-interface UseChorusMessagesOptions {
-  value?: Message[];
-  messages?: Message[];
-  initialMessages?: Message[];
-  onChange?: (messages: Message[]) => void;
+interface UseChorusMessagesOptions<TMeta = Record<string, unknown>> {
+  value?: Message<TMeta>[];
+  messages?: Message<TMeta>[];
+  initialMessages?: Message<TMeta>[];
+  onChange?: (messages: Message<TMeta>[]) => void;
   persistenceKey?: string;
-  persistedMessages: Message[];
-  onPersistedChange: (messages: Message[]) => void;
+  persistedMessages: Message<TMeta>[];
+  onPersistedChange: (messages: Message<TMeta>[]) => void;
   onChunk?: (chunk: string, messageId: string) => void;
 }
 
-function warnDuplicateMessageIds(next: Message[]) {
+function warnDuplicateMessageIds<TMeta>(next: Message<TMeta>[]) {
   if (process.env.NODE_ENV !== 'production') {
     const ids = next.map(m => m.id);
     const uniq = new Set(ids);
@@ -23,7 +23,7 @@ function warnDuplicateMessageIds(next: Message[]) {
   }
 }
 
-export function useChorusMessages({
+export function useChorusMessages<TMeta = Record<string, unknown>>({
   value,
   messages,
   initialMessages,
@@ -32,8 +32,8 @@ export function useChorusMessages({
   persistedMessages,
   onPersistedChange,
   onChunk,
-}: UseChorusMessagesOptions) {
-  const [internalMsgs, setInternalMsgs] = React.useState<Message[]>(() => messages ?? initialMessages ?? []);
+}: UseChorusMessagesOptions<TMeta>) {
+  const [internalMsgs, setInternalMsgs] = React.useState<Message<TMeta>[]>(() => messages ?? initialMessages ?? []);
   const msgs = value !== undefined ? value : persistenceKey ? persistedMessages : internalMsgs;
 
   const msgsRef = useLatestRef(msgs);
@@ -41,7 +41,7 @@ export function useChorusMessages({
   const onChunkRef = useLatestRef(onChunk);
   const onPersistedChangeRef = useLatestRef(onPersistedChange);
 
-  const updateMsgs = React.useCallback((updater: (prev: Message[]) => Message[]) => {
+  const updateMsgs = React.useCallback((updater: (prev: Message<TMeta>[]) => Message<TMeta>[]) => {
     const next = updater(msgsRef.current);
     warnDuplicateMessageIds(next);
     msgsRef.current = next;

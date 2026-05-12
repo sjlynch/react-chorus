@@ -1,7 +1,7 @@
 import type { Message } from '../types';
 import type { Transport } from '../hooks/useChorusStream';
 
-export interface WebSocketTransportOptions {
+export interface WebSocketTransportOptions<TMeta = Record<string, unknown>> {
   /** WebSocket sub-protocols forwarded to the WebSocket constructor. */
   protocols?: string | string[];
   /** Called after the WebSocket opens, in addition to resolving the transport response. */
@@ -15,7 +15,7 @@ export interface WebSocketTransportOptions {
    * Defaults to `JSON.stringify({ prompt, history })`, matching the fetch SSE transport.
    * `history` includes the current user turn; `prompt` is a convenience copy.
    */
-  formatMessage?: (text: string, history: Message[]) => string;
+  formatMessage?: (text: string, history: Message<TMeta>[]) => string;
 }
 
 /**
@@ -34,15 +34,15 @@ export interface WebSocketTransportOptions {
  * const transport = createWebSocketTransport('wss://api.example.com/chat');
  * ```
  */
-export function createWebSocketTransport(
+export function createWebSocketTransport<TMeta = Record<string, unknown>>(
   url: string,
-  opts?: WebSocketTransportOptions,
-): Transport {
+  opts?: WebSocketTransportOptions<TMeta>,
+): Transport<TMeta> {
   const formatMessage =
     opts?.formatMessage ??
-    ((text, history) => JSON.stringify({ prompt: text, history }));
+    ((text: string, history: Message<TMeta>[]) => JSON.stringify({ prompt: text, history }));
 
-  return (text: string, history: Message[], signal: AbortSignal) =>
+  return (text: string, history: Message<TMeta>[], signal: AbortSignal) =>
     new Promise<Response>((resolve, reject) => {
       if (signal.aborted) {
         reject(new DOMException('Aborted', 'AbortError'));

@@ -17,8 +17,8 @@ function MessageAttachments({ attachments }: { attachments?: Attachment[] }) {
   );
 }
 
-export interface MessageBubbleProps {
-  message: Message;
+export interface MessageBubbleProps<TMeta = Record<string, unknown>> {
+  message: Message<TMeta>;
   className?: string;
   style?: React.CSSProperties;
   codeTheme?: 'dark' | 'light';
@@ -26,7 +26,7 @@ export interface MessageBubbleProps {
   streaming?: boolean;
 }
 
-export function MessageBubble({ message, className, style, codeTheme = 'dark', headless, streaming = false }: MessageBubbleProps) {
+export function MessageBubble<TMeta = Record<string, unknown>>({ message, className, style, codeTheme = 'dark', headless, streaming = false }: MessageBubbleProps<TMeta>) {
   const cls = ['chorus-msg', `chorus-${message.role}`, className].filter(Boolean).join(' ');
   return (
     <div className={cls} style={style}>
@@ -38,8 +38,8 @@ export function MessageBubble({ message, className, style, codeTheme = 'dark', h
   );
 }
 
-export interface MessageRowProps {
-  m: Message;
+export interface MessageRowProps<TMeta = Record<string, unknown>> {
+  m: Message<TMeta>;
   codeTheme: 'dark' | 'light';
   headless?: boolean;
   onEdit?: (id: string, newText: string) => void;
@@ -48,7 +48,7 @@ export interface MessageRowProps {
   streaming?: boolean;
 }
 
-export function MessageRow({ m, codeTheme, headless, onEdit, onRegenerate, onDelete, streaming = false }: MessageRowProps) {
+export function MessageRow<TMeta = Record<string, unknown>>({ m, codeTheme, headless, onEdit, onRegenerate, onDelete, streaming = false }: MessageRowProps<TMeta>) {
   const [editing, setEditing] = React.useState(false);
   const [editText, setEditText] = React.useState(m.text);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
