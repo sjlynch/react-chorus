@@ -25,6 +25,17 @@ describe('ToolCallBlock', () => {
     expect(screen.getByRole('button')).toHaveTextContent('▼');
   });
 
+  it('links the expandable header to the body it controls', async () => {
+    const user = userEvent.setup();
+    render(<ToolCallBlock toolCall={CALL_WITH_IO} />);
+    const button = screen.getByRole('button');
+    const controls = button.getAttribute('aria-controls');
+
+    expect(controls).toBeTruthy();
+    await user.click(button);
+    expect(document.getElementById(controls!)).toHaveClass('chorus-tool-call-body');
+  });
+
   it('does not show a chevron or allow expand when no input/output', () => {
     render(<ToolCallBlock toolCall={CALL_NAME_ONLY} />);
     expect(screen.getByRole('button')).toBeDisabled();

@@ -110,4 +110,25 @@ describe('readSSEStream', () => {
     await readSSEStream(makeResponse('data:\n\n'), e => events.push(e));
     expect(events).toEqual(['']);
   });
+
+  it('stops reading and cancels the body when the callback returns false', async () => {
+    const events: string[] = [];
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('data: first\n\ndata: second\n\n'));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+
+    await readSSEStream(new Response(stream), e => {
+      events.push(e);
+      return false;
+    });
+
+    expect(events).toEqual(['first']);
+    expect(cancelled).toBe(true);
+  });
 });

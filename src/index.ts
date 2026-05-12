@@ -19,6 +19,7 @@ export type { FetchSSETransportOptions } from './streaming/createFetchSSETranspo
 export { createWebSocketTransport } from './streaming/createWebSocketTransport';
 export type { WebSocketTransportOptions } from './streaming/createWebSocketTransport';
 export { Markdown } from './components/Markdown';
+export type { MarkdownProps, MarkdownSanitizer } from './components/Markdown';
 
 export type { Connector, ConnectorResult } from './connectors/connectors';
 export { getConnector, autoConnector } from './connectors/connectors';

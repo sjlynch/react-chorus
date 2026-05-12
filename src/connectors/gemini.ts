@@ -1,3 +1,4 @@
+import { extractErrorMessage } from './error';
 import type { Connector, ConnectorResult } from './openai';
 
 /**
@@ -14,6 +15,8 @@ export const geminiConnector: Connector = {
   extract(data: string): ConnectorResult | null {
     try {
       const obj = JSON.parse(data);
+      const error = extractErrorMessage(obj);
+      if (error) return { error };
       if (!obj || !Array.isArray(obj.candidates)) return null;
 
       let text = '';

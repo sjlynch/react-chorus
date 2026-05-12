@@ -7,12 +7,8 @@ const openai = new OpenAI(); // reads OPENAI_API_KEY from environment
 app.use(express.json());
 
 app.post('/api/chat', async (req, res) => {
-  const { prompt, history = [] } = req.body;
-
-  const messages = [
-    ...history.map((m) => ({ role: m.role, content: m.text })),
-    { role: 'user', content: prompt },
-  ];
+  const { history = [] } = req.body;
+  const messages = history.map((m) => ({ role: m.role, content: m.text }));
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -31,7 +27,8 @@ app.post('/api/chat', async (req, res) => {
 
     res.write('data: [DONE]\n\n');
   } catch (err) {
-    res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`);
+    const message = err instanceof Error ? err.message : String(err);
+    res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
   } finally {
     res.end();
   }

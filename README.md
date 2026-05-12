@@ -19,11 +19,16 @@ import 'react-chorus/styles.css';
 ```tsx
 import { Chorus } from 'react-chorus';
 
-// That's it — point it at your streaming API endpoint
-<Chorus transport="/api/chat" />
+export default function App() {
+  return (
+    <div style={{ height: '100dvh' }}>
+      <Chorus transport="/api/chat" />
+    </div>
+  );
+}
 ```
 
-Chorus POSTs `{ prompt: string, history: Message[] }` to the URL and streams the SSE response into the assistant message automatically.
+Chorus fills its parent, so give the wrapper an explicit height (for example `100dvh`) to make the transcript scroll internally. Chorus POSTs `{ prompt: string, history: Message[] }` to the URL and streams the SSE response into the assistant message automatically. `history` already includes the current user turn; `prompt` is a convenience copy of that latest user text.
 
 ## Two usage paths
 
@@ -89,7 +94,26 @@ export default function App() {
 }
 ```
 
-`createFetchSSETransport(url)` posts `{ prompt, history }` to your endpoint and reads the response as a Server-Sent Events stream. Pass a `formatBody` option to customise the request shape for OpenAI, FastAPI, or any other backend. The `openai` connector parses the standard `choices[*].delta.content` shape.
+`createFetchSSETransport(url)` posts `{ prompt, history }` to your endpoint and reads the response as a Server-Sent Events stream. `history` includes the latest user message, so backend examples should map `history` directly instead of appending `prompt` again. Pass a `formatBody` option to customise the request shape for OpenAI, FastAPI, or any other backend. The `openai` connector parses the standard `choices[*].delta.content` shape.
+
+For a non-streaming client, `onSend` may return a complete assistant `Message`. Chorus appends it after the user message (and after `minAssistantDelayMs`):
+
+```tsx
+<Chorus
+  onSend={async (text) => {
+    const r = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: text }),
+    });
+    return {
+      id: crypto.randomUUID(),
+      role: 'assistant',
+      text: (await r.json()).reply,
+    };
+  }}
+/>
+```
 
 ### Minimal Express + OpenAI backend
 
@@ -104,24 +128,26 @@ const openai = new OpenAI(); // reads OPENAI_API_KEY from env
 app.use(express.json());
 
 app.post('/api/chat', async (req, res) => {
-  const { prompt, history = [] } = req.body;
-
-  const messages = [
-    ...history.map((m) => ({ role: m.role, content: m.text })),
-    { role: 'user', content: prompt },
-  ];
+  const { history = [] } = req.body;
+  const messages = history.map((m) => ({ role: m.role, content: m.text }));
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
 
-  const stream = await openai.chat.completions.create({ model: 'gpt-4o-mini', messages, stream: true });
+  try {
+    const stream = await openai.chat.completions.create({ model: 'gpt-4o-mini', messages, stream: true });
 
-  for await (const chunk of stream) {
-    res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+    for await (const chunk of stream) {
+      res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+    }
+
+    res.write('data: [DONE]\n\n');
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
+  } finally {
+    res.end();
   }
-
-  res.write('data: [DONE]\n\n');
-  res.end();
 });
 
 app.listen(3001);
@@ -188,28 +214,30 @@ const client = new Anthropic();
 
 wss.on('connection', (ws) => {
   ws.on('message', async (raw) => {
-    const { prompt, history } = JSON.parse(raw.toString());
+    const { history = [] } = JSON.parse(raw.toString());
+    const messages = history.map((m) => ({ role: m.role, content: m.text }));
 
-    const messages = [
-      ...history.map((m) => ({ role: m.role, content: m.text })),
-      { role: 'user', content: prompt },
-    ];
+    try {
+      const stream = await client.messages.stream({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1024,
+        messages,
+      });
 
-    const stream = await client.messages.stream({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 1024,
-      messages,
-    });
-
-    // Forward raw Anthropic SDK events verbatim — the front-end
-    // `anthropic` connector parses `content_block_delta` / `message_stop`
-    // directly, so no server-side reshaping is needed.
-    for await (const event of stream) {
-      ws.send(JSON.stringify(event));
+      // Forward raw Anthropic SDK events verbatim — the front-end
+      // `anthropic` connector parses `content_block_delta` / `message_stop`
+      // directly, so no server-side reshaping is needed.
+      for await (const event of stream) {
+        ws.send(JSON.stringify(event));
+      }
+      // `client.messages.stream` already emits a `message_stop` event,
+      // which the anthropic connector treats as the done sentinel. The
+      // react-chorus WebSocket transport opens a fresh socket per send and
+      // closes it client-side after that sentinel is processed.
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      ws.send(JSON.stringify({ error: message }));
     }
-    // `client.messages.stream` already emits a `message_stop` event,
-    // which the anthropic connector treats as the done sentinel.
-    // ws.close() — optional; leaving it open allows reuse for the next turn.
   });
 });
 ```
@@ -228,6 +256,8 @@ Connectors tell Chorus how to parse the streaming response from different AI pro
 | `'anthropic'` | Anthropic Messages API | `content_block_delta` / `delta.text` |
 | `'gemini'` | Google Gemini (AI / Vertex AI) | `candidates[*].content.parts[*].text` |
 | `'auto'` *(default)* | Auto-detect | Tries OpenAI, then Gemini, then Anthropic, then plain text |
+
+All built-in connectors also recognise in-band stream errors. If a backend has already started a `200` SSE/WebSocket stream, send `data: {"error":"message"}` (or `{"error":{"message":"message"}}`) to abort the response, call `onError` with an `Error`, and show the configured error banner.
 
 ### Usage
 
@@ -276,15 +306,24 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 app.post('/api/chat', async (req, res) => {
-  const { prompt } = req.body;
+  const { history = [] } = req.body;
   const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-  const result = await model.generateContentStream(prompt);
+  const contents = history
+    .filter((m) => m.role === 'user' || m.role === 'assistant')
+    .map((m) => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.text }] }));
 
   res.setHeader('Content-Type', 'text/event-stream');
-  for await (const chunk of result.stream) {
-    res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+  try {
+    const result = await model.generateContentStream({ contents });
+    for await (const chunk of result.stream) {
+      res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
+  } finally {
+    res.end();
   }
-  res.end();
 });
 ```
 
@@ -332,23 +371,34 @@ npm run dev
 
 **Impact:**
 - Pages that never render code blocks pay zero cost — highlight.js is never downloaded.
-- Pages that do render code blocks load highlight.js asynchronously on demand. The matching GitHub dark/light token-color stylesheet is also injected on demand based on `codeBlockTheme`. The code renders immediately as plain text and is re-rendered with syntax highlighting once the chunk arrives (typically one extra render, imperceptible during streaming).
+- Pages that do render code blocks load highlight.js asynchronously on demand. The matching GitHub dark/light token-color stylesheet is also injected on demand based on `codeBlockTheme`. The code renders immediately as plain text and is re-rendered with syntax highlighting once the chunk arrives.
+- While an assistant message is actively streaming, Chorus renders that growing message as React-escaped plain text and switches to full Markdown parsing/sanitization when the stream finalizes. This avoids reparsing and resanitizing the entire message on every token.
 - Bundlers (Vite, webpack, Rollup) will automatically split highlight.js into a separate async chunk, so it does not inflate the main bundle.
+
+## SSR and Markdown sanitization
+
+`<Markdown>` sanitizes rendered HTML during server-side rendering as well as in the browser before using `dangerouslySetInnerHTML`. If the default `dompurify` export is not usable in a server environment, react-chorus falls back to a conservative sanitizer that removes executable tags, event-handler attributes, and JavaScript URLs. Apps that already create an isomorphic DOMPurify instance can pass it via `<Markdown sanitizer={...} />`.
 
 ## API
 
 ### `<Chorus>`
+
+Message source modes are mutually exclusive:
+
+- Controlled: pass `value` + `onChange` and keep the canonical message list in your state.
+- Uncontrolled with a seed: pass `initialMessages` (or legacy `messages`) and let Chorus manage subsequent updates internally.
+- Uncontrolled with persistence: pass `persistenceKey` without `value`; passing both makes `value` win, so built-in persistence is bypassed.
 
 | Prop | Type | Default | Description |
 |------|------|---------|-------------|
 | `transport` | `string \| Transport` | — | Simple path: URL to POST to, or a custom Transport function. Chorus handles all streaming. |
 | `systemPrompt` | `string` | — | Transport-path convenience prop. Prepends a hidden `system` message to the request history for every send. |
 | `connector` | `Connector \| 'auto' \| 'openai' \| 'anthropic' \| 'gemini'` | `'auto'` | SSE connector used to parse the stream. `'auto'` detects OpenAI, Anthropic, and Gemini; pass an explicit name when the format is known. |
-| `onSend` | `(text, messages, helpers) => Promise<void>` | — | Advanced path: called when the user submits a message. Use `helpers.appendAssistant` to stream tokens and `helpers.finalizeAssistant` when done. |
-| `value` | `Message[]` | — | Controlled message list. |
-| `onChange` | `(messages: Message[]) => void` | — | Called whenever the message list changes (controlled mode). |
-| `messages` | `Message[]` | — | Initial messages (uncontrolled mode; retained for compatibility). |
-| `initialMessages` | `Message[]` | — | Initial messages for uncontrolled mode. Useful for welcome messages; `system` and `tool` messages are hidden by default via `hiddenRoles`. |
+| `onSend` | `(text, messages, helpers) => Message \| void \| Promise<Message \| void>` | — | Advanced path: called when the user submits a message. Use `helpers.appendAssistant`/`helpers.finalizeAssistant` to stream tokens, or return a complete assistant `Message` for non-streaming replies. |
+| `value` | `Message[]` | — | Controlled message list. Pair with `onChange`; Chorus renders this array as the source of truth. |
+| `onChange` | `(messages: Message[]) => void` | — | Called whenever Chorus wants to change the message list in controlled mode (`value` is provided). Not called for legacy `messages`-only uncontrolled state. |
+| `messages` | `Message[]` | — | Legacy initial-only seed for uncontrolled mode. Read once on mount; later prop changes are ignored. Prefer `initialMessages` for seeding or `value` + `onChange` for controlled mode. |
+| `initialMessages` | `Message[]` | — | Initial-only seed for uncontrolled mode. Useful for welcome messages; `system` and `tool` messages are hidden by default via `hiddenRoles`. |
 | `placeholder` | `string` | `"Message…"` | Input placeholder text. |
 | `accept` | `string` | — | Forwarded to the file-picker `<input accept>`. Omitting the prop hides the attach button entirely. |
 | `sending` | `boolean` | — | Override the sending state (useful when you manage it externally via `useChorusStream`). |
@@ -358,7 +408,7 @@ npm run dev
 | `errorMessage` | `string` | `'Something went wrong. Please try again.'` | Friendly message shown in the error banner. Raw transport errors are never surfaced in the UI. |
 | `onError` | `(error: Error) => void` | — | Called for any non-abort error from a send or stream. The raw `Error` goes here; the UI shows `errorMessage`. |
 | `onChunk` | `(chunk: string, messageId: string) => void` | — | Observation hook called for each streamed token. Receives the assistant `messageId` so callers can correlate chunks with a specific message. Does **not** affect streaming behaviour. |
-| `persistenceKey` | `string` | — | When set, automatically saves and restores messages using the given key. Defaults to localStorage. |
+| `persistenceKey` | `string` | — | Uncontrolled-mode persistence key. When set without `value`, Chorus saves/restores messages using this key (defaults to localStorage). If `value` is provided, controlled state wins and built-in persistence is not used. |
 | `persistenceStorage` | `StorageAdapter` | `localStorage` | Custom storage adapter for persistenceKey. |
 | `headless` | `boolean` | `false` | Strip all default styles and inline style injection. |
 | `renderMessage` | `(message: Message) => ReactNode` | — | Custom per-message renderer. Return `null` to fall back to default rendering. |
@@ -420,7 +470,7 @@ const { send, abort, sending } = useChorusStream(transport, { connector: 'openai
 ```
 
 - `transport` — async function `(text, history, signal) => Promise<Response>`. Use `createFetchSSETransport(url)` or write your own.
-- `opts.connector` — `'openai'` | `'anthropic'` | `'gemini'` | `'auto'` | custom `Connector`. Defaults to `'auto'` which handles OpenAI, Gemini, Anthropic JSON, and plain-text SSE.
+- `opts.connector` — `'openai'` | `'anthropic'` | `'gemini'` | `'auto'` | custom `Connector`. Defaults to `'auto'` which handles OpenAI, Gemini, Anthropic JSON, plain-text SSE, and in-band `{ error }` payloads.
 
 ### `createFetchSSETransport(url, init?)`
 
@@ -468,6 +518,7 @@ const myConnector: Connector = {
   extract(data) {
     if (data === '[DONE]') return { done: true };
     const obj = JSON.parse(data);
+    if (obj.error) return { error: typeof obj.error === 'string' ? obj.error : obj.error.message };
     return obj.token ? { text: obj.token } : null;
   },
 };
@@ -543,6 +594,7 @@ interface MessageBubbleProps {
   style?: React.CSSProperties; // merged onto the outer .chorus-msg element
   codeTheme?: 'dark' | 'light'; // defaults to 'dark'
   headless?: boolean;          // forwards headless mode to Markdown; defaults to false
+  streaming?: boolean;         // forwards Markdown's escaped plain-text streaming mode
 }
 ```
 
@@ -619,7 +671,7 @@ import { ChatWindow, ChatInput, ChorusTheme, Markdown } from 'react-chorus';
 - **`<ChatWindow messages={…} typing={…} />`** — renders the scrollable message list with a typing indicator. It accepts `hiddenRoles?: Role[]` (default `['system', 'tool']`); `showSystemMessages` is deprecated but remains supported as an alias for showing all roles.
 - **`<ChatInput value onSend onStop placeholder sending />`** — the text input and send/stop button.
 - **`<ChorusTheme palette={…}>`** — applies theme CSS variables to any subtree.
-- **`<Markdown text={…} codeTheme="dark" />`** — standalone markdown renderer with syntax highlighting and copy buttons.
+- **`<Markdown text={…} codeTheme="dark" />`** — standalone markdown renderer with syntax highlighting and copy buttons. It supports `streaming` to render escaped plain text until finalization and `sanitizer` to provide a custom DOMPurify-compatible sanitizer for SSR.
 - **`<MessageBubble message={…} />`** — renders the default bubble for one message, including attachments. Accepts `className`, `style`, `codeTheme`, and `headless` for decoration without replacing the full renderer.
 
 ## Message Shape

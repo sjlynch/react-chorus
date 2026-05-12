@@ -1,3 +1,4 @@
+import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -23,6 +24,23 @@ function sseResponse(chunks: string[], status = 200) {
   });
 
   return new Response(body, { status });
+}
+
+function erroringSSEResponse(chunks: string[]) {
+  const encoder = new TextEncoder();
+  let index = 0;
+  const body = new ReadableStream({
+    pull(controller) {
+      if (index < chunks.length) {
+        controller.enqueue(encoder.encode(`data: ${chunks[index]}\n\n`));
+        index += 1;
+        return;
+      }
+      controller.error(new Error('stream exploded'));
+    },
+  });
+
+  return new Response(body, { status: 200 });
 }
 
 function deferred<T = void>() {
@@ -121,6 +139,82 @@ describe('Chorus', () => {
     warn.mockRestore();
   });
 
+  it('generates unique message IDs for rapid sends in the same millisecond', async () => {
+    const user = userEvent.setup();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    let latestMessages: Message[] = [];
+
+    function Harness() {
+      const [messages, setMessages] = React.useState<Message[]>([]);
+      return (
+        <Chorus
+          value={messages}
+          onChange={(next) => {
+            latestMessages = next;
+            setMessages(next);
+          }}
+          onSend={() => ({ role: 'assistant', text: 'ok' } as Message)}
+          minAssistantDelayMs={0}
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'one');
+    const firstNow = vi.spyOn(Date, 'now').mockReturnValue(12345);
+    await user.click(screen.getByRole('button', { name: /send/i }));
+    await waitFor(() => expect(latestMessages).toHaveLength(2));
+    firstNow.mockRestore();
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'two');
+    const secondNow = vi.spyOn(Date, 'now').mockReturnValue(12345);
+    await user.click(screen.getByRole('button', { name: /send/i }));
+    await waitFor(() => expect(latestMessages).toHaveLength(4));
+    secondNow.mockRestore();
+
+    const ids = latestMessages.map(m => m.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('warns when messages is paired with onChange instead of value', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    render(<Chorus messages={[]} onChange={vi.fn()} />);
+
+    await waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining('`messages` is initial-only')));
+    warn.mockRestore();
+  });
+
+  it('warns when value and persistenceKey are both provided', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    render(<Chorus value={[]} persistenceKey="chat" />);
+
+    await waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining('Both `value` and `persistenceKey`')));
+    warn.mockRestore();
+  });
+
+  it('onSend can return a message for a non-streaming assistant response', async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn<OnSend>(async () => ({
+      id: 'assistant-1',
+      role: 'assistant',
+      text: 'non-streamed reply',
+      metadata: { source: 'rest' },
+    }));
+
+    render(<Chorus onSend={onSend} minAssistantDelayMs={0} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'hello');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
+    expect(await screen.findByText('non-streamed reply')).toBeInTheDocument();
+  });
+
   it('onSend path calls onSend with text, messages, and helpers', async () => {
     const user = userEvent.setup();
     const initial: Message[] = [{ id: 'm1', role: 'assistant', text: 'Welcome' }];
@@ -211,6 +305,25 @@ describe('Chorus', () => {
     expect(onError.mock.calls[0][0].message).toMatch(/Bad response \(500\) or missing body/i);
     expect(await screen.findByText('Something went wrong. Please try again.')).toBeInTheDocument();
     expect(screen.queryByText(/Bad response \(500\) or missing body/i)).not.toBeInTheDocument();
+  });
+
+  it('transport path surfaces in-band error payloads through onError and the UI banner', async () => {
+    const user = userEvent.setup();
+    const transport = vi.fn<Transport>(async () => sseResponse([
+      JSON.stringify({ choices: [{ delta: { content: 'partial' } }] }),
+      JSON.stringify({ error: 'stream failed' }),
+    ]));
+    const onError = vi.fn();
+
+    render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} onError={onError} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'boom');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    await waitFor(() => expect(onError).toHaveBeenCalledOnce());
+    expect(onError.mock.calls[0][0]).toBeInstanceOf(Error);
+    expect(onError.mock.calls[0][0].message).toBe('stream failed');
+    expect(await screen.findByText('Something went wrong. Please try again.')).toBeInTheDocument();
   });
 
   it('onSend non-abort error invokes onError with the Error object', async () => {
@@ -315,6 +428,34 @@ describe('Chorus', () => {
     await waitFor(() => expect(transport).toHaveBeenCalledTimes(2));
     expect(transport.mock.calls[0][0]).toBe('try again');
     expect(transport.mock.calls[1][0]).toBe('try again');
+  });
+
+  it('removes a failed partial transport response before retrying', async () => {
+    const user = userEvent.setup();
+    const transport = vi.fn<Transport>(async () => (
+      transport.mock.calls.length === 1
+        ? erroringSSEResponse(['partial answer'])
+        : sseResponse(['fresh answer'])
+    ));
+
+    render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'try again');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByText('Something went wrong. Please try again.')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText('partial answer')).not.toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: /retry/i }));
+
+    await waitFor(() => expect(transport).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getAllByText('fresh answer')).toHaveLength(1));
+    expect(transport.mock.calls[1][1]).toEqual([
+      expect.objectContaining({ role: 'user', text: 'try again' }),
+    ]);
+    expect(transport.mock.calls[1][1]).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ text: 'partial answer' })]),
+    );
   });
 
   it('Stop button aborts the active transport stream', async () => {

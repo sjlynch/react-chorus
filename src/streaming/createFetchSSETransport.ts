@@ -5,6 +5,7 @@ export interface FetchSSETransportOptions extends Omit<RequestInit, 'body' | 'me
   /**
    * Serialize the outgoing request body.
    * Defaults to `JSON.stringify({ prompt, history })` for backwards compatibility.
+   * `history` includes the current user turn; `prompt` is a convenience copy.
    *
    * @example OpenAI-compatible backend
    * ```ts

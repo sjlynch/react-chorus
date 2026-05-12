@@ -23,15 +23,16 @@ export interface MessageBubbleProps {
   style?: React.CSSProperties;
   codeTheme?: 'dark' | 'light';
   headless?: boolean;
+  streaming?: boolean;
 }
 
-export function MessageBubble({ message, className, style, codeTheme = 'dark', headless }: MessageBubbleProps) {
+export function MessageBubble({ message, className, style, codeTheme = 'dark', headless, streaming = false }: MessageBubbleProps) {
   const cls = ['chorus-msg', `chorus-${message.role}`, className].filter(Boolean).join(' ');
   return (
     <div className={cls} style={style}>
       <div className="chorus-bubble">
         <MessageAttachments attachments={message.attachments} />
-        <Markdown text={message.text} codeTheme={codeTheme} headless={headless ?? false} />
+        <Markdown text={message.text} codeTheme={codeTheme} headless={headless ?? false} streaming={streaming} />
       </div>
     </div>
   );
@@ -44,9 +45,10 @@ export interface MessageRowProps {
   onEdit?: (id: string, newText: string) => void;
   onRegenerate?: (id: string) => void;
   onDelete?: (id: string) => void;
+  streaming?: boolean;
 }
 
-export function MessageRow({ m, codeTheme, headless, onEdit, onRegenerate, onDelete }: MessageRowProps) {
+export function MessageRow({ m, codeTheme, headless, onEdit, onRegenerate, onDelete, streaming = false }: MessageRowProps) {
   const [editing, setEditing] = React.useState(false);
   const [editText, setEditText] = React.useState(m.text);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
@@ -95,7 +97,7 @@ export function MessageRow({ m, codeTheme, headless, onEdit, onRegenerate, onDel
         <div className="chorus-msg-content">
           <div className="chorus-bubble">
             <MessageAttachments attachments={m.attachments} />
-            <Markdown text={m.text} codeTheme={codeTheme} headless={headless} />
+            <Markdown text={m.text} codeTheme={codeTheme} headless={headless} streaming={streaming} />
           </div>
           {hasActions && (
             <div className="chorus-actions">

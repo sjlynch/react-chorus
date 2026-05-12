@@ -2,6 +2,7 @@ import type { ConnectorName } from '../types';
 import { openaiConnector, type Connector } from './openai';
 import { anthropicConnector } from './anthropic';
 import { geminiConnector } from './gemini';
+import { extractErrorMessage } from './error';
 
 export type { Connector, ConnectorResult } from './openai';
 export { anthropicConnector } from './anthropic';
@@ -21,6 +22,8 @@ export const autoConnector: Connector = {
     if (data === '[DONE]') return { done: true };
     try {
       const obj = JSON.parse(data);
+      const error = extractErrorMessage(obj);
+      if (error) return { error };
       if (obj && Array.isArray(obj.choices)) return openaiConnector.extract(data);
       if (obj && Array.isArray(obj.candidates)) return geminiConnector.extract(data);
       if (obj && typeof obj.type === 'string') return anthropicConnector.extract(data);
