@@ -53,7 +53,7 @@ describe('Chorus', () => {
 
   it('transport path send() fires transport and streams tokens into the message list', async () => {
     const user = userEvent.setup();
-    const transport = vi.fn(async () => sseResponse(['Hel', 'lo']));
+    const transport = vi.fn(async (_text: string) => sseResponse(['Hel', 'lo']));
 
     render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} />);
 
@@ -69,7 +69,7 @@ describe('Chorus', () => {
   it('onSend path calls onSend with text, messages, and helpers', async () => {
     const user = userEvent.setup();
     const initial: Message[] = [{ id: 'm1', role: 'assistant', text: 'Welcome' }];
-    const onSend = vi.fn(async () => undefined);
+    const onSend = vi.fn(async (_text: string, _messages: Message[], _helpers: OnSendHelpers) => undefined);
 
     render(<Chorus messages={initial} onSend={onSend} minAssistantDelayMs={0} />);
 
@@ -247,7 +247,7 @@ describe('Chorus', () => {
 
   it('Retry re-triggers the assistant with the last user text', async () => {
     const user = userEvent.setup();
-    const transport = vi.fn(async () => sseResponse([], 500));
+    const transport = vi.fn(async (_text: string) => sseResponse([], 500));
 
     render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} />);
 
