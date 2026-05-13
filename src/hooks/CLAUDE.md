@@ -19,6 +19,10 @@ Loads and saves message arrays through a `StorageAdapter`.
 - Supports async adapters (for example IndexedDB wrappers) via effect-based loading and promise-aware saving.
 - Returns `{ value, onChange }` so callers can spread persistence into `<Chorus>`.
 
+## `useLatestRef`
+
+Small helper that stores the latest callback/value in a ref after each render. It is used by stable callbacks and async closures in `useChorusStream`, `useChorusMessages`, and `useRAFQueue` so they can read current props/state without changing callback identity.
+
 ## Closure pattern
 
-Callbacks or values used inside stable callbacks/async closures should be read from refs to avoid stale closure bugs. This codebase currently uses manual `ref` + assignment/effect patterns rather than a shared `useLatestRef` helper.
+Prefer `useLatestRef` for captured callbacks or values that must stay fresh inside stable callbacks/async work. Use manual refs for mutable lifecycle state or imperative handles (`isSendingRef`, `controllerRef`, scroll refs) rather than stale-closure avoidance.
