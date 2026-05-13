@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readSSEStream } from '../hooks/useChorusStream';
 import { createWebSocketTransport } from '../streaming/createWebSocketTransport';
 
 class MockWebSocket {
@@ -100,6 +101,25 @@ describe('createWebSocketTransport', () => {
     ws.onmessage?.({ data: '{"chunk":" there"}' } as MessageEvent);
     const second = await reader.read();
     expect(decoder.decode(second.value)).toBe('data: {"chunk":" there"}\n\n');
+  });
+
+  it('preserves embedded newlines in a WS message as one SSE payload', async () => {
+    const transport = createWebSocketTransport('wss://api.example.com/chat');
+    const promise = transport('hello', [], new AbortController().signal);
+    const ws = MockWebSocket.instances[0];
+
+    ws.emitOpen();
+    const response = await promise;
+    const events: string[] = [];
+    const readPromise = readSSEStream(response, payload => {
+      events.push(payload);
+      return false;
+    });
+
+    ws.onmessage?.({ data: 'hello\nworld' } as MessageEvent);
+    await readPromise;
+
+    expect(events).toEqual(['hello\nworld']);
   });
 
   it('closes the response stream when the WS closes', async () => {

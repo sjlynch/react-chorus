@@ -18,6 +18,10 @@ export interface WebSocketTransportOptions<TMeta = Record<string, unknown>> {
   formatMessage?: (text: string, history: Message<TMeta>[]) => string;
 }
 
+function encodeSSEDataEvent(data: string) {
+  return `${data.split(/\r\n|\r|\n/).map(line => `data: ${line}`).join('\n')}\n\n`;
+}
+
 /**
  * Creates a Transport backed by a native WebSocket connection.
  *
@@ -86,8 +90,9 @@ export function createWebSocketTransport<TMeta = Record<string, unknown>>(
 
       ws.onmessage = (event: MessageEvent) => {
         const data = typeof event.data === 'string' ? event.data : '';
-        // Wrap as an SSE event so readSSEStream can parse it downstream.
-        streamController.enqueue(encoder.encode(`data: ${data}\n\n`));
+        // Wrap as one SSE event so readSSEStream can parse it downstream.
+        // Prefix each line to preserve embedded newlines in the WS payload.
+        streamController.enqueue(encoder.encode(encodeSSEDataEvent(data)));
       };
 
       ws.onclose = (event: CloseEvent) => {
