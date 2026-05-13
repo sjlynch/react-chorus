@@ -6,11 +6,11 @@ Message list and auto-scroll container. It filters roles via `hiddenRoles` (defa
 
 ## `ChatInput`
 
-Textarea plus send/stop button and optional file attachment UI (`accept` enables attach). Enter sends, Shift+Enter inserts a newline, and attached files are read as data URLs. Intended growth is capped at 160px; current code enforces that with CSS `max-height` and has no separate JS auto-resize helper.
+Textarea plus send/stop button and optional file attachment UI (`accept` enables attach). Enter sends, Shift+Enter inserts a newline, and attached files are read as data URLs. `resizeTextarea()` is the JS auto-resize helper: on change it resets height to `auto`, then sets `min(scrollHeight, 160px)`; CSS also caps growth with `max-height`, and height resets after send.
 
 ## `Markdown`
 
-Uses a private `Marked` instance, not the global singleton, so host app marked configuration is not mutated. It lazy-loads `highlight.js` and a raw theme CSS file on first code fence. Highlight CSS is scoped under `.chorus-codeblock-{theme}` classes, and rendered HTML is sanitized with DOMPurify in the browser.
+Uses a private `Marked` instance, not the global singleton, so host app marked configuration is not mutated. Finalized markdown normalizes incomplete fences, parses once per memo, sanitizes with a provided sanitizer, `DOMPurify.sanitize` when available, or a fallback sanitizer for SSR/no-DOMPurify environments, then adds code-block chrome unless `headless`. While `streaming` is true it skips parsing/highlighting and renders React-escaped plain text with pre-wrap until finalization; `highlight.js` and theme CSS lazy-load only for finalized code fences.
 
 ## `ChorusTheme`
 
@@ -18,7 +18,7 @@ Standalone wrapper that applies palette CSS variables via `styleVarsFromPalette`
 
 ## `MessageBubble`
 
-Exported from `ChatWindow.tsx` for use in `renderMessage` render-props. It wraps the default role class and `Markdown`; the built-in row renderer also handles attachments.
+Exported from `ChatWindow.tsx` for use in `renderMessage` render-props. It wraps the default role class and bubble, renders `message.attachments` (image previews or file names), and passes text through `Markdown`. The built-in `MessageRow` uses the same attachment renderer and adds edit/regenerate/delete actions.
 
 ## `ToolCallBlock`
 
