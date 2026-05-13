@@ -14,13 +14,20 @@ import type { Connector } from './connectors/connectors';
 export type { Transport };
 export type { Connector };
 
-interface ChorusSendHelpers {
+export interface ChorusSendHelpers {
   appendAssistant: (chunk: string) => void;
   finalizeAssistant: () => void;
   signal: AbortSignal;
 }
 
+export type ChorusOnSend<TMeta = Record<string, unknown>> = (
+  text: string,
+  messages: Message<TMeta>[],
+  helpers: ChorusSendHelpers,
+) => Promise<Message<TMeta> | void> | Message<TMeta> | void;
+
 const DEFAULT_MIN_ASSISTANT_DELAY_MS = 300;
+const DEFAULT_PERSISTENCE_WRITE_DEBOUNCE_MS = 80;
 let fallbackMessageIdCounter = 0;
 
 function createMessageId() {
@@ -74,7 +81,7 @@ export interface ChorusProps<TMeta = Record<string, unknown>> {
   /** Hidden system prompt prepended to transport request history. */
   systemPrompt?: string;
   connector?: Connector | ConnectorName;
-  onSend?: (text: string, messages: Message<TMeta>[], helpers: ChorusSendHelpers) => Promise<Message<TMeta> | void> | Message<TMeta> | void;
+  onSend?: ChorusOnSend<TMeta>;
   placeholder?: string;
   palette?: Palette;
   sending?: boolean;
@@ -86,6 +93,16 @@ export interface ChorusProps<TMeta = Record<string, unknown>> {
   accept?: string;
   persistenceKey?: string;
   persistenceStorage?: StorageAdapter;
+  /** Called when Chorus cannot write the transcript to persistenceStorage. */
+  onPersistenceError?: (error: Error) => void;
+  /** Show a built-in button that clears/resets the conversation. */
+  showClearButton?: boolean;
+  /** Accessible/button label for the built-in clear action. */
+  clearLabel?: string;
+  /** Called after the clear/reset action chooses the next message list. */
+  onClear?: (messages: Message<TMeta>[]) => void;
+  /** When clearing, restore initialMessages/messages instead of clearing to []. Defaults to false. */
+  resetToInitialMessages?: boolean;
   headless?: boolean;
   renderMessage?: (message: Message<TMeta>) => React.ReactNode;
   hiddenRoles?: Role[];
@@ -113,14 +130,23 @@ export function Chorus<TMeta = Record<string, unknown>>({
   accept,
   persistenceKey,
   persistenceStorage,
+  onPersistenceError,
+  showClearButton = false,
+  clearLabel = 'Clear conversation',
+  onClear,
+  resetToInitialMessages = false,
   headless = false,
   renderMessage,
   hiddenRoles,
   className,
   style,
 }: ChorusProps<TMeta>) {
-  const persisted = useChorusPersistence<TMeta>(persistenceKey ?? '', { storage: persistenceStorage });
-  const { msgs, updateMsgs, onChunkRef } = useChorusMessages<TMeta>({
+  const persisted = useChorusPersistence<TMeta>(persistenceKey ?? '', {
+    storage: persistenceStorage,
+    writeDebounceMs: DEFAULT_PERSISTENCE_WRITE_DEBOUNCE_MS,
+    onError: onPersistenceError,
+  });
+  const { msgs, updateMsgs, onChunkRef, seedMessages } = useChorusMessages<TMeta>({
     value,
     messages,
     initialMessages,
@@ -201,6 +227,7 @@ export function Chorus<TMeta = Record<string, unknown>>({
 
   const finalizeAssistantNow = () => {
     cancelPending(true);
+    persisted.flush();
     hasStartedAssistantRef.current = false;
     pendingAssistantIdRef.current = null;
     setInternalSending(false);
@@ -217,6 +244,7 @@ export function Chorus<TMeta = Record<string, unknown>>({
     let released = minAssistantDelayMs <= 0;
     let bufferedChunks: string[] = [];
     let finalizeRequested = false;
+    let finalizeCalled = false;
     let releaseTimer: ReturnType<typeof setTimeout> | null = null;
 
     const clearReleaseTimer = () => {
@@ -267,12 +295,13 @@ export function Chorus<TMeta = Record<string, unknown>>({
       scheduleRelease();
     };
 
-    const finalizeAssistant = () => {
+    const requestFinalize = (forceFlush: boolean) => {
       if (!isActive()) return;
 
       if (!released && bufferedChunks.length > 0) {
         finalizeRequested = true;
-        scheduleRelease();
+        if (forceFlush) flushBufferedChunks();
+        else scheduleRelease();
         return;
       }
 
@@ -280,9 +309,19 @@ export function Chorus<TMeta = Record<string, unknown>>({
       completeActiveSession(sessionId);
     };
 
+    const finalizeAssistant = () => {
+      finalizeCalled = true;
+      requestFinalize(false);
+    };
+
+    const autoFinalizeAssistant = () => requestFinalize(true);
+
     return {
       helpers: { appendAssistant, finalizeAssistant, signal },
       hasPendingAssistant: () => bufferedChunks.length > 0 || finalizeRequested,
+      hasAssistantOutput: () => hasStartedAssistantRef.current || bufferedChunks.length > 0,
+      wasFinalizeRequested: () => finalizeCalled,
+      autoFinalizeAssistant,
     };
   };
 
@@ -306,7 +345,7 @@ export function Chorus<TMeta = Record<string, unknown>>({
   const removePendingAssistant = () => {
     const partialId = pendingAssistantIdRef.current;
     resetStreamState();
-    if (partialId) updateMsgs(prev => prev.filter(m => m.id !== partialId));
+    if (partialId) updateMsgs(prev => prev.filter(m => m.id !== partialId), { flushPersistence: true });
   };
 
   const historyForTransport = (history: Message<TMeta>[]): Message<TMeta>[] => (
@@ -375,6 +414,13 @@ export function Chorus<TMeta = Record<string, unknown>>({
         }));
         completeActiveSession(sessionId);
       }
+
+      if (isAssistantSessionActive(sessionId) && sessionHelpers.hasAssistantOutput() && !sessionHelpers.wasFinalizeRequested()) {
+        if (process.env.NODE_ENV !== 'production') {
+          console.warn('[Chorus] `onSend` appended assistant chunks but resolved without calling `helpers.finalizeAssistant()`. Chorus finalized the assistant automatically to avoid leaving the conversation in a sending state.');
+        }
+        sessionHelpers.autoFinalizeAssistant();
+      }
     } catch (e: unknown) {
       if (isAssistantSessionActive(sessionId)) {
         removePendingAssistant();
@@ -410,17 +456,31 @@ export function Chorus<TMeta = Record<string, unknown>>({
     const submitted = lastSubmittedTurnRef.current;
     if (!submitted || sending) return;
     if (streamError && msgs[msgs.length - 1]?.role === 'assistant') {
-      updateMsgs(prev => dropTrailingAssistant(prev));
+      updateMsgs(prev => dropTrailingAssistant(prev), { flushPersistence: true });
     }
     await triggerAssistant(submitted.text, cloneHistoryForRetry(submitted.history));
   };
 
-  const stop = () => {
-    if (!sending) return;
+  const stopActiveAssistant = () => {
     invalidateAssistantSession();
     if (transport) streamAbort();
     else controllerRef.current?.abort();
     finalizeAssistantNow();
+  };
+
+  const stop = () => {
+    if (!sending) return;
+    stopActiveAssistant();
+  };
+
+  const clearMessages = () => {
+    if (sending) stopActiveAssistant();
+    setDraft('');
+    setStreamError(null);
+    lastSubmittedTurnRef.current = null;
+    const next = resetToInitialMessages ? seedMessages : [];
+    updateMsgs(() => next, { flushPersistence: true });
+    onClear?.(next);
   };
 
   const handleEdit = async (id: string, newText: string) => {
@@ -428,7 +488,7 @@ export function Chorus<TMeta = Record<string, unknown>>({
     const idx = msgs.findIndex(m => m.id === id);
     if (idx === -1) return;
     const edited: Message<TMeta> = { ...msgs[idx], text: newText };
-    const next = updateMsgs(prev => [...prev.slice(0, idx), edited]);
+    const next = updateMsgs(prev => [...prev.slice(0, idx), edited], { flushPersistence: true });
     await triggerAssistant(newText, next);
   };
 
@@ -443,15 +503,22 @@ export function Chorus<TMeta = Record<string, unknown>>({
     const next = updateMsgs(prev => {
       const history = streamError ? dropTrailingAssistant(prev) : prev;
       return history.slice(0, userIdx + 1);
-    });
+    }, { flushPersistence: true });
     await triggerAssistant(userMsg.text, next);
   };
 
-  const handleDelete = (id: string) => updateMsgs(prev => prev.filter(m => m.id !== id));
+  const handleDelete = (id: string) => updateMsgs(prev => prev.filter(m => m.id !== id), { flushPersistence: true });
 
   return (
     <div className={["chorus", className].filter(Boolean).join(" ")} style={{ ...paletteVars, ...style }}>
       <ChatWindow<TMeta> messages={msgs} typing={!!(transport || onSend) && sending && !hasStartedAssistantRef.current} codeTheme={codeBlockTheme} headless={headless} renderMessage={renderMessage} hiddenRoles={hiddenRoles} streamingMessageId={activeStreamingMessageId} onEdit={(transport || onSend) ? handleEdit : undefined} onRegenerate={(transport || onSend) ? handleRegenerate : undefined} onDelete={handleDelete} error={streamError} onRetry={retry} />
+      {showClearButton && (
+        <div className="chorus-clear-row">
+          <button type="button" className="chorus-clear-btn" onClick={clearMessages} disabled={!sending && msgs.length === 0}>
+            {clearLabel}
+          </button>
+        </div>
+      )}
       <ChatInput value={draft} onChange={setDraft} onSend={send} onStop={stop} sending={sending} placeholder={placeholder} accept={accept} />
     </div>
   );

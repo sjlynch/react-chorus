@@ -13,6 +13,7 @@ export { ToolCallBlock } from './components/ToolCallBlock';
 export { ChorusHeadless as Chorus, type ChorusHeadlessProps as ChorusProps } from './ChorusHeadless';
 export { ChorusHeadless } from './ChorusHeadless';
 export type { ChorusHeadlessProps } from './ChorusHeadless';
+export type { ChorusOnSend, ChorusSendHelpers } from './Chorus';
 
 export { ChorusTheme } from './components/ChorusTheme';
 export type { Palette } from './components/ChorusTheme';

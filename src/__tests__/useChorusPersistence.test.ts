@@ -187,4 +187,86 @@ describe('useChorusPersistence', () => {
 
     expect(result.current.value).toEqual([MSG]);
   });
+
+  it('records and surfaces synchronous write failures without throwing', async () => {
+    const quotaError = new DOMException('Full', 'QuotaExceededError');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const onError = vi.fn();
+    const storage: StorageAdapter = {
+      getItem: vi.fn(() => null),
+      setItem: vi.fn(() => { throw quotaError; }),
+    };
+
+    const { result } = renderHook(() => useChorusPersistence('key', { storage, onError }));
+
+    expect(() => act(() => result.current.onChange(MSGS))).not.toThrow();
+
+    await act(async () => { await Promise.resolve(); });
+
+    expect(result.current.error).toBe(quotaError);
+    expect(onError).toHaveBeenCalledWith(quotaError);
+    expect(warn).toHaveBeenCalledWith('[Chorus] Failed to persist messages.', quotaError);
+    warn.mockRestore();
+  });
+
+  it('records and surfaces rejected async write failures without throwing', async () => {
+    const writeError = new Error('write failed');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const onError = vi.fn();
+    const storage: StorageAdapter = {
+      getItem: vi.fn(() => null),
+      setItem: vi.fn(() => Promise.reject(writeError)),
+    };
+
+    const { result } = renderHook(() => useChorusPersistence('key', { storage, onError }));
+
+    expect(() => act(() => result.current.onChange(MSGS))).not.toThrow();
+
+    await act(async () => { await Promise.resolve(); });
+
+    expect(result.current.error).toBe(writeError);
+    expect(onError).toHaveBeenCalledWith(writeError);
+    expect(warn).toHaveBeenCalledWith('[Chorus] Failed to persist messages.', writeError);
+    warn.mockRestore();
+  });
+
+  it('serializes async writes so newer messages win', async () => {
+    const store: Record<string, string> = {};
+    const writes: Array<{ value: string; resolve: () => void }> = [];
+    const storage: StorageAdapter = {
+      getItem: vi.fn(() => null),
+      setItem: vi.fn((_key, value) => new Promise<void>((resolve) => {
+        writes.push({
+          value,
+          resolve: () => {
+            store.key = value;
+            resolve();
+          },
+        });
+      })),
+    };
+
+    const { result } = renderHook(() => useChorusPersistence('key', { storage }));
+
+    act(() => result.current.onChange([MSG]));
+    act(() => result.current.onChange(MSGS));
+
+    expect(writes).toHaveLength(1);
+    expect(writes[0].value).toBe(JSON.stringify([MSG]));
+
+    await act(async () => {
+      writes[0].resolve();
+      await Promise.resolve();
+    });
+
+    expect(writes).toHaveLength(2);
+    expect(writes[1].value).toBe(JSON.stringify(MSGS));
+
+    await act(async () => {
+      writes[1].resolve();
+      await Promise.resolve();
+    });
+
+    expect(store.key).toBe(JSON.stringify(MSGS));
+  });
 });

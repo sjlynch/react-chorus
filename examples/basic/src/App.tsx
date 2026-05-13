@@ -1,5 +1,6 @@
 import 'react-chorus/styles.css';
 import { Chorus } from 'react-chorus';
+import type { ChorusOnSend } from 'react-chorus';
 
 const REPLIES = [
   "That's a great point! Let me think about that...",
@@ -10,19 +11,11 @@ const REPLIES = [
 
 // Simulated streaming transport — no backend required.
 // Replace this with createFetchSSETransport('/api/chat') to wire up a real backend.
-async function handleSend(
-  text: string,
-  _messages: unknown[],
-  {
-    appendAssistant,
-    finalizeAssistant,
-    signal,
-  }: {
-    appendAssistant: (chunk: string) => void;
-    finalizeAssistant: () => void;
-    signal: AbortSignal;
-  }
-) {
+const handleSend: ChorusOnSend = async (
+  text,
+  _messages,
+  { appendAssistant, finalizeAssistant, signal },
+) => {
   const reply = REPLIES[Math.floor(Math.random() * REPLIES.length)] + ` (You said: "${text}")`;
   const words = reply.split(' ');
 
@@ -33,7 +26,7 @@ async function handleSend(
   }
 
   finalizeAssistant();
-}
+};
 
 export default function App() {
   return (

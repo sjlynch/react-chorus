@@ -21,6 +21,10 @@
 .chorus-msg-file { display: inline-block; padding: 4px 10px; background: rgba(0,0,0,.15); border-radius: 6px; font-size: 12px; }
 
 /* Input area — column flex to stack attachment previews above the input row */
+.chorus-clear-row { display: flex; justify-content: flex-end; margin-top: 8px; }
+.chorus-clear-btn { font-size: 12px; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--chorus-border, #2a2a2a); background: transparent; color: var(--chorus-action-text, #a3a3a3); cursor: pointer; }
+.chorus-clear-btn:hover:not(:disabled) { background: var(--chorus-action-hover-bg, rgba(255,255,255,0.15)); color: var(--chorus-action-hover-text, #eee); }
+.chorus-clear-btn:disabled { opacity: .5; cursor: default; }
 .chorus-input { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; background: var(--chorus-input-area-bg, transparent); }
 .chorus-input-row { position: relative; display: flex; align-items: center; }
 .chorus-input-row textarea { width: 100%; min-height: 44px; max-height: 160px; padding: 12px 50px 12px 14px; border-radius: 12px; border: 1px solid var(--chorus-input-border, #333333); background: var(--chorus-input-bg, #1a1a1a); color: var(--chorus-input-text, #f3f4f6); outline: none; resize: none; overflow: hidden; line-height: 1.4; }

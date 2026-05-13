@@ -1,6 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { Chorus } from './Chorus';
+import { Chorus, type ChorusOnSend } from './Chorus';
 
 const DEMO_CHUNK_DELAY_MS = 60;
 
@@ -11,19 +11,11 @@ const REPLIES = [
   "Sure, let me walk you through it step by step.",
 ];
 
-async function handleSend(
-  text: string,
-  _messages: unknown[],
-  {
-    appendAssistant,
-    finalizeAssistant,
-    signal,
-  }: {
-    appendAssistant: (chunk: string) => void;
-    finalizeAssistant: () => void;
-    signal: AbortSignal;
-  }
-) {
+const handleSend: ChorusOnSend = async (
+  text,
+  _messages,
+  { appendAssistant, finalizeAssistant, signal },
+) => {
   const reply = REPLIES[Math.floor(Math.random() * REPLIES.length)] + ` (You said: "${text}")`;
   const words = reply.split(' ');
 
@@ -34,7 +26,7 @@ async function handleSend(
   }
 
   finalizeAssistant();
-}
+};
 
 function App() {
   return (

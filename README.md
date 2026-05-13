@@ -70,7 +70,7 @@ Use `onSend` when you need direct control: proxying through a custom client, han
 import 'react-chorus/styles.css';
 import React from 'react';
 import { Chorus, createFetchSSETransport, useChorusStream } from 'react-chorus';
-import type { Message } from 'react-chorus';
+import type { ChorusOnSend, Message } from 'react-chorus';
 
 const transport = createFetchSSETransport('/api/chat');
 
@@ -78,15 +78,16 @@ export default function App() {
   const [messages, setMessages] = React.useState<Message[]>([]);
   const { send, sending } = useChorusStream(transport, { connector: 'openai' });
 
+  const handleSend: ChorusOnSend = (text, msgs, { appendAssistant, finalizeAssistant, signal }) =>
+    send(text, msgs, { onChunk: appendAssistant, onDone: finalizeAssistant }, signal);
+
   return (
     <div style={{ height: '100dvh' }}>
       <Chorus
         value={messages}
         onChange={setMessages}
         sending={sending}
-        onSend={(text, msgs, { appendAssistant, finalizeAssistant, signal }) =>
-          send(text, msgs, { onChunk: appendAssistant, onDone: finalizeAssistant }, signal)
-        }
+        onSend={handleSend}
         placeholder="Type a message…"
       />
     </div>
@@ -95,6 +96,8 @@ export default function App() {
 ```
 
 `createFetchSSETransport(url)` posts `{ prompt, history }` to your endpoint and reads the response as a Server-Sent Events stream. `history` includes the latest user message, so backend examples should map `history` directly instead of appending `prompt` again. Pass a `formatBody` option to customise the request shape for OpenAI, FastAPI, FormData uploads, or any other backend. The transport sets `Content-Type: application/json` only for its default JSON body; custom serializers should set JSON headers themselves and FormData/Blob/URLSearchParams are not forced to JSON. The `openai` connector parses the standard `choices[*].delta.content` shape.
+
+For reusable callbacks, import `ChorusOnSend<TMeta>` or the lower-level `ChorusSendHelpers` type instead of duplicating the helper shape. `ChorusOnSend<TMeta>` preserves your `Message<TMeta>.metadata` type through the `messages` argument and returned assistant message.
 
 For a non-streaming client, `onSend` may return a complete assistant `Message`. Chorus appends it after the user message (and after `minAssistantDelayMs`):
 
@@ -441,6 +444,8 @@ Message source modes are mutually exclusive:
 
 When `persistenceKey` is combined with `initialMessages` (or legacy `messages`), stored history is checked first. If the key has no stored value, Chorus renders and saves the seed so welcome messages still appear with persistence enabled. If the key already exists — including an intentionally empty `[]` conversation — the stored value wins. Async storage adapters may show the seed while loading; once the read resolves, stored history replaces it, and stale reads are ignored after local changes.
 
+Persistence writes are debounced while assistant tokens stream, flushed when a message finalizes and on explicit edits/deletes/clears, and serialized for async adapters so older saves cannot overwrite newer transcripts. If `setItem` throws or rejects, Chorus keeps the UI running, logs a development warning, records the error in `useChorusPersistence().error`, and calls `onPersistenceError` when provided.
+
 | Prop | Type | Default | Description |
 |------|------|---------|-------------|
 | `transport` | `string \| Transport<TMeta>` | — | Simple path: URL to POST to, or a custom Transport function. Chorus handles all streaming. |
@@ -462,6 +467,11 @@ When `persistenceKey` is combined with `initialMessages` (or legacy `messages`),
 | `onChunk` | `(chunk: string, messageId: string) => void` | — | Observation hook called for each streamed token. Receives the assistant `messageId` so callers can correlate chunks with a specific message. Does **not** affect streaming behaviour. |
 | `persistenceKey` | `string` | — | Uncontrolled-mode persistence key. When set without `value`, Chorus saves/restores messages using this key (defaults to localStorage). If `value` is provided, controlled state wins and built-in persistence is not used. |
 | `persistenceStorage` | `StorageAdapter` | `localStorage` | Custom storage adapter for persistenceKey. The default `localStorage` is resolved lazily; if browser storage is blocked or unavailable, Chorus keeps working without persistence. |
+| `onPersistenceError` | `(error: Error) => void` | — | Called when a persistence write throws or rejects. The hook also exposes the latest write error as `useChorusPersistence().error`. |
+| `showClearButton` | `boolean` | `false` | Shows a built-in clear/reset conversation button above the input. |
+| `clearLabel` | `string` | `'Clear conversation'` | Label for the built-in clear/reset button. |
+| `onClear` | `(messages: Message<TMeta>[]) => void` | — | Called with the reset message list after the built-in clear action runs. |
+| `resetToInitialMessages` | `boolean` | `false` | When clearing, restore the initial `messages`/`initialMessages` seed instead of saving an intentionally empty `[]` conversation. |
 | `headless` | `boolean` | `false` | Strip all default styles and inline style injection. |
 | `renderMessage` | `(message: Message<TMeta>) => ReactNode` | — | Custom per-message renderer. Return `null` to fall back to default rendering. |
 | `hiddenRoles` | `Role[]` | `['system', 'tool']` | Message roles hidden from the transcript. Pass `['system']` to show tool calls while hiding system prompts, or `[]` to show all roles. `<Chorus>` accepts `hiddenRoles` only — `showSystemMessages` exists on `<ChatWindow>` for backwards compatibility. |
@@ -473,6 +483,23 @@ When `persistenceKey` is combined with `initialMessages` (or legacy `messages`),
 | `appendAssistant(chunk)` | Append a text chunk to the current assistant message. Chunks are buffered until `minAssistantDelayMs` has elapsed before the first token is shown. |
 | `finalizeAssistant()` | Mark the assistant message complete. If first-token chunks are still buffered, completion waits until they flush. |
 | `signal` | `AbortSignal` — aborted when the user hits Stop. |
+
+Call `finalizeAssistant()` when your custom stream is done. In development, Chorus warns if `onSend` appended chunks and then resolved without finalizing; it will still flush those chunks and reset the sending state so the UI cannot get stuck in Stop mode.
+
+### Clearing/resetting a conversation
+
+Use the built-in clear button for uncontrolled or persisted chats:
+
+```tsx
+<Chorus
+  persistenceKey="support-chat"
+  initialMessages={[{ id: 'welcome', role: 'assistant', text: 'Hi! How can I help?' }]}
+  showClearButton
+  onPersistenceError={(err) => reportError(err)}
+/>
+```
+
+By default, clearing saves `[]` (so a reload does not resurrect `initialMessages`). Pass `resetToInitialMessages` to reset back to the seed welcome messages instead. In controlled mode, the same button calls `onChange(resetMessages)` and `onClear(resetMessages)`; keep the canonical list in your state as usual.
 
 ### Observing streamed tokens with `onChunk`
 
