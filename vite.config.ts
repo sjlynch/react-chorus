@@ -19,6 +19,7 @@ export default defineConfig({
       },
       name: 'ReactChorus',
       fileName: (format, entryName) => `${entryName}.${format === 'cjs' ? 'cjs' : 'es.js'}`,
+      cssFileName: 'styles',
       formats: ['es', 'cjs']
     },
     rollupOptions: {
@@ -26,7 +27,7 @@ export default defineConfig({
       output: {
         // Keep package.json "./styles.css" export aligned with the generated CSS file.
         assetFileNames: (assetInfo) =>
-          assetInfo.name === 'style.css' ? 'styles.css' : '[name]-[hash][extname]',
+          assetInfo.name?.endsWith('.css') ? 'styles.css' : '[name]-[hash][extname]',
         globals: {
           react: 'React',
           'react-dom': 'ReactDOM',
