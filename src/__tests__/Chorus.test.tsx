@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Chorus, type ChorusProps, type Transport } from '../Chorus';
 import type { Message, StorageAdapter } from '../types';
@@ -106,6 +106,73 @@ describe('Chorus', () => {
     expect(transport.mock.calls[0][0]).toBe('hi');
     expect(screen.getByText('hi')).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText('Hello')).toBeInTheDocument());
+  });
+
+  it('delays the first transport token until minAssistantDelayMs elapses', async () => {
+    vi.useFakeTimers();
+    try {
+      const transport = vi.fn<Transport>(async () => sseResponse(['Delayed']));
+
+      render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={500} />);
+
+      fireEvent.change(screen.getByPlaceholderText('Send a message'), { target: { value: 'hi' } });
+      fireEvent.click(screen.getByRole('button', { name: /send/i }));
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      expect(transport).toHaveBeenCalledOnce();
+      expect(screen.getByText('hi')).toBeInTheDocument();
+      expect(screen.queryByText('Delayed')).not.toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(499);
+      });
+      expect(screen.queryByText('Delayed')).not.toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(screen.getByText('Delayed')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('delays custom onSend helper chunks until minAssistantDelayMs elapses', async () => {
+    vi.useFakeTimers();
+    try {
+      const onSend = vi.fn<OnSend>((_text, _messages, helpers) => {
+        helpers.appendAssistant('Delayed helper');
+        helpers.finalizeAssistant();
+      });
+
+      render(<Chorus onSend={onSend} minAssistantDelayMs={500} />);
+
+      fireEvent.change(screen.getByPlaceholderText('Send a message'), { target: { value: 'hi' } });
+      fireEvent.click(screen.getByRole('button', { name: /send/i }));
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      expect(onSend).toHaveBeenCalledOnce();
+      expect(screen.queryByText('Delayed helper')).not.toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(499);
+      });
+      expect(screen.queryByText('Delayed helper')).not.toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(screen.getByText('Delayed helper')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('renders initialMessages in uncontrolled mode', () => {
@@ -344,7 +411,7 @@ describe('Chorus', () => {
       return new Promise<void>(() => undefined);
     });
 
-    render(<Chorus onSend={onSend} />);
+    render(<Chorus onSend={onSend} minAssistantDelayMs={0} />);
 
     await user.type(screen.getByPlaceholderText('Send a message'), 'stream');
     await user.click(screen.getByRole('button', { name: /send/i }));
@@ -468,6 +535,32 @@ describe('Chorus', () => {
     expect(screen.queryByText('Something went wrong. Please try again.')).not.toBeInTheDocument();
   });
 
+  it('ignores captured onSend helpers after Stop', async () => {
+    const user = userEvent.setup();
+    let helpers!: OnSendHelpers;
+    const onSend = vi.fn((_text: string, _messages: Message[], h: OnSendHelpers) => {
+      helpers = h;
+      return new Promise<void>(() => undefined);
+    });
+
+    render(<Chorus onSend={onSend} minAssistantDelayMs={0} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'stop stale helpers');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /stop/i })).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: /stop/i }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument());
+
+    act(() => {
+      helpers.appendAssistant('late chunk');
+      helpers.finalizeAssistant();
+    });
+
+    expect(screen.queryByText('late chunk')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument();
+  });
+
   it('controlled mode forwards new messages via onChange and renders the externally-controlled list', async () => {
     const user = userEvent.setup();
     const initial: Message[] = [{ id: 'seed', role: 'assistant', text: 'seeded reply' }];
@@ -508,6 +601,74 @@ describe('Chorus', () => {
     await waitFor(() => expect(transport).toHaveBeenCalledTimes(2));
     expect(transport.mock.calls[0][0]).toBe('try again');
     expect(transport.mock.calls[1][0]).toBe('try again');
+  });
+
+  it('Retry resubmits an image-only message with its attachment', async () => {
+    const user = userEvent.setup();
+    const transport = vi.fn<Transport>(async () => sseResponse([], 500));
+    const file = new File(['image-bytes'], 'photo.png', { type: 'image/png' });
+    const { container } = render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} accept="image/*" />);
+
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(fileInput, file);
+    await screen.findByText('photo.png');
+
+    await user.click(screen.getByRole('button', { name: /send/i }));
+    await screen.findByRole('button', { name: /retry/i });
+
+    await user.click(screen.getByRole('button', { name: /retry/i }));
+
+    await waitFor(() => expect(transport).toHaveBeenCalledTimes(2));
+    expect(transport.mock.calls[1][0]).toBe('');
+    expect(transport.mock.calls[1][1]).toEqual([
+      expect.objectContaining({
+        role: 'user',
+        text: '',
+        attachments: [expect.objectContaining({
+          name: 'photo.png',
+          type: 'image/png',
+          size: file.size,
+          data: expect.stringMatching(/^data:image\/png;base64,/),
+        })],
+      }),
+    ]);
+  });
+
+  it('Retry preserves a text-and-attachment turn without duplicating it', async () => {
+    const user = userEvent.setup();
+    const transport = vi.fn<Transport>(async () => (
+      transport.mock.calls.length === 1
+        ? sseResponse([], 500)
+        : sseResponse(['ok'])
+    ));
+    const file = new File(['image-bytes'], 'photo.png', { type: 'image/png' });
+    const { container } = render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} accept="image/*" />);
+
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(fileInput, file);
+    await screen.findByText('photo.png');
+    await user.type(screen.getByPlaceholderText('Send a message'), 'describe this');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+    await screen.findByRole('button', { name: /retry/i });
+
+    await user.click(screen.getByRole('button', { name: /retry/i }));
+
+    await waitFor(() => expect(transport).toHaveBeenCalledTimes(2));
+    const retryHistory = transport.mock.calls[1][1];
+    const userTurns = retryHistory.filter(message => message.role === 'user');
+    expect(userTurns).toHaveLength(1);
+    expect(userTurns[0]).toEqual(expect.objectContaining({
+      role: 'user',
+      text: 'describe this',
+      attachments: [expect.objectContaining({
+        name: 'photo.png',
+        type: 'image/png',
+        size: file.size,
+        data: expect.stringMatching(/^data:image\/png;base64,/),
+      })],
+    }));
+    expect(screen.getAllByText('describe this')).toHaveLength(1);
+    await waitFor(() => expect(screen.getAllByAltText('photo.png')).toHaveLength(1));
   });
 
   it('removes a failed partial transport response before retrying', async () => {

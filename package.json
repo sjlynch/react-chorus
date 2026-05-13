@@ -3,21 +3,24 @@
   "version": "0.1.0",
   "description": "Composable chat UI components for React.",
   "type": "module",
-  "main": "./dist/react-chorus.cjs.js",
+  "main": "./dist/react-chorus.cjs",
   "module": "./dist/react-chorus.es.js",
   "types": "./dist/types/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/types/index.d.ts",
       "import": "./dist/react-chorus.es.js",
-      "require": "./dist/react-chorus.cjs.js"
+      "require": "./dist/react-chorus.cjs"
     },
     "./headless": {
       "types": "./dist/types/headless.d.ts",
       "import": "./dist/react-chorus-headless.es.js",
-      "require": "./dist/react-chorus-headless.cjs.js"
+      "require": "./dist/react-chorus-headless.cjs"
     },
-    "./styles.css": "./dist/styles.css"
+    "./styles.css": {
+      "types": "./dist/styles.css.d.ts",
+      "default": "./dist/styles.css"
+    }
   },
   "files": [
     "dist"
@@ -37,7 +40,7 @@
     "@types/node": "^25.6.2",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^4.0.0",
+    "@vitejs/plugin-react": "^6.0.1",
     "eslint": "^10.2.1",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
@@ -45,21 +48,22 @@
     "jsdom": "^29.1.1",
     "typescript": "^5.8.0",
     "typescript-eslint": "^8.59.1",
-    "vite": "^5.0.0",
-    "vitest": "^4.1.5"
+    "vite": "^8.0.12",
+    "vitest": "^4.1.6"
   },
   "scripts": {
     "dev": "vite",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "build": "vite build && tsc -p tsconfig.json --emitDeclarationOnly",
+    "build": "vite build && tsc -p tsconfig.json --emitDeclarationOnly && node scripts/finalize-declarations.mjs",
     "prepublishOnly": "npm run lint && npm run typecheck && npm run build",
+    "typecheck:consumer": "tsc -p fixtures/consumer-typecheck/tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "dompurify": "^3.2.7",
+    "dompurify": "^3.4.2",
     "highlight.js": "^11.11.1",
     "lucide-react": "^0.544.0",
     "marked": "^16.3.0",
