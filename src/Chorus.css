@@ -23,7 +23,8 @@
 /* Input area — column flex to stack attachment previews above the input row */
 .chorus-input { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; background: var(--chorus-input-area-bg, transparent); }
 .chorus-input-row { position: relative; display: flex; align-items: center; }
-.chorus-input-row textarea { width: 100%; min-height: 44px; max-height: 160px; padding: 12px 50px 12px 14px; border-radius: 12px; border: 1px solid var(--chorus-input-border, #333333); background: var(--chorus-input-bg, #1a1a1a); color: var(--chorus-input-text, #f3f4f6); outline: none; resize: none; overflow: hidden; line-height: 1.4; }
+.chorus-input-row textarea { width: 100%; min-height: 44px; max-height: 160px; padding: 12px 50px 12px 14px; border-radius: 12px; border: 1px solid var(--chorus-input-border, #333333); background: var(--chorus-input-bg, #1a1a1a); color: var(--chorus-input-text, #f3f4f6); outline: none; resize: none; overflow: hidden; line-height: 1.4; transition: border-color 0.15s, box-shadow 0.15s; }
+.chorus-input--dragging .chorus-input-row textarea { border-color: var(--chorus-send-bg, #ffffff); box-shadow: 0 0 0 3px var(--chorus-focus-ring, rgba(255,255,255,0.2)); }
 .chorus-input-row textarea::placeholder { color: #a3a3a3; }
 .chorus-input-row textarea:focus { border-color: var(--chorus-send-bg, #ffffff); box-shadow: 0 0 0 3px var(--chorus-focus-ring, rgba(255,255,255,0.2)); }
 .chorus-input-row--has-attach textarea { padding-left: 44px; }

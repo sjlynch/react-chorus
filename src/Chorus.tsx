@@ -3,7 +3,7 @@ import './Chorus.css';
 import { ChatWindow } from './components/ChatWindow';
 import { ChatInput } from './components/ChatInput';
 import { styleVarsFromPalette, type Palette } from './components/ChorusTheme';
-import type { Attachment, ConnectorName, Message, Role, StorageAdapter } from './types';
+import type { Attachment, AttachmentError, ConnectorName, Message, Role, StorageAdapter, UploadAttachment } from './types';
 import { useChorusStream, type Transport } from './hooks/useChorusStream';
 import { createFetchSSETransport } from './streaming/createFetchSSETransport';
 import { useChorusPersistence } from './hooks/useChorusPersistence';
@@ -84,6 +84,10 @@ export interface ChorusProps<TMeta = Record<string, unknown>> {
   onChunk?: (chunk: string, messageId: string) => void;
   codeBlockTheme?: 'dark' | 'light';
   accept?: string;
+  maxAttachmentBytes?: number;
+  maxAttachments?: number;
+  onAttachmentError?: (error: AttachmentError) => void;
+  uploadAttachment?: UploadAttachment;
   persistenceKey?: string;
   persistenceStorage?: StorageAdapter;
   headless?: boolean;
@@ -111,6 +115,10 @@ export function Chorus<TMeta = Record<string, unknown>>({
   onChunk,
   codeBlockTheme = 'dark',
   accept,
+  maxAttachmentBytes,
+  maxAttachments,
+  onAttachmentError,
+  uploadAttachment,
   persistenceKey,
   persistenceStorage,
   headless = false,
@@ -452,7 +460,7 @@ export function Chorus<TMeta = Record<string, unknown>>({
   return (
     <div className={["chorus", className].filter(Boolean).join(" ")} style={{ ...paletteVars, ...style }}>
       <ChatWindow<TMeta> messages={msgs} typing={!!(transport || onSend) && sending && !hasStartedAssistantRef.current} codeTheme={codeBlockTheme} headless={headless} renderMessage={renderMessage} hiddenRoles={hiddenRoles} streamingMessageId={activeStreamingMessageId} onEdit={(transport || onSend) ? handleEdit : undefined} onRegenerate={(transport || onSend) ? handleRegenerate : undefined} onDelete={handleDelete} error={streamError} onRetry={retry} />
-      <ChatInput value={draft} onChange={setDraft} onSend={send} onStop={stop} sending={sending} placeholder={placeholder} accept={accept} />
+      <ChatInput value={draft} onChange={setDraft} onSend={send} onStop={stop} sending={sending} placeholder={placeholder} accept={accept} maxAttachmentBytes={maxAttachmentBytes} maxAttachments={maxAttachments} onAttachmentError={onAttachmentError} uploadAttachment={uploadAttachment} />
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ChatInput } from '../components/ChatInput';
 import type { ChatInputProps } from '../components/ChatInput';
@@ -10,15 +10,20 @@ function ControlledChatInput(props: Partial<ChatInputProps>) {
 
   return (
     <ChatInput
+      {...props}
       value={value}
       onChange={setValue}
       onSend={props.onSend ?? vi.fn()}
-      onStop={props.onStop}
-      placeholder={props.placeholder}
-      sending={props.sending}
-      accept={props.accept}
     />
   );
+}
+
+function fileTransfer(...files: File[]) {
+  return {
+    files,
+    items: files.map(file => ({ kind: 'file', getAsFile: () => file })),
+    types: ['Files'],
+  };
 }
 
 describe('ChatInput', () => {
@@ -148,5 +153,113 @@ describe('ChatInput', () => {
     await user.click(screen.getByRole('button', { name: /remove photo\.png/i }));
 
     expect(screen.queryByText('photo.png')).not.toBeInTheDocument();
+  });
+
+  it('attaches accepted files pasted from the clipboard', async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn();
+    const file = new File(['image-bytes'], 'pasted.png', { type: 'image/png' });
+    render(<ControlledChatInput onSend={onSend} accept="image/*" />);
+
+    fireEvent.paste(screen.getByRole('textbox'), { clipboardData: fileTransfer(file) });
+
+    expect(await screen.findByText('pasted.png')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(onSend).toHaveBeenCalledWith([
+      expect.objectContaining({
+        name: 'pasted.png',
+        type: 'image/png',
+        data: expect.stringMatching(/^data:image\/png;base64,/),
+      }),
+    ]);
+  });
+
+  it('attaches accepted files dropped onto the composer', async () => {
+    const file = new File(['drop-bytes'], 'dropped.png', { type: 'image/png' });
+    render(<ControlledChatInput accept="image/*" />);
+
+    fireEvent.drop(screen.getByRole('textbox'), { dataTransfer: fileTransfer(file) });
+
+    expect(await screen.findByText('dropped.png')).toBeInTheDocument();
+  });
+
+  it('rejects oversized files and calls onAttachmentError with a useful reason', async () => {
+    const onAttachmentError = vi.fn();
+    const file = new File(['too large'], 'large.txt', { type: 'text/plain' });
+    render(<ControlledChatInput accept="text/plain" maxAttachmentBytes={3} onAttachmentError={onAttachmentError} />);
+
+    fireEvent.drop(screen.getByRole('textbox'), { dataTransfer: fileTransfer(file) });
+
+    await waitFor(() => expect(onAttachmentError).toHaveBeenCalledWith(expect.objectContaining({
+      reason: 'too-large',
+      source: 'drop',
+      file,
+      maxAttachmentBytes: 3,
+    })));
+    expect(screen.queryByText('large.txt')).not.toBeInTheDocument();
+  });
+
+  it('rejects pasted files that do not match accept', async () => {
+    const onAttachmentError = vi.fn();
+    const file = new File(['notes'], 'notes.txt', { type: 'text/plain' });
+    render(<ControlledChatInput accept="image/*" onAttachmentError={onAttachmentError} />);
+
+    fireEvent.paste(screen.getByRole('textbox'), { clipboardData: fileTransfer(file) });
+
+    await waitFor(() => expect(onAttachmentError).toHaveBeenCalledWith(expect.objectContaining({
+      reason: 'unsupported-type',
+      source: 'paste',
+      file,
+      accept: 'image/*',
+    })));
+    expect(screen.queryByText('notes.txt')).not.toBeInTheDocument();
+  });
+
+  it('enforces maxAttachments while keeping accepted files', async () => {
+    const onAttachmentError = vi.fn();
+    const first = new File(['one'], 'one.png', { type: 'image/png' });
+    const second = new File(['two'], 'two.png', { type: 'image/png' });
+    render(<ControlledChatInput accept="image/*" maxAttachments={1} onAttachmentError={onAttachmentError} />);
+
+    fireEvent.drop(screen.getByRole('textbox'), { dataTransfer: fileTransfer(first, second) });
+
+    expect(await screen.findByText('one.png')).toBeInTheDocument();
+    expect(screen.queryByText('two.png')).not.toBeInTheDocument();
+    await waitFor(() => expect(onAttachmentError).toHaveBeenCalledWith(expect.objectContaining({
+      reason: 'too-many',
+      source: 'drop',
+      file: second,
+      maxAttachments: 1,
+    })));
+  });
+
+  it('uses uploadAttachment results instead of forcing data URLs', async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn();
+    const uploadAttachment = vi.fn(async (file: File) => ({
+      name: file.name,
+      type: file.type,
+      size: file.size,
+      url: 'https://cdn.example.com/uploaded.png',
+      id: 'file_123',
+    }));
+    const file = new File(['image-bytes'], 'uploaded.png', { type: 'image/png' });
+    render(<ControlledChatInput accept="image/*" uploadAttachment={uploadAttachment} onSend={onSend} />);
+
+    fireEvent.drop(screen.getByRole('textbox'), { dataTransfer: fileTransfer(file) });
+    expect(await screen.findByText('uploaded.png')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(uploadAttachment).toHaveBeenCalledWith(file);
+    expect(onSend).toHaveBeenCalledWith([
+      expect.objectContaining({
+        name: 'uploaded.png',
+        url: 'https://cdn.example.com/uploaded.png',
+        id: 'file_123',
+        data: 'https://cdn.example.com/uploaded.png',
+      }),
+    ]);
   });
 });

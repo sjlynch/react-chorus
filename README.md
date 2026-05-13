@@ -1,6 +1,18 @@
 # react-chorus
 
-A React chat UI component with built-in SSE streaming support.
+Drop a polished, streaming AI chat experience into React — then peel back the layers when you need custom transport, rendering, persistence, tools, attachments, or theming.
+
+[![Open in StackBlitz](https://developer.stackblitz.com/img/open_in_stackblitz.svg)](https://stackblitz.com/github/sjlynch/react-chorus?file=src%2Fmain.tsx)
+
+The root playground showcases streaming replies, paste/drop image attachments, retry/edit/regenerate/delete actions, and palette theming. Run `npm run dev` locally or open the StackBlitz link above for a fast first look before reading the API details.
+
+## Why react-chorus?
+
+react-chorus is for React developers who want a drop-in AI chat UI that stays composable. Use the batteries-included `<Chorus>` widget for a production-ready shell, or import the headless/hooks/components when your product needs a custom layout.
+
+- **Versus Vercel AI SDK:** react-chorus focuses on the visible chat UI and composer UX; pair it with any backend or SDK, including Vercel AI SDK, instead of adopting a specific transport stack.
+- **Versus assistant-ui:** react-chorus keeps the default path small and direct while still exposing message rendering, streaming, persistence, and theme primitives.
+- **Versus rolling your own:** you get SSE parsing, retry/edit/regenerate flows, Markdown, attachment handling, and local persistence without rebuilding the common edge cases.
 
 ## Install
 
@@ -396,16 +408,35 @@ npm run dev
 
 ### Running the OpenAI example
 
-```bash
-# Build the library first
-npm run build
+Build the library first:
 
-# Terminal 1 — backend
+```bash
+npm run build
+```
+
+Terminal 1 — backend:
+
+```bash
 cd examples/with-openai/server
 npm install
-OPENAI_API_KEY=sk-... node index.js
+```
 
-# Terminal 2 — frontend (proxies /api to http://localhost:3001)
+Set your API key with the command for your shell, then start the server:
+
+```bash
+# macOS/Linux/POSIX shells
+OPENAI_API_KEY=sk-... npm start
+
+# Windows PowerShell
+$env:OPENAI_API_KEY="sk-..."; npm start
+
+# Windows cmd.exe
+set OPENAI_API_KEY=sk-... && npm start
+```
+
+Terminal 2 — frontend (proxies `/api` to `http://localhost:3001`):
+
+```bash
 cd examples/with-openai
 npm install
 npm run dev
@@ -451,8 +482,12 @@ When `persistenceKey` is combined with `initialMessages` (or legacy `messages`),
 | `onChange` | `(messages: Message<TMeta>[]) => void` | — | Called whenever Chorus wants to change the message list in controlled mode (`value` is provided). Not called for legacy `messages`-only uncontrolled state. |
 | `messages` | `Message<TMeta>[]` | — | Legacy initial-only seed for uncontrolled mode. Read once on mount; later prop changes are ignored. Prefer `initialMessages` for seeding or `value` + `onChange` for controlled mode. |
 | `initialMessages` | `Message<TMeta>[]` | — | Initial-only seed for uncontrolled mode. Useful for welcome messages; `system` and `tool` messages are hidden by default via `hiddenRoles`. |
-| `placeholder` | `string` | `"Message…"` | Input placeholder text. |
-| `accept` | `string` | — | Forwarded to the file-picker `<input accept>`. Omitting the prop hides the attach button entirely. |
+| `placeholder` | `string` | `"Send a message"` | Input placeholder text. |
+| `accept` | `string` | — | Enables attachments and is forwarded to the file-picker `<input accept>`. Paste/drop validation uses the same MIME/extension rules. Omitting the prop hides the attach button and disables paste/drop attachments. |
+| `maxAttachmentBytes` | `number` | — | Reject files larger than this byte limit before reading/uploading them. |
+| `maxAttachments` | `number` | — | Maximum attachments queued in the composer at once. Extra files trigger `onAttachmentError`. |
+| `onAttachmentError` | `(error: AttachmentError) => void` | — | Called when a picker, paste, or drop file is rejected or cannot be read/uploaded. Reasons include `unsupported-type`, `too-large`, `too-many`, `read-failed`, and `upload-failed`. |
+| `uploadAttachment` | `(file: File) => AttachmentUploadResult \| Promise<AttachmentUploadResult>` | data URL reader | Optional transform/upload hook. Return a custom attachment (for example a CDN URL or provider file id) instead of the default data URL payload. |
 | `sending` | `boolean` | — | Override the sending state (useful when you manage it externally via `useChorusStream`). |
 | `palette` | `Palette` | dark theme | Custom color palette for theming, including `actionText`, `actionHoverBg`, `actionHoverText`, `errorBg`, `errorBorder`, and `errorText`. |
 | `codeBlockTheme` | `'dark' \| 'light'` | `'dark'` | Code block syntax-highlight theme. |
@@ -490,6 +525,52 @@ const tokensRef = React.useRef(0);
   }}
 />
 ```
+
+### Attachment composer UX
+
+Passing `accept` enables the built-in attachment composer. Users can pick files, paste files from the clipboard, or drag/drop files onto the composer; all three paths use the same `accept` matching (`image/*`, exact MIME types, and extensions such as `.pdf`).
+
+By default, react-chorus reads accepted files into base64 **data URLs** and stores them in `Message.attachments`. That makes local demos and simple persistence easy, but data URLs can inflate request bodies and persisted history. For production, set size/count limits and consider `uploadAttachment` so large files are uploaded to your storage/provider before the message is sent.
+
+Limit file size/count and surface actionable errors:
+
+```tsx
+<Chorus
+  transport="/api/chat"
+  accept="image/*"
+  maxAttachmentBytes={2 * 1024 * 1024}
+  maxAttachments={3}
+  onAttachmentError={(error) => {
+    // error.reason: 'unsupported-type' | 'too-large' | 'too-many' | 'read-failed' | 'upload-failed'
+    toast.error(error.message);
+  }}
+/>
+```
+
+Upload/transform files before they enter message history:
+
+```tsx
+<Chorus
+  transport="/api/chat"
+  accept="image/*,.pdf"
+  uploadAttachment={async (file) => {
+    const form = new FormData();
+    form.set('file', file);
+    const uploaded = await fetch('/api/uploads', { method: 'POST', body: form }).then(r => r.json());
+
+    return {
+      name: file.name,
+      type: file.type,
+      size: file.size,
+      url: uploaded.url,      // used for previews when renderable
+      id: uploaded.fileId,    // preserve provider/storage ids for your backend
+      data: uploaded.url,     // optional; defaults to url or id when omitted
+    };
+  }}
+/>
+```
+
+If you return only `url` or `id`, Chorus normalizes `attachment.data` to that value for backwards compatibility. Your backend should still prefer explicit `url`/`id` fields when present.
 
 ### Hiding system messages while showing tool calls
 
@@ -601,10 +682,15 @@ Recommended patterns:
 
 ### End-to-end image attachment recipe (OpenAI Chat Completions)
 
-Front end: enable image selection. The `accept` prop makes `<ChatInput>` read files into `Message.attachments` as data URLs, and the normal `transport` path sends those attachments in `history`.
+Front end: enable image selection, paste, and drop. The `accept` prop makes `<ChatInput>` read image files into `Message.attachments` as data URLs by default, and the normal `transport` path sends those attachments in `history`.
 
 ```tsx
-<Chorus transport="/api/chat" connector="openai" accept="image/*" />
+<Chorus
+  transport="/api/chat"
+  connector="openai"
+  accept="image/*"
+  maxAttachmentBytes={2 * 1024 * 1024}
+/>
 ```
 
 Backend: map only user image attachments to OpenAI `image_url` content parts, while keeping text-only turns as simple strings.
@@ -793,7 +879,7 @@ import { ChatWindow, ChatInput, ChorusTheme, Markdown } from 'react-chorus';
 ```
 
 - **`<ChatWindow messages={…} typing={…} />`** — renders the scrollable message list with a typing indicator. It accepts `hiddenRoles?: Role[]` (default `['system', 'tool']`); `showSystemMessages` is deprecated but remains supported as an alias for showing all roles.
-- **`<ChatInput value onSend onStop placeholder sending />`** — the text input and send/stop button.
+- **`<ChatInput value onSend onStop placeholder sending />`** — the text input, send/stop button, and optional attachment composer (`accept`, paste/drop, limits, `uploadAttachment`).
 - **`<ChorusTheme palette={…}>`** — applies theme CSS variables to any subtree.
 - **`<Markdown text={…} codeTheme="dark" />`** — standalone markdown renderer with syntax highlighting and copy buttons. It supports `streaming` to render escaped plain text until finalization and `sanitizer` to provide a custom DOMPurify-compatible sanitizer when SSR needs sanitized raw HTML instead of the built-in no-raw-HTML safe mode.
 - **`<MessageBubble message={…} />`** — renders the default bubble for one message, including attachments. Accepts `className`, `style`, `codeTheme`, and `headless` for decoration without replacing the full renderer.
@@ -812,8 +898,11 @@ interface ToolCall {
 interface Attachment {
   name: string;
   type: string;
-  data: string; // base64 data URL
+  data: string; // data URL by default; custom uploadAttachment may store a URL/file id here
   size: number;
+  url?: string;
+  id?: string;
+  metadata?: Record<string, unknown>;
 }
 
 interface Message<TMeta = Record<string, unknown>> {

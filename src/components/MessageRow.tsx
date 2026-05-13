@@ -3,16 +3,26 @@ import { Check, Pencil, RefreshCw, Trash2, X } from 'lucide-react';
 import type { Attachment, Message } from '../types';
 import { Markdown } from './Markdown';
 
+function isRenderableAttachmentSource(src: string | undefined) {
+  return !!src && /^(data:|blob:|https?:)/i.test(src);
+}
+
+function getAttachmentPreviewSource(att: Attachment) {
+  const source = att.url ?? att.data;
+  return isRenderableAttachmentSource(source) ? source : undefined;
+}
+
 function MessageAttachments({ attachments }: { attachments?: Attachment[] }) {
   if (!attachments || attachments.length === 0) return null;
 
   return (
     <div className="chorus-msg-attachments">
-      {attachments.map((att, i) => (
-        att.type.startsWith('image/')
-          ? <img key={i} src={att.data} alt={att.name} className="chorus-msg-img" />
-          : <span key={i} className="chorus-msg-file">{att.name}</span>
-      ))}
+      {attachments.map((att, i) => {
+        const previewSource = getAttachmentPreviewSource(att);
+        return att.type.startsWith('image/') && previewSource
+          ? <img key={i} src={previewSource} alt={att.name} className="chorus-msg-img" />
+          : <span key={i} className="chorus-msg-file">{att.name}</span>;
+      })}
     </div>
   );
 }

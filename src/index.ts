@@ -10,7 +10,18 @@ export type { Palette } from './components/ChorusTheme';
 export type { ChorusProps } from './Chorus';
 
 export type { Message } from './types';
-export type { Role, Attachment, ConnectorName, StorageAdapter, ToolCall } from './types';
+export type {
+  Role,
+  Attachment,
+  AttachmentError,
+  AttachmentErrorReason,
+  AttachmentSource,
+  AttachmentUploadResult,
+  ConnectorName,
+  StorageAdapter,
+  ToolCall,
+  UploadAttachment,
+} from './types';
 export { useChorusStream } from './hooks/useChorusStream';
 export type { SendCallbacks, StreamOptions, Transport } from './hooks/useChorusStream';
 export { useChorusPersistence } from './hooks/useChorusPersistence';
