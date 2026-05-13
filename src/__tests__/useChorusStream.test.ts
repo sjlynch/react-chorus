@@ -293,7 +293,7 @@ describe('useChorusStream', () => {
     expect(result.current.sending).toBe(false);
   });
 
-  it('delays onDone until minDelayMs has elapsed', async () => {
+  it('delays the first chunk until minDelayMs has elapsed', async () => {
     vi.useFakeTimers();
     const transport = vi.fn<Transport>(() => Promise.resolve(makeSseResponse(['token'])));
     const onChunk = vi.fn();
@@ -306,7 +306,7 @@ describe('useChorusStream', () => {
       await vi.advanceTimersByTimeAsync(999);
     });
 
-    expect(onChunk).toHaveBeenCalledWith('token');
+    expect(onChunk).not.toHaveBeenCalled();
     expect(onDone).not.toHaveBeenCalled();
 
     await act(async () => {
@@ -314,6 +314,7 @@ describe('useChorusStream', () => {
       await sendPromise;
     });
 
+    expect(onChunk).toHaveBeenCalledWith('token');
     expect(onDone).toHaveBeenCalledTimes(1);
   });
 

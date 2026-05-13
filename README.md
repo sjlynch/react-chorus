@@ -423,7 +423,9 @@ npm run dev
 
 ## SSR and Markdown sanitization
 
-`<Markdown>` sanitizes rendered HTML during server-side rendering as well as in the browser before using `dangerouslySetInnerHTML`. If the default `dompurify` export is not usable in a server environment, react-chorus falls back to a conservative sanitizer that removes executable tags, event-handler attributes, and JavaScript URLs. Apps that already create an isomorphic DOMPurify instance can pass it via `<Markdown sanitizer={...} />`.
+`<Markdown>` sanitizes rendered HTML before using `dangerouslySetInnerHTML`. In the browser it uses `dompurify` (or initializes the DOMPurify factory with `window` when needed). During SSR, if no real DOMPurify-compatible sanitizer is available, react-chorus does **not** attempt regex-based HTML sanitization; it switches to a safe no-raw-HTML renderer that drops raw HTML tokens and only emits Markdown-generated links/images with safe URL protocols. Ordinary Markdown (`**bold**`, headings, lists, code, safe `http`/`https` links) renders the same on server and client.
+
+If your SSR app wants to allow sanitized raw HTML, create an isomorphic DOMPurify instance (for example with your framework's DOM/window or jsdom on the server) and pass it to the standalone renderer: `<Markdown sanitizer={purify} />` or `<Markdown sanitizer={(html) => purify.sanitize(html)} />`.
 
 ## API
 
@@ -436,6 +438,8 @@ Message source modes are mutually exclusive:
 - Controlled: pass `value` + `onChange` and keep the canonical message list in your state.
 - Uncontrolled with a seed: pass `initialMessages` (or legacy `messages`) and let Chorus manage subsequent updates internally.
 - Uncontrolled with persistence: pass `persistenceKey` without `value`; passing both makes `value` win, so built-in persistence is bypassed.
+
+When `persistenceKey` is combined with `initialMessages` (or legacy `messages`), stored history is checked first. If the key has no stored value, Chorus renders and saves the seed so welcome messages still appear with persistence enabled. If the key already exists — including an intentionally empty `[]` conversation — the stored value wins. Async storage adapters may show the seed while loading; once the read resolves, stored history replaces it, and stale reads are ignored after local changes.
 
 | Prop | Type | Default | Description |
 |------|------|---------|-------------|
@@ -457,7 +461,7 @@ Message source modes are mutually exclusive:
 | `onError` | `(error: Error) => void` | — | Called for any non-abort error from a send or stream. The raw `Error` goes here; the UI shows `errorMessage`. |
 | `onChunk` | `(chunk: string, messageId: string) => void` | — | Observation hook called for each streamed token. Receives the assistant `messageId` so callers can correlate chunks with a specific message. Does **not** affect streaming behaviour. |
 | `persistenceKey` | `string` | — | Uncontrolled-mode persistence key. When set without `value`, Chorus saves/restores messages using this key (defaults to localStorage). If `value` is provided, controlled state wins and built-in persistence is not used. |
-| `persistenceStorage` | `StorageAdapter` | `localStorage` | Custom storage adapter for persistenceKey. |
+| `persistenceStorage` | `StorageAdapter` | `localStorage` | Custom storage adapter for persistenceKey. The default `localStorage` is resolved lazily; if browser storage is blocked or unavailable, Chorus keeps working without persistence. |
 | `headless` | `boolean` | `false` | Strip all default styles and inline style injection. |
 | `renderMessage` | `(message: Message<TMeta>) => ReactNode` | — | Custom per-message renderer. Return `null` to fall back to default rendering. |
 | `hiddenRoles` | `Role[]` | `['system', 'tool']` | Message roles hidden from the transcript. Pass `['system']` to show tool calls while hiding system prompts, or `[]` to show all roles. `<Chorus>` accepts `hiddenRoles` only — `showSystemMessages` exists on `<ChatWindow>` for backwards compatibility. |
@@ -466,8 +470,8 @@ Message source modes are mutually exclusive:
 
 | Helper | Description |
 |--------|-------------|
-| `appendAssistant(chunk)` | Append a text chunk to the current assistant message. |
-| `finalizeAssistant()` | Mark the assistant message complete. |
+| `appendAssistant(chunk)` | Append a text chunk to the current assistant message. Chunks are buffered until `minAssistantDelayMs` has elapsed before the first token is shown. |
+| `finalizeAssistant()` | Mark the assistant message complete. If first-token chunks are still buffered, completion waits until they flush. |
 | `signal` | `AbortSignal` — aborted when the user hits Stop. |
 
 ### Observing streamed tokens with `onChunk`
@@ -518,6 +522,7 @@ const { send, abort, sending } = useChorusStream<MyMeta>(transport, { connector:
 ```
 
 - `transport` — async function `(text, history: Message<TMeta>[], signal) => Promise<Response>`. Use `createFetchSSETransport<TMeta>(url)` or write your own.
+- `send(..., { minDelayMs })` buffers the first streamed chunks until that many milliseconds have elapsed from send start, then flushes them before continuing normally.
 - `opts.connector` — `'openai'` | `'anthropic'` | `'gemini'` | `'auto'` | custom `Connector`. Defaults to `'auto'` which handles OpenAI, Gemini, Anthropic JSON, plain-text SSE, and in-band `{ error }` payloads.
 
 ### `createFetchSSETransport(url, init?)`
@@ -785,7 +790,7 @@ import { ChatWindow, ChatInput, ChorusTheme, Markdown } from 'react-chorus';
 - **`<ChatWindow messages={…} typing={…} />`** — renders the scrollable message list with a typing indicator. It accepts `hiddenRoles?: Role[]` (default `['system', 'tool']`); `showSystemMessages` is deprecated but remains supported as an alias for showing all roles.
 - **`<ChatInput value onSend onStop placeholder sending />`** — the text input and send/stop button.
 - **`<ChorusTheme palette={…}>`** — applies theme CSS variables to any subtree.
-- **`<Markdown text={…} codeTheme="dark" />`** — standalone markdown renderer with syntax highlighting and copy buttons. It supports `streaming` to render escaped plain text until finalization and `sanitizer` to provide a custom DOMPurify-compatible sanitizer for SSR.
+- **`<Markdown text={…} codeTheme="dark" />`** — standalone markdown renderer with syntax highlighting and copy buttons. It supports `streaming` to render escaped plain text until finalization and `sanitizer` to provide a custom DOMPurify-compatible sanitizer when SSR needs sanitized raw HTML instead of the built-in no-raw-HTML safe mode.
 - **`<MessageBubble message={…} />`** — renders the default bubble for one message, including attachments. Accepts `className`, `style`, `codeTheme`, and `headless` for decoration without replacing the full renderer.
 
 ## Message Shape

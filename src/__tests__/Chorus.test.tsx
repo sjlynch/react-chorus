@@ -1,9 +1,9 @@
 import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Chorus, type ChorusProps, type Transport } from '../Chorus';
-import type { Message } from '../types';
+import type { Message, StorageAdapter } from '../types';
 
 type OnSend = NonNullable<ChorusProps['onSend']>;
 type OnSendHelpers = Parameters<OnSend>[2];
@@ -53,6 +53,15 @@ function deferred<T = void>() {
   return { promise, resolve, reject };
 }
 
+function makeSyncStorage(initial: Record<string, string> = {}): StorageAdapter & { store: Record<string, string> } {
+  const store = { ...initial };
+  return {
+    store,
+    getItem: (key) => store[key] ?? null,
+    setItem: (key, value) => { store[key] = value; },
+  };
+}
+
 describe('Chorus', () => {
   it('applies className, style, and palette variables to the root element', () => {
     const { container } = render(
@@ -99,10 +108,148 @@ describe('Chorus', () => {
     await waitFor(() => expect(screen.getByText('Hello')).toBeInTheDocument());
   });
 
+  it('delays the first transport token until minAssistantDelayMs elapses', async () => {
+    vi.useFakeTimers();
+    try {
+      const transport = vi.fn<Transport>(async () => sseResponse(['Delayed']));
+
+      render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={500} />);
+
+      fireEvent.change(screen.getByPlaceholderText('Send a message'), { target: { value: 'hi' } });
+      fireEvent.click(screen.getByRole('button', { name: /send/i }));
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      expect(transport).toHaveBeenCalledOnce();
+      expect(screen.getByText('hi')).toBeInTheDocument();
+      expect(screen.queryByText('Delayed')).not.toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(499);
+      });
+      expect(screen.queryByText('Delayed')).not.toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(screen.getByText('Delayed')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('delays custom onSend helper chunks until minAssistantDelayMs elapses', async () => {
+    vi.useFakeTimers();
+    try {
+      const onSend = vi.fn<OnSend>((_text, _messages, helpers) => {
+        helpers.appendAssistant('Delayed helper');
+        helpers.finalizeAssistant();
+      });
+
+      render(<Chorus onSend={onSend} minAssistantDelayMs={500} />);
+
+      fireEvent.change(screen.getByPlaceholderText('Send a message'), { target: { value: 'hi' } });
+      fireEvent.click(screen.getByRole('button', { name: /send/i }));
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      expect(onSend).toHaveBeenCalledOnce();
+      expect(screen.queryByText('Delayed helper')).not.toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(499);
+      });
+      expect(screen.queryByText('Delayed helper')).not.toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(screen.getByText('Delayed helper')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('renders initialMessages in uncontrolled mode', () => {
     render(<Chorus initialMessages={[{ id: 'welcome', role: 'assistant', text: 'Welcome!' }]} />);
 
     expect(screen.getByText('Welcome!')).toBeInTheDocument();
+  });
+
+  it('renders and persists initialMessages when persistence storage is empty', async () => {
+    const storage = makeSyncStorage();
+    const welcome: Message[] = [{ id: 'welcome', role: 'assistant', text: 'Welcome!' }];
+
+    render(<Chorus persistenceKey="chat" persistenceStorage={storage} initialMessages={welcome} />);
+
+    expect(screen.getByText('Welcome!')).toBeInTheDocument();
+    await waitFor(() => expect(storage.store.chat).toBe(JSON.stringify(welcome)));
+  });
+
+  it('uses legacy messages as a persistence seed when storage is empty', async () => {
+    const storage = makeSyncStorage();
+    const welcome: Message[] = [{ id: 'welcome', role: 'assistant', text: 'Legacy welcome!' }];
+
+    render(<Chorus persistenceKey="chat" persistenceStorage={storage} messages={welcome} />);
+
+    expect(screen.getByText('Legacy welcome!')).toBeInTheDocument();
+    await waitFor(() => expect(storage.store.chat).toBe(JSON.stringify(welcome)));
+  });
+
+  it('lets existing persisted history win over initialMessages', () => {
+    const stored: Message[] = [{ id: 'stored', role: 'assistant', text: 'Stored history' }];
+    const storage = makeSyncStorage({ chat: JSON.stringify(stored) });
+
+    render(
+      <Chorus
+        persistenceKey="chat"
+        persistenceStorage={storage}
+        initialMessages={[{ id: 'welcome', role: 'assistant', text: 'Welcome!' }]}
+      />
+    );
+
+    expect(screen.getByText('Stored history')).toBeInTheDocument();
+    expect(screen.queryByText('Welcome!')).not.toBeInTheDocument();
+  });
+
+  it('keeps the initialMessages seed after an empty async persistence load resolves', async () => {
+    const welcome: Message[] = [{ id: 'welcome', role: 'assistant', text: 'Async welcome!' }];
+    const asyncStorage: StorageAdapter = {
+      getItem: vi.fn().mockResolvedValue(null),
+      setItem: vi.fn(),
+    };
+
+    render(<Chorus persistenceKey="chat" persistenceStorage={asyncStorage} initialMessages={welcome} />);
+
+    expect(screen.getByText('Async welcome!')).toBeInTheDocument();
+    await waitFor(() => expect(asyncStorage.setItem).toHaveBeenCalledWith('chat', JSON.stringify(welcome)));
+    expect(screen.getByText('Async welcome!')).toBeInTheDocument();
+  });
+
+  it('replaces the initialMessages seed when async persistence loads stored history', async () => {
+    const stored: Message[] = [{ id: 'stored', role: 'assistant', text: 'Async stored history' }];
+    const asyncStorage: StorageAdapter = {
+      getItem: vi.fn().mockResolvedValue(JSON.stringify(stored)),
+      setItem: vi.fn(),
+    };
+
+    render(
+      <Chorus
+        persistenceKey="chat"
+        persistenceStorage={asyncStorage}
+        initialMessages={[{ id: 'welcome', role: 'assistant', text: 'Async welcome!' }]}
+      />
+    );
+
+    expect(screen.getByText('Async welcome!')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('Async stored history')).toBeInTheDocument());
+    expect(screen.queryByText('Async welcome!')).not.toBeInTheDocument();
+    expect(asyncStorage.setItem).not.toHaveBeenCalled();
   });
 
   it('prepends systemPrompt to transport history without rendering it', async () => {
@@ -264,7 +411,7 @@ describe('Chorus', () => {
       return new Promise<void>(() => undefined);
     });
 
-    render(<Chorus onSend={onSend} />);
+    render(<Chorus onSend={onSend} minAssistantDelayMs={0} />);
 
     await user.type(screen.getByPlaceholderText('Send a message'), 'stream');
     await user.click(screen.getByRole('button', { name: /send/i }));
@@ -388,6 +535,32 @@ describe('Chorus', () => {
     expect(screen.queryByText('Something went wrong. Please try again.')).not.toBeInTheDocument();
   });
 
+  it('ignores captured onSend helpers after Stop', async () => {
+    const user = userEvent.setup();
+    let helpers!: OnSendHelpers;
+    const onSend = vi.fn((_text: string, _messages: Message[], h: OnSendHelpers) => {
+      helpers = h;
+      return new Promise<void>(() => undefined);
+    });
+
+    render(<Chorus onSend={onSend} minAssistantDelayMs={0} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'stop stale helpers');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /stop/i })).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: /stop/i }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument());
+
+    act(() => {
+      helpers.appendAssistant('late chunk');
+      helpers.finalizeAssistant();
+    });
+
+    expect(screen.queryByText('late chunk')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument();
+  });
+
   it('controlled mode forwards new messages via onChange and renders the externally-controlled list', async () => {
     const user = userEvent.setup();
     const initial: Message[] = [{ id: 'seed', role: 'assistant', text: 'seeded reply' }];
@@ -428,6 +601,74 @@ describe('Chorus', () => {
     await waitFor(() => expect(transport).toHaveBeenCalledTimes(2));
     expect(transport.mock.calls[0][0]).toBe('try again');
     expect(transport.mock.calls[1][0]).toBe('try again');
+  });
+
+  it('Retry resubmits an image-only message with its attachment', async () => {
+    const user = userEvent.setup();
+    const transport = vi.fn<Transport>(async () => sseResponse([], 500));
+    const file = new File(['image-bytes'], 'photo.png', { type: 'image/png' });
+    const { container } = render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} accept="image/*" />);
+
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(fileInput, file);
+    await screen.findByText('photo.png');
+
+    await user.click(screen.getByRole('button', { name: /send/i }));
+    await screen.findByRole('button', { name: /retry/i });
+
+    await user.click(screen.getByRole('button', { name: /retry/i }));
+
+    await waitFor(() => expect(transport).toHaveBeenCalledTimes(2));
+    expect(transport.mock.calls[1][0]).toBe('');
+    expect(transport.mock.calls[1][1]).toEqual([
+      expect.objectContaining({
+        role: 'user',
+        text: '',
+        attachments: [expect.objectContaining({
+          name: 'photo.png',
+          type: 'image/png',
+          size: file.size,
+          data: expect.stringMatching(/^data:image\/png;base64,/),
+        })],
+      }),
+    ]);
+  });
+
+  it('Retry preserves a text-and-attachment turn without duplicating it', async () => {
+    const user = userEvent.setup();
+    const transport = vi.fn<Transport>(async () => (
+      transport.mock.calls.length === 1
+        ? sseResponse([], 500)
+        : sseResponse(['ok'])
+    ));
+    const file = new File(['image-bytes'], 'photo.png', { type: 'image/png' });
+    const { container } = render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} accept="image/*" />);
+
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(fileInput, file);
+    await screen.findByText('photo.png');
+    await user.type(screen.getByPlaceholderText('Send a message'), 'describe this');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+    await screen.findByRole('button', { name: /retry/i });
+
+    await user.click(screen.getByRole('button', { name: /retry/i }));
+
+    await waitFor(() => expect(transport).toHaveBeenCalledTimes(2));
+    const retryHistory = transport.mock.calls[1][1];
+    const userTurns = retryHistory.filter(message => message.role === 'user');
+    expect(userTurns).toHaveLength(1);
+    expect(userTurns[0]).toEqual(expect.objectContaining({
+      role: 'user',
+      text: 'describe this',
+      attachments: [expect.objectContaining({
+        name: 'photo.png',
+        type: 'image/png',
+        size: file.size,
+        data: expect.stringMatching(/^data:image\/png;base64,/),
+      })],
+    }));
+    expect(screen.getAllByText('describe this')).toHaveLength(1);
+    await waitFor(() => expect(screen.getAllByAltText('photo.png')).toHaveLength(1));
   });
 
   it('removes a failed partial transport response before retrying', async () => {
