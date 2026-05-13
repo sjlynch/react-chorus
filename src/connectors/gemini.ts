@@ -6,6 +6,8 @@ import type { Connector, ConnectorResult } from './openai';
  * Expects SSE data lines with JSON objects containing a "candidates" array.
  * Yields text from candidates[*].content.parts[*].text.
  * Signals done when any candidate has a finishReason set.
+ * Function-call parts are intentionally ignored; handle them with a custom
+ * connector/onSend flow when needed.
  *
  * Usage example:
  *   const { send } = useChorusStream(transport, { connector: 'gemini' });

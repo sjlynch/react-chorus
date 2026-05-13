@@ -5,7 +5,9 @@ export interface Connector { name: string; extract: (data: string) => ConnectorR
 
 /**
  * OpenAI Chat Completions streaming connector.
- * Expects SSE data lines that are either "[DONE]" or JSON with choices[*].delta.content
+ * Expects SSE data lines that are either "[DONE]" or JSON with choices[*].delta.content.
+ * Tool-call deltas (choices[*].delta.tool_calls) are intentionally ignored;
+ * handle them with a custom connector/onSend flow when your app needs tool steps.
  */
 export const openaiConnector: Connector = {
   name: 'openai',

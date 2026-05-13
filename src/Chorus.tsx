@@ -31,7 +31,7 @@ function createMessageId() {
   return `chorus-${Date.now()}-${fallbackMessageIdCounter}`;
 }
 
-function dropTrailingAssistant(history: Message[]) {
+function dropTrailingAssistant<TMeta>(history: Message<TMeta>[]) {
   const last = history[history.length - 1];
   return last?.role === 'assistant' ? history.slice(0, -1) : history;
 }
@@ -40,18 +40,41 @@ function isAbortError(error: unknown) {
   return typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError';
 }
 
-export interface ChorusProps {
-  messages?: Message[];
+interface SubmittedUserTurn<TMeta = Record<string, unknown>> {
+  text: string;
+  history: Message<TMeta>[];
+}
+
+function cloneMessageForRetry<TMeta>(message: Message<TMeta>): Message<TMeta> {
+  return {
+    ...message,
+    attachments: message.attachments?.map(attachment => ({ ...attachment })),
+  };
+}
+
+function cloneHistoryForRetry<TMeta>(history: Message<TMeta>[]): Message<TMeta>[] {
+  return history.map(message => cloneMessageForRetry(message));
+}
+
+function findLastUserMessage<TMeta>(history: Message<TMeta>[]) {
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    if (history[i].role === 'user') return history[i];
+  }
+  return null;
+}
+
+export interface ChorusProps<TMeta = Record<string, unknown>> {
+  messages?: Message<TMeta>[];
   /** Initial messages for uncontrolled mode. Useful for welcome messages. */
-  initialMessages?: Message[];
-  value?: Message[];
-  onChange?: (messages: Message[]) => void;
+  initialMessages?: Message<TMeta>[];
+  value?: Message<TMeta>[];
+  onChange?: (messages: Message<TMeta>[]) => void;
   /** Simple path: URL or Transport function. */
-  transport?: string | Transport;
+  transport?: string | Transport<TMeta>;
   /** Hidden system prompt prepended to transport request history. */
   systemPrompt?: string;
   connector?: Connector | ConnectorName;
-  onSend?: (text: string, messages: Message[], helpers: ChorusSendHelpers) => Promise<Message | void> | Message | void;
+  onSend?: (text: string, messages: Message<TMeta>[], helpers: ChorusSendHelpers) => Promise<Message<TMeta> | void> | Message<TMeta> | void;
   placeholder?: string;
   palette?: Palette;
   sending?: boolean;
@@ -64,13 +87,13 @@ export interface ChorusProps {
   persistenceKey?: string;
   persistenceStorage?: StorageAdapter;
   headless?: boolean;
-  renderMessage?: (message: Message) => React.ReactNode;
+  renderMessage?: (message: Message<TMeta>) => React.ReactNode;
   hiddenRoles?: Role[];
   className?: string;
   style?: React.CSSProperties;
 }
 
-export function Chorus({
+export function Chorus<TMeta = Record<string, unknown>>({
   messages,
   initialMessages,
   value,
@@ -95,15 +118,18 @@ export function Chorus({
   hiddenRoles,
   className,
   style,
-}: ChorusProps) {
-  const persisted = useChorusPersistence(persistenceKey ?? '', { storage: persistenceStorage });
-  const { msgs, updateMsgs, onChunkRef } = useChorusMessages({
+}: ChorusProps<TMeta>) {
+  const persisted = useChorusPersistence<TMeta>(persistenceKey ?? '', { storage: persistenceStorage });
+  const { msgs, updateMsgs, onChunkRef } = useChorusMessages<TMeta>({
     value,
     messages,
     initialMessages,
     onChange,
     persistenceKey,
     persistedMessages: persisted.value,
+    persistenceLoaded: persisted.loaded,
+    hasPersistedValue: persisted.hasStoredValue,
+    canPersist: persisted.canPersist,
     onPersistedChange: persisted.onChange,
     onChunk,
   });
@@ -124,10 +150,29 @@ export function Chorus({
   const [internalSending, setInternalSending] = React.useState(false);
   const [streamError, setStreamError] = React.useState<string | null>(null);
   const fallbackErrorMessage = errorMessage ?? 'Something went wrong. Please try again.';
-  const lastUserTextRef = React.useRef<string>('');
+  const lastSubmittedTurnRef = React.useRef<SubmittedUserTurn<TMeta> | null>(null);
   const controllerRef = React.useRef<AbortController | null>(null);
   const hasStartedAssistantRef = React.useRef(false);
   const pendingAssistantIdRef = React.useRef<string | null>(null);
+  const activeSessionIdRef = React.useRef(0);
+
+  const beginAssistantSession = () => {
+    activeSessionIdRef.current += 1;
+    return activeSessionIdRef.current;
+  };
+
+  const isAssistantSessionActive = (sessionId: number) => activeSessionIdRef.current === sessionId;
+
+  const invalidateAssistantSession = (sessionId?: number) => {
+    if (sessionId === undefined || isAssistantSessionActive(sessionId)) {
+      activeSessionIdRef.current += 1;
+    }
+  };
+
+  const rememberSubmittedTurn = (text: string, history: Message<TMeta>[]) => {
+    if (!findLastUserMessage(history)) return;
+    lastSubmittedTurnRef.current = { text, history: cloneHistoryForRetry(history) };
+  };
 
   const { enqueue: enqueueChunk, cancelPending } = useRAFQueue((add) => {
     const id = pendingAssistantIdRef.current;
@@ -144,7 +189,7 @@ export function Chorus({
     onChunkRef.current?.(firstChunk, id);
   };
 
-  const appendAssistant = (chunk: string) => {
+  const appendAssistantNow = (chunk: string) => {
     if (!chunk) return;
     if (!hasStartedAssistantRef.current) startAssistant(chunk);
     else {
@@ -154,20 +199,100 @@ export function Chorus({
     }
   };
 
-  const finalizeAssistant = () => {
+  const finalizeAssistantNow = () => {
     cancelPending(true);
     hasStartedAssistantRef.current = false;
     pendingAssistantIdRef.current = null;
     setInternalSending(false);
   };
 
-  const resolvedTransport = React.useMemo((): Transport => {
-    if (typeof transport === 'string') return createFetchSSETransport(transport);
+  const completeActiveSession = (sessionId: number) => {
+    if (!isAssistantSessionActive(sessionId)) return false;
+    finalizeAssistantNow();
+    invalidateAssistantSession(sessionId);
+    return true;
+  };
+
+  const createSessionHelpers = (sessionId: number, signal: AbortSignal, startedAt: number) => {
+    let released = minAssistantDelayMs <= 0;
+    let bufferedChunks: string[] = [];
+    let finalizeRequested = false;
+    let releaseTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const clearReleaseTimer = () => {
+      if (releaseTimer !== null) {
+        clearTimeout(releaseTimer);
+        releaseTimer = null;
+      }
+    };
+
+    const isActive = () => isAssistantSessionActive(sessionId) && !signal.aborted;
+
+    const flushBufferedChunks = () => {
+      clearReleaseTimer();
+      if (released) return;
+      if (!isActive()) {
+        bufferedChunks = [];
+        finalizeRequested = false;
+        return;
+      }
+
+      released = true;
+      const chunks = bufferedChunks;
+      bufferedChunks = [];
+      for (const chunk of chunks) appendAssistantNow(chunk);
+      if (finalizeRequested) completeActiveSession(sessionId);
+    };
+
+    const scheduleRelease = () => {
+      if (released || releaseTimer !== null) return;
+      const wait = Math.max(0, minAssistantDelayMs - (Date.now() - startedAt));
+      if (wait <= 0) {
+        flushBufferedChunks();
+        return;
+      }
+      releaseTimer = setTimeout(flushBufferedChunks, wait);
+    };
+
+    const appendAssistant = (chunk: string) => {
+      if (!chunk || !isActive()) return;
+
+      if (released || Date.now() - startedAt >= minAssistantDelayMs) {
+        if (!released) flushBufferedChunks();
+        if (isActive()) appendAssistantNow(chunk);
+        return;
+      }
+
+      bufferedChunks.push(chunk);
+      scheduleRelease();
+    };
+
+    const finalizeAssistant = () => {
+      if (!isActive()) return;
+
+      if (!released && bufferedChunks.length > 0) {
+        finalizeRequested = true;
+        scheduleRelease();
+        return;
+      }
+
+      clearReleaseTimer();
+      completeActiveSession(sessionId);
+    };
+
+    return {
+      helpers: { appendAssistant, finalizeAssistant, signal },
+      hasPendingAssistant: () => bufferedChunks.length > 0 || finalizeRequested,
+    };
+  };
+
+  const resolvedTransport = React.useMemo((): Transport<TMeta> => {
+    if (typeof transport === 'string') return createFetchSSETransport<TMeta>(transport);
     if (typeof transport === 'function') return transport;
     return () => Promise.resolve(new Response(null, { status: 200 }));
   }, [transport]);
 
-  const { send: doStream, abort: streamAbort, sending: streamSending } = useChorusStream(resolvedTransport, { connector });
+  const { send: doStream, abort: streamAbort, sending: streamSending } = useChorusStream<TMeta>(resolvedTransport, { connector });
   const sending = sendingProp ?? (transport ? streamSending : internalSending);
   const paletteVars = React.useMemo(() => styleVarsFromPalette(palette), [palette]);
   const activeStreamingMessageId = sending && hasStartedAssistantRef.current ? pendingAssistantIdRef.current : null;
@@ -184,11 +309,14 @@ export function Chorus({
     if (partialId) updateMsgs(prev => prev.filter(m => m.id !== partialId));
   };
 
-  const historyForTransport = (history: Message[]) => (
+  const historyForTransport = (history: Message<TMeta>[]): Message<TMeta>[] => (
     systemPrompt ? [{ id: 'chorus-system-prompt', role: 'system' as const, text: systemPrompt }, ...history] : history
   );
 
-  const triggerAssistant = async (text: string, history: Message[] = msgs) => {
+  const triggerAssistant = async (text: string, history: Message<TMeta>[] = msgs) => {
+    const sessionId = beginAssistantSession();
+    rememberSubmittedTurn(text, history);
+
     if (transport) {
       if (process.env.NODE_ENV !== 'production' && onSend) {
         console.warn('[Chorus] Both `transport` and `onSend` props were provided. `transport` takes precedence and `onSend` will be ignored. Remove one of the two props to silence this warning.');
@@ -196,47 +324,75 @@ export function Chorus({
       resetStreamState();
       setStreamError(null);
       doStream(text, historyForTransport(history), {
-        onChunk: appendAssistant,
-        onDone: finalizeAssistant,
-        onError: (err) => { removePendingAssistant(); onError?.(err); setStreamError(fallbackErrorMessage); },
+        onChunk: (chunk) => {
+          if (isAssistantSessionActive(sessionId)) appendAssistantNow(chunk);
+        },
+        onDone: () => {
+          completeActiveSession(sessionId);
+        },
+        onError: (err) => {
+          if (!isAssistantSessionActive(sessionId)) return;
+          removePendingAssistant();
+          invalidateAssistantSession(sessionId);
+          onError?.(err);
+          setStreamError(fallbackErrorMessage);
+        },
         minDelayMs: minAssistantDelayMs,
       });
       return;
     }
 
-    if (!onSend) return;
-    controllerRef.current?.abort();
-    controllerRef.current = new AbortController();
-    try {
-      setInternalSending(true);
-      setStreamError(null);
-      resetStreamState();
+    if (!onSend) {
+      invalidateAssistantSession(sessionId);
+      return;
+    }
 
-      const start = Date.now();
-      const res = await onSend(text, history, { appendAssistant, finalizeAssistant, signal: controllerRef.current.signal });
-      if (res && typeof res === 'object' && !hasStartedAssistantRef.current) {
-        const wait = Math.max(0, minAssistantDelayMs - (Date.now() - start));
+    controllerRef.current?.abort();
+    const controller = new AbortController();
+    controllerRef.current = controller;
+    setInternalSending(true);
+    setStreamError(null);
+    resetStreamState();
+
+    const startedAt = Date.now();
+    const sessionHelpers = createSessionHelpers(sessionId, controller.signal, startedAt);
+
+    try {
+      const res = await onSend(text, history, sessionHelpers.helpers);
+      if (!isAssistantSessionActive(sessionId)) return;
+
+      if (res && typeof res === 'object' && !hasStartedAssistantRef.current && !sessionHelpers.hasPendingAssistant()) {
+        const wait = Math.max(0, minAssistantDelayMs - (Date.now() - startedAt));
         if (wait) await new Promise(r => setTimeout(r, wait));
-        const returnedMessage = res as Message;
+        if (!isAssistantSessionActive(sessionId)) return;
+
+        const returnedMessage = res as Message<TMeta>;
         updateMsgs(prev => prev.concat({
           ...returnedMessage,
           id: returnedMessage.id || createMessageId(),
           role: returnedMessage.role ?? 'assistant',
           text: returnedMessage.text ?? '',
         }));
+        completeActiveSession(sessionId);
       }
     } catch (e: unknown) {
-      const partialId = pendingAssistantIdRef.current;
-      if (partialId) updateMsgs(prev => prev.filter(m => m.id !== partialId));
-      hasStartedAssistantRef.current = false;
-      pendingAssistantIdRef.current = null;
-      if (!isAbortError(e)) {
-        const error = e instanceof Error ? e : new Error(String(e));
-        onError?.(error);
-        setStreamError(fallbackErrorMessage);
+      if (isAssistantSessionActive(sessionId)) {
+        removePendingAssistant();
+        invalidateAssistantSession(sessionId);
+        setInternalSending(false);
+        if (controllerRef.current === controller) controllerRef.current = null;
+
+        if (!isAbortError(e)) {
+          const error = e instanceof Error ? e : new Error(String(e));
+          onError?.(error);
+          setStreamError(fallbackErrorMessage);
+        }
       }
     } finally {
-      if (!hasStartedAssistantRef.current) setInternalSending(false);
+      if (isAssistantSessionActive(sessionId) && !hasStartedAssistantRef.current && !sessionHelpers.hasPendingAssistant()) {
+        completeActiveSession(sessionId);
+      }
+      if (controllerRef.current === controller && !isAssistantSessionActive(sessionId)) controllerRef.current = null;
     }
   };
 
@@ -246,32 +402,32 @@ export function Chorus({
     if (!text && !attachments.length) return;
 
     setDraft('');
-    lastUserTextRef.current = text;
     const next = updateMsgs(prev => prev.concat({ id: createMessageId(), role: 'user', text, attachments: attachments.length > 0 ? attachments : undefined }));
     await triggerAssistant(text, next);
   };
 
   const retry = async () => {
-    const text = lastUserTextRef.current;
-    if (!text || sending) return;
-    const history = streamError && msgs[msgs.length - 1]?.role === 'assistant'
-      ? updateMsgs(prev => dropTrailingAssistant(prev))
-      : msgs;
-    await triggerAssistant(text, history);
+    const submitted = lastSubmittedTurnRef.current;
+    if (!submitted || sending) return;
+    if (streamError && msgs[msgs.length - 1]?.role === 'assistant') {
+      updateMsgs(prev => dropTrailingAssistant(prev));
+    }
+    await triggerAssistant(submitted.text, cloneHistoryForRetry(submitted.history));
   };
 
   const stop = () => {
     if (!sending) return;
+    invalidateAssistantSession();
     if (transport) streamAbort();
     else controllerRef.current?.abort();
-    finalizeAssistant();
+    finalizeAssistantNow();
   };
 
   const handleEdit = async (id: string, newText: string) => {
     if (sending) return;
     const idx = msgs.findIndex(m => m.id === id);
     if (idx === -1) return;
-    const edited: Message = { ...msgs[idx], text: newText };
+    const edited: Message<TMeta> = { ...msgs[idx], text: newText };
     const next = updateMsgs(prev => [...prev.slice(0, idx), edited]);
     await triggerAssistant(newText, next);
   };
@@ -295,7 +451,7 @@ export function Chorus({
 
   return (
     <div className={["chorus", className].filter(Boolean).join(" ")} style={{ ...paletteVars, ...style }}>
-      <ChatWindow messages={msgs} typing={!!(transport || onSend) && sending && !hasStartedAssistantRef.current} codeTheme={codeBlockTheme} headless={headless} renderMessage={renderMessage} hiddenRoles={hiddenRoles} streamingMessageId={activeStreamingMessageId} onEdit={(transport || onSend) ? handleEdit : undefined} onRegenerate={(transport || onSend) ? handleRegenerate : undefined} onDelete={handleDelete} error={streamError} onRetry={retry} />
+      <ChatWindow<TMeta> messages={msgs} typing={!!(transport || onSend) && sending && !hasStartedAssistantRef.current} codeTheme={codeBlockTheme} headless={headless} renderMessage={renderMessage} hiddenRoles={hiddenRoles} streamingMessageId={activeStreamingMessageId} onEdit={(transport || onSend) ? handleEdit : undefined} onRegenerate={(transport || onSend) ? handleRegenerate : undefined} onDelete={handleDelete} error={streamError} onRetry={retry} />
       <ChatInput value={draft} onChange={setDraft} onSend={send} onStop={stop} sending={sending} placeholder={placeholder} accept={accept} />
     </div>
   );

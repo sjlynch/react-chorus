@@ -6,6 +6,8 @@ import type { Connector, ConnectorResult } from './openai';
  * Expects SSE data lines with JSON objects containing a "type" field.
  * Yields text from content_block_delta events (delta.type === 'text_delta').
  * Signals done on message_stop.
+ * Tool-use deltas (input_json_delta/tool_use content blocks) are intentionally
+ * ignored; handle them with a custom connector/onSend flow when needed.
  *
  * Usage example:
  *   const { send } = useChorusStream(transport, { connector: 'anthropic' });

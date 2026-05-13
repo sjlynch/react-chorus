@@ -69,7 +69,7 @@ describe('useChorusStream', () => {
     expect(onDone).toHaveBeenCalledTimes(1);
   });
 
-  it('delays onDone until minDelayMs has elapsed when the transport resolves faster', async () => {
+  it('delays the first chunk until minDelayMs has elapsed when the transport resolves faster', async () => {
     vi.useFakeTimers();
     try {
       let resolveTransport!: (response: Response) => void;
@@ -89,31 +89,33 @@ describe('useChorusStream', () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(10);
         resolveTransport(makeResponse());
-        // Flush microtasks so readSSEStream completes and finish() schedules its setTimeout.
+        // Flush microtasks so readSSEStream completes and schedules the first-token timer.
         await vi.advanceTimersByTimeAsync(0);
       });
 
-      expect(onChunk).toHaveBeenCalledTimes(1);
+      expect(onChunk).not.toHaveBeenCalled();
       expect(onDone).not.toHaveBeenCalled();
 
-      // Partway through the remaining ~490ms wait — onDone still pending.
+      // Partway through the remaining ~490ms wait — chunks and done are still pending.
       await act(async () => {
         await vi.advanceTimersByTimeAsync(400);
       });
+      expect(onChunk).not.toHaveBeenCalled();
       expect(onDone).not.toHaveBeenCalled();
 
-      // Finish the delay; onDone should fire once total elapsed reaches minDelayMs.
+      // Finish the delay; the buffered chunk flushes before onDone.
       await act(async () => {
         await vi.runAllTimersAsync();
         await sendPromise;
       });
+      expect(onChunk).toHaveBeenCalledTimes(1);
       expect(onDone).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it('calls onDone without extra delay when the transport is slower than minDelayMs', async () => {
+  it('delivers chunks without extra delay when the transport is slower than minDelayMs', async () => {
     vi.useFakeTimers();
     try {
       let resolveTransport!: (response: Response) => void;
@@ -133,15 +135,17 @@ describe('useChorusStream', () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(600);
       });
+      expect(onChunk).not.toHaveBeenCalled();
       expect(onDone).not.toHaveBeenCalled();
 
-      // Resolving the transport must finalize without scheduling any further timer:
+      // Resolving the transport must deliver and finalize without scheduling any further timer:
       // if finish() had set a setTimeout, awaiting sendPromise here would hang since
       // no timers are advanced after this point.
       await act(async () => {
         resolveTransport(makeResponse());
         await sendPromise;
       });
+      expect(onChunk).toHaveBeenCalledTimes(1);
       expect(onDone).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();

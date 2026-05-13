@@ -94,7 +94,7 @@ export default function App() {
 }
 ```
 
-`createFetchSSETransport(url)` posts `{ prompt, history }` to your endpoint and reads the response as a Server-Sent Events stream. `history` includes the latest user message, so backend examples should map `history` directly instead of appending `prompt` again. Pass a `formatBody` option to customise the request shape for OpenAI, FastAPI, or any other backend. The `openai` connector parses the standard `choices[*].delta.content` shape.
+`createFetchSSETransport(url)` posts `{ prompt, history }` to your endpoint and reads the response as a Server-Sent Events stream. `history` includes the latest user message, so backend examples should map `history` directly instead of appending `prompt` again. Pass a `formatBody` option to customise the request shape for OpenAI, FastAPI, FormData uploads, or any other backend. The transport sets `Content-Type: application/json` only for its default JSON body; custom serializers should set JSON headers themselves and FormData/Blob/URLSearchParams are not forced to JSON. The `openai` connector parses the standard `choices[*].delta.content` shape.
 
 For a non-streaming client, `onSend` may return a complete assistant `Message`. Chorus appends it after the user message (and after `minAssistantDelayMs`):
 
@@ -125,11 +125,44 @@ import OpenAI from 'openai';
 const app = express();
 const openai = new OpenAI(); // reads OPENAI_API_KEY from env
 
-app.use(express.json());
+app.use(express.json({ limit: '10mb' })); // data URL image attachments can be large
+
+function toOpenAIMessage(m) {
+  if (!m || typeof m !== 'object') return null;
+  const text = typeof m.text === 'string' ? m.text : '';
+
+  if (m.role === 'system' || m.role === 'assistant') {
+    return text.trim() ? { role: m.role, content: text } : null;
+  }
+
+  if (m.role === 'user') {
+    const parts = [];
+    if (text.trim()) parts.push({ type: 'text', text });
+    for (const att of Array.isArray(m.attachments) ? m.attachments : []) {
+      if (att?.type?.startsWith('image/') && typeof att.data === 'string' && att.data.startsWith('data:')) {
+        parts.push({ type: 'image_url', image_url: { url: att.data } });
+      } else {
+        parts.push({ type: 'text', text: `[Unsupported attachment omitted: ${att?.name ?? 'attachment'}]` });
+      }
+    }
+    if (!parts.length) return null;
+    return parts.length === 1 && parts[0].type === 'text'
+      ? { role: 'user', content: parts[0].text }
+      : { role: 'user', content: parts };
+  }
+
+  if (m.role === 'tool' && m.toolCall) {
+    // Chorus tool messages do not include OpenAI's required tool_call_id.
+    // Preserve them as context instead of sending an invalid role: 'tool' item.
+    return { role: 'system', content: `Tool ${m.toolCall.name} result:\n${JSON.stringify(m.toolCall.output ?? m.text)}` };
+  }
+
+  return null;
+}
 
 app.post('/api/chat', async (req, res) => {
   const { history = [] } = req.body;
-  const messages = history.map((m) => ({ role: m.role, content: m.text }));
+  const messages = Array.isArray(history) ? history.map(toOpenAIMessage).filter(Boolean) : [];
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -215,12 +248,21 @@ const client = new Anthropic();
 wss.on('connection', (ws) => {
   ws.on('message', async (raw) => {
     const { history = [] } = JSON.parse(raw.toString());
-    const messages = history.map((m) => ({ role: m.role, content: m.text }));
+    const system = history
+      .filter((m) => m.role === 'system' && m.text)
+      .map((m) => m.text)
+      .join('\n\n') || undefined;
+    const messages = history
+      .filter((m) => (m.role === 'user' || m.role === 'assistant') && m.text)
+      .map((m) => ({ role: m.role, content: m.text }));
+    // Tool messages and attachments need Anthropic content blocks/tool_result
+    // mapping. Do that explicitly instead of passing raw Chorus messages through.
 
     try {
       const stream = await client.messages.stream({
         model: 'claude-sonnet-4-6',
         max_tokens: 1024,
+        system,
         messages,
       });
 
@@ -258,6 +300,8 @@ Connectors tell Chorus how to parse the streaming response from different AI pro
 | `'auto'` *(default)* | Auto-detect | Tries OpenAI, then Gemini, then Anthropic, then plain text |
 
 All built-in connectors also recognise in-band stream errors. If a backend has already started a `200` SSE/WebSocket stream, send `data: {"error":"message"}` (or `{"error":{"message":"message"}}`) to abort the response, call `onError` with an `Error`, and show the configured error banner.
+
+Built-in connectors are text-delta connectors. OpenAI `delta.tool_calls`, Anthropic `tool_use` / `input_json_delta`, and Gemini function-call deltas are intentionally ignored rather than converted to `toolCall` messages. For agent-step UIs, handle provider tool events in your own client/server layer (for example with `onSend`, a custom `Connector`, or by appending `role: 'tool'` messages yourself after the tool finishes).
 
 ### Usage
 
@@ -309,8 +353,10 @@ app.post('/api/chat', async (req, res) => {
   const { history = [] } = req.body;
   const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
   const contents = history
-    .filter((m) => m.role === 'user' || m.role === 'assistant')
+    .filter((m) => (m.role === 'user' || m.role === 'assistant') && m.text)
     .map((m) => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.text }] }));
+  // This text-only example filters system/tool messages. Map image attachments
+  // to Gemini inlineData/fileData parts explicitly before sending them.
 
   res.setHeader('Content-Type', 'text/event-stream');
   try {
@@ -377,11 +423,15 @@ npm run dev
 
 ## SSR and Markdown sanitization
 
-`<Markdown>` sanitizes rendered HTML during server-side rendering as well as in the browser before using `dangerouslySetInnerHTML`. If the default `dompurify` export is not usable in a server environment, react-chorus falls back to a conservative sanitizer that removes executable tags, event-handler attributes, and JavaScript URLs. Apps that already create an isomorphic DOMPurify instance can pass it via `<Markdown sanitizer={...} />`.
+`<Markdown>` sanitizes rendered HTML before using `dangerouslySetInnerHTML`. In the browser it uses `dompurify` (or initializes the DOMPurify factory with `window` when needed). During SSR, if no real DOMPurify-compatible sanitizer is available, react-chorus does **not** attempt regex-based HTML sanitization; it switches to a safe no-raw-HTML renderer that drops raw HTML tokens and only emits Markdown-generated links/images with safe URL protocols. Ordinary Markdown (`**bold**`, headings, lists, code, safe `http`/`https` links) renders the same on server and client.
+
+If your SSR app wants to allow sanitized raw HTML, create an isomorphic DOMPurify instance (for example with your framework's DOM/window or jsdom on the server) and pass it to the standalone renderer: `<Markdown sanitizer={purify} />` or `<Markdown sanitizer={(html) => purify.sanitize(html)} />`.
 
 ## API
 
 ### `<Chorus>`
+
+`ChorusProps` is generic: `ChorusProps<TMeta = Record<string, unknown>>`. Use `<Chorus<MyMeta> ... />` when your `Message.metadata` has a structured shape; `value`, `onChange`, `onSend`, `transport`, and `renderMessage` will all preserve `Message<MyMeta>`.
 
 Message source modes are mutually exclusive:
 
@@ -389,16 +439,18 @@ Message source modes are mutually exclusive:
 - Uncontrolled with a seed: pass `initialMessages` (or legacy `messages`) and let Chorus manage subsequent updates internally.
 - Uncontrolled with persistence: pass `persistenceKey` without `value`; passing both makes `value` win, so built-in persistence is bypassed.
 
+When `persistenceKey` is combined with `initialMessages` (or legacy `messages`), stored history is checked first. If the key has no stored value, Chorus renders and saves the seed so welcome messages still appear with persistence enabled. If the key already exists — including an intentionally empty `[]` conversation — the stored value wins. Async storage adapters may show the seed while loading; once the read resolves, stored history replaces it, and stale reads are ignored after local changes.
+
 | Prop | Type | Default | Description |
 |------|------|---------|-------------|
-| `transport` | `string \| Transport` | — | Simple path: URL to POST to, or a custom Transport function. Chorus handles all streaming. |
+| `transport` | `string \| Transport<TMeta>` | — | Simple path: URL to POST to, or a custom Transport function. Chorus handles all streaming. |
 | `systemPrompt` | `string` | — | Transport-path convenience prop. Prepends a hidden `system` message to the request history for every send. |
 | `connector` | `Connector \| 'auto' \| 'openai' \| 'anthropic' \| 'gemini'` | `'auto'` | SSE connector used to parse the stream. `'auto'` detects OpenAI, Anthropic, and Gemini; pass an explicit name when the format is known. |
-| `onSend` | `(text, messages, helpers) => Message \| void \| Promise<Message \| void>` | — | Advanced path: called when the user submits a message. Use `helpers.appendAssistant`/`helpers.finalizeAssistant` to stream tokens, or return a complete assistant `Message` for non-streaming replies. |
-| `value` | `Message[]` | — | Controlled message list. Pair with `onChange`; Chorus renders this array as the source of truth. |
-| `onChange` | `(messages: Message[]) => void` | — | Called whenever Chorus wants to change the message list in controlled mode (`value` is provided). Not called for legacy `messages`-only uncontrolled state. |
-| `messages` | `Message[]` | — | Legacy initial-only seed for uncontrolled mode. Read once on mount; later prop changes are ignored. Prefer `initialMessages` for seeding or `value` + `onChange` for controlled mode. |
-| `initialMessages` | `Message[]` | — | Initial-only seed for uncontrolled mode. Useful for welcome messages; `system` and `tool` messages are hidden by default via `hiddenRoles`. |
+| `onSend` | `(text, messages, helpers) => Message<TMeta> \| void \| Promise<Message<TMeta> \| void>` | — | Advanced path: called when the user submits a message. Use `helpers.appendAssistant`/`helpers.finalizeAssistant` to stream tokens, or return a complete assistant `Message` for non-streaming replies. |
+| `value` | `Message<TMeta>[]` | — | Controlled message list. Pair with `onChange`; Chorus renders this array as the source of truth. |
+| `onChange` | `(messages: Message<TMeta>[]) => void` | — | Called whenever Chorus wants to change the message list in controlled mode (`value` is provided). Not called for legacy `messages`-only uncontrolled state. |
+| `messages` | `Message<TMeta>[]` | — | Legacy initial-only seed for uncontrolled mode. Read once on mount; later prop changes are ignored. Prefer `initialMessages` for seeding or `value` + `onChange` for controlled mode. |
+| `initialMessages` | `Message<TMeta>[]` | — | Initial-only seed for uncontrolled mode. Useful for welcome messages; `system` and `tool` messages are hidden by default via `hiddenRoles`. |
 | `placeholder` | `string` | `"Message…"` | Input placeholder text. |
 | `accept` | `string` | — | Forwarded to the file-picker `<input accept>`. Omitting the prop hides the attach button entirely. |
 | `sending` | `boolean` | — | Override the sending state (useful when you manage it externally via `useChorusStream`). |
@@ -409,17 +461,17 @@ Message source modes are mutually exclusive:
 | `onError` | `(error: Error) => void` | — | Called for any non-abort error from a send or stream. The raw `Error` goes here; the UI shows `errorMessage`. |
 | `onChunk` | `(chunk: string, messageId: string) => void` | — | Observation hook called for each streamed token. Receives the assistant `messageId` so callers can correlate chunks with a specific message. Does **not** affect streaming behaviour. |
 | `persistenceKey` | `string` | — | Uncontrolled-mode persistence key. When set without `value`, Chorus saves/restores messages using this key (defaults to localStorage). If `value` is provided, controlled state wins and built-in persistence is not used. |
-| `persistenceStorage` | `StorageAdapter` | `localStorage` | Custom storage adapter for persistenceKey. |
+| `persistenceStorage` | `StorageAdapter` | `localStorage` | Custom storage adapter for persistenceKey. The default `localStorage` is resolved lazily; if browser storage is blocked or unavailable, Chorus keeps working without persistence. |
 | `headless` | `boolean` | `false` | Strip all default styles and inline style injection. |
-| `renderMessage` | `(message: Message) => ReactNode` | — | Custom per-message renderer. Return `null` to fall back to default rendering. |
+| `renderMessage` | `(message: Message<TMeta>) => ReactNode` | — | Custom per-message renderer. Return `null` to fall back to default rendering. |
 | `hiddenRoles` | `Role[]` | `['system', 'tool']` | Message roles hidden from the transcript. Pass `['system']` to show tool calls while hiding system prompts, or `[]` to show all roles. `<Chorus>` accepts `hiddenRoles` only — `showSystemMessages` exists on `<ChatWindow>` for backwards compatibility. |
 
 ### `helpers` (passed to `onSend`)
 
 | Helper | Description |
 |--------|-------------|
-| `appendAssistant(chunk)` | Append a text chunk to the current assistant message. |
-| `finalizeAssistant()` | Mark the assistant message complete. |
+| `appendAssistant(chunk)` | Append a text chunk to the current assistant message. Chunks are buffered until `minAssistantDelayMs` has elapsed before the first token is shown. |
+| `finalizeAssistant()` | Mark the assistant message complete. If first-token chunks are still buffered, completion waits until they flush. |
 | `signal` | `AbortSignal` — aborted when the user hits Stop. |
 
 ### Observing streamed tokens with `onChunk`
@@ -466,31 +518,44 @@ const [messages, setMessages] = React.useState<Message[]>([
 ### `useChorusStream(transport, opts?)`
 
 ```ts
-const { send, abort, sending } = useChorusStream(transport, { connector: 'openai' });
+const { send, abort, sending } = useChorusStream<MyMeta>(transport, { connector: 'openai' });
 ```
 
-- `transport` — async function `(text, history, signal) => Promise<Response>`. Use `createFetchSSETransport(url)` or write your own.
+- `transport` — async function `(text, history: Message<TMeta>[], signal) => Promise<Response>`. Use `createFetchSSETransport<TMeta>(url)` or write your own.
+- `send(..., { minDelayMs })` buffers the first streamed chunks until that many milliseconds have elapsed from send start, then flushes them before continuing normally.
 - `opts.connector` — `'openai'` | `'anthropic'` | `'gemini'` | `'auto'` | custom `Connector`. Defaults to `'auto'` which handles OpenAI, Gemini, Anthropic JSON, plain-text SSE, and in-band `{ error }` payloads.
 
 ### `createFetchSSETransport(url, init?)`
 
-Returns a `Transport` that POSTs JSON to `url` and reads the response as a Server-Sent Events stream.
+Returns a `Transport` that POSTs to `url` and reads the response as a Server-Sent Events stream. With no `formatBody`, it sends JSON `{ prompt, history }` and defaults `Content-Type: application/json`. With a custom `formatBody`, headers are left alone so FormData/Blob/URLSearchParams can set their own content type; add an explicit JSON Content-Type when your custom serializer returns JSON.
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `formatBody` | `(text, history) => BodyInit` | `JSON.stringify({ prompt, history })` | Serialise the outgoing request body |
+| `formatBody` | `(text, history: Message<TMeta>[]) => BodyInit` | `JSON.stringify({ prompt, history })` | Serialise the outgoing request body. Custom serializers do not get an automatic JSON Content-Type. |
 | *(any `RequestInit` field)* | | | Forwarded to `fetch` (e.g. `headers`, `credentials`) |
 
 ```ts
 // OpenAI-compatible backend
 const transport = createFetchSSETransport('/api/chat', {
+  headers: { 'Content-Type': 'application/json' },
   formatBody: (text, history) =>
     JSON.stringify({ model: 'gpt-4o', messages: history, stream: true }),
 });
 
 // FastAPI / LangChain backend
 const transport = createFetchSSETransport('/api/chat', {
+  headers: { 'Content-Type': 'application/json' },
   formatBody: (text, history) => JSON.stringify({ messages: history }),
+});
+
+// Multipart upload or custom body: no forced JSON Content-Type
+const multipartTransport = createFetchSSETransport('/api/chat-with-files', {
+  formatBody: (text, history) => {
+    const form = new FormData();
+    form.set('prompt', text);
+    form.set('history', JSON.stringify(history));
+    return form;
+  },
 });
 ```
 
@@ -504,7 +569,7 @@ Returns a `Transport` that connects over a native WebSocket. Each incoming messa
 | `onOpen` | `() => void` | – | Called when the WebSocket connection opens |
 | `onClose` | `(code: number, reason: string) => void` | – | Called when the WebSocket closes, with the close code and reason |
 | `onError` | `(event: Event) => void` | – | Called when the WebSocket reports an error |
-| `formatMessage` | `(text, history) => string` | `JSON.stringify({ prompt, history })` | Serialise the outgoing request |
+| `formatMessage` | `(text, history: Message<TMeta>[]) => string` | `JSON.stringify({ prompt, history })` | Serialise the outgoing request |
 
 Supports `AbortSignal` cancellation — closing the socket when the user hits Stop.
 
@@ -522,6 +587,60 @@ const myConnector: Connector = {
     return obj.token ? { text: obj.token } : null;
   },
 };
+```
+
+## Serializing multimodal and tool-call history
+
+`Message` is react-chorus' UI/storage shape. Provider APIs have stricter role and content schemas, so do not blindly send every item as `{ role: m.role, content: m.text }`: `tool` messages often need provider-specific IDs, system prompts may be top-level fields, and attachments need multimodal content parts.
+
+Recommended patterns:
+
+- Keep the default transport body (`{ prompt, history }`) and map `history` safely on your server, as the OpenAI example above does.
+- Or pass `createFetchSSETransport('/api/chat', { formatBody, headers })` and serialize to your backend's exact schema on the client.
+- Filter unsupported roles/attachments explicitly, or convert them to safe text context, instead of passing invalid provider messages through.
+
+### End-to-end image attachment recipe (OpenAI Chat Completions)
+
+Front end: enable image selection. The `accept` prop makes `<ChatInput>` read files into `Message.attachments` as data URLs, and the normal `transport` path sends those attachments in `history`.
+
+```tsx
+<Chorus transport="/api/chat" connector="openai" accept="image/*" />
+```
+
+Backend: map only user image attachments to OpenAI `image_url` content parts, while keeping text-only turns as simple strings.
+
+```js
+function toOpenAIUserMessage(m) {
+  const parts = [];
+  if (m.text?.trim()) parts.push({ type: 'text', text: m.text });
+  for (const att of Array.isArray(m.attachments) ? m.attachments : []) {
+    if (att?.type?.startsWith('image/') && att.data?.startsWith('data:')) {
+      parts.push({ type: 'image_url', image_url: { url: att.data } });
+    } else {
+      parts.push({ type: 'text', text: `[Unsupported attachment omitted: ${att?.name ?? 'attachment'}]` });
+    }
+  }
+  if (!parts.length) return null;
+  return parts.length === 1 && parts[0].type === 'text'
+    ? { role: 'user', content: parts[0].text }
+    : { role: 'user', content: parts };
+}
+```
+
+The runnable [`examples/with-openai`](./examples/with-openai) app includes this mapping and sets `express.json({ limit: '10mb' })` so data URL images are accepted by the proxy.
+
+### Tool-call history recipe
+
+Chorus displays tool steps as `role: 'tool'` with `message.toolCall`, but those messages are not a provider-neutral wire format. If your provider requires IDs (for example OpenAI `tool_call_id`) and paired assistant tool-call records, store those provider IDs in `metadata` and serialize them explicitly in `formatBody` or on your server. If you only need the model to see the result, convert the tool message to safe text context:
+
+```js
+function toolMessageToContext(m) {
+  if (m.role !== 'tool' || !m.toolCall) return null;
+  return {
+    role: 'system',
+    content: `Tool ${m.toolCall.name} result:\n${JSON.stringify(m.toolCall.output ?? m.text)}`,
+  };
+}
 ```
 
 ## Tool calls and agent steps
@@ -588,8 +707,8 @@ import { ToolCallBlock } from 'react-chorus';
 import { MessageBubble } from 'react-chorus';
 
 // props
-interface MessageBubbleProps {
-  message: Message;            // the message to render, including attachments
+interface MessageBubbleProps<TMeta = Record<string, unknown>> {
+  message: Message<TMeta>;     // the message to render, including attachments
   className?: string;          // merged onto the outer .chorus-msg element
   style?: React.CSSProperties; // merged onto the outer .chorus-msg element
   codeTheme?: 'dark' | 'light'; // defaults to 'dark'
@@ -676,7 +795,7 @@ import { ChatWindow, ChatInput, ChorusTheme, Markdown } from 'react-chorus';
 - **`<ChatWindow messages={…} typing={…} />`** — renders the scrollable message list with a typing indicator. It accepts `hiddenRoles?: Role[]` (default `['system', 'tool']`); `showSystemMessages` is deprecated but remains supported as an alias for showing all roles.
 - **`<ChatInput value onSend onStop placeholder sending />`** — the text input and send/stop button.
 - **`<ChorusTheme palette={…}>`** — applies theme CSS variables to any subtree.
-- **`<Markdown text={…} codeTheme="dark" />`** — standalone markdown renderer with syntax highlighting and copy buttons. It supports `streaming` to render escaped plain text until finalization and `sanitizer` to provide a custom DOMPurify-compatible sanitizer for SSR.
+- **`<Markdown text={…} codeTheme="dark" />`** — standalone markdown renderer with syntax highlighting and copy buttons. It supports `streaming` to render escaped plain text until finalization and `sanitizer` to provide a custom DOMPurify-compatible sanitizer when SSR needs sanitized raw HTML instead of the built-in no-raw-HTML safe mode.
 - **`<MessageBubble message={…} />`** — renders the default bubble for one message, including attachments. Accepts `className`, `style`, `codeTheme`, and `headless` for decoration without replacing the full renderer.
 
 ## Message Shape
@@ -690,10 +809,18 @@ interface ToolCall {
   output?: unknown;
 }
 
+interface Attachment {
+  name: string;
+  type: string;
+  data: string; // base64 data URL
+  size: number;
+}
+
 interface Message<TMeta = Record<string, unknown>> {
   id: string;
   role: Role;
   text: string; // supports CommonMark + GFM
+  attachments?: Attachment[]; // populated by <ChatInput accept="..." />
   toolCall?: ToolCall; // populated when role === 'tool'
   metadata?: TMeta; // optional typed data (timestamps, model, latency, etc.)
 }
@@ -702,11 +829,13 @@ interface Message<TMeta = Record<string, unknown>> {
 `Message` defaults to arbitrary metadata for backwards compatibility. Pass a type argument when your app stores structured metadata:
 
 ```ts
-type ChatMessage = Message<{
+type MyMeta = {
   timestamp: Date;
   model: string;
   latencyMs: number;
-}>;
+};
+
+type ChatMessage = Message<MyMeta>;
 
 const message: ChatMessage = {
   id: '1',
@@ -720,6 +849,16 @@ const message: ChatMessage = {
 };
 
 const latency = message.metadata?.latencyMs;
+```
+
+The same generic flows through public components and hooks:
+
+```tsx
+<Chorus<MyMeta>
+  value={messages}
+  onChange={(next) => next[0].metadata?.latencyMs}
+  renderMessage={(message) => <span>{message.metadata?.model}</span>}
+/>
 ```
 
 The generic `Message` declaration shape is a minor semver-level type declaration change while remaining source-compatible.

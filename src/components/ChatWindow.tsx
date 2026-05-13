@@ -15,12 +15,12 @@ function isNearBottom(el: HTMLElement) {
   return el.scrollHeight - el.scrollTop - el.clientHeight <= SCROLL_BOTTOM_THRESHOLD_PX;
 }
 
-export interface ChatWindowProps {
-  messages: Message[];
+export interface ChatWindowProps<TMeta = Record<string, unknown>> {
+  messages: Message<TMeta>[];
   typing?: boolean;
   codeTheme?: 'dark' | 'light';
   headless?: boolean;
-  renderMessage?: (message: Message) => React.ReactNode;
+  renderMessage?: (message: Message<TMeta>) => React.ReactNode;
   /** Message roles hidden from the transcript. Defaults to ['system', 'tool']; pass ['system'] to show tool calls while hiding system prompts, or [] to show every role. */
   hiddenRoles?: Role[];
   /** @deprecated Use hiddenRoles instead. When hiddenRoles is omitted, true is equivalent to hiddenRoles={[]} and false keeps the default ['system', 'tool']. */
@@ -34,7 +34,7 @@ export interface ChatWindowProps {
   streamingMessageId?: string | null;
 }
 
-export function ChatWindow({ messages, typing, codeTheme = 'dark', headless = false, renderMessage, hiddenRoles, showSystemMessages, onEdit, onRegenerate, onDelete, error, onRetry, streamingMessageId }: ChatWindowProps) {
+export function ChatWindow<TMeta = Record<string, unknown>>({ messages, typing, codeTheme = 'dark', headless = false, renderMessage, hiddenRoles, showSystemMessages, onEdit, onRegenerate, onDelete, error, onRetry, streamingMessageId }: ChatWindowProps<TMeta>) {
   React.useEffect(() => {
     if (showSystemMessages === undefined || didWarnShowSystemMessages) return;
     console.warn('[Chorus] `showSystemMessages` is deprecated. Use `hiddenRoles` instead (for example hiddenRoles={[\'system\']} to show tool messages while hiding system prompts).');

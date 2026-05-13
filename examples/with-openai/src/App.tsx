@@ -40,6 +40,7 @@ export default function App() {
         onSend={handleSend}
         sending={sending}
         placeholder="Type a message and press Enter…"
+        accept="image/*"
       />
     </div>
   );

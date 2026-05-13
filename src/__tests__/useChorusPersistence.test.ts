@@ -15,6 +15,16 @@ function makeSyncStorage(initial?: string): StorageAdapter & { store: Record<str
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 // ---------------------------------------------------------------------------
 
 describe('useChorusPersistence', () => {
@@ -30,10 +40,38 @@ describe('useChorusPersistence', () => {
     expect(result.current.value).toEqual([]);
   });
 
+  it('falls back safely when the default localStorage getter throws', () => {
+    const descriptor = Object.getOwnPropertyDescriptor(window, 'localStorage');
+    const originalLocalStorage = window.localStorage;
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      get() { throw new DOMException('Blocked', 'SecurityError'); },
+    });
+
+    try {
+      const { result } = renderHook(() => useChorusPersistence('key'));
+      expect(result.current.value).toEqual([]);
+      expect(result.current.canPersist).toBe(false);
+    } finally {
+      if (descriptor) Object.defineProperty(window, 'localStorage', descriptor);
+      else Object.defineProperty(window, 'localStorage', { configurable: true, value: originalLocalStorage });
+    }
+  });
+
   it('reads initial value from synchronous storage', () => {
     const storage = makeSyncStorage(JSON.stringify(MSGS));
     const { result } = renderHook(() => useChorusPersistence('key', { storage }));
     expect(result.current.value).toEqual(MSGS);
+  });
+
+  it('reads initial value from default localStorage', () => {
+    window.localStorage.setItem('chorus-default-key', JSON.stringify(MSGS));
+    try {
+      const { result } = renderHook(() => useChorusPersistence('chorus-default-key'));
+      expect(result.current.value).toEqual(MSGS);
+    } finally {
+      window.localStorage.removeItem('chorus-default-key');
+    }
   });
 
   it('reloads stored messages when the persistence key changes', () => {
@@ -128,5 +166,25 @@ describe('useChorusPersistence', () => {
     await act(async () => { await Promise.resolve(); });
 
     expect(result.current.value).toEqual([]);
+  });
+
+  it('ignores stale async reads after onChange writes newer messages', async () => {
+    const pendingRead = deferred<string | null>();
+    const asyncStorage: StorageAdapter = {
+      getItem: vi.fn(() => pendingRead.promise),
+      setItem: vi.fn(),
+    };
+
+    const { result } = renderHook(() => useChorusPersistence('key', { storage: asyncStorage }));
+
+    act(() => result.current.onChange([MSG]));
+    expect(result.current.value).toEqual([MSG]);
+
+    await act(async () => {
+      pendingRead.resolve(JSON.stringify(MSGS));
+      await pendingRead.promise;
+    });
+
+    expect(result.current.value).toEqual([MSG]);
   });
 });

@@ -5,7 +5,7 @@ import { useLatestRef } from './useLatestRef';
 
 export interface SendCallbacks {
   /**
-   * Optional notification fired with the first non-empty stream chunk.
+   * Optional notification fired when the first non-empty stream chunk is delivered.
    * The same first chunk is also delivered to onChunk.
    */
   onStart?: (firstChunk: string) => void;
@@ -13,10 +13,11 @@ export interface SendCallbacks {
   onChunk: (chunk: string) => void;
   onDone?: () => void;
   onError?: (err: Error) => void;
+  /** Minimum elapsed time from send() start before delivering the first chunk. */
   minDelayMs?: number;
 }
 
-export type Transport = (text: string, history: Message[], signal: AbortSignal) => Promise<Response>;
+export type Transport<TMeta = Record<string, unknown>> = (text: string, history: Message<TMeta>[], signal: AbortSignal) => Promise<Response>;
 
 export interface StreamOptions {
   connector?: Connector | ConnectorName;
@@ -24,6 +25,128 @@ export interface StreamOptions {
 
 function isAbortError(error: unknown) {
   return typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError';
+}
+
+function createAbortError() {
+  const err = new Error('Aborted');
+  err.name = 'AbortError';
+  return err;
+}
+
+function createDelayedChunkEmitter(cb: SendCallbacks, startedAt: number, signal: AbortSignal) {
+  const minDelayMs = Math.max(0, cb.minDelayMs ?? 0);
+  let hasDeliveredFirstChunk = false;
+  let released = minDelayMs === 0;
+  let cancelled = false;
+  let bufferedChunks: string[] = [];
+  let releasePromise: Promise<void> | null = null;
+  let resolveRelease: (() => void) | null = null;
+  let rejectRelease: ((err: Error) => void) | null = null;
+  let releaseTimer: ReturnType<typeof setTimeout> | null = null;
+  let abortListener: ((event: Event) => void) | null = null;
+
+  const cleanupScheduledRelease = () => {
+    if (releaseTimer !== null) {
+      clearTimeout(releaseTimer);
+      releaseTimer = null;
+    }
+
+    if (abortListener) {
+      signal.removeEventListener('abort', abortListener);
+      abortListener = null;
+    }
+
+    resolveRelease = null;
+    rejectRelease = null;
+  };
+
+  const settleScheduledRelease = () => {
+    const resolve = resolveRelease;
+    cleanupScheduledRelease();
+    releasePromise = null;
+    resolve?.();
+  };
+
+  const rejectScheduledRelease = (err: Error) => {
+    const reject = rejectRelease;
+    cleanupScheduledRelease();
+    releasePromise = null;
+    reject?.(err);
+  };
+
+  const deliverChunk = (chunk: string) => {
+    if (cancelled) return;
+    if (!hasDeliveredFirstChunk) {
+      hasDeliveredFirstChunk = true;
+      cb.onStart?.(chunk);
+    }
+    cb.onChunk(chunk);
+  };
+
+  const flushBufferedChunks = () => {
+    if (cancelled || released) return;
+    released = true;
+    const chunks = bufferedChunks;
+    bufferedChunks = [];
+    settleScheduledRelease();
+    for (const chunk of chunks) deliverChunk(chunk);
+  };
+
+  const cancel = () => {
+    cancelled = true;
+    bufferedChunks = [];
+    rejectScheduledRelease(createAbortError());
+  };
+
+  const scheduleRelease = () => {
+    if (released || cancelled) return Promise.resolve();
+
+    const wait = Math.max(0, minDelayMs - (Date.now() - startedAt));
+    if (wait <= 0) {
+      flushBufferedChunks();
+      return Promise.resolve();
+    }
+
+    if (signal.aborted) {
+      cancel();
+      return Promise.reject(createAbortError());
+    }
+
+    if (!releasePromise) {
+      releasePromise = new Promise<void>((resolve, reject) => {
+        resolveRelease = resolve;
+        rejectRelease = reject;
+        abortListener = () => {
+          cancelled = true;
+          bufferedChunks = [];
+          rejectScheduledRelease(createAbortError());
+        };
+        signal.addEventListener('abort', abortListener, { once: true });
+        releaseTimer = setTimeout(flushBufferedChunks, wait);
+      });
+    }
+
+    return releasePromise;
+  };
+
+  const handleChunk = (chunk: string) => {
+    if (!chunk || cancelled) return;
+
+    if (released || Date.now() - startedAt >= minDelayMs) {
+      if (!released) flushBufferedChunks();
+      deliverChunk(chunk);
+      return;
+    }
+
+    bufferedChunks.push(chunk);
+    void scheduleRelease().catch(() => undefined);
+  };
+
+  const flushBeforeDone = async () => {
+    if (!released && bufferedChunks.length > 0) await scheduleRelease();
+  };
+
+  return { handleChunk, flushBeforeDone, cancel };
 }
 
 /**
@@ -91,7 +214,7 @@ export function readSSEStream(res: Response, onEvent: (payload: string) => unkno
   });
 }
 
-export function useChorusStream(transport: Transport, opts?: StreamOptions) {
+export function useChorusStream<TMeta = Record<string, unknown>>(transport: Transport<TMeta>, opts?: StreamOptions) {
   const connector = getConnector(opts?.connector);
   const transportRef = useLatestRef(transport);
   const connectorRef = useLatestRef(connector);
@@ -100,7 +223,7 @@ export function useChorusStream(transport: Transport, opts?: StreamOptions) {
   const isSendingRef = React.useRef(false);
   const controllerRef = React.useRef<AbortController | null>(null);
 
-  const send = React.useCallback(async (text: string, history: Message[], cb: SendCallbacks, externalSignal?: AbortSignal) => {
+  const send = React.useCallback(async (text: string, history: Message<TMeta>[], cb: SendCallbacks, externalSignal?: AbortSignal) => {
     if (isSendingRef.current) return;
     isSendingRef.current = true;
 
@@ -118,10 +241,10 @@ export function useChorusStream(transport: Transport, opts?: StreamOptions) {
 
     setSending(true);
     const startedAt = Date.now();
+    const delayedChunks = createDelayedChunkEmitter(cb, startedAt, signal);
 
     const finish = async () => {
-      const wait = Math.max(0, (cb.minDelayMs ?? 0) - (Date.now() - startedAt));
-      if (wait) await new Promise(r => setTimeout(r, wait));
+      await delayedChunks.flushBeforeDone();
       cb.onDone?.();
       isSendingRef.current = false;
       setSending(false);
@@ -132,28 +255,20 @@ export function useChorusStream(transport: Transport, opts?: StreamOptions) {
       const res = await transportRef.current(text, history, signal);
       if (!res.ok || !res.body) throw new Error(`Bad response (${res.status}) or missing body`);
 
-      let started = false;
       await readSSEStream(res, (payload) => {
         const out = connectorRef.current.extract(payload);
         if (!out) return;
         if (out.error) throw new Error(out.error);
 
         const chunk = out.text || '';
-        if (chunk) {
-          if (!started) {
-            started = true;
-            if (cb.onStart) cb.onStart(chunk);
-            cb.onChunk(chunk);
-          } else {
-            cb.onChunk(chunk);
-          }
-        }
+        if (chunk) delayedChunks.handleChunk(chunk);
 
         if (out.done) return false;
       });
 
       await finish();
     } catch (e: unknown) {
+      delayedChunks.cancel();
       if (!isAbortError(e)) cb.onError?.(e instanceof Error ? e : new Error(String(e)));
       isSendingRef.current = false;
       setSending(false);

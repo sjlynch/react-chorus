@@ -5,7 +5,7 @@ Transports are async functions used by the simple `transport` send path. They ac
 ## Transport type
 
 ```ts
-(text: string, history: Message[], signal: AbortSignal) => Promise<Response>
+(text: string, history: Message<TMeta>[], signal: AbortSignal) => Promise<Response>
 ```
 
 The type is exported from `src/hooks/useChorusStream.ts` and re-exported from `Chorus.tsx`.
@@ -16,7 +16,8 @@ The type is exported from `src/hooks/useChorusStream.ts` and re-exported from `C
 
 - POSTs to `url` with JSON by default: `{ prompt: text, history }`.
 - Supports `formatBody(text, history)` for provider/backend-specific request bodies.
-- Merges custom headers with `Content-Type: application/json`.
+- Normalizes custom headers with the Headers API.
+- Adds `Content-Type: application/json` only for the default JSON body unless the caller already supplied Content-Type; custom `formatBody` serializers must set their own JSON headers and FormData/Blob/URLSearchParams are not forced to JSON.
 - Returns the `fetch()` `Response` directly; the server must stream SSE `data:` events.
 
 ## WebSocket transport
