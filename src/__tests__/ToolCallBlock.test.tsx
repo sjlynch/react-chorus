@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest';
+import type React from 'react';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ToolCallBlock } from '../components/ToolCallBlock';
@@ -23,6 +24,16 @@ describe('ToolCallBlock', () => {
   it('shows a chevron toggle when input or output is present', () => {
     render(<ToolCallBlock toolCall={CALL_WITH_IO} />);
     expect(screen.getByRole('button')).toHaveTextContent('▼');
+  });
+
+  it('toggle button does not submit an enclosing form', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn((event: React.FormEvent) => event.preventDefault());
+    render(<form onSubmit={onSubmit}><ToolCallBlock toolCall={CALL_WITH_IO} /></form>);
+
+    await user.click(screen.getByRole('button'));
+
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 
   it('links the expandable header to the body it controls', async () => {
@@ -83,6 +94,27 @@ describe('ToolCallBlock', () => {
     render(<ToolCallBlock toolCall={CALL_WITH_IO} />);
     await user.click(screen.getByRole('button'));
     expect(screen.getByText(/vitest testing/)).toBeInTheDocument();
+  });
+
+  it('safely renders circular, BigInt, function, and undefined payloads', async () => {
+    const user = userEvent.setup();
+    const circular: Record<string, unknown> = {
+      count: 123n,
+      fn: function namedTool() { return 'ok'; },
+      optional: undefined,
+    };
+    circular.self = circular;
+    const call: ToolCall = { name: 'complex', input: circular, output: undefined };
+
+    render(<ToolCallBlock toolCall={call} />);
+    await user.click(screen.getByRole('button'));
+
+    expect(screen.getByText('Input')).toBeInTheDocument();
+    expect(screen.getByText('Output')).toBeInTheDocument();
+    expect(screen.getByText(/123n/)).toBeInTheDocument();
+    expect(screen.getByText(/\[Circular\]/)).toBeInTheDocument();
+    expect(screen.getByText(/\[Function namedTool\]/)).toBeInTheDocument();
+    expect(screen.getAllByText(/undefined|\[undefined\]/).length).toBeGreaterThan(0);
   });
 
   it('shows only input section when output is absent', async () => {

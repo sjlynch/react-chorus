@@ -425,7 +425,7 @@ npm run dev
 
 `<Markdown>` sanitizes rendered HTML before using `dangerouslySetInnerHTML`. In the browser it uses `dompurify` (or initializes the DOMPurify factory with `window` when needed). During SSR, if no real DOMPurify-compatible sanitizer is available, react-chorus does **not** attempt regex-based HTML sanitization; it switches to a safe no-raw-HTML renderer that drops raw HTML tokens and only emits Markdown-generated links/images with safe URL protocols. Ordinary Markdown (`**bold**`, headings, lists, code, safe `http`/`https` links) renders the same on server and client.
 
-If your SSR app wants to allow sanitized raw HTML, create an isomorphic DOMPurify instance (for example with your framework's DOM/window or jsdom on the server) and pass it to the standalone renderer: `<Markdown sanitizer={purify} />` or `<Markdown sanitizer={(html) => purify.sanitize(html)} />`.
+If your SSR app wants to allow sanitized raw HTML, create an isomorphic DOMPurify instance (for example with your framework's DOM/window or jsdom on the server) and pass it to the standalone renderer: `<Markdown sanitizer={purify} />` or `<Markdown sanitizer={(html) => purify.sanitize(html)} />`. The built-in chat renderer accepts the same customization via `<Chorus markdownSanitizer={purify} />` / `<ChatWindow markdownSanitizer={purify} />`, or through `markdownProps={{ sanitizer: purify }}`.
 
 ## API
 
@@ -463,7 +463,9 @@ When `persistenceKey` is combined with `initialMessages` (or legacy `messages`),
 | `persistenceKey` | `string` | — | Uncontrolled-mode persistence key. When set without `value`, Chorus saves/restores messages using this key (defaults to localStorage). If `value` is provided, controlled state wins and built-in persistence is not used. |
 | `persistenceStorage` | `StorageAdapter` | `localStorage` | Custom storage adapter for persistenceKey. The default `localStorage` is resolved lazily; if browser storage is blocked or unavailable, Chorus keeps working without persistence. |
 | `headless` | `boolean` | `false` | Strip all default styles and inline style injection. |
-| `renderMessage` | `(message: Message<TMeta>) => ReactNode` | — | Custom per-message renderer. Return `null` to fall back to default rendering. |
+| `renderMessage` | `(message: Message<TMeta>, ctx: RenderMessageContext<TMeta>) => ReactNode` | — | Custom per-message renderer. Return `null` to fall back to default rendering. `ctx` includes `isStreaming`, `defaultRender()`, and action callbacks/default action controls. Existing one-argument renderers continue to work. |
+| `markdownProps` | `Omit<MarkdownProps, 'text' \| 'codeTheme' \| 'headless' \| 'streaming'>` | — | Props forwarded to the built-in Markdown renderer for every message. Currently useful for `sanitizer`. |
+| `markdownSanitizer` | `MarkdownSanitizer` | — | Convenience alias for `markdownProps.sanitizer`; takes precedence when both are provided. |
 | `hiddenRoles` | `Role[]` | `['system', 'tool']` | Message roles hidden from the transcript. Pass `['system']` to show tool calls while hiding system prompts, or `[]` to show all roles. `<Chorus>` accepts `hiddenRoles` only — `showSystemMessages` exists on `<ChatWindow>` for backwards compatibility. |
 
 ### `helpers` (passed to `onSend`)
@@ -671,13 +673,13 @@ The block shows the tool name in a header. Clicking expands it to reveal the inp
 
 ### Custom renderer via `renderMessage`
 
-Supply a `renderMessage` render-prop to take full control of how any message is displayed. Return `null` to fall back to the default renderer for that message.
+Supply a `renderMessage` render-prop to take full control of how any message is displayed. Return `null` to fall back to the default renderer for that message. The second argument exposes rendering context: `ctx.isStreaming`, `ctx.defaultRender()`, and `ctx.actions` (`edit(newText)`, `regenerate()`, `delete()`, plus `ctx.actions.defaultRender()` for the built-in action controls).
 
 ```tsx
 <Chorus
   messages={messages}
   hiddenRoles={['system']} // show tool calls while still hiding system prompts
-  renderMessage={(msg) => {
+  renderMessage={(msg, ctx) => {
     if (msg.role === 'tool' && msg.toolCall) {
       return (
         <div key={msg.id} className="my-tool-step">
@@ -686,6 +688,16 @@ Supply a `renderMessage` render-prop to take full control of how any message is 
         </div>
       );
     }
+
+    if (msg.role === 'assistant') {
+      return (
+        <>
+          <MessageBubble message={msg} streaming={ctx.isStreaming} />
+          {ctx.actions.defaultRender()}
+        </>
+      );
+    }
+
     return null; // use default rendering for other messages
   }}
 />
@@ -714,6 +726,8 @@ interface MessageBubbleProps<TMeta = Record<string, unknown>> {
   codeTheme?: 'dark' | 'light'; // defaults to 'dark'
   headless?: boolean;          // forwards headless mode to Markdown; defaults to false
   streaming?: boolean;         // forwards Markdown's escaped plain-text streaming mode
+  markdownProps?: MessageMarkdownProps;
+  markdownSanitizer?: MarkdownSanitizer;
 }
 ```
 
@@ -792,11 +806,23 @@ You can compose the UI from smaller pieces:
 import { ChatWindow, ChatInput, ChorusTheme, Markdown } from 'react-chorus';
 ```
 
-- **`<ChatWindow messages={…} typing={…} />`** — renders the scrollable message list with a typing indicator. It accepts `hiddenRoles?: Role[]` (default `['system', 'tool']`); `showSystemMessages` is deprecated but remains supported as an alias for showing all roles.
+- **`<ChatWindow messages={…} typing={…} />`** — renders the scrollable message list with a typing indicator. It accepts `hiddenRoles?: Role[]` (default `['system', 'tool']`); `showSystemMessages` is deprecated but remains supported as an alias for showing all roles. Pass `markdownSanitizer` or `markdownProps` to customize built-in Markdown rendering.
 - **`<ChatInput value onSend onStop placeholder sending />`** — the text input and send/stop button.
 - **`<ChorusTheme palette={…}>`** — applies theme CSS variables to any subtree.
 - **`<Markdown text={…} codeTheme="dark" />`** — standalone markdown renderer with syntax highlighting and copy buttons. It supports `streaming` to render escaped plain text until finalization and `sanitizer` to provide a custom DOMPurify-compatible sanitizer when SSR needs sanitized raw HTML instead of the built-in no-raw-HTML safe mode.
-- **`<MessageBubble message={…} />`** — renders the default bubble for one message, including attachments. Accepts `className`, `style`, `codeTheme`, and `headless` for decoration without replacing the full renderer.
+- **`<MessageBubble message={…} />`** — renders the default bubble for one message, including attachments. Accepts `className`, `style`, `codeTheme`, `headless`, `streaming`, `markdownProps`, and `markdownSanitizer` for decoration without replacing the full renderer.
+
+### Headless subpath
+
+Import from `react-chorus/headless` when you want semantic markup and behavior without default styling. The headless subpath preserves class names as styling hooks, and its `Chorus`, `ChatWindow`, `MessageBubble`, and `Markdown` exports default `headless={true}` so Markdown styles and syntax-highlight theme CSS are not injected unless you explicitly pass `headless={false}`.
+
+```tsx
+import { ChatWindow, Markdown, MessageBubble } from 'react-chorus/headless';
+
+<ChatWindow messages={messages} />
+<MessageBubble message={message} />
+<Markdown text="**unstyled**" />
+```
 
 ## Message Shape
 

@@ -1,6 +1,6 @@
 import React from 'react';
 import './Chorus.css';
-import { ChatWindow } from './components/ChatWindow';
+import { ChatWindow, type MessageMarkdownProps, type RenderMessageContext } from './components/ChatWindow';
 import { ChatInput } from './components/ChatInput';
 import { styleVarsFromPalette, type Palette } from './components/ChorusTheme';
 import type { Attachment, ConnectorName, Message, Role, StorageAdapter } from './types';
@@ -10,6 +10,8 @@ import { useChorusPersistence } from './hooks/useChorusPersistence';
 import { useChorusMessages } from './hooks/useChorusMessages';
 import { useRAFQueue } from './hooks/useRAFQueue';
 import type { Connector } from './connectors/connectors';
+import type { MarkdownSanitizer } from './components/Markdown';
+import { isChorusDevMode } from './utils/devMode';
 
 export type { Transport };
 export type { Connector };
@@ -87,7 +89,11 @@ export interface ChorusProps<TMeta = Record<string, unknown>> {
   persistenceKey?: string;
   persistenceStorage?: StorageAdapter;
   headless?: boolean;
-  renderMessage?: (message: Message<TMeta>) => React.ReactNode;
+  renderMessage?: (message: Message<TMeta>, context: RenderMessageContext<TMeta>) => React.ReactNode;
+  /** Props forwarded to the built-in Markdown renderer for message text. */
+  markdownProps?: MessageMarkdownProps;
+  /** Convenience alias for markdownProps.sanitizer. Takes precedence when both are provided. */
+  markdownSanitizer?: MarkdownSanitizer;
   hiddenRoles?: Role[];
   className?: string;
   style?: React.CSSProperties;
@@ -115,6 +121,8 @@ export function Chorus<TMeta = Record<string, unknown>>({
   persistenceStorage,
   headless = false,
   renderMessage,
+  markdownProps,
+  markdownSanitizer,
   hiddenRoles,
   className,
   style,
@@ -135,7 +143,7 @@ export function Chorus<TMeta = Record<string, unknown>>({
   });
 
   React.useEffect(() => {
-    if (process.env.NODE_ENV === 'production') return;
+    if (!isChorusDevMode()) return;
 
     if (messages !== undefined && onChange) {
       console.warn('[Chorus] `messages` is initial-only and does not make <Chorus> controlled. Use `value` + `onChange` for controlled mode, or rename `messages` to `initialMessages` when you only want to seed uncontrolled state.');
@@ -318,7 +326,7 @@ export function Chorus<TMeta = Record<string, unknown>>({
     rememberSubmittedTurn(text, history);
 
     if (transport) {
-      if (process.env.NODE_ENV !== 'production' && onSend) {
+      if (isChorusDevMode() && onSend) {
         console.warn('[Chorus] Both `transport` and `onSend` props were provided. `transport` takes precedence and `onSend` will be ignored. Remove one of the two props to silence this warning.');
       }
       resetStreamState();
@@ -451,7 +459,7 @@ export function Chorus<TMeta = Record<string, unknown>>({
 
   return (
     <div className={["chorus", className].filter(Boolean).join(" ")} style={{ ...paletteVars, ...style }}>
-      <ChatWindow<TMeta> messages={msgs} typing={!!(transport || onSend) && sending && !hasStartedAssistantRef.current} codeTheme={codeBlockTheme} headless={headless} renderMessage={renderMessage} hiddenRoles={hiddenRoles} streamingMessageId={activeStreamingMessageId} onEdit={(transport || onSend) ? handleEdit : undefined} onRegenerate={(transport || onSend) ? handleRegenerate : undefined} onDelete={handleDelete} error={streamError} onRetry={retry} />
+      <ChatWindow<TMeta> messages={msgs} typing={!!(transport || onSend) && sending && !hasStartedAssistantRef.current} codeTheme={codeBlockTheme} headless={headless} renderMessage={renderMessage} markdownProps={markdownProps} markdownSanitizer={markdownSanitizer} hiddenRoles={hiddenRoles} streamingMessageId={activeStreamingMessageId} onEdit={(transport || onSend) ? handleEdit : undefined} onRegenerate={(transport || onSend) ? handleRegenerate : undefined} onDelete={handleDelete} error={streamError} onRetry={retry} />
       <ChatInput value={draft} onChange={setDraft} onSend={send} onStop={stop} sending={sending} placeholder={placeholder} accept={accept} />
     </div>
   );
