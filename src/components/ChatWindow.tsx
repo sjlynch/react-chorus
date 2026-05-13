@@ -1,10 +1,13 @@
 import React from 'react';
 import type { Message, Role } from '../types';
 import { ToolCallBlock } from './ToolCallBlock';
-import { MessageRow } from './MessageRow';
+import { MessageActionControls, MessageRow } from './MessageRow';
+import type { MessageMarkdownProps, MessageRenderActions } from './MessageRow';
+import type { MarkdownSanitizer } from './Markdown';
+import { isChorusDevMode } from '../utils/devMode';
 
 export { MessageBubble } from './MessageRow';
-export type { MessageBubbleProps } from './MessageRow';
+export type { MessageBubbleProps, MessageMarkdownProps, MessageRenderActions } from './MessageRow';
 
 const DEFAULT_HIDDEN_ROLES: Role[] = ['system', 'tool'];
 const NO_HIDDEN_ROLES: Role[] = [];
@@ -15,12 +18,23 @@ function isNearBottom(el: HTMLElement) {
   return el.scrollHeight - el.scrollTop - el.clientHeight <= SCROLL_BOTTOM_THRESHOLD_PX;
 }
 
+export interface RenderMessageContext<TMeta = Record<string, unknown>> {
+  isStreaming: boolean;
+  defaultRender: () => React.ReactNode;
+  actions: MessageRenderActions;
+  message: Message<TMeta>;
+}
+
 export interface ChatWindowProps<TMeta = Record<string, unknown>> {
   messages: Message<TMeta>[];
   typing?: boolean;
   codeTheme?: 'dark' | 'light';
   headless?: boolean;
-  renderMessage?: (message: Message<TMeta>) => React.ReactNode;
+  renderMessage?: (message: Message<TMeta>, context: RenderMessageContext<TMeta>) => React.ReactNode;
+  /** Props forwarded to the built-in Markdown renderer for message text. */
+  markdownProps?: MessageMarkdownProps;
+  /** Convenience alias for markdownProps.sanitizer. Takes precedence when both are provided. */
+  markdownSanitizer?: MarkdownSanitizer;
   /** Message roles hidden from the transcript. Defaults to ['system', 'tool']; pass ['system'] to show tool calls while hiding system prompts, or [] to show every role. */
   hiddenRoles?: Role[];
   /** @deprecated Use hiddenRoles instead. When hiddenRoles is omitted, true is equivalent to hiddenRoles={[]} and false keeps the default ['system', 'tool']. */
@@ -34,9 +48,9 @@ export interface ChatWindowProps<TMeta = Record<string, unknown>> {
   streamingMessageId?: string | null;
 }
 
-export function ChatWindow<TMeta = Record<string, unknown>>({ messages, typing, codeTheme = 'dark', headless = false, renderMessage, hiddenRoles, showSystemMessages, onEdit, onRegenerate, onDelete, error, onRetry, streamingMessageId }: ChatWindowProps<TMeta>) {
+export function ChatWindow<TMeta = Record<string, unknown>>({ messages, typing, codeTheme = 'dark', headless = false, renderMessage, markdownProps, markdownSanitizer, hiddenRoles, showSystemMessages, onEdit, onRegenerate, onDelete, error, onRetry, streamingMessageId }: ChatWindowProps<TMeta>) {
   React.useEffect(() => {
-    if (showSystemMessages === undefined || didWarnShowSystemMessages) return;
+    if (!isChorusDevMode() || showSystemMessages === undefined || didWarnShowSystemMessages) return;
     console.warn('[Chorus] `showSystemMessages` is deprecated. Use `hiddenRoles` instead (for example hiddenRoles={[\'system\']} to show tool messages while hiding system prompts).');
     didWarnShowSystemMessages = true;
   }, [showSystemMessages]);
@@ -91,20 +105,47 @@ export function ChatWindow<TMeta = Record<string, unknown>>({ messages, typing, 
   return (
     <div className="chorus-window" ref={windowRef} role="log" aria-live="polite" aria-label="Chat transcript">
       {visible.map(m => {
-        const custom = renderMessage?.(m);
+        const isStreaming = m.id === streamingMessageId;
+        const defaultRender = () => {
+          if (m.role === 'tool' && m.toolCall) {
+            return (
+              <div className="chorus-msg chorus-tool">
+                <ToolCallBlock toolCall={m.toolCall} />
+              </div>
+            );
+          }
+
+          return (
+            <MessageRow
+              m={m}
+              codeTheme={codeTheme}
+              headless={headless}
+              streaming={isStreaming}
+              markdownProps={markdownProps}
+              markdownSanitizer={markdownSanitizer}
+              onEdit={onEdit}
+              onRegenerate={onRegenerate}
+              onDelete={onDelete}
+            />
+          );
+        };
+        const actions: MessageRenderActions = {
+          canEdit: Boolean(m.role === 'user' && onEdit),
+          canRegenerate: Boolean(m.role === 'assistant' && onRegenerate),
+          canDelete: Boolean(onDelete),
+          edit: m.role === 'user' && onEdit ? (newText) => {
+            const trimmed = newText.trim();
+            if (trimmed) onEdit(m.id, trimmed);
+          } : undefined,
+          regenerate: m.role === 'assistant' && onRegenerate ? () => onRegenerate(m.id) : undefined,
+          delete: onDelete ? () => onDelete(m.id) : undefined,
+          defaultRender: () => <MessageActionControls message={m} actions={actions} />,
+        };
+        const context: RenderMessageContext<TMeta> = { isStreaming, defaultRender, actions, message: m };
+        const custom = renderMessage?.(m, context);
         if (custom != null) return <React.Fragment key={m.id}>{custom}</React.Fragment>;
 
-        if (m.role === 'tool' && m.toolCall) {
-          return (
-            <div key={m.id} className="chorus-msg chorus-tool">
-              <ToolCallBlock toolCall={m.toolCall} />
-            </div>
-          );
-        }
-
-        return (
-          <MessageRow key={m.id} m={m} codeTheme={codeTheme} headless={headless} streaming={m.id === streamingMessageId} onEdit={onEdit} onRegenerate={onRegenerate} onDelete={onDelete} />
-        );
+        return <React.Fragment key={m.id}>{defaultRender()}</React.Fragment>;
       })}
 
       {typing &&
@@ -115,7 +156,7 @@ export function ChatWindow<TMeta = Record<string, unknown>>({ messages, typing, 
       {error &&
         <div className="chorus-error" role="alert">
           <span className="chorus-error-text">{error}</span>
-          {onRetry && <button className="chorus-retry-btn" onClick={onRetry}>Retry</button>}
+          {onRetry && <button type="button" className="chorus-retry-btn" onClick={onRetry}>Retry</button>}
         </div>
       }
       <div ref={bottomRef} className="chorus-scroll-sentinel" aria-hidden="true" />

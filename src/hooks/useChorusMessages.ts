@@ -1,6 +1,7 @@
 import React from 'react';
 import type { Message } from '../types';
 import { useLatestRef } from './useLatestRef';
+import { isChorusDevMode } from '../utils/devMode';
 
 interface PersistedChangeOptions {
   flush?: boolean;
@@ -25,7 +26,7 @@ interface UseChorusMessagesOptions<TMeta = Record<string, unknown>> {
 }
 
 function warnDuplicateMessageIds<TMeta>(next: Message<TMeta>[]) {
-  if (process.env.NODE_ENV !== 'production') {
+  if (isChorusDevMode()) {
     const ids = next.map(m => m.id);
     const uniq = new Set(ids);
     if (uniq.size !== ids.length) {
