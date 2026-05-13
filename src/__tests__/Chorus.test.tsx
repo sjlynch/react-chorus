@@ -2,11 +2,11 @@ import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { Chorus, type ChorusProps, type Transport } from '../Chorus';
+import { Chorus, type ChorusOnSend, type ChorusProps, type ChorusSendHelpers, type Transport } from '../Chorus';
 import type { Message, StorageAdapter } from '../types';
 
-type OnSend = NonNullable<ChorusProps['onSend']>;
-type OnSendHelpers = Parameters<OnSend>[2];
+type OnSend = ChorusOnSend;
+type OnSendHelpers = ChorusSendHelpers;
 
 vi.mock('../components/Markdown', () => ({
   Markdown: ({ text }: { text: string }) => <span data-testid="markdown">{text}</span>,
@@ -252,6 +252,62 @@ describe('Chorus', () => {
     expect(asyncStorage.setItem).not.toHaveBeenCalled();
   });
 
+  it('coalesces persistence writes during token streams and flushes the final assistant text', async () => {
+    const user = userEvent.setup();
+    const chunks = Array.from({ length: 100 }, () => 'x');
+    const finalText = chunks.join('');
+    const store: Record<string, string> = {};
+    const storage: StorageAdapter = {
+      getItem: vi.fn((key) => store[key] ?? null),
+      setItem: vi.fn((key, value) => { store[key] = value; }),
+    };
+    const transport = vi.fn<Transport>(async () => sseResponse(chunks));
+
+    render(<Chorus persistenceKey="chat" persistenceStorage={storage} transport={transport} connector="openai" minAssistantDelayMs={0} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'persist stream');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByText(finalText)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument());
+    await waitFor(() => expect(storage.setItem).toHaveBeenCalled());
+
+    const callsAfterFinal = vi.mocked(storage.setItem).mock.calls.length;
+    expect(callsAfterFinal).toBeLessThanOrEqual(3);
+
+    const lastWrite = vi.mocked(storage.setItem).mock.calls.at(-1);
+    expect(lastWrite?.[0]).toBe('chat');
+    const persistedMessages = JSON.parse(lastWrite?.[1] ?? '[]') as Message[];
+    expect(persistedMessages).toEqual([
+      expect.objectContaining({ role: 'user', text: 'persist stream' }),
+      expect.objectContaining({ role: 'assistant', text: finalText }),
+    ]);
+
+    await new Promise(resolve => setTimeout(resolve, 120));
+    expect(storage.setItem).toHaveBeenCalledTimes(callsAfterFinal);
+  });
+
+  it('surfaces persistence write failures through onPersistenceError', async () => {
+    const user = userEvent.setup();
+    const quotaError = new DOMException('Full', 'QuotaExceededError');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const onPersistenceError = vi.fn();
+    const storage: StorageAdapter = {
+      getItem: vi.fn(() => null),
+      setItem: vi.fn(() => { throw quotaError; }),
+    };
+
+    render(<Chorus persistenceKey="chat" persistenceStorage={storage} onPersistenceError={onPersistenceError} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'will persist');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(screen.getByText('will persist')).toBeInTheDocument();
+    await waitFor(() => expect(onPersistenceError).toHaveBeenCalledWith(quotaError));
+    expect(warn).toHaveBeenCalledWith('[Chorus] Failed to persist messages.', quotaError);
+    warn.mockRestore();
+  });
+
   it('prepends systemPrompt to transport history without rendering it', async () => {
     const user = userEvent.setup();
     const transport = vi.fn<Transport>(async () => sseResponse([]));
@@ -423,6 +479,24 @@ describe('Chorus', () => {
 
     act(() => helpers.finalizeAssistant());
     await waitFor(() => expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument());
+  });
+
+  it('auto-finalizes helper chunks when onSend resolves without finalizeAssistant', async () => {
+    const user = userEvent.setup();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const onSend = vi.fn<OnSend>(async (_text, _messages, helpers) => {
+      helpers.appendAssistant('forgotten finalize');
+    });
+
+    render(<Chorus onSend={onSend} minAssistantDelayMs={0} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'stream');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByText('forgotten finalize')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument());
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('resolved without calling `helpers.finalizeAssistant()`'));
+    warn.mockRestore();
   });
 
   it('shows an error banner when the transport path fails', async () => {
@@ -787,5 +861,109 @@ describe('Chorus', () => {
 
     expect(screen.queryByText('remove me')).not.toBeInTheDocument();
     expect(screen.getByText('keep me')).toBeInTheDocument();
+  });
+
+  it('clears uncontrolled messages from the built-in clear button', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <Chorus
+        messages={[{ id: 'welcome', role: 'assistant', text: 'clear me' }]}
+        showClearButton
+      />
+    );
+
+    expect(screen.getByText('clear me')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /clear conversation/i }));
+
+    expect(screen.queryByText('clear me')).not.toBeInTheDocument();
+  });
+
+  it('can reset to the initialMessages seed when requested', async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn<OnSend>(async () => ({ id: 'a1', role: 'assistant', text: 'reply' }));
+
+    render(
+      <Chorus
+        initialMessages={[{ id: 'welcome', role: 'assistant', text: 'welcome back' }]}
+        onSend={onSend}
+        minAssistantDelayMs={0}
+        showClearButton
+        resetToInitialMessages
+      />
+    );
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'question');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+    expect(await screen.findByText('reply')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /clear conversation/i }));
+
+    expect(screen.getByText('welcome back')).toBeInTheDocument();
+    expect(screen.queryByText('question')).not.toBeInTheDocument();
+    expect(screen.queryByText('reply')).not.toBeInTheDocument();
+  });
+
+  it('controlled clear calls onChange with the reset list', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn<(messages: Message[]) => void>();
+    const onClear = vi.fn<(messages: Message[]) => void>();
+
+    function Harness() {
+      const [messages, setMessages] = React.useState<Message[]>([{ id: 'm1', role: 'assistant', text: 'controlled message' }]);
+      return (
+        <Chorus
+          value={messages}
+          onChange={(next) => {
+            onChange(next);
+            setMessages(next);
+          }}
+          onClear={onClear}
+          showClearButton
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    await user.click(screen.getByRole('button', { name: /clear conversation/i }));
+
+    expect(onChange).toHaveBeenCalledWith([]);
+    expect(onClear).toHaveBeenCalledWith([]);
+    expect(screen.queryByText('controlled message')).not.toBeInTheDocument();
+  });
+
+  it('persists cleared conversations so initialMessages do not resurrect on reload', async () => {
+    const user = userEvent.setup();
+    const storage = makeSyncStorage();
+    const welcome: Message[] = [{ id: 'welcome', role: 'assistant', text: 'persistent welcome' }];
+    const { unmount } = render(
+      <Chorus
+        persistenceKey="chat"
+        persistenceStorage={storage}
+        initialMessages={welcome}
+        showClearButton
+      />
+    );
+
+    expect(screen.getByText('persistent welcome')).toBeInTheDocument();
+    await waitFor(() => expect(storage.store.chat).toBe(JSON.stringify(welcome)));
+
+    await user.click(screen.getByRole('button', { name: /clear conversation/i }));
+    await waitFor(() => expect(storage.store.chat).toBe(JSON.stringify([])));
+    expect(screen.queryByText('persistent welcome')).not.toBeInTheDocument();
+
+    unmount();
+    render(
+      <Chorus
+        persistenceKey="chat"
+        persistenceStorage={storage}
+        initialMessages={welcome}
+        showClearButton
+      />
+    );
+
+    expect(screen.queryByText('persistent welcome')).not.toBeInTheDocument();
   });
 });

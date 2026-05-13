@@ -1,3 +1,4 @@
+import type React from 'react';
 import { readFileSync } from 'node:fs';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
@@ -7,7 +8,9 @@ import type { Message } from '../types';
 
 // Mock Markdown to avoid DOMPurify/highlight.js complexity in unit tests
 vi.mock('../components/Markdown', () => ({
-  Markdown: ({ text, headless }: { text: string; headless?: boolean }) => <span data-testid="markdown" data-headless={String(headless)}>{text}</span>,
+  Markdown: ({ text, headless, streaming, sanitizer }: { text: string; headless?: boolean; streaming?: boolean; sanitizer?: unknown }) => (
+    <span data-testid="markdown" data-headless={String(headless)} data-streaming={String(streaming)} data-sanitizer={String(Boolean(sanitizer))}>{text}</span>
+  ),
 }));
 
 const USER_MSG: Message = { id: 'u1', role: 'user', text: 'Hello' };
@@ -94,6 +97,18 @@ describe('ChatWindow', () => {
     expect(onRetry).toHaveBeenCalledOnce();
   });
 
+  it('retry button does not submit an enclosing form', async () => {
+    const user = userEvent.setup();
+    const onRetry = vi.fn();
+    const onSubmit = vi.fn((event: React.FormEvent) => event.preventDefault());
+    render(<form onSubmit={onSubmit}><ChatWindow messages={[]} error="Oops" onRetry={onRetry} /></form>);
+
+    await user.click(screen.getByRole('button', { name: /retry/i }));
+
+    expect(onRetry).toHaveBeenCalledOnce();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
   it('does not show retry button when error is present but onRetry is absent', () => {
     render(<ChatWindow messages={[]} error="Oops" />);
     expect(screen.queryByRole('button', { name: /retry/i })).not.toBeInTheDocument();
@@ -110,7 +125,12 @@ describe('ChatWindow', () => {
     ));
     render(<ChatWindow messages={[USER_MSG]} renderMessage={renderMessage} />);
     expect(screen.getByTestId('custom')).toHaveTextContent('Hello');
-    expect(renderMessage).toHaveBeenCalledWith(USER_MSG);
+    expect(renderMessage.mock.calls[0][0]).toBe(USER_MSG);
+    expect(renderMessage.mock.calls[0][1]).toEqual(expect.objectContaining({
+      isStreaming: false,
+      defaultRender: expect.any(Function),
+      actions: expect.any(Object),
+    }));
   });
 
   it('falls back to default rendering when renderMessage returns null', () => {
@@ -118,6 +138,28 @@ describe('ChatWindow', () => {
     render(<ChatWindow messages={[USER_MSG]} renderMessage={renderMessage} />);
     // Falls back to the default MessageRow render
     expect(screen.getByText('Hello')).toBeInTheDocument();
+  });
+
+  it('provides renderMessage context for streaming state, default rendering, and actions', async () => {
+    const user = userEvent.setup();
+    const onDelete = vi.fn();
+    const renderMessage = vi.fn((_message: Message, ctx) => (
+      <div>
+        <span data-testid="streaming-state">{String(ctx.isStreaming)}</span>
+        {ctx.defaultRender()}
+        <button type="button" onClick={ctx.actions.delete}>Custom delete</button>
+      </div>
+    ));
+
+    render(<ChatWindow messages={[ASST_MSG]} streamingMessageId="a1" renderMessage={renderMessage} onDelete={onDelete} />);
+
+    expect(screen.getByTestId('streaming-state')).toHaveTextContent('true');
+    expect(screen.getByText('Hi there')).toBeInTheDocument();
+    expect(screen.getByTestId('markdown')).toHaveAttribute('data-streaming', 'true');
+
+    await user.click(screen.getByRole('button', { name: 'Custom delete' }));
+
+    expect(onDelete).toHaveBeenCalledWith('a1');
   });
 
   it('names all message action controls and the edit textarea', async () => {
@@ -209,5 +251,11 @@ describe('ChatWindow', () => {
   it('MessageBubble forwards headless to Markdown', () => {
     render(<MessageBubble message={USER_MSG} headless />);
     expect(screen.getByTestId('markdown')).toHaveAttribute('data-headless', 'true');
+  });
+
+  it('forwards Markdown customisation props to the built-in renderer', () => {
+    const sanitizer = vi.fn((html: string) => html);
+    render(<ChatWindow messages={[USER_MSG]} markdownSanitizer={sanitizer} />);
+    expect(screen.getByTestId('markdown')).toHaveAttribute('data-sanitizer', 'true');
   });
 });

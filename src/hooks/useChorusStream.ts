@@ -160,7 +160,8 @@ export function readSSEStream(res: Response, onEvent: (payload: string) => unkno
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
 
-  let buf = '';
+  let currentLine = '';
+  let skipNextLF = false;
   let dataLines: string[] = [];
   let stopped = false;
 
@@ -173,12 +174,33 @@ export function readSSEStream(res: Response, onEvent: (payload: string) => unkno
 
   const processLine = (line: string) => {
     if (stopped) return;
-    if (line.endsWith('\r')) line = line.slice(0, -1);
     if (line === '') { flushEvent(); return; }
     if (line.startsWith('data:')) {
       let v = line.slice(5);
       if (v.startsWith(' ')) v = v.slice(1);
       dataLines.push(v);
+    }
+  };
+
+  const processText = (text: string) => {
+    for (let i = 0; !stopped && i < text.length; i += 1) {
+      const ch = text[i];
+
+      if (skipNextLF) {
+        skipNextLF = false;
+        if (ch === '\n') continue;
+      }
+
+      if (ch === '\r') {
+        processLine(currentLine);
+        currentLine = '';
+        skipNextLF = true;
+      } else if (ch === '\n') {
+        processLine(currentLine);
+        currentLine = '';
+      } else {
+        currentLine += ch;
+      }
     }
   };
 
@@ -188,18 +210,14 @@ export function readSSEStream(res: Response, onEvent: (payload: string) => unkno
         while (!stopped) {
           const { value, done } = await reader.read();
           if (done) break;
-          buf += decoder.decode(value, { stream: true });
-
-          let idx: number;
-          while (!stopped && (idx = buf.indexOf('\n')) !== -1) {
-            const line = buf.slice(0, idx);
-            buf = buf.slice(idx + 1);
-            processLine(line);
-          }
+          processText(decoder.decode(value, { stream: true }));
         }
         if (!stopped) {
-          buf += decoder.decode();
-          if (buf.length) processLine(buf);
+          processText(decoder.decode());
+          if (currentLine.length) {
+            processLine(currentLine);
+            currentLine = '';
+          }
           flushEvent();
         }
         if (stopped) {

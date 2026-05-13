@@ -64,6 +64,24 @@ describe('readSSEStream', () => {
     expect(events).toEqual(['hello']);
   });
 
+  it('handles bare CR line endings', async () => {
+    const events: string[] = [];
+    await readSSEStream(makeResponse('data: hello\r\r'), e => events.push(e));
+    expect(events).toEqual(['hello']);
+  });
+
+  it('handles bare CR line endings split across chunks', async () => {
+    const events: string[] = [];
+    await readSSEStream(makeChunkedResponse(['data: hel', 'lo\r', '\r']), e => events.push(e));
+    expect(events).toEqual(['hello']);
+  });
+
+  it('handles CR+LF line endings split across chunks for multi-line events', async () => {
+    const events: string[] = [];
+    await readSSEStream(makeChunkedResponse(['data: one\r', '\ndata: two\r', '\n\r', '\n']), e => events.push(e));
+    expect(events).toEqual(['one\ntwo']);
+  });
+
   it('ignores non-data lines (event:, id:, comments)', async () => {
     const events: string[] = [];
     const body = 'event: message\nid: 1\n: comment\ndata: payload\n\n';

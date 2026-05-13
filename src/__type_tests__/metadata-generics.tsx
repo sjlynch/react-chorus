@@ -1,5 +1,6 @@
 import { ChatWindow, Chorus, MessageBubble, createFetchSSETransport, createWebSocketTransport, useChorusPersistence, useChorusStream } from '../index';
-import type { Message, Transport } from '../index';
+import type { ChorusOnSend, ChorusSendHelpers, Message, Transport } from '../index';
+import type { ChorusOnSend as HeadlessChorusOnSend, ChorusSendHelpers as HeadlessChorusSendHelpers } from '../headless';
 
 interface MyMeta {
   latencyMs: number;
@@ -44,6 +45,24 @@ const fetchTransport = createFetchSSETransport<MyMeta>('/api/chat', {
 const webSocketTransport = createWebSocketTransport<MyMeta>('wss://api.example.com/chat', {
   formatMessage: (_text, history) => JSON.stringify({ latency: history[0].metadata?.latencyMs }),
 });
+
+const typedHelpers: ChorusSendHelpers = {
+  appendAssistant: (_chunk) => undefined,
+  finalizeAssistant: () => undefined,
+  signal: new AbortController().signal,
+};
+
+const typedOnSend: ChorusOnSend<MyMeta> = async (_text, history, helpers) => {
+  const latency: number | undefined = history[0].metadata?.latencyMs;
+  // @ts-expect-error MyMeta does not include requestId
+  void history[0].metadata?.requestId;
+  helpers.appendAssistant(String(latency ?? 0));
+};
+
+const headlessOnSend: HeadlessChorusOnSend<MyMeta> = typedOnSend;
+const headlessHelpers: HeadlessChorusSendHelpers = typedHelpers;
+void headlessOnSend;
+void headlessHelpers;
 
 function HookSamples() {
   const persist = useChorusPersistence<MyMeta>('chat');

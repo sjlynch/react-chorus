@@ -1,6 +1,6 @@
 import 'react-chorus/styles.css';
 import { Chorus, createFetchSSETransport, useChorusStream } from 'react-chorus';
-import type { Message } from 'react-chorus';
+import type { ChorusOnSend, Message } from 'react-chorus';
 import React from 'react';
 
 // Transport posts { prompt, history } to /api/chat and reads back an SSE stream.
@@ -11,18 +11,10 @@ export default function App() {
   const [messages, setMessages] = React.useState<Message[]>([]);
   const { send, sending } = useChorusStream(transport, { connector: 'openai' });
 
-  const handleSend = async (
-    text: string,
-    msgs: Message[],
-    {
-      appendAssistant,
-      finalizeAssistant,
-      signal,
-    }: {
-      appendAssistant: (chunk: string) => void;
-      finalizeAssistant: () => void;
-      signal: AbortSignal;
-    }
+  const handleSend: ChorusOnSend = async (
+    text,
+    msgs,
+    { appendAssistant, finalizeAssistant, signal },
   ) => {
     await send(
       text,

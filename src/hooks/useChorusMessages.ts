@@ -1,6 +1,15 @@
 import React from 'react';
 import type { Message } from '../types';
 import { useLatestRef } from './useLatestRef';
+import { isChorusDevMode } from '../utils/devMode';
+
+interface PersistedChangeOptions {
+  flush?: boolean;
+}
+
+interface UpdateMessagesOptions {
+  flushPersistence?: boolean;
+}
 
 interface UseChorusMessagesOptions<TMeta = Record<string, unknown>> {
   value?: Message<TMeta>[];
@@ -12,12 +21,12 @@ interface UseChorusMessagesOptions<TMeta = Record<string, unknown>> {
   persistenceLoaded?: boolean;
   hasPersistedValue?: boolean;
   canPersist?: boolean;
-  onPersistedChange: (messages: Message<TMeta>[]) => void;
+  onPersistedChange: (messages: Message<TMeta>[], options?: PersistedChangeOptions) => void;
   onChunk?: (chunk: string, messageId: string) => void;
 }
 
 function warnDuplicateMessageIds<TMeta>(next: Message<TMeta>[]) {
-  if (process.env.NODE_ENV !== 'production') {
+  if (isChorusDevMode()) {
     const ids = next.map(m => m.id);
     const uniq = new Set(ids);
     if (uniq.size !== ids.length) {
@@ -69,17 +78,17 @@ export function useChorusMessages<TMeta = Record<string, unknown>>({
     onPersistedChangeRef.current(seedMessages);
   }, [canPersist, persistedStoreHasValue, persistenceKey, persistenceLoaded, seedMessages, value, onPersistedChangeRef]);
 
-  const updateMsgs = React.useCallback((updater: (prev: Message<TMeta>[]) => Message<TMeta>[]) => {
+  const updateMsgs = React.useCallback((updater: (prev: Message<TMeta>[]) => Message<TMeta>[], options?: UpdateMessagesOptions) => {
     const next = updater(msgsRef.current);
     warnDuplicateMessageIds(next);
     msgsRef.current = next;
 
     if (value !== undefined) onChangeRef.current?.(next);
-    else if (persistenceKey) onPersistedChangeRef.current(next);
+    else if (persistenceKey) onPersistedChangeRef.current(next, { flush: options?.flushPersistence });
     else setInternalMsgs(next);
 
     return next;
   }, [msgsRef, onChangeRef, onPersistedChangeRef, persistenceKey, value]);
 
-  return { msgs, updateMsgs, onChangeRef, onChunkRef };
+  return { msgs, updateMsgs, onChangeRef, onChunkRef, seedMessages };
 }
