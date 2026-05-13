@@ -56,8 +56,9 @@
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.type-tests.json --noEmit",
     "build": "vite build && tsc -p tsconfig.json --emitDeclarationOnly && node scripts/finalize-declarations.mjs",
-    "prepublishOnly": "npm run lint && npm run typecheck && npm run build",
+    "prepublishOnly": "npm run lint && npm run typecheck && npm run build && npm run typecheck:consumer && npm run verify:pack",
     "typecheck:consumer": "tsc -p fixtures/consumer-typecheck/tsconfig.json",
+    "verify:pack": "node scripts/assert-package-contents.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
