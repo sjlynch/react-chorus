@@ -10,6 +10,20 @@ function isReactPeerDependency(id: string) {
 
 export default defineConfig({
   plugins: [react()],
+  // Pre-bundle eagerly-imported deps so the dev server (StackBlitz / WebContainer
+  // cold start, in particular) doesn't discover them mid-page-load and trigger a
+  // full reload race. Lazy deps like highlight.js stay out — they're code-split.
+  optimizeDeps: {
+    include: [
+      'react',
+      'react-dom/client',
+      'react/jsx-runtime',
+      'marked',
+      'marked-highlight',
+      'dompurify',
+      'lucide-react',
+    ],
+  },
   build: {
     copyPublicDir: false,
     lib: {

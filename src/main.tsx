@@ -82,8 +82,8 @@ function App() {
         body {
           margin: 0;
           background:
-            radial-gradient(1100px 600px at 85% -10%, rgba(237,115,46,0.10), transparent 60%),
-            radial-gradient(900px 500px at -10% 110%, rgba(99,102,241,0.08), transparent 60%),
+            radial-gradient(1100px 600px at 85% -10%, rgba(99,102,241,0.14), transparent 60%),
+            radial-gradient(900px 500px at -10% 110%, rgba(139,92,246,0.10), transparent 60%),
             #0b0b0d;
           color: #e7e7ea;
           min-height: 100dvh;
@@ -118,10 +118,10 @@ function App() {
           border-radius: 8px;
           display: inline-grid;
           place-items: center;
-          background: linear-gradient(135deg, #ed732e, #c95e22);
+          background: linear-gradient(135deg, #6366f1, #4f46e5);
           color: #fff;
           font-size: 14px;
-          box-shadow: 0 6px 16px rgba(237,115,46,0.35);
+          box-shadow: 0 6px 16px rgba(99,102,241,0.40);
         }
         .pg-tag {
           font-size: 12px;
@@ -241,15 +241,15 @@ function App() {
                 assistantBubbleBg: 'rgba(255,255,255,0.05)',
                 assistantBorder: 'rgba(255,255,255,0.08)',
                 assistantText: '#f4f4f5',
-                userBubbleBg: '#ed732e',
-                userBorder: '#c95e22',
+                userBubbleBg: '#6366f1',
+                userBorder: '#4f46e5',
                 userText: '#ffffff',
                 inputBg: 'rgba(255,255,255,0.04)',
                 inputBorder: 'rgba(255,255,255,0.10)',
                 inputText: '#f4f4f5',
-                sendButtonBg: '#ed732e',
+                sendButtonBg: '#6366f1',
                 sendButtonText: '#ffffff',
-                focusRing: 'rgba(237,115,46,0.30)',
+                focusRing: 'rgba(99,102,241,0.35)',
                 border: 'rgba(255,255,255,0.06)',
               }}
             />

@@ -26,7 +26,7 @@
 
 /* Roles */
 .chorus-assistant { justify-content: flex-start; }
-.chorus-assistant .chorus-bubble { background: var(--chorus-assistant-bg, rgb(237 115 46)); border: 1px solid var(--chorus-assistant-border, #c95e22); color: var(--chorus-assistant-text, #ffffff); }
+.chorus-assistant .chorus-bubble { background: var(--chorus-assistant-bg, #6366f1); border: 1px solid var(--chorus-assistant-border, #4f46e5); color: var(--chorus-assistant-text, #ffffff); }
 .chorus-user { justify-content: flex-end; }
 .chorus-user .chorus-bubble { background: var(--chorus-user-bg, #dddddd); border: 1px solid var(--chorus-user-border, #cccccc); color: var(--chorus-user-text, #111111); }
 
