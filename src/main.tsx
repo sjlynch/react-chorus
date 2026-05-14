@@ -1,75 +1,204 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { Chorus } from './Chorus';
-import type { Attachment, Message } from './types';
+import { ConversationList } from './components/ConversationList';
+import { useConversations } from './hooks/useConversations';
+import type { Message } from './types';
+import type { Transport } from './hooks/useChorusStream';
 
-const DEMO_CHUNK_DELAY_MS = 28;
+const DEMO_CHUNK_DELAY_MS = 22;
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
 
-const initialMessages: Message[] = [
-  {
-    id: 'welcome',
-    role: 'assistant',
-    text: "**Welcome to react-chorus.** This playground simulates a streaming assistant locally — no backend needed.\n\nTry asking anything, paste an image, or use the message actions on hover.",
-  },
-];
+const WELCOME_MESSAGE: Message = {
+  id: 'welcome',
+  role: 'assistant',
+  text: "**Welcome to react-chorus.** This playground streams a fake OpenAI-style SSE response through Chorus's real connector + stream pipeline — exactly the code path you'd ship with a real backend.\n\nTry a prompt below, then check the sidebar for a multi-conversation example. Messages persist locally — refresh the page and they're still here.",
+};
 
 const SUGGESTED_PROMPTS = [
+  "What's the weather in Tokyo?",
   'Show me a code sample',
-  'Summarize the key features',
   'Give me a markdown demo',
 ];
 
-const REPLIES: Record<string, string> = {
-  code: "Here's a tiny streaming setup:\n\n```tsx\nimport { Chorus } from 'react-chorus';\nimport 'react-chorus/styles.css';\n\nexport default function App() {\n  return <Chorus transport=\"/api/chat\" />;\n}\n```\n\nDrop in `transport`, ship a chat UI.",
-  summary: "react-chorus gives you:\n\n- **Streaming UI** with token-by-token rendering and stop/retry\n- **Composable hooks** for transport, persistence, and message state\n- **Attachments** via paste, drop, or file picker\n- **Themeable defaults** through palette variables\n- **Markdown + code highlighting** out of the box",
-  markdown: "Here's a quick markdown tour:\n\n### Lists work\n\n1. Numbered items\n2. *Italic* and **bold** text\n3. `inline code`\n\n> Block quotes render cleanly too.\n\n```js\nconst chunks = await response.body.getReader().read();\n```\n\nThat's the gist.",
-  default: "react-chorus keeps the drop-in defaults while exposing composable hooks and components. Swap in `transport=\"/api/chat\"` when you're ready for real streaming.",
+const REPLY_TEXTS = {
+  code: "Here's the smallest possible integration:\n\n```tsx\nimport { Chorus } from 'react-chorus';\nimport 'react-chorus/styles.css';\n\nexport default function App() {\n  return <Chorus transport=\"/api/chat\" />;\n}\n```\n\nPoint `transport` at any SSE endpoint (OpenAI, Anthropic, Gemini, or your own) and the connector auto-detects the format.",
+  summary: "react-chorus gives you:\n\n- **Streaming UI** with token-by-token rendering, stop, and retry\n- **Reasoning traces** and **tool calls** rendered automatically when the connector detects them\n- **Multi-conversation** state via `useConversations` + `ConversationList`\n- **Persistence** through any `StorageAdapter` (localStorage by default)\n- **Attachments** via paste, drop, or file picker\n- **Themeable** through ~20 CSS palette variables",
+  markdown: "Here's a quick markdown tour:\n\n### Lists work\n\n1. Numbered items\n2. *Italic* and **bold** text\n3. `inline code`\n\n> Block quotes render cleanly too.\n\n```js\nconst reader = response.body.getReader();\nconst { value, done } = await reader.read();\n```\n\nAnd inline links: [docs](https://github.com/sjlynch/react-chorus).",
+  weather: "It's currently **22 °C and partly cloudy** in Tokyo, with 58% humidity and light winds out of the east. Comfortable jacket weather — no rain expected for the next few hours.",
+  default: "react-chorus keeps the drop-in defaults while exposing composable hooks and components. The reply you just saw streamed through a mock `Transport` — swap that for your real SSE endpoint and the same UI keeps working.",
 };
 
-function pickReply(prompt: string): string {
-  const lower = prompt.toLowerCase();
-  if (lower.includes('code') || lower.includes('sample')) return REPLIES.code;
-  if (lower.includes('summar') || lower.includes('feature')) return REPLIES.summary;
-  if (lower.includes('markdown')) return REPLIES.markdown;
-  return REPLIES.default;
+interface StreamPlan {
+  reasoning?: string;
+  toolCall?: {
+    id: string;
+    name: string;
+    input: Record<string, unknown>;
+    output: unknown;
+  };
+  text: string;
 }
 
-async function streamWords(reply: string, appendAssistant: (chunk: string) => void, signal: AbortSignal) {
-  const tokens = reply.match(/\S+\s*|\s+/g) ?? [reply];
-  for (const token of tokens) {
-    if (signal.aborted) break;
-    await new Promise((r) => setTimeout(r, DEMO_CHUNK_DELAY_MS));
-    appendAssistant(token);
+function planFor(prompt: string): StreamPlan {
+  const p = prompt.toLowerCase();
+
+  if (p.includes('weather')) {
+    const location = /weather\s+(?:in|at|for)\s+([a-zA-Z\s]+)/i.exec(prompt)?.[1]?.trim() || 'Tokyo';
+    return {
+      reasoning: `The user is asking about current weather conditions for ${location}. I'll call the weather tool with the location and metric units, then summarize the result in plain language.`,
+      toolCall: {
+        id: 'call_weather_1',
+        name: 'get_weather',
+        input: { location, units: 'metric' },
+        output: {
+          location,
+          temperature_c: 22,
+          condition: 'Partly cloudy',
+          humidity: 0.58,
+          wind_kmh: 12,
+          wind_direction: 'E',
+        },
+      },
+      text: REPLY_TEXTS.weather.replace('Tokyo', location),
+    };
   }
-}
 
-async function handleSend(
-  text: string,
-  messages: Message[],
-  {
-    appendAssistant,
-    finalizeAssistant,
-    signal,
-  }: {
-    appendAssistant: (chunk: string) => void;
-    finalizeAssistant: () => void;
-    signal: AbortSignal;
+  if (p.includes('code') || p.includes('sample') || p.includes('install')) {
+    return {
+      reasoning: "Showing the smallest possible Chorus integration — a single import plus one component.",
+      text: REPLY_TEXTS.code,
+    };
   }
-) {
-  const currentTurn = messages[messages.length - 1];
-  const attachments: Attachment[] = currentTurn?.attachments ?? [];
-  const reply = pickReply(text);
-  const attachmentNote = attachments.length
-    ? `\n\n_Received ${attachments.length} attachment${attachments.length === 1 ? '' : 's'}: ${attachments.map(a => a.name).join(', ')}._`
-    : '';
 
-  await streamWords(`${reply}${attachmentNote}`, appendAssistant, signal);
-  finalizeAssistant();
+  if (p.includes('summar') || p.includes('feature') || p.includes('what can')) {
+    return {
+      reasoning: 'Compiling the headline features the user would notice in the first 30 seconds.',
+      text: REPLY_TEXTS.summary,
+    };
+  }
+
+  if (p.includes('markdown')) {
+    return {
+      reasoning: 'A quick tour through the markdown primitives Chorus renders out of the box.',
+      text: REPLY_TEXTS.markdown,
+    };
+  }
+
+  return {
+    reasoning: 'No special intent detected — falling back to the default playground response.',
+    text: REPLY_TEXTS.default,
+  };
 }
+
+function tokenize(text: string): string[] {
+  return text.match(/\S+\s*|\s+/g) ?? [text];
+}
+
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(signal.reason ?? new Error('Aborted'));
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      window.clearTimeout(timer);
+      reject(signal.reason ?? new Error('Aborted'));
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+function sseLine(payload: unknown): string {
+  return `data: ${JSON.stringify(payload)}\n\n`;
+}
+
+async function* streamSSE(plan: StreamPlan, signal: AbortSignal): AsyncGenerator<string> {
+  if (plan.reasoning) {
+    for (const token of tokenize(plan.reasoning)) {
+      await sleep(DEMO_CHUNK_DELAY_MS, signal);
+      yield sseLine({ choices: [{ index: 0, delta: { reasoning_content: token } }] });
+    }
+  }
+
+  if (plan.toolCall) {
+    await sleep(DEMO_CHUNK_DELAY_MS * 3, signal);
+    yield sseLine({
+      choices: [{
+        index: 0,
+        delta: {
+          tool_calls: [{
+            index: 0,
+            id: plan.toolCall.id,
+            function: {
+              name: plan.toolCall.name,
+              arguments: JSON.stringify(plan.toolCall.input),
+            },
+            output: plan.toolCall.output,
+          }],
+        },
+      }],
+    });
+    await sleep(DEMO_CHUNK_DELAY_MS * 4, signal);
+  }
+
+  for (const token of tokenize(plan.text)) {
+    await sleep(DEMO_CHUNK_DELAY_MS, signal);
+    yield sseLine({ choices: [{ index: 0, delta: { content: token } }] });
+  }
+
+  yield 'data: [DONE]\n\n';
+}
+
+const mockTransport: Transport = (text, _history, signal) => {
+  const plan = planFor(text);
+  const encoder = new TextEncoder();
+
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      try {
+        for await (const evt of streamSSE(plan, signal)) {
+          controller.enqueue(encoder.encode(evt));
+        }
+      } catch (err) {
+        if (!signal.aborted) {
+          controller.error(err);
+          return;
+        }
+      } finally {
+        try { controller.close(); } catch {}
+      }
+    },
+    cancel() {
+      // ReadableStream cancelled from the consumer side; nothing to clean up.
+    },
+  });
+
+  return Promise.resolve(new Response(stream, {
+    status: 200,
+    headers: { 'content-type': 'text/event-stream' },
+  }));
+};
 
 function App() {
+  const conversations = useConversations({ defaultTitle: 'New chat' });
   const [attachmentNotice, setAttachmentNotice] = React.useState<string | null>(null);
+  const autoCreatedRef = React.useRef(false);
+
+  React.useEffect(() => {
+    if (autoCreatedRef.current) return;
+    if (conversations.loaded && conversations.conversations.length === 0) {
+      autoCreatedRef.current = true;
+      conversations.createConversation('First chat');
+    }
+  }, [conversations]);
+
+  const conversationStorage = conversations.storage ?? undefined;
+  const activeKey = conversations.activePersistenceKey || '';
 
   return (
     <>
@@ -92,17 +221,18 @@ function App() {
           min-height: 100dvh;
           display: flex;
           flex-direction: column;
-          align-items: center;
-          padding: 28px 20px;
-          gap: 20px;
+          padding: 24px 20px;
+          gap: 16px;
         }
         .pg-header {
           width: 100%;
-          max-width: 820px;
+          max-width: 1120px;
+          margin: 0 auto;
           display: flex;
           align-items: center;
           justify-content: space-between;
           gap: 12px;
+          flex-wrap: wrap;
         }
         .pg-brand {
           display: inline-flex;
@@ -123,18 +253,55 @@ function App() {
           font-size: 14px;
           box-shadow: 0 6px 16px rgba(99,102,241,0.40);
         }
-        .pg-tag {
+        .pg-header-meta {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          flex-wrap: wrap;
+        }
+        .pg-pill {
           font-size: 12px;
           color: #a1a1aa;
           padding: 4px 10px;
           border: 1px solid rgba(255,255,255,0.08);
           border-radius: 9999px;
           background: rgba(255,255,255,0.02);
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+        }
+        .pg-pill-dot {
+          width: 6px;
+          height: 6px;
+          border-radius: 9999px;
+          background: #22c55e;
+          box-shadow: 0 0 6px rgba(34,197,94,0.6);
+        }
+        .pg-body {
+          width: 100%;
+          max-width: 1120px;
+          margin: 0 auto;
+          flex: 1 1 auto;
+          min-height: 0;
+          display: grid;
+          grid-template-columns: 240px minmax(0, 1fr);
+          gap: 16px;
+        }
+        .pg-sidebar {
+          min-height: 0;
+          display: flex;
+          flex-direction: column;
+        }
+        .pg-sidebar .chorus-conversation-list {
+          flex: 1 1 auto;
+          min-height: 0;
+          background: rgba(20,20,22,0.78);
+          border-color: rgba(255,255,255,0.08);
+          border-radius: 14px;
+          padding: 12px;
+          overflow-y: auto;
         }
         .pg-card {
-          width: 100%;
-          max-width: 820px;
-          flex: 1 1 auto;
           min-height: 0;
           display: flex;
           flex-direction: column;
@@ -152,22 +319,15 @@ function App() {
           padding: 4px 6px 10px;
           font-size: 12px;
           color: #a1a1aa;
+          gap: 12px;
+          flex-wrap: wrap;
         }
-        .pg-status {
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
+        .pg-card-head-title {
+          font-weight: 600;
+          color: #fafafa;
+          font-size: 13px;
         }
-        .pg-status-dot {
-          width: 7px;
-          height: 7px;
-          border-radius: 9999px;
-          background: #22c55e;
-          box-shadow: 0 0 8px rgba(34,197,94,0.6);
-        }
-        .pg-notice {
-          color: #fbbf24;
-        }
+        .pg-notice { color: #fbbf24; }
         .pg-chorus-wrap {
           flex: 1 1 auto;
           min-height: 0;
@@ -188,10 +348,22 @@ function App() {
           border-radius: 14px;
           min-height: 48px;
         }
+        .pg-card-empty {
+          flex: 1 1 auto;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 32px;
+          color: #a1a1aa;
+          text-align: center;
+          font-size: 14px;
+        }
         .pg-footer {
           font-size: 12px;
           color: #71717a;
           text-align: center;
+          max-width: 1120px;
+          margin: 0 auto;
         }
         .pg-footer a {
           color: #a1a1aa;
@@ -199,8 +371,14 @@ function App() {
           border-bottom: 1px dashed rgba(255,255,255,0.18);
         }
         .pg-footer a:hover { color: #fafafa; }
-        @media (max-width: 640px) {
-          .pg-shell { padding: 16px 12px; }
+        @media (max-width: 800px) {
+          .pg-shell { padding: 16px 12px; gap: 12px; }
+          .pg-body {
+            grid-template-columns: 1fr;
+          }
+          .pg-sidebar .chorus-conversation-list {
+            max-height: 160px;
+          }
           .pg-card { padding: 10px; border-radius: 14px; }
         }
       `}</style>
@@ -210,55 +388,91 @@ function App() {
             <span className="pg-logo">✦</span>
             react-chorus
           </span>
-          <span className="pg-tag">Live playground</span>
+          <span className="pg-header-meta">
+            <span className="pg-pill">
+              <span className="pg-pill-dot" aria-hidden="true" />
+              Mock SSE → real connector
+            </span>
+            <span className="pg-pill" title="Conversations and messages are saved to localStorage.">
+              💾 Persists locally
+            </span>
+          </span>
         </header>
-        <section className="pg-card" aria-label="react-chorus demo chat">
-          <div className="pg-card-head">
-            <span className="pg-status">
-              <span className="pg-status-dot" aria-hidden="true" />
-              Streaming locally
-            </span>
-            <span className={attachmentNotice ? 'pg-notice' : undefined}>
-              {attachmentNotice ?? `Images ≤ ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)} MB, up to 3`}
-            </span>
-          </div>
-          <div className="pg-chorus-wrap">
-            <Chorus
-              onSend={handleSend}
-              initialMessages={initialMessages}
-              suggestedPrompts={SUGGESTED_PROMPTS}
-              placeholder="Ask react-chorus anything, or paste/drop an image…"
-              accept="image/*"
-              maxAttachmentBytes={MAX_IMAGE_BYTES}
-              maxAttachments={3}
-              onAttachmentError={(error) => {
-                setAttachmentNotice(error.message);
-                window.setTimeout(() => setAttachmentNotice(null), 4000);
-              }}
-              palette={{
-                chatBg: 'transparent',
-                chatText: '#e7e7ea',
-                assistantBubbleBg: 'rgba(255,255,255,0.05)',
-                assistantBorder: 'rgba(255,255,255,0.08)',
-                assistantText: '#f4f4f5',
-                userBubbleBg: '#6366f1',
-                userBorder: '#4f46e5',
-                userText: '#ffffff',
-                inputBg: 'rgba(255,255,255,0.04)',
-                inputBorder: 'rgba(255,255,255,0.10)',
-                inputText: '#f4f4f5',
-                sendButtonBg: '#6366f1',
-                sendButtonText: '#ffffff',
-                focusRing: 'rgba(99,102,241,0.35)',
-                border: 'rgba(255,255,255,0.06)',
-              }}
+
+        <div className="pg-body">
+          <aside className="pg-sidebar" aria-label="Conversations">
+            <ConversationList
+              conversations={conversations.conversations}
+              activeId={conversations.activeId}
+              createConversation={conversations.createConversation}
+              selectConversation={conversations.selectConversation}
+              renameConversation={conversations.renameConversation}
+              deleteConversation={conversations.deleteConversation}
+              newConversationLabel="+ New chat"
+              emptyLabel="No conversations yet"
             />
-          </div>
-        </section>
+          </aside>
+
+          <section className="pg-card" aria-label="react-chorus demo chat">
+            <div className="pg-card-head">
+              <span className="pg-card-head-title">
+                {conversations.activeConversation?.title ?? 'Conversation'}
+              </span>
+              <span className={attachmentNotice ? 'pg-notice' : undefined}>
+                {attachmentNotice ?? `Images ≤ ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)} MB, up to 3`}
+              </span>
+            </div>
+
+            {activeKey ? (
+              <div className="pg-chorus-wrap">
+                <Chorus
+                  key={conversations.activeId ?? 'none'}
+                  transport={mockTransport}
+                  persistenceKey={activeKey}
+                  persistenceStorage={conversationStorage}
+                  initialMessages={[WELCOME_MESSAGE]}
+                  suggestedPrompts={SUGGESTED_PROMPTS}
+                  placeholder="Ask react-chorus anything, or paste/drop an image…"
+                  accept="image/*"
+                  maxAttachmentBytes={MAX_IMAGE_BYTES}
+                  maxAttachments={3}
+                  onAttachmentError={(error) => {
+                    setAttachmentNotice(error.message);
+                    window.setTimeout(() => setAttachmentNotice(null), 4000);
+                  }}
+                  palette={{
+                    chatBg: 'transparent',
+                    chatText: '#e7e7ea',
+                    assistantBubbleBg: 'rgba(255,255,255,0.05)',
+                    assistantBorder: 'rgba(255,255,255,0.08)',
+                    assistantText: '#f4f4f5',
+                    userBubbleBg: '#6366f1',
+                    userBorder: '#4f46e5',
+                    userText: '#ffffff',
+                    inputBg: 'rgba(255,255,255,0.04)',
+                    inputBorder: 'rgba(255,255,255,0.10)',
+                    inputText: '#f4f4f5',
+                    sendButtonBg: '#6366f1',
+                    sendButtonText: '#ffffff',
+                    focusRing: 'rgba(99,102,241,0.35)',
+                    border: 'rgba(255,255,255,0.06)',
+                  }}
+                />
+              </div>
+            ) : (
+              <div className="pg-card-empty">
+                Create a conversation in the sidebar to start chatting.
+              </div>
+            )}
+          </section>
+        </div>
+
         <p className="pg-footer">
           <a href="https://github.com/sjlynch/react-chorus" target="_blank" rel="noreferrer">View on GitHub</a>
           {' · '}
           <a href="https://www.npmjs.com/package/react-chorus" target="_blank" rel="noreferrer">npm</a>
+          {' · '}
+          Reasoning + tool calls in this demo are streamed via a mock OpenAI-format SSE transport through the real <code>autoConnector</code>.
         </p>
       </main>
     </>
