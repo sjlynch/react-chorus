@@ -12,8 +12,8 @@ import {
 } from './components/ChatWindow';
 import { Markdown as BaseMarkdown, type MarkdownProps } from './components/Markdown';
 
-export type { ChatWindowProps, MessageBubbleProps } from './components/ChatWindow';
-export type { RenderMessageContext, MessageMarkdownProps, MessageRenderActions } from './components/ChatWindow';
+export type { ChatWindowProps, MessageBubbleProps, MessageBubbleSlots } from './components/ChatWindow';
+export type { MessageFeedback, RenderMessageContext, MessageMarkdownProps, MessageRenderActions } from './components/ChatWindow';
 
 export function ChatWindow<TMeta = Record<string, unknown>>({ headless = true, ...props }: ChatWindowProps<TMeta>) {
   return React.createElement(BaseChatWindow<TMeta>, { ...props, headless });

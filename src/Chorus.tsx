@@ -1,6 +1,6 @@
 import React from 'react';
 import './Chorus.css';
-import { ChatWindow, type MessageMarkdownProps, type RenderMessageContext } from './components/ChatWindow';
+import { ChatWindow, type MessageFeedback, type MessageMarkdownProps, type RenderMessageContext } from './components/ChatWindow';
 import { ChatInput } from './components/ChatInput';
 import { styleVarsFromPalette, type Palette } from './components/ChorusTheme';
 import type { Attachment, AttachmentError, ConnectorName, Message, Role, StorageAdapter, UploadAttachment } from './types';
@@ -91,6 +91,8 @@ export interface ChorusProps<TMeta = Record<string, unknown>> {
   errorMessage?: string;
   onError?: (error: Error) => void;
   onChunk?: (chunk: string, messageId: string) => void;
+  onCopy?: (message: Message<TMeta>) => void;
+  onFeedback?: (message: Message<TMeta>, feedback: MessageFeedback) => void;
   codeBlockTheme?: 'dark' | 'light';
   accept?: string;
   maxAttachmentBytes?: number;
@@ -136,6 +138,8 @@ export function Chorus<TMeta = Record<string, unknown>>({
   errorMessage,
   onError,
   onChunk,
+  onCopy,
+  onFeedback,
   codeBlockTheme = 'dark',
   accept,
   maxAttachmentBytes,
@@ -527,7 +531,7 @@ export function Chorus<TMeta = Record<string, unknown>>({
 
   return (
     <div className={["chorus", className].filter(Boolean).join(" ")} style={{ ...paletteVars, ...style }}>
-      <ChatWindow<TMeta> messages={msgs} typing={!!(transport || onSend) && sending && !hasStartedAssistantRef.current} codeTheme={codeBlockTheme} headless={headless} renderMessage={renderMessage} markdownProps={markdownProps} markdownSanitizer={markdownSanitizer} hiddenRoles={hiddenRoles} streamingMessageId={activeStreamingMessageId} onEdit={(transport || onSend) ? handleEdit : undefined} onRegenerate={(transport || onSend) ? handleRegenerate : undefined} onDelete={handleDelete} error={streamError} onRetry={retry} />
+      <ChatWindow<TMeta> messages={msgs} typing={!!(transport || onSend) && sending && !hasStartedAssistantRef.current} codeTheme={codeBlockTheme} headless={headless} renderMessage={renderMessage} markdownProps={markdownProps} markdownSanitizer={markdownSanitizer} hiddenRoles={hiddenRoles} streamingMessageId={activeStreamingMessageId} onEdit={(transport || onSend) ? handleEdit : undefined} onRegenerate={(transport || onSend) ? handleRegenerate : undefined} onDelete={handleDelete} onCopy={onCopy} onFeedback={onFeedback} error={streamError} onRetry={retry} />
       {showClearButton && (
         <div className="chorus-clear-row">
           <button type="button" className="chorus-clear-btn" onClick={clearMessages} disabled={!sending && msgs.length === 0}>

@@ -4,6 +4,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ChatInput } from '../components/ChatInput';
 import type { ChatInputProps } from '../components/ChatInput';
+import type { AttachmentUploadResult } from '../types';
 
 function ControlledChatInput(props: Partial<ChatInputProps>) {
   const [value, setValue] = useState(props.value ?? '');
@@ -24,6 +25,16 @@ function fileTransfer(...files: File[]) {
     items: files.map(file => ({ kind: 'file', getAsFile: () => file })),
     types: ['Files'],
   };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
 }
 
 describe('ChatInput', () => {
@@ -150,6 +161,8 @@ describe('ChatInput', () => {
     await user.upload(fileInput, file);
 
     expect(await screen.findByText('photo.png')).toBeInTheDocument();
+    expect(await screen.findByAltText('photo.png')).toHaveAttribute('loading', 'lazy');
+    expect(screen.getByAltText('photo.png')).toHaveAttribute('decoding', 'async');
     await user.click(screen.getByRole('button', { name: /remove photo\.png/i }));
 
     expect(screen.queryByText('photo.png')).not.toBeInTheDocument();
@@ -234,6 +247,52 @@ describe('ChatInput', () => {
     })));
   });
 
+  it('shows a pending upload chip and disables send until uploadAttachment resolves', async () => {
+    const upload = deferred<AttachmentUploadResult>();
+    const uploadAttachment = vi.fn(() => upload.promise);
+    const file = new File(['image-bytes'], 'slow.png', { type: 'image/png' });
+    const { container } = render(<ControlledChatInput accept="image/*" uploadAttachment={uploadAttachment} />);
+
+    fireEvent.drop(screen.getByRole('textbox'), { dataTransfer: fileTransfer(file) });
+
+    expect(await screen.findByText('slow.png')).toBeInTheDocument();
+    expect(container.querySelector('.chorus-attachment-chip--pending')).toBeInTheDocument();
+    expect(container.querySelector('.chorus-attachment-spinner')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /send/i })).toBeDisabled();
+
+    upload.resolve({
+      name: 'slow.png',
+      type: 'image/png',
+      size: file.size,
+      url: 'https://cdn.example.com/slow.png',
+    });
+
+    await waitFor(() => expect(container.querySelector('.chorus-attachment-chip--pending')).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: /send/i })).toBeEnabled();
+  });
+
+  it('removes a pending upload chip and reports upload-failed when uploadAttachment rejects', async () => {
+    const upload = deferred<AttachmentUploadResult>();
+    const uploadAttachment = vi.fn(() => upload.promise);
+    const onAttachmentError = vi.fn();
+    const file = new File(['image'], 'broken.png', { type: 'image/png' });
+    const { container } = render(<ControlledChatInput accept="image/*" uploadAttachment={uploadAttachment} onAttachmentError={onAttachmentError} />);
+
+    fireEvent.drop(screen.getByRole('textbox'), { dataTransfer: fileTransfer(file) });
+    expect(await screen.findByText('broken.png')).toBeInTheDocument();
+    expect(container.querySelector('.chorus-attachment-chip--pending')).toBeInTheDocument();
+
+    upload.reject(new Error('network down'));
+
+    await waitFor(() => expect(onAttachmentError).toHaveBeenCalledWith(expect.objectContaining({
+      reason: 'upload-failed',
+      source: 'drop',
+      file,
+    })));
+    await waitFor(() => expect(screen.queryByText('broken.png')).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: /send/i })).toBeDisabled();
+  });
+
   it('uses uploadAttachment results instead of forcing data URLs', async () => {
     const user = userEvent.setup();
     const onSend = vi.fn();
@@ -248,8 +307,9 @@ describe('ChatInput', () => {
     render(<ControlledChatInput accept="image/*" uploadAttachment={uploadAttachment} onSend={onSend} />);
 
     fireEvent.drop(screen.getByRole('textbox'), { dataTransfer: fileTransfer(file) });
-    expect(await screen.findByText('uploaded.png')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('uploaded.png')).toBeInTheDocument());
 
+    await waitFor(() => expect(screen.getByRole('button', { name: /send/i })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: /send/i }));
 
     expect(uploadAttachment).toHaveBeenCalledWith(file);
