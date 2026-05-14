@@ -11,6 +11,7 @@ import {
   type MessageBubbleProps,
 } from './components/ChatWindow';
 import { Markdown as BaseMarkdown, type MarkdownProps } from './components/Markdown';
+import { ConversationList as BaseConversationList, type ConversationListProps } from './components/ConversationList';
 
 export type { ChatWindowProps, MessageBubbleProps } from './components/ChatWindow';
 export type { RenderMessageContext, MessageMarkdownProps, MessageRenderActions } from './components/ChatWindow';
@@ -26,6 +27,12 @@ export function MessageBubble<TMeta = Record<string, unknown>>({ headless = true
 export function Markdown({ headless = true, ...props }: MarkdownProps) {
   return React.createElement(BaseMarkdown, { ...props, headless });
 }
+
+export function ConversationList({ headless = true, ...props }: ConversationListProps) {
+  return React.createElement(BaseConversationList, { ...props, headless });
+}
+
+export type { ConversationListProps } from './components/ConversationList';
 
 export { ChatInput } from './components/ChatInput';
 export type { ChatInputProps } from './components/ChatInput';
@@ -45,6 +52,9 @@ export type { Role, Attachment, ConnectorName, StorageAdapter, ToolCall } from '
 export { useChorusStream } from './hooks/useChorusStream';
 export type { SendCallbacks, StreamOptions, Transport } from './hooks/useChorusStream';
 export { useChorusPersistence } from './hooks/useChorusPersistence';
+export type { DeserializeMessages, PersistenceWriteOptions, SerializeMessages, UseChorusPersistenceOptions, UseChorusPersistenceResult } from './hooks/useChorusPersistence';
+export { useConversations } from './hooks/useConversations';
+export type { ConversationSummary, UseConversationsOptions, UseConversationsResult } from './hooks/useConversations';
 export { createFetchSSETransport } from './streaming/createFetchSSETransport';
 export type { FetchSSETransportOptions } from './streaming/createFetchSSETransport';
 export { createWebSocketTransport } from './streaming/createWebSocketTransport';

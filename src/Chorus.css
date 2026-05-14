@@ -20,6 +20,25 @@
 .chorus-msg-img { max-width: 100%; max-height: 300px; border-radius: 8px; display: block; }
 .chorus-msg-file { display: inline-block; padding: 4px 10px; background: rgba(0,0,0,.15); border-radius: 6px; font-size: 12px; }
 
+/* Multi-conversation sidebar */
+.chorus-conversation-list { display: flex; flex-direction: column; gap: 8px; min-width: 220px; padding: 10px; background: var(--chorus-chat-bg, #161616); color: var(--chorus-chat-text, #f3f4f6); border: 1px solid var(--chorus-border, #2a2a2a); border-radius: 12px; }
+.chorus-conversation-new { width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--chorus-border, #2a2a2a); background: var(--chorus-input-bg, #1a1a1a); color: var(--chorus-input-text, #f3f4f6); cursor: pointer; text-align: left; }
+.chorus-conversation-new:hover { background: var(--chorus-action-hover-bg, rgba(255,255,255,0.15)); color: var(--chorus-action-hover-text, #eee); }
+.chorus-conversation-items { display: flex; flex-direction: column; gap: 6px; }
+.chorus-conversation-empty { padding: 12px 8px; color: var(--chorus-action-text, #a3a3a3); font-size: 13px; }
+.chorus-conversation-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px; align-items: center; border-radius: 8px; border: 1px solid transparent; }
+.chorus-conversation-item--active { border-color: var(--chorus-border, #2a2a2a); background: var(--chorus-action-hover-bg, rgba(255,255,255,0.1)); }
+.chorus-conversation-select { min-width: 0; padding: 8px; border: none; border-radius: 8px; background: transparent; color: inherit; cursor: pointer; text-align: left; }
+.chorus-conversation-select:hover { background: var(--chorus-action-hover-bg, rgba(255,255,255,0.15)); color: var(--chorus-action-hover-text, #eee); }
+.chorus-conversation-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.chorus-conversation-time { display: block; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--chorus-action-text, #a3a3a3); font-size: 11px; }
+.chorus-conversation-actions { display: flex; gap: 2px; padding-right: 4px; }
+.chorus-conversation-action { padding: 4px 6px; border: none; border-radius: 6px; background: transparent; color: var(--chorus-action-text, #a3a3a3); cursor: pointer; font-size: 12px; }
+.chorus-conversation-action:hover { background: var(--chorus-action-hover-bg, rgba(255,255,255,0.15)); color: var(--chorus-action-hover-text, #eee); }
+.chorus-conversation-rename { grid-column: 1 / -1; display: flex; gap: 4px; padding: 4px; }
+.chorus-conversation-rename-input { min-width: 0; flex: 1; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--chorus-input-border, #333333); background: var(--chorus-input-bg, #1a1a1a); color: var(--chorus-input-text, #f3f4f6); }
+.chorus-conversation-rename-input:focus { outline: none; border-color: var(--chorus-send-bg, #ffffff); box-shadow: 0 0 0 3px var(--chorus-focus-ring, rgba(255,255,255,0.2)); }
+
 /* Input area — column flex to stack attachment previews above the input row */
 .chorus-clear-row { display: flex; justify-content: flex-end; margin-top: 8px; }
 .chorus-clear-btn { font-size: 12px; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--chorus-border, #2a2a2a); background: transparent; color: var(--chorus-action-text, #a3a3a3); cursor: pointer; }

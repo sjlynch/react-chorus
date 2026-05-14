@@ -934,7 +934,55 @@ describe('Chorus', () => {
     expect(screen.queryByText('controlled message')).not.toBeInTheDocument();
   });
 
-  it('persists cleared conversations so initialMessages do not resurrect on reload', async () => {
+  it('removes the persisted key when clearing with a removeItem-capable adapter', async () => {
+    const user = userEvent.setup();
+    const storage = makeSyncStorage();
+    storage.removeItem = vi.fn((key) => { delete storage.store[key]; });
+    const welcome: Message[] = [{ id: 'welcome', role: 'assistant', text: 'persistent welcome' }];
+
+    render(
+      <Chorus
+        persistenceKey="chat"
+        persistenceStorage={storage}
+        initialMessages={welcome}
+        showClearButton
+      />
+    );
+
+    await waitFor(() => expect(storage.store.chat).toBe(JSON.stringify(welcome)));
+    await user.click(screen.getByRole('button', { name: /clear conversation/i }));
+
+    await waitFor(() => expect(storage.removeItem).toHaveBeenCalledWith('chat'));
+    expect(storage.store.chat).toBeUndefined();
+  });
+
+  it('passes custom persistence serializer and deserializer hooks through Chorus', async () => {
+    const user = userEvent.setup();
+    const storage = makeSyncStorage({ chat: 'custom:read' });
+    const serializeMessages = vi.fn(() => 'custom:write');
+    const deserializeMessages = vi.fn(() => [{ id: 'stored', role: 'assistant', text: 'Stored custom' } as Message]);
+
+    render(
+      <Chorus
+        persistenceKey="chat"
+        persistenceStorage={storage}
+        serializeMessages={serializeMessages}
+        deserializeMessages={deserializeMessages}
+        initialMessages={[{ id: 'welcome', role: 'assistant', text: 'Welcome!' }]}
+      />
+    );
+
+    expect(screen.getByText('Stored custom')).toBeInTheDocument();
+    expect(deserializeMessages).toHaveBeenCalledWith('custom:read');
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'new message');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    await waitFor(() => expect(serializeMessages).toHaveBeenCalled());
+    await waitFor(() => expect(storage.store.chat).toBe('custom:write'));
+  });
+
+  it('persists cleared conversations so initialMessages do not resurrect on reload when removeItem is unavailable', async () => {
     const user = userEvent.setup();
     const storage = makeSyncStorage();
     const welcome: Message[] = [{ id: 'welcome', role: 'assistant', text: 'persistent welcome' }];

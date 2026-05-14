@@ -3,6 +3,8 @@ export type { ChatWindowProps, MessageBubbleProps, RenderMessageContext, Message
 export { ChatInput } from './components/ChatInput';
 export type { ChatInputProps } from './components/ChatInput';
 export { ToolCallBlock } from './components/ToolCallBlock';
+export { ConversationList } from './components/ConversationList';
+export type { ConversationListProps } from './components/ConversationList';
 
 export { Chorus } from './Chorus';
 export { ChorusTheme } from './components/ChorusTheme';
@@ -25,6 +27,9 @@ export type {
 export { useChorusStream } from './hooks/useChorusStream';
 export type { SendCallbacks, StreamOptions, Transport } from './hooks/useChorusStream';
 export { useChorusPersistence } from './hooks/useChorusPersistence';
+export type { DeserializeMessages, PersistenceWriteOptions, SerializeMessages, UseChorusPersistenceOptions, UseChorusPersistenceResult } from './hooks/useChorusPersistence';
+export { useConversations } from './hooks/useConversations';
+export type { ConversationSummary, UseConversationsOptions, UseConversationsResult } from './hooks/useConversations';
 export { createFetchSSETransport } from './streaming/createFetchSSETransport';
 export type { FetchSSETransportOptions } from './streaming/createFetchSSETransport';
 export { createWebSocketTransport } from './streaming/createWebSocketTransport';

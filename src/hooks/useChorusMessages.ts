@@ -5,10 +5,12 @@ import { isChorusDevMode } from '../utils/devMode';
 
 interface PersistedChangeOptions {
   flush?: boolean;
+  removeIfEmpty?: boolean;
 }
 
 interface UpdateMessagesOptions {
   flushPersistence?: boolean;
+  removePersistenceIfEmpty?: boolean;
 }
 
 interface UseChorusMessagesOptions<TMeta = Record<string, unknown>> {
@@ -84,7 +86,7 @@ export function useChorusMessages<TMeta = Record<string, unknown>>({
     msgsRef.current = next;
 
     if (value !== undefined) onChangeRef.current?.(next);
-    else if (persistenceKey) onPersistedChangeRef.current(next, { flush: options?.flushPersistence });
+    else if (persistenceKey) onPersistedChangeRef.current(next, { flush: options?.flushPersistence, removeIfEmpty: options?.removePersistenceIfEmpty });
     else setInternalMsgs(next);
 
     return next;

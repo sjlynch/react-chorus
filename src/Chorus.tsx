@@ -6,7 +6,7 @@ import { styleVarsFromPalette, type Palette } from './components/ChorusTheme';
 import type { Attachment, AttachmentError, ConnectorName, Message, Role, StorageAdapter, UploadAttachment } from './types';
 import { useChorusStream, type Transport } from './hooks/useChorusStream';
 import { createFetchSSETransport } from './streaming/createFetchSSETransport';
-import { useChorusPersistence } from './hooks/useChorusPersistence';
+import { useChorusPersistence, type DeserializeMessages, type SerializeMessages } from './hooks/useChorusPersistence';
 import { useChorusMessages } from './hooks/useChorusMessages';
 import { useRAFQueue } from './hooks/useRAFQueue';
 import type { Connector } from './connectors/connectors';
@@ -101,6 +101,10 @@ export interface ChorusProps<TMeta = Record<string, unknown>> {
   persistenceStorage?: StorageAdapter;
   /** Called when Chorus cannot write the transcript to persistenceStorage. */
   onPersistenceError?: (error: Error) => void;
+  /** Override built-in JSON persistence serialization. */
+  serializeMessages?: SerializeMessages<TMeta>;
+  /** Override built-in JSON persistence deserialization/revival. */
+  deserializeMessages?: DeserializeMessages<TMeta>;
   /** Show a built-in button that clears/resets the conversation. */
   showClearButton?: boolean;
   /** Accessible/button label for the built-in clear action. */
@@ -145,6 +149,8 @@ export function Chorus<TMeta = Record<string, unknown>>({
   persistenceKey,
   persistenceStorage,
   onPersistenceError,
+  serializeMessages,
+  deserializeMessages,
   showClearButton = false,
   clearLabel = 'Clear conversation',
   onClear,
@@ -161,6 +167,8 @@ export function Chorus<TMeta = Record<string, unknown>>({
     storage: persistenceStorage,
     writeDebounceMs: DEFAULT_PERSISTENCE_WRITE_DEBOUNCE_MS,
     onError: onPersistenceError,
+    serializeMessages,
+    deserializeMessages,
   });
   const { msgs, updateMsgs, onChunkRef, seedMessages } = useChorusMessages<TMeta>({
     value,
@@ -495,7 +503,7 @@ export function Chorus<TMeta = Record<string, unknown>>({
     setStreamError(null);
     lastSubmittedTurnRef.current = null;
     const next = resetToInitialMessages ? seedMessages : [];
-    updateMsgs(() => next, { flushPersistence: true });
+    updateMsgs(() => next, { flushPersistence: true, removePersistenceIfEmpty: !resetToInitialMessages });
     onClear?.(next);
   };
 

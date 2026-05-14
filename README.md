@@ -473,9 +473,11 @@ Message source modes are mutually exclusive:
 - Uncontrolled with a seed: pass `initialMessages` (or legacy `messages`) and let Chorus manage subsequent updates internally.
 - Uncontrolled with persistence: pass `persistenceKey` without `value`; passing both makes `value` win, so built-in persistence is bypassed.
 
-When `persistenceKey` is combined with `initialMessages` (or legacy `messages`), stored history is checked first. If the key has no stored value, Chorus renders and saves the seed so welcome messages still appear with persistence enabled. If the key already exists — including an intentionally empty `[]` conversation — the stored value wins. Async storage adapters may show the seed while loading; once the read resolves, stored history replaces it, and stale reads are ignored after local changes.
+When `persistenceKey` is combined with `initialMessages` (or legacy `messages`), stored history is checked first. If the key has no stored value, Chorus renders and saves the seed so welcome messages still appear with persistence enabled. If the key already exists, the stored value wins. Async storage adapters may show the seed while loading; once the read resolves, stored history replaces it, and stale reads are ignored after local changes.
 
-Persistence writes are debounced while assistant tokens stream, flushed when a message finalizes and on explicit edits/deletes/clears, and serialized for async adapters so older saves cannot overwrite newer transcripts. If `setItem` throws or rejects, Chorus keeps the UI running, logs a development warning, records the error in `useChorusPersistence().error`, and calls `onPersistenceError` when provided.
+Persistence writes are debounced while assistant tokens stream, flushed when a message finalizes and on explicit edits/deletes/clears, and serialized for async adapters so older saves cannot overwrite newer transcripts. Pending debounced writes are also flushed on `pagehide` and `visibilitychange` → `hidden`; synchronous adapters such as `localStorage` can complete that final write during tab close, while Promise-based adapters cannot block navigation. For remote/IndexedDB persistence, prefer a synchronous localStorage fallback plus an async backup when data loss on close is unacceptable.
+
+Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message data must be JSON-serializable: Dates are restored as strings, classes are not revived, and values such as `BigInt` fail serialization and surface through `onPersistenceError` / `useChorusPersistence().error`. Pass `serializeMessages` and/or `deserializeMessages` to customize validation, compression, or Date revival.
 
 | Prop | Type | Default | Description |
 |------|------|---------|-------------|
@@ -501,12 +503,14 @@ Persistence writes are debounced while assistant tokens stream, flushed when a m
 | `onError` | `(error: Error) => void` | — | Called for any non-abort error from a send or stream. The raw `Error` goes here; the UI shows `errorMessage`. |
 | `onChunk` | `(chunk: string, messageId: string) => void` | — | Observation hook called for each streamed token. Receives the assistant `messageId` so callers can correlate chunks with a specific message. Does **not** affect streaming behaviour. |
 | `persistenceKey` | `string` | — | Uncontrolled-mode persistence key. When set without `value`, Chorus saves/restores messages using this key (defaults to localStorage). If `value` is provided, controlled state wins and built-in persistence is not used. |
-| `persistenceStorage` | `StorageAdapter` | `localStorage` | Custom storage adapter for persistenceKey. The default `localStorage` is resolved lazily; if browser storage is blocked or unavailable, Chorus keeps working without persistence. |
+| `persistenceStorage` | `StorageAdapter` | `localStorage` | Custom storage adapter for persistenceKey. The default `localStorage` is resolved lazily; if browser storage is blocked or unavailable, Chorus keeps working without persistence. Implement optional `removeItem(key)` to delete cleared/deleted conversation keys; adapters without it fall back to writing `[]`. |
 | `onPersistenceError` | `(error: Error) => void` | — | Called when a persistence write throws or rejects. The hook also exposes the latest write error as `useChorusPersistence().error`. |
+| `serializeMessages` | `(messages: Message<TMeta>[]) => string` | `JSON.stringify` | Optional persistence serializer. Use it for custom formats or to reject unsupported data explicitly. |
+| `deserializeMessages` | `(raw: string) => Message<TMeta>[]` | JSON parse + array guard | Optional persistence deserializer/reviver. Use it to validate stored payloads or revive Dates/classes. |
 | `showClearButton` | `boolean` | `false` | Shows a built-in clear/reset conversation button above the input. |
 | `clearLabel` | `string` | `'Clear conversation'` | Label for the built-in clear/reset button. |
 | `onClear` | `(messages: Message<TMeta>[]) => void` | — | Called with the reset message list after the built-in clear action runs. |
-| `resetToInitialMessages` | `boolean` | `false` | When clearing, restore the initial `messages`/`initialMessages` seed instead of saving an intentionally empty `[]` conversation. |
+| `resetToInitialMessages` | `boolean` | `false` | When clearing, restore the initial `messages`/`initialMessages` seed instead of removing (or fallback-saving `[]` to) the empty conversation key. |
 | `headless` | `boolean` | `false` | Strip all default styles and inline style injection. |
 | `renderMessage` | `(message: Message<TMeta>, ctx: RenderMessageContext<TMeta>) => ReactNode` | — | Custom per-message renderer. Return `null` to fall back to default rendering. `ctx` includes `isStreaming`, `defaultRender()`, and action callbacks/default action controls. Existing one-argument renderers continue to work. |
 | `markdownProps` | `Omit<MarkdownProps, 'text' \| 'codeTheme' \| 'headless' \| 'streaming'>` | — | Props forwarded to the built-in Markdown renderer for every message. Currently useful for `sanitizer`. |
@@ -536,7 +540,31 @@ Use the built-in clear button for uncontrolled or persisted chats:
 />
 ```
 
-By default, clearing saves `[]` (so a reload does not resurrect `initialMessages`). Pass `resetToInitialMessages` to reset back to the seed welcome messages instead. In controlled mode, the same button calls `onChange(resetMessages)` and `onClear(resetMessages)`; keep the canonical list in your state as usual.
+By default, clearing writes an empty conversation. If the storage adapter implements `removeItem`, Chorus removes the key; adapters without `removeItem` fall back to saving `[]` for backward compatibility. Pass `resetToInitialMessages` to reset back to the seed welcome messages instead. In controlled mode, the same button calls `onChange(resetMessages)` and `onClear(resetMessages)`; keep the canonical list in your state as usual.
+
+A storage adapter can be synchronous (like `localStorage`) or Promise-based:
+
+```ts
+interface StorageAdapter {
+  getItem(key: string): string | null | Promise<string | null>;
+  setItem(key: string, value: string): void | Promise<void>;
+  removeItem?(key: string): void | Promise<void>;
+}
+```
+
+For multiple saved chats, use `useConversations` with `ConversationList` and pass the active persistence key/storage into Chorus:
+
+```tsx
+const conversations = useConversations();
+
+<ConversationList {...conversations} />
+<Chorus
+  persistenceKey={conversations.activePersistenceKey}
+  persistenceStorage={conversations.storage ?? undefined}
+/>
+```
+
+`useConversations({ indexKey, messageKeyPrefix, storage })` stores a JSON index of `{ id, title, createdAt, updatedAt }` records under `indexKey` (default `chorus-conversations-index`) and stores each transcript under `${messageKeyPrefix}${id}`. `deleteConversation(id)` removes the transcript key via `removeItem` when available.
 
 ### Observing streamed tokens with `onChunk`
 
@@ -927,13 +955,14 @@ import { ChatWindow, ChatInput, ChorusTheme, Markdown } from 'react-chorus';
 
 ### Headless subpath
 
-Import from `react-chorus/headless` when you want semantic markup and behavior without default styling. The headless subpath preserves class names as styling hooks, and its `Chorus`, `ChatWindow`, `MessageBubble`, and `Markdown` exports default `headless={true}` so Markdown styles and syntax-highlight theme CSS are not injected unless you explicitly pass `headless={false}`.
+Import from `react-chorus/headless` when you want semantic markup and behavior without default styling. The headless subpath preserves class names as styling hooks, and its `Chorus`, `ChatWindow`, `MessageBubble`, `ConversationList`, and `Markdown` exports default `headless={true}` so Markdown styles and syntax-highlight theme CSS are not injected unless you explicitly pass `headless={false}`.
 
 ```tsx
-import { ChatWindow, Markdown, MessageBubble } from 'react-chorus/headless';
+import { ChatWindow, ConversationList, Markdown, MessageBubble } from 'react-chorus/headless';
 
 <ChatWindow messages={messages} />
 <MessageBubble message={message} />
+<ConversationList {...conversations} />
 <Markdown text="**unstyled**" />
 ```
 
@@ -972,7 +1001,8 @@ interface Message<TMeta = Record<string, unknown>> {
 
 ```ts
 type MyMeta = {
-  timestamp: Date;
+  // ISO strings are safe with built-in JSON persistence.
+  timestamp: string;
   model: string;
   latencyMs: number;
 };
@@ -984,13 +1014,24 @@ const message: ChatMessage = {
   role: 'assistant',
   text: 'Hello!',
   metadata: {
-    timestamp: new Date(),
+    timestamp: new Date().toISOString(),
     model: 'gpt-4o-mini',
     latencyMs: 420,
   },
 };
 
 const latency = message.metadata?.latencyMs;
+```
+
+If you enable built-in persistence, keep metadata/tool payloads JSON-serializable or provide `serializeMessages` / `deserializeMessages`; JSON parsing does not revive `Date` instances or custom classes automatically.
+
+```tsx
+<Chorus<{ timestamp: Date }>
+  persistenceKey="chat-with-dates"
+  deserializeMessages={(raw) => JSON.parse(raw, (key, value) => (
+    key === 'timestamp' && typeof value === 'string' ? new Date(value) : value
+  ))}
+/>
 ```
 
 The same generic flows through public components and hooks:
