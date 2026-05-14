@@ -15,9 +15,16 @@ import { Markdown as BaseMarkdown, type MarkdownProps } from './components/Markd
 export type { ChatWindowProps, MessageBubbleProps, MessageBubbleSlots } from './components/ChatWindow';
 export type { MessageFeedback, RenderMessageContext, MessageMarkdownProps, MessageRenderActions } from './components/ChatWindow';
 
-export function ChatWindow<TMeta = Record<string, unknown>>({ headless = true, ...props }: ChatWindowProps<TMeta>) {
-  return React.createElement(BaseChatWindow<TMeta>, { ...props, headless });
+function ChatWindowInner<TMeta = Record<string, unknown>>(
+  { headless = true, ...props }: ChatWindowProps<TMeta>,
+  ref: React.ForwardedRef<HTMLDivElement>,
+) {
+  return React.createElement(BaseChatWindow<TMeta>, { ...props, ref, headless });
 }
+
+export const ChatWindow = React.forwardRef(ChatWindowInner) as <TMeta = Record<string, unknown>>(
+  props: ChatWindowProps<TMeta> & React.RefAttributes<HTMLDivElement>,
+) => React.ReactElement | null;
 
 export function MessageBubble<TMeta = Record<string, unknown>>({ headless = true, ...props }: MessageBubbleProps<TMeta>) {
   return React.createElement(BaseMessageBubble<TMeta>, { ...props, headless });
@@ -35,13 +42,24 @@ export { ToolCallBlock } from './components/ToolCallBlock';
 export { ChorusHeadless as Chorus, type ChorusHeadlessProps as ChorusProps } from './ChorusHeadless';
 export { ChorusHeadless } from './ChorusHeadless';
 export type { ChorusHeadlessProps } from './ChorusHeadless';
-export type { ChorusOnSend, ChorusSendHelpers } from './Chorus';
+export type { ChorusOnSend, ChorusSendHelpers, ChorusRef, ChorusFinishContext, ChorusOnFinish } from './Chorus';
 
 export { ChorusTheme } from './components/ChorusTheme';
 export type { Palette } from './components/ChorusTheme';
 
 export type { Message } from './types';
-export type { Role, Attachment, ConnectorName, StorageAdapter, ToolCall } from './types';
+export type {
+  Role,
+  Attachment,
+  AttachmentError,
+  AttachmentErrorReason,
+  AttachmentSource,
+  AttachmentUploadResult,
+  ConnectorName,
+  StorageAdapter,
+  ToolCall,
+  UploadAttachment,
+} from './types';
 export { useChorusStream } from './hooks/useChorusStream';
 export type { SendCallbacks, StreamOptions, Transport } from './hooks/useChorusStream';
 export { useChorusPersistence } from './hooks/useChorusPersistence';

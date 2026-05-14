@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { createRef, useState } from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -59,6 +59,17 @@ describe('ChatInput', () => {
 
     expect(onSend).not.toHaveBeenCalled();
     expect(textarea).toHaveValue('Hello\nworld');
+  });
+
+  it('forwards root refs and HTML attributes while focus() targets the textarea', () => {
+    const ref = createRef<HTMLDivElement>();
+    const { container } = render(<ChatInput ref={ref} value="" onChange={vi.fn()} onSend={vi.fn()} id="composer" data-testid="composer-root" />);
+
+    expect(ref.current).toBe(container.firstElementChild);
+    expect(screen.getByTestId('composer-root')).toHaveAttribute('id', 'composer');
+
+    ref.current?.focus();
+    expect(screen.getByRole('textbox')).toHaveFocus();
   });
 
   it('has an accessible name from the placeholder or default label', () => {
@@ -150,6 +161,17 @@ describe('ChatInput', () => {
     render(<ChatInput value="" onChange={vi.fn()} onSend={vi.fn()} accept="image/*" />);
 
     expect(screen.getByRole('button', { name: /attach file/i })).toBeInTheDocument();
+  });
+
+  it('treats an empty accept string as allowing any file while still showing attachments', async () => {
+    const file = new File(['notes'], 'notes.txt', { type: 'text/plain' });
+    const { container } = render(<ControlledChatInput accept="" />);
+
+    expect(screen.getByRole('button', { name: /attach file/i })).toBeInTheDocument();
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    await userEvent.upload(fileInput, file);
+
+    expect(await screen.findByText('notes.txt')).toBeInTheDocument();
   });
 
   it('renders attachments as chips and removes them with the X button', async () => {

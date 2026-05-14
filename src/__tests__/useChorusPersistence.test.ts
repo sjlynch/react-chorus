@@ -209,6 +209,31 @@ describe('useChorusPersistence', () => {
     warn.mockRestore();
   });
 
+  it('records and surfaces write failures when process is unavailable', async () => {
+    const originalProcess = globalThis.process;
+    const processWithoutEnv = Object.create(originalProcess ?? null) as typeof process;
+    Object.defineProperty(processWithoutEnv, 'env', { value: undefined, configurable: true, writable: true });
+    const quotaError = new DOMException('Full', 'QuotaExceededError');
+    const onError = vi.fn();
+    const storage: StorageAdapter = {
+      getItem: vi.fn(() => null),
+      setItem: vi.fn(() => { throw quotaError; }),
+    };
+
+    Object.defineProperty(globalThis, 'process', { value: processWithoutEnv, configurable: true, writable: true });
+    try {
+      const { result } = renderHook(() => useChorusPersistence('key', { storage, onError }));
+
+      expect(() => act(() => result.current.onChange(MSGS))).not.toThrow();
+      await act(async () => { await Promise.resolve(); });
+
+      expect(result.current.error).toBe(quotaError);
+      expect(onError).toHaveBeenCalledWith(quotaError);
+    } finally {
+      Object.defineProperty(globalThis, 'process', { value: originalProcess, configurable: true, writable: true });
+    }
+  });
+
   it('records and surfaces rejected async write failures without throwing', async () => {
     const writeError = new Error('write failed');
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);

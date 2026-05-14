@@ -1,3 +1,4 @@
+import { createRef } from 'react';
 import type React from 'react';
 import { readFileSync } from 'node:fs';
 import { describe, it, expect, vi } from 'vitest';
@@ -39,6 +40,15 @@ describe('ChatWindow', () => {
     render(<ChatWindow messages={[USER_MSG, ASST_MSG]} />);
     expect(screen.getByText('Hello')).toBeInTheDocument();
     expect(screen.getByText('Hi there')).toBeInTheDocument();
+  });
+
+  it('forwards root refs and HTML attributes', () => {
+    const ref = createRef<HTMLDivElement>();
+    render(<ChatWindow ref={ref} messages={[USER_MSG]} id="transcript" data-testid="chat-window" />);
+
+    const transcript = screen.getByTestId('chat-window');
+    expect(ref.current).toBe(transcript);
+    expect(transcript).toHaveAttribute('id', 'transcript');
   });
 
   it('exposes the transcript as a polite live log region', () => {

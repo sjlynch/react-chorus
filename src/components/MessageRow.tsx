@@ -129,7 +129,7 @@ export function MessageBubble<TMeta = Record<string, unknown>>({ message, classN
 
   const cls = ['chorus-msg', `chorus-${message.role}`, className].filter(Boolean).join(' ');
   return (
-    <div className={cls} style={style}>
+    <div className={cls} style={style} data-chorus-message-id={message.id}>
       <MessageSpeakerLabel role={message.role} />
       <MessageBubbleLayout
         message={message}
@@ -298,7 +298,7 @@ export function MessageRow<TMeta = Record<string, unknown>>({ m, codeTheme, head
   };
 
   return (
-    <div className={`chorus-msg chorus-${m.role}`}>
+    <div className={`chorus-msg chorus-${m.role}`} data-chorus-message-id={m.id}>
       <MessageSpeakerLabel role={m.role} />
       {editing && actions.edit ? (
         <InlineMessageEditor
