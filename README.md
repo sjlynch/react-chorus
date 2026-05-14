@@ -109,6 +109,8 @@ export default function App() {
         onSend={handleSend}
         placeholder="Type a message…"
         suggestedPrompts={['Explain this code path', 'Write a regression test', 'Summarize the latest logs']}
+        errorMessage="The assistant could not complete that request. Please try again."
+        onError={(error) => console.error(error)}
       />
     </div>
   );
@@ -189,6 +191,7 @@ app.post('/api/chat', async (req, res) => {
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('X-Accel-Buffering', 'no'); // avoid proxy buffering for SSE
 
   try {
     const stream = await openai.chat.completions.create({ model: 'gpt-4o-mini', messages, stream: true });
@@ -402,7 +405,7 @@ Runnable examples live in the [`/examples`](./examples) directory:
 
 | Example | Description |
 |---------|-------------|
-| [`examples/basic`](./examples/basic) | Zero-backend demo using a simulated streaming response — great for local development |
+| [`examples/basic`](./examples/basic) | Zero-backend demo using a simulated streaming response, local persistence, clear/reset, and a custom error banner — great for local development |
 | [`examples/with-openai`](./examples/with-openai) | Full-stack example: Vite frontend + Express backend proxying to OpenAI |
 
 ### Running the basic example
@@ -445,6 +448,8 @@ $env:OPENAI_API_KEY="sk-..."; npm start
 set OPENAI_API_KEY=sk-... && npm start
 ```
 
+The Express server sets `X-Accel-Buffering: no` so nginx-style reverse proxies do not buffer SSE chunks and make the assistant response appear all at once.
+
 Terminal 2 — frontend (proxies `/api` to `http://localhost:3001`):
 
 ```bash
@@ -467,7 +472,7 @@ npm run dev
 
 `<Markdown>` sanitizes rendered HTML before using `dangerouslySetInnerHTML`. In the browser it uses `dompurify` (or initializes the DOMPurify factory with `window` when needed). During SSR, if no real DOMPurify-compatible sanitizer is available, react-chorus does **not** attempt regex-based HTML sanitization; it switches to a safe no-raw-HTML renderer that drops raw HTML tokens and only emits Markdown-generated links/images with safe URL protocols. Ordinary Markdown (`**bold**`, headings, lists, code, safe `http`/`https` links) renders the same on server and client.
 
-If your SSR app wants to allow sanitized raw HTML, create an isomorphic DOMPurify instance (for example with your framework's DOM/window or jsdom on the server) and pass it to the standalone renderer: `<Markdown sanitizer={purify} />` or `<Markdown sanitizer={(html) => purify.sanitize(html)} />`. The built-in chat renderer accepts the same customization via `<Chorus markdownSanitizer={purify} />` / `<ChatWindow markdownSanitizer={purify} />`, or through `markdownProps={{ sanitizer: purify }}`.
+If your SSR app wants to allow sanitized raw HTML, create an isomorphic DOMPurify instance (for example with your framework's DOM/window or jsdom on the server) and pass it to the standalone renderer: `<Markdown sanitizer={purify} />` or `<Markdown sanitizer={(html) => purify.sanitize(html)} />`. The built-in chat renderer accepts the same customization via `<Chorus markdownSanitizer={purify} />` / `<ChatWindow markdownSanitizer={purify} />`, or through `markdownProps={{ sanitizer: purify }}`. You can also pass `markedOptions` and `markedExtensions` directly to `<Markdown>` or via `markdownProps` to adjust parsing and register marked extensions without mutating marked's global singleton.
 
 ## API
 
@@ -504,7 +509,7 @@ Persistence writes are debounced while assistant tokens stream, flushed when a m
 | `maxRenderedMessages` | `number` | — | Performance escape hatch: render only the latest N visible messages while keeping typing/error rows, auto-scroll, and actions wired to original message IDs. |
 | `onAttachmentError` | `(error: AttachmentError) => void` | — | Called when a picker, paste, or drop file is rejected or cannot be read/uploaded. Reasons include `unsupported-type`, `too-large`, `too-many`, `read-failed`, and `upload-failed`. |
 | `uploadAttachment` | `(file: File) => AttachmentUploadResult \| Promise<AttachmentUploadResult>` | data URL reader | Optional transform/upload hook. Return a custom attachment (for example a CDN URL or provider file id) instead of the default data URL payload. |
-| `sending` | `boolean` | — | Override the sending state (useful when you manage it externally via `useChorusStream`). |
+| `sending` | `boolean` | — | Visual sending-state override for fully custom `onSend`/`useChorusStream` integrations. On the `transport` path, Chorus still owns the internal concurrency guard even if this is overridden. |
 | `palette` | `Palette` | dark theme | Custom color palette for theming, including `actionText`, `actionHoverBg`, `actionHoverText`, `errorBg`, `errorBorder`, and `errorText`. |
 | `codeBlockTheme` | `'dark' \| 'light'` | `'dark'` | Code block syntax-highlight theme. |
 | `minAssistantDelayMs` | `number` | `300` | Minimum ms before showing the first assistant token. |
@@ -512,6 +517,9 @@ Persistence writes are debounced while assistant tokens stream, flushed when a m
 | `onError` | `(error: Error) => void` | — | Called for any non-abort error from a send or stream. The raw `Error` goes here; the UI shows `errorMessage`. |
 | `renderError` | `({ error, rawError, retry, dismiss }) => ReactNode` | — | Replace the built-in error banner. `error` is the friendly UI string, `rawError` is the last raw `Error` when available, `retry()` resubmits the last turn, and `dismiss()` clears the banner. |
 | `onChunk` | `(chunk: string, messageId: string) => void` | — | Observation hook called for each streamed token. Receives the assistant `messageId` so callers can correlate chunks with a specific message. Does **not** affect streaming behaviour. |
+| `onCopy` | `(message: Message<TMeta>) => void` | Clipboard copy when available | Overrides the built-in per-message Copy action. If omitted, Chorus copies `message.text` with `navigator.clipboard.writeText` when the Clipboard API is available. |
+| `onFeedback` | `(message: Message<TMeta>, feedback: 'up' \| 'down') => void` | — | Enables built-in thumbs-up / thumbs-down per-message feedback actions and reports the selected variant. |
+| `onFinish` | `({ message, messages, reason, response }) => void` | — | Called once when an assistant message completes normally. Use it for telemetry, persistence handoff, moderation, or post-response UI. Not called for aborts, Stop, or errors. |
 | `persistenceKey` | `string` | — | Uncontrolled-mode persistence key. When set without `value`, Chorus saves/restores messages using this key (defaults to localStorage). If `value` is provided, controlled state wins and built-in persistence is not used. |
 | `persistenceStorage` | `StorageAdapter` | `localStorage` | Custom storage adapter for persistenceKey. The default `localStorage` is resolved lazily; if browser storage is blocked or unavailable, Chorus keeps working without persistence. |
 | `onPersistenceError` | `(error: Error) => void` | — | Called when a persistence write throws or rejects. The hook also exposes the latest write error as `useChorusPersistence().error`. |
@@ -521,8 +529,8 @@ Persistence writes are debounced while assistant tokens stream, flushed when a m
 | `resetToInitialMessages` | `boolean` | `false` | When clearing, restore the initial `messages`/`initialMessages` seed instead of saving an intentionally empty `[]` conversation. |
 | `showJumpToBottomButton` | `boolean` | `true` (`false` in headless exports) | Shows a floating “Jump to latest” button when auto-scroll is paused and new activity arrives. |
 | `headless` | `boolean` | `false` | Strip all default styles and inline style injection. |
-| `renderMessage` | `(message: Message<TMeta>, ctx: RenderMessageContext<TMeta>) => ReactNode` | — | Custom per-message renderer. Return `null` to fall back to default rendering. `ctx` includes `isStreaming`, `defaultRender()`, and action callbacks/default action controls. Existing one-argument renderers continue to work. |
-| `markdownProps` | `Omit<MarkdownProps, 'text' \| 'codeTheme' \| 'headless' \| 'streaming'>` | — | Props forwarded to the built-in Markdown renderer for every message. Currently useful for `sanitizer`. |
+| `renderMessage` | `(message: Message<TMeta>, ctx: RenderMessageContext<TMeta>) => ReactNode` | — | Custom per-message renderer. Return `null` to fall back to default rendering. `ctx` includes `isStreaming`, `defaultRender(slots?)`, and action callbacks/default action controls. Existing one-argument renderers continue to work. |
+| `markdownProps` | `Omit<MarkdownProps, 'text' \| 'codeTheme' \| 'headless' \| 'streaming'>` | — | Props forwarded to the built-in Markdown renderer for every message, including `sanitizer`, `markedOptions`, and `markedExtensions`. |
 | `markdownSanitizer` | `MarkdownSanitizer` | — | Convenience alias for `markdownProps.sanitizer`; takes precedence when both are provided. |
 | `hiddenRoles` | `Role[]` | `['system', 'tool']` | Message roles hidden from the transcript. Pass `['system']` to show tool calls while hiding system prompts, or `[]` to show all roles. `<Chorus>` accepts `hiddenRoles` only — `showSystemMessages` exists on `<ChatWindow>` for backwards compatibility. |
 
@@ -535,6 +543,39 @@ Persistence writes are debounced while assistant tokens stream, flushed when a m
 | `signal` | `AbortSignal` — aborted when the user hits Stop. |
 
 Call `finalizeAssistant()` when your custom stream is done. In development, Chorus warns if `onSend` appended chunks and then resolved without finalizing; it will still flush those chunks and reset the sending state so the UI cannot get stuck in Stop mode.
+
+### Keyboard shortcuts
+
+- Composer textarea: **Enter** sends, **Shift+Enter** inserts a newline.
+- Inline edit textarea: **Enter** saves, **Shift+Enter** inserts a newline, and **Escape** cancels editing.
+
+### Imperative `ChorusRef`
+
+Use a ref for suggested prompts, global focus shortcuts, external clear buttons, or scrolling to a known message:
+
+```tsx
+import React from 'react';
+import { Chorus, type ChorusRef } from 'react-chorus';
+
+export function SupportChat() {
+  const chorusRef = React.useRef<ChorusRef>(null);
+  const suggestions = ['Summarize my account', 'Explain my last invoice'];
+
+  return (
+    <>
+      {suggestions.map((text) => (
+        <button key={text} type="button" onClick={() => chorusRef.current?.send(text)}>
+          {text}
+        </button>
+      ))}
+      <button type="button" onClick={() => chorusRef.current?.focus()}>Focus chat</button>
+      <Chorus ref={chorusRef} transport="/api/chat" />
+    </>
+  );
+}
+```
+
+The ref exposes `send(text, attachments?)`, `stop()`, `clear()`, `focus()`, and `scrollToMessage(id)`.
 
 ### Clearing/resetting a conversation
 
@@ -550,6 +591,35 @@ Use the built-in clear button for uncontrolled or persisted chats:
 ```
 
 By default, clearing saves `[]` (so a reload does not resurrect `initialMessages`). Pass `resetToInitialMessages` to reset back to the seed welcome messages instead. In controlled mode, the same button calls `onChange(resetMessages)` and `onClear(resetMessages)`; keep the canonical list in your state as usual.
+
+### Persistence examples
+
+The basic runnable example enables `persistenceKey`, so it saves to `localStorage` by default. You can swap storage adapters without changing the rest of the chat:
+
+```tsx
+// localStorage (default)
+<Chorus persistenceKey="support-chat" transport="/api/chat" />
+
+// sessionStorage
+<Chorus persistenceKey="support-chat" persistenceStorage={sessionStorage} transport="/api/chat" />
+
+// Async adapter (IndexedDB, remote draft API, etc.)
+const asyncStorage = {
+  async getItem(key: string) {
+    return await draftsApi.load(key);
+  },
+  async setItem(key: string, value: string) {
+    await draftsApi.save(key, value);
+  },
+};
+
+<Chorus
+  persistenceKey="support-chat"
+  persistenceStorage={asyncStorage}
+  onPersistenceError={(error) => reportError(error)}
+  transport="/api/chat"
+/>
+```
 
 ### Observing streamed tokens with `onChunk`
 
@@ -567,6 +637,27 @@ const tokensRef = React.useRef(0);
   }}
 />
 ```
+
+### Completion telemetry with `onFinish`
+
+Use `onFinish` when you need the final assistant message rather than token-by-token observations:
+
+```tsx
+<Chorus
+  transport="/api/chat"
+  onFinish={({ message, messages, reason, response }) => {
+    analytics.track('assistant_completed', {
+      assistantMessageId: message.id,
+      characters: message.text.length,
+      turns: messages.filter((m) => m.role === 'user').length,
+      reason,
+      status: response?.status,
+    });
+  }}
+/>
+```
+
+`onFinish` is not called for Stop/abort, transport errors, provider error payloads, or sends that produce no assistant message.
 
 ### Attachment composer UX
 
@@ -614,6 +705,8 @@ Upload/transform files before they enter message history:
 
 If you return only `url` or `id`, Chorus normalizes `attachment.data` to that value for backwards compatibility. Your backend should still prefer explicit `url`/`id` fields when present.
 
+While an async `uploadAttachment` is in flight, the composer shows a pending attachment chip with a spinner and disables Send so an empty placeholder cannot be submitted. Users can remove the pending chip to cancel it from the outgoing message; upload failures call `onAttachmentError` with `reason: 'upload-failed'` and remove the chip.
+
 ### Hiding system messages while showing tool calls
 
 `<Chorus>` uses `hiddenRoles` to control which roles appear in the transcript (`showSystemMessages` is only available on `<ChatWindow>`, for backwards compatibility). A common agent-UI pattern is to render tool call blocks while still hiding system prompts:
@@ -648,6 +741,48 @@ By default, `<Chorus>` and `<ChatWindow>` render every visible message so browse
 
 This is a simple windowing escape hatch rather than full virtualization: earlier visible messages are not mounted until you remove/increase the limit, but typing/error rows stay accessible, bottom auto-scroll still tracks new output, and edit/regenerate/delete actions continue to target original message IDs.
 
+### Driving Chorus with `useChorusStream` directly
+
+`useChorusStream` is also useful without `<Chorus>` when you want a fully custom transcript shell:
+
+```tsx
+import React from 'react';
+import { createFetchSSETransport, useChorusStream, type Message } from 'react-chorus';
+
+const transport = createFetchSSETransport('/api/chat');
+
+export function CustomChat() {
+  const [messages, setMessages] = React.useState<Message[]>([]);
+  const { send, abort, sending } = useChorusStream(transport, { connector: 'openai' });
+
+  async function submit(text: string) {
+    const user: Message = { id: crypto.randomUUID(), role: 'user', text };
+    const assistant: Message = { id: crypto.randomUUID(), role: 'assistant', text: '' };
+    const history = [...messages, user];
+    setMessages([...history, assistant]);
+
+    try {
+      await send(text, history, {
+        onChunk: (chunk) => setMessages((prev) => prev.map((m) =>
+          m.id === assistant.id ? { ...m, text: m.text + chunk } : m,
+        )),
+      });
+    } catch (error) {
+      setMessages((prev) => prev.filter((m) => m.id !== assistant.id));
+      console.error(error);
+    }
+  }
+
+  return (
+    <section>
+      {messages.map((m) => <p key={m.id}><b>{m.role}:</b> {m.text}</p>)}
+      <button type="button" disabled={sending} onClick={() => submit('Hello')}>Send hello</button>
+      {sending && <button type="button" onClick={abort}>Stop</button>}
+    </section>
+  );
+}
+```
+
 ### `useChorusStream(transport, opts?)`
 
 ```ts
@@ -656,6 +791,8 @@ const { send, abort, sending } = useChorusStream<MyMeta>(transport, { connector:
 
 - `transport` — async function `(text, history: Message<TMeta>[], signal) => Promise<Response>`. Use `createFetchSSETransport<TMeta>(url)` or write your own.
 - `send(..., { minDelayMs })` buffers the first streamed chunks until that many milliseconds have elapsed from send start, then flushes them before continuing normally.
+- Non-abort transport, HTTP, connector, and in-band provider errors call `onError` when supplied and reject the returned `send()` promise. This lets README-style `await send(...)` bridges surface the friendly Chorus error banner through the surrounding `onSend` catch path.
+- `onError` receives raw transport details (including bounded HTTP response body snippets); the built-in UI continues to show only `errorMessage`.
 - `opts.connector` — `'openai'` | `'anthropic'` | `'gemini'` | `'auto'` | custom `Connector`. Defaults to `'auto'` which handles OpenAI, Gemini, Anthropic JSON, plain-text SSE, and in-band `{ error }` payloads.
 
 ### `createFetchSSETransport(url, init?)`
@@ -809,7 +946,7 @@ The block shows the tool name in a header. Clicking expands it to reveal the inp
 
 ### Custom renderer via `renderMessage`
 
-Supply a `renderMessage` render-prop to take full control of how any message is displayed. Return `null` to fall back to the default renderer for that message. The second argument exposes rendering context: `ctx.isStreaming`, `ctx.defaultRender()`, and `ctx.actions` (`edit(newText)`, `regenerate()`, `delete()`, plus `ctx.actions.defaultRender()` for the built-in action controls).
+Supply a `renderMessage` render-prop to take full control of how any message is displayed. Return `null` to fall back to the default renderer for that message. The second argument exposes rendering context: `ctx.isStreaming`, `ctx.defaultRender(slots?)`, and `ctx.actions` (`edit(newText)`, `regenerate()`, `delete()`, `copy()`, `feedback('up' | 'down')`, plus `ctx.actions.defaultRender()` for the built-in action controls).
 
 ```tsx
 <Chorus
@@ -864,6 +1001,10 @@ interface MessageBubbleProps<TMeta = Record<string, unknown>> {
   streaming?: boolean;         // forwards Markdown's escaped plain-text streaming mode
   markdownProps?: MessageMarkdownProps;
   markdownSanitizer?: MarkdownSanitizer;
+  before?: React.ReactNode;      // rendered before .chorus-msg-content (for avatars)
+  headerSlot?: React.ReactNode;  // rendered above .chorus-bubble inside .chorus-msg-content
+  footerSlot?: React.ReactNode;  // rendered below .chorus-bubble inside .chorus-msg-content
+  after?: React.ReactNode;       // rendered after .chorus-msg-content
 }
 ```
 
@@ -877,12 +1018,26 @@ Example — custom bubble color per role without changing layout:
 />
 ```
 
+Example — add decoration slots while preserving the default bubble and action layout:
+
+```tsx
+<MessageBubble
+  message={message}
+  before={<Avatar role={message.role} />}
+  headerSlot={<span>{message.role === 'user' ? 'You' : 'Assistant'} · 14:32</span>}
+  footerSlot={<span>{message.metadata?.model}</span>}
+/>
+```
+
+When you only need slots around the built-in renderer from `renderMessage`, call `ctx.defaultRender({ before, headerSlot, footerSlot, after })` and return it.
+
 ### Default renderer
 
 When neither `renderMessage` nor a custom `MessageBubble` is used, each message renders as:
 
 ```html
 <div class="chorus-msg chorus-{role}">
+  <span class="chorus-sr-only">User message</span>
   <div class="chorus-msg-content">
     <div class="chorus-bubble"><!-- attachments + Markdown content --></div>
     <div class="chorus-actions"><!-- optional action buttons --></div>
@@ -891,6 +1046,8 @@ When neither `renderMessage` nor a custom `MessageBubble` is used, each message 
 ```
 
 `<MessageBubble message={message} />` uses the same `.chorus-msg > .chorus-msg-content > .chorus-bubble` structure, so it preserves the default message width and role alignment when used from `renderMessage`.
+
+Each built-in row and `<MessageBubble>` includes a visually hidden `.chorus-sr-only` speaker label (`User message`, `Assistant message`, `System message`, or `Tool message`) so screen readers announce who spoke without changing the visual layout.
 
 Target these classes in your CSS to restyle without a render prop:
 
@@ -945,12 +1102,12 @@ import { ChatWindow, ChatInput, ChorusTheme, Markdown } from 'react-chorus';
 - **`<ChatWindow messages={…} typing={…} />`** — renders the scrollable message list with empty-state prompts, a typing indicator, errors, optional jump-to-latest button, and optional `maxRenderedMessages` windowing. It accepts `hiddenRoles?: Role[]` (default `['system', 'tool']`); `showSystemMessages` is deprecated but remains supported as an alias for showing all roles. Pass `markdownSanitizer`, `markdownProps`, `renderError`, or `renderMessage` to customize built-in rendering.
 - **`<ChatInput value onSend onStop placeholder sending />`** — the text input, send/stop button, and optional attachment composer (`accept`, paste/drop, limits, `uploadAttachment`).
 - **`<ChorusTheme palette={…}>`** — applies theme CSS variables to any subtree.
-- **`<Markdown text={…} codeTheme="dark" />`** — standalone markdown renderer with syntax highlighting and copy buttons. It supports `streaming` to render escaped plain text until finalization and `sanitizer` to provide a custom DOMPurify-compatible sanitizer when SSR needs sanitized raw HTML instead of the built-in no-raw-HTML safe mode.
-- **`<MessageBubble message={…} />`** — renders the default bubble for one message, including attachments. Accepts `className`, `style`, `codeTheme`, `headless`, `streaming`, `markdownProps`, and `markdownSanitizer` for decoration without replacing the full renderer.
+- **`<Markdown text={…} codeTheme="dark" />`** — standalone markdown renderer with syntax highlighting and copy buttons. It supports `streaming` to render escaped plain text until finalization, `sanitizer` to provide a custom DOMPurify-compatible sanitizer when SSR needs sanitized raw HTML instead of the built-in no-raw-HTML safe mode, and `markedOptions`/`markedExtensions` for per-instance parser customization.
+- **`<MessageBubble message={…} />`** — renders the default bubble for one message, including attachments and screen-reader speaker labels. Accepts `className`, `style`, `codeTheme`, `headless`, `streaming`, `markdownProps`, `markdownSanitizer`, and decoration slots (`before`, `headerSlot`, `footerSlot`, `after`) without replacing the full renderer.
 
 ### Headless subpath
 
-Import from `react-chorus/headless` when you want semantic markup and behavior without default styling. The headless subpath preserves class names as styling hooks, and its `Chorus`, `ChatWindow`, `MessageBubble`, and `Markdown` exports default `headless={true}` so Markdown styles and syntax-highlight theme CSS are not injected unless you explicitly pass `headless={false}`.
+Import from `react-chorus/headless` when you want semantic markup and behavior without default styling. The headless subpath preserves class names as styling hooks, and its `Chorus`, `ChatWindow`, `MessageBubble`, and `Markdown` exports default `headless={true}` so Markdown styles and syntax-highlight theme CSS are not injected unless you explicitly pass `headless={false}`. It re-exports the same public message, attachment, upload, streaming, and persistence types as the root entry point so `ChatInput` handlers can be typed from the subpath alone.
 
 ```tsx
 import { ChatWindow, Markdown, MessageBubble } from 'react-chorus/headless';

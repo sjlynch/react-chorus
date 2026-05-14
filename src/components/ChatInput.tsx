@@ -1,5 +1,6 @@
 import React from 'react';
 import { ArrowUp, Paperclip, X } from 'lucide-react';
+import { getAttachmentPreviewSource } from '../utils/attachmentPreview';
 import type {
   Attachment,
   AttachmentError,
@@ -10,8 +11,10 @@ import type {
 } from '../types';
 
 const MAX_HEIGHT = 160;
+const PENDING_ATTACHMENT_STATUS = 'uploading';
+let pendingAttachmentIdCounter = 0;
 
-export interface ChatInputProps {
+export interface ChatInputProps extends Omit<React.HTMLAttributes<HTMLDivElement>, 'onChange'> {
   value: string;
   onChange: (v: string) => void;
   onSend: (attachments: Attachment[]) => void;
@@ -77,13 +80,27 @@ function normalizeAttachment(file: File, result: AttachmentUploadResult): Attach
   };
 }
 
-function isRenderableAttachmentSource(src: string | undefined) {
-  return !!src && /^(data:|blob:|https?:)/i.test(src);
+function createPendingAttachmentId() {
+  pendingAttachmentIdCounter += 1;
+  return `chorus-upload-${Date.now()}-${pendingAttachmentIdCounter}`;
 }
 
-function getAttachmentPreviewSource(att: Attachment) {
-  const source = att.url ?? att.data;
-  return isRenderableAttachmentSource(source) ? source : undefined;
+function getPendingAttachmentId(att: Attachment) {
+  return typeof att.metadata?.pendingId === 'string' ? att.metadata.pendingId : undefined;
+}
+
+function isPendingAttachment(att: Attachment) {
+  return att.metadata?.status === PENDING_ATTACHMENT_STATUS && typeof att.metadata?.pendingId === 'string';
+}
+
+function createPendingAttachment(file: File, pendingId: string): Attachment {
+  return {
+    name: file.name,
+    type: file.type,
+    size: file.size,
+    data: '',
+    metadata: { status: PENDING_ATTACHMENT_STATUS, pendingId },
+  };
 }
 
 function listFiles(files: FileList | File[] | null | undefined) {
@@ -108,7 +125,7 @@ function filesFromTransfer(transfer: DataTransfer) {
     .filter((file): file is File => file !== null);
 }
 
-export function ChatInput({
+export const ChatInput = React.forwardRef<HTMLDivElement, ChatInputProps>(function ChatInput({
   value,
   onChange,
   onSend,
@@ -120,9 +137,18 @@ export function ChatInput({
   maxAttachments,
   onAttachmentError,
   uploadAttachment,
-}: ChatInputProps) {
+  className,
+  style,
+  onPaste: onPasteProp,
+  onDragEnter: onDragEnterProp,
+  onDragOver: onDragOverProp,
+  onDragLeave: onDragLeaveProp,
+  onDrop: onDropProp,
+  ...rest
+}: ChatInputProps, ref) {
   const [attachments, setAttachments] = React.useState<Attachment[]>([]);
   const [draggingFiles, setDraggingFiles] = React.useState(false);
+  const rootRef = React.useRef<HTMLDivElement>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const attachmentsRef = React.useRef(attachments);
@@ -139,7 +165,19 @@ export function ChatInput({
     el.style.height = Math.min(el.scrollHeight, MAX_HEIGHT) + 'px';
   }, [value]);
 
-  const canSend = value.trim().length > 0 || attachments.length > 0;
+  React.useImperativeHandle(ref, () => {
+    const root = rootRef.current!;
+    const focusTextarea = () => textareaRef.current?.focus();
+    try {
+      Object.defineProperty(root, 'focus', { value: focusTextarea, configurable: true });
+    } catch {
+      root.focus = focusTextarea;
+    }
+    return root;
+  });
+
+  const hasPendingAttachments = attachments.some(isPendingAttachment);
+  const canSend = (value.trim().length > 0 || attachments.length > 0) && !hasPendingAttachments;
   const showAttachBtn = accept !== undefined;
 
   const resizeTextarea = () => {
@@ -156,8 +194,8 @@ export function ChatInput({
   };
 
   const handleSend = () => {
+    if (hasPendingAttachments) return;
     onSend(attachments);
-    attachmentsRef.current = [];
     setAttachments([]);
     const el = textareaRef.current;
     if (el) el.style.height = '';
@@ -249,24 +287,48 @@ export function ChatInput({
 
     if (acceptedFiles.length === 0) return;
 
+    if (uploadAttachment) {
+      const pendingUploads = acceptedFiles.map(file => {
+        const pendingId = createPendingAttachmentId();
+        return { file, pendingId, placeholder: createPendingAttachment(file, pendingId) };
+      });
+
+      setAttachments(prev => [...prev, ...pendingUploads.map(upload => upload.placeholder)]);
+
+      await Promise.all(pendingUploads.map(async ({ file, pendingId }) => {
+        try {
+          const attachment = await convertFile(file);
+          setAttachments(prev => {
+            let replaced = false;
+            const next = prev.map(att => {
+              if (getPendingAttachmentId(att) !== pendingId) return att;
+              replaced = true;
+              return attachment;
+            });
+            return replaced ? next : prev;
+          });
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          reportAttachmentError('upload-failed', source, file, `${file.name} could not be uploaded: ${detail}`);
+          setAttachments(prev => prev.filter(att => getPendingAttachmentId(att) !== pendingId));
+        }
+      }));
+      return;
+    }
+
     const converted = await Promise.all(acceptedFiles.map(async file => {
       try {
         return await convertFile(file);
       } catch (error) {
-        const reason: AttachmentErrorReason = uploadAttachment ? 'upload-failed' : 'read-failed';
         const detail = error instanceof Error ? error.message : String(error);
-        reportAttachmentError(reason, source, file, `${file.name} could not be ${uploadAttachment ? 'uploaded' : 'read'}: ${detail}`);
+        reportAttachmentError('read-failed', source, file, `${file.name} could not be read: ${detail}`);
         return null;
       }
     }));
 
     const nextAttachments = converted.filter((att): att is Attachment => att !== null);
     if (nextAttachments.length > 0) {
-      setAttachments(prev => {
-        const next = [...prev, ...nextAttachments];
-        attachmentsRef.current = next;
-        return next;
-      });
+      setAttachments(prev => [...prev, ...nextAttachments]);
     }
   }, [accept, convertFile, maxAttachmentBytes, maxAttachments, reportAttachmentError, showAttachBtn, uploadAttachment]);
 
@@ -310,31 +372,59 @@ export function ChatInput({
     void handleFiles(filesFromTransfer(e.dataTransfer), 'drop');
   };
 
-  const removeAttachment = (idx: number) => setAttachments(prev => {
-    const next = prev.filter((_, i) => i !== idx);
-    attachmentsRef.current = next;
-    return next;
-  });
+  const removeAttachment = (idx: number) => setAttachments(prev => prev.filter((_, i) => i !== idx));
+
+  const handleRootPaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
+    onPasteProp?.(e);
+    if (!e.defaultPrevented) handlePaste(e);
+  };
+
+  const handleRootDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
+    onDragEnterProp?.(e);
+    if (!e.defaultPrevented) handleDragEnter(e);
+  };
+
+  const handleRootDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    onDragOverProp?.(e);
+    if (!e.defaultPrevented) handleDragOver(e);
+  };
+
+  const handleRootDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    onDragLeaveProp?.(e);
+    if (!e.defaultPrevented) handleDragLeave(e);
+  };
+
+  const handleRootDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    onDropProp?.(e);
+    if (!e.defaultPrevented) handleDrop(e);
+  };
 
   return (
     <div
-      className={`chorus-input${draggingFiles ? ' chorus-input--dragging' : ''}`}
-      onPaste={handlePaste}
-      onDragEnter={handleDragEnter}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
+      {...rest}
+      ref={rootRef}
+      className={[`chorus-input${draggingFiles ? ' chorus-input--dragging' : ''}`, className].filter(Boolean).join(' ')}
+      style={style}
+      onPaste={handleRootPaste}
+      onDragEnter={handleRootDragEnter}
+      onDragOver={handleRootDragOver}
+      onDragLeave={handleRootDragLeave}
+      onDrop={handleRootDrop}
     >
       {attachments.length > 0 && (
         <div className="chorus-attachments">
           {attachments.map((att, i) => {
             const previewSource = getAttachmentPreviewSource(att);
+            const pending = isPendingAttachment(att);
             return (
-              <div key={`${att.name}-${i}`} className="chorus-attachment-chip">
-                {att.type.startsWith('image/') && previewSource && (
-                  <img src={previewSource} alt={att.name} className="chorus-attachment-thumb" />
+              <div key={getPendingAttachmentId(att) ?? `${att.name}-${i}`} className={`chorus-attachment-chip${pending ? ' chorus-attachment-chip--pending' : ''}`}>
+                {pending ? (
+                  <span className="chorus-attachment-spinner" aria-hidden="true" />
+                ) : att.type.startsWith('image/') && previewSource && (
+                  <img src={previewSource} alt={att.name} className="chorus-attachment-thumb" loading="lazy" decoding="async" />
                 )}
                 <span className="chorus-attachment-name">{att.name}</span>
+                {pending && <span className="chorus-sr-only">Uploading {att.name}</span>}
                 <button type="button" className="chorus-attachment-remove" onClick={() => removeAttachment(i)} aria-label={`Remove ${att.name}`}>
                   <X size={12} />
                 </button>
@@ -366,4 +456,4 @@ export function ChatInput({
       </div>
     </div>
   );
-}
+});

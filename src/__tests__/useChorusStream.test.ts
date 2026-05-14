@@ -218,7 +218,7 @@ describe('useChorusStream', () => {
     const { result } = renderHook(() => useChorusStream(transport, { connector: 'openai' }));
 
     await act(async () => {
-      await result.current.send('hello', [], { onChunk, onDone, onError });
+      await expect(result.current.send('hello', [], { onChunk, onDone, onError })).rejects.toThrow('provider failed mid-stream');
     });
 
     expect(onChunk).toHaveBeenCalledWith('partial');
@@ -238,7 +238,7 @@ describe('useChorusStream', () => {
     const { result } = renderHook(() => useChorusStream(transport));
 
     await act(async () => {
-      await result.current.send('hello', [], { onChunk: vi.fn(), onDone, onError });
+      await expect(result.current.send('hello', [], { onChunk: vi.fn(), onDone, onError })).rejects.toThrow('network failed');
     });
 
     expect(onError).toHaveBeenCalledTimes(1);
@@ -318,10 +318,11 @@ describe('useChorusStream', () => {
     expect(onDone).toHaveBeenCalledTimes(1);
   });
 
-  it('does nothing when send() is called while already sending', async () => {
+  it('does nothing and warns in development when send() is called while already sending', async () => {
     const response = deferred<Response>();
     const transport = vi.fn<Transport>(() => response.promise);
     const onChunk = vi.fn();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const { result } = renderHook(() => useChorusStream(transport));
 
     let firstSend!: Promise<void>;
@@ -337,6 +338,7 @@ describe('useChorusStream', () => {
 
     expect(transport).toHaveBeenCalledTimes(1);
     expect(transport).toHaveBeenCalledWith('first', [], expect.any(AbortSignal));
+    expect(warn).toHaveBeenCalledWith('[Chorus] useChorusStream.send was called while a previous send is still in flight; the new call was ignored. Wait for the previous send to finish (await the promise) or call abort() before re-sending.');
 
     await act(async () => {
       response.resolve(makeSseResponse(['only-once']));
@@ -345,5 +347,113 @@ describe('useChorusStream', () => {
 
     expect(onChunk).toHaveBeenCalledTimes(1);
     expect(onChunk).toHaveBeenCalledWith('only-once');
+    warn.mockRestore();
+  });
+
+  it('aborts the active transport when the hook unmounts', async () => {
+    let capturedSignal!: AbortSignal;
+    const transport = vi.fn<Transport>((_text, _history, signal) => {
+      capturedSignal = signal;
+      return new Promise<Response>(() => undefined);
+    });
+    const { result, unmount } = renderHook(() => useChorusStream(transport));
+
+    await act(async () => {
+      void result.current.send('hello', [], { onChunk: vi.fn() });
+    });
+
+    expect(capturedSignal.aborted).toBe(false);
+    unmount();
+    expect(capturedSignal.aborted).toBe(true);
+  });
+
+  it('short-circuits pre-aborted external signals before calling the transport', async () => {
+    const transport = vi.fn<Transport>(() => Promise.resolve(makeSseResponse(['unused'])));
+    const { result } = renderHook(() => useChorusStream(transport));
+    const controller = new AbortController();
+    controller.abort();
+
+    await act(async () => {
+      await result.current.send('hello', [], { onChunk: vi.fn() }, controller.signal);
+    });
+
+    expect(transport).not.toHaveBeenCalled();
+    expect(result.current.sending).toBe(false);
+  });
+
+  it('rejects with HTTP JSON error response details', async () => {
+    const transport = vi.fn<Transport>(() => Promise.resolve(new Response(JSON.stringify({ error: 'missing API key' }), {
+      status: 400,
+      statusText: 'Bad Request',
+    })));
+    const onError = vi.fn();
+    const { result } = renderHook(() => useChorusStream(transport));
+
+    await act(async () => {
+      await expect(result.current.send('hello', [], { onChunk: vi.fn(), onError })).rejects.toThrow(/HTTP 400 Bad Request: \{"error":"missing API key"\}/);
+    });
+
+    expect(onError.mock.calls[0][0].message).toContain('missing API key');
+    expect(result.current.sending).toBe(false);
+  });
+
+  it('rejects with HTTP text error response details', async () => {
+    const transport = vi.fn<Transport>(() => Promise.resolve(new Response('upstream exploded', {
+      status: 500,
+      statusText: 'Internal Server Error',
+    })));
+    const { result } = renderHook(() => useChorusStream(transport));
+
+    await act(async () => {
+      await expect(result.current.send('hello', [], { onChunk: vi.fn() })).rejects.toThrow('HTTP 500 Internal Server Error: upstream exploded');
+    });
+  });
+
+  it('truncates oversized HTTP error bodies', async () => {
+    const transport = vi.fn<Transport>(() => Promise.resolve(new Response('x'.repeat(3000), { status: 500 })));
+    const onError = vi.fn();
+    const { result } = renderHook(() => useChorusStream(transport));
+
+    await act(async () => {
+      await expect(result.current.send('hello', [], { onChunk: vi.fn(), onError })).rejects.toThrow(/HTTP 500: x+…/);
+    });
+
+    expect(onError.mock.calls[0][0].message.length).toBeLessThan(2100);
+  });
+
+  it('reports missing response bodies separately', async () => {
+    const transport = vi.fn<Transport>(() => Promise.resolve(new Response(null, { status: 200 })));
+    const { result } = renderHook(() => useChorusStream(transport));
+
+    await act(async () => {
+      await expect(result.current.send('hello', [], { onChunk: vi.fn() })).rejects.toThrow('Response body was missing for HTTP 200');
+    });
+  });
+
+  it('rejects transport failures even when no onError callback is supplied', async () => {
+    const transportError = new Error('proxy failed');
+    const transport = vi.fn<Transport>(() => Promise.reject(transportError));
+    const { result } = renderHook(() => useChorusStream(transport));
+
+    await act(async () => {
+      await expect(result.current.send('hello', [], { onChunk: vi.fn() })).rejects.toThrow('proxy failed');
+    });
+
+    expect(result.current.sending).toBe(false);
+  });
+
+  it('resets sending before rethrowing an onError callback exception', async () => {
+    const transport = vi.fn<Transport>(() => Promise.reject(new Error('network failed')));
+    const callbackError = new Error('observer failed');
+    const { result } = renderHook(() => useChorusStream(transport));
+
+    await act(async () => {
+      await expect(result.current.send('hello', [], {
+        onChunk: vi.fn(),
+        onError: () => { throw callbackError; },
+      })).rejects.toThrow('observer failed');
+    });
+
+    expect(result.current.sending).toBe(false);
   });
 });

@@ -1,6 +1,14 @@
 import { ChatWindow, Chorus, MessageBubble, createFetchSSETransport, createWebSocketTransport, useChorusPersistence, useChorusStream } from '../index';
 import type { ChorusOnSend, ChorusSendHelpers, Message, Transport } from '../index';
-import type { ChorusOnSend as HeadlessChorusOnSend, ChorusSendHelpers as HeadlessChorusSendHelpers } from '../headless';
+import type {
+  AttachmentError as HeadlessAttachmentError,
+  AttachmentErrorReason as HeadlessAttachmentErrorReason,
+  AttachmentSource as HeadlessAttachmentSource,
+  AttachmentUploadResult as HeadlessAttachmentUploadResult,
+  ChorusOnSend as HeadlessChorusOnSend,
+  ChorusSendHelpers as HeadlessChorusSendHelpers,
+  UploadAttachment as HeadlessUploadAttachment,
+} from '../headless';
 
 interface MyMeta {
   latencyMs: number;
@@ -61,8 +69,20 @@ const typedOnSend: ChorusOnSend<MyMeta> = async (_text, history, helpers) => {
 
 const headlessOnSend: HeadlessChorusOnSend<MyMeta> = typedOnSend;
 const headlessHelpers: HeadlessChorusSendHelpers = typedHelpers;
+const headlessUpload: HeadlessUploadAttachment = async (file) => ({ name: file.name, type: file.type, size: file.size, data: 'data:' });
+const headlessUploadResult: HeadlessAttachmentUploadResult = { name: 'x', type: 'text/plain', size: 1, data: 'data:' };
+const headlessAttachmentReason: HeadlessAttachmentErrorReason = 'upload-failed';
+const headlessAttachmentSource: HeadlessAttachmentSource = 'drop';
+const headlessAttachmentError: HeadlessAttachmentError = {
+  reason: headlessAttachmentReason,
+  source: headlessAttachmentSource,
+  message: 'failed',
+};
 void headlessOnSend;
 void headlessHelpers;
+void headlessUpload;
+void headlessUploadResult;
+void headlessAttachmentError;
 
 function HookSamples() {
   const persist = useChorusPersistence<MyMeta>('chat');

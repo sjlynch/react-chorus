@@ -1,13 +1,14 @@
 import React from 'react';
 import type { Message, Role } from '../types';
 import { ToolCallBlock } from './ToolCallBlock';
-import { MessageActionControls, MessageRow } from './MessageRow';
-import type { MessageMarkdownProps, MessageRenderActions } from './MessageRow';
+import { MessageActionControls, MessageRenderStateProvider, MessageRow, MessageSpeakerLabel } from './MessageRow';
+import type { MessageBubbleSlots, MessageFeedback, MessageMarkdownProps, MessageRenderActions } from './MessageRow';
 import type { MarkdownSanitizer } from './Markdown';
 import { isChorusDevMode } from '../utils/devMode';
+import { canWriteTextToClipboard, writeTextToClipboard } from '../utils/messageCopy';
 
 export { MessageBubble } from './MessageRow';
-export type { MessageBubbleProps, MessageMarkdownProps, MessageRenderActions } from './MessageRow';
+export type { MessageBubbleProps, MessageBubbleSlots, MessageFeedback, MessageMarkdownProps, MessageRenderActions } from './MessageRow';
 
 const DEFAULT_HIDDEN_ROLES: Role[] = ['system', 'tool'];
 const NO_HIDDEN_ROLES: Role[] = [];
@@ -47,12 +48,12 @@ export interface RenderErrorContext {
 
 export interface RenderMessageContext<TMeta = Record<string, unknown>> {
   isStreaming: boolean;
-  defaultRender: () => React.ReactNode;
+  defaultRender: (slots?: MessageBubbleSlots) => React.ReactNode;
   actions: MessageRenderActions;
   message: Message<TMeta>;
 }
 
-export interface ChatWindowProps<TMeta = Record<string, unknown>> {
+export interface ChatWindowProps<TMeta = Record<string, unknown>> extends Omit<React.HTMLAttributes<HTMLDivElement>, 'onCopy'> {
   codeTheme?: 'dark' | 'light';
   emptyState?: React.ReactNode;
   error?: string | null;
@@ -66,9 +67,11 @@ export interface ChatWindowProps<TMeta = Record<string, unknown>> {
   /** Render only the latest N visible messages. Typing and error rows still render outside this message window. */
   maxRenderedMessages?: number;
   messages: Message<TMeta>[];
+  onCopy?: (message: Message<TMeta>) => void;
   onDelete?: (id: string) => void;
   onDismissError?: () => void;
   onEdit?: (id: string, newText: string) => void;
+  onFeedback?: (message: Message<TMeta>, feedback: MessageFeedback) => void;
   onRegenerate?: (id: string) => void;
   onRetry?: () => void;
   onSuggestedPrompt?: (prompt: string) => void;
@@ -104,7 +107,9 @@ function DefaultEmptyState({ prompts, onSuggestedPrompt }: { prompts: string[]; 
   );
 }
 
-export function ChatWindow<TMeta = Record<string, unknown>>({
+function ChatWindowInner<TMeta = Record<string, unknown>>({
+  messages,
+  typing,
   codeTheme = 'dark',
   emptyState,
   error,
@@ -113,10 +118,11 @@ export function ChatWindow<TMeta = Record<string, unknown>>({
   markdownProps,
   markdownSanitizer,
   maxRenderedMessages,
-  messages,
+  onCopy,
   onDelete,
   onDismissError,
   onEdit,
+  onFeedback,
   onRegenerate,
   onRetry,
   onSuggestedPrompt,
@@ -127,8 +133,10 @@ export function ChatWindow<TMeta = Record<string, unknown>>({
   showSystemMessages,
   streamingMessageId,
   suggestedPrompts,
-  typing,
-}: ChatWindowProps<TMeta>) {
+  className,
+  style,
+  ...rest
+}: ChatWindowProps<TMeta>, ref: React.ForwardedRef<HTMLDivElement>) {
   React.useEffect(() => {
     if (!isChorusDevMode() || showSystemMessages === undefined || didWarnShowSystemMessages) return;
     console.warn('[Chorus] `showSystemMessages` is deprecated. Use `hiddenRoles` instead (for example hiddenRoles={[\'system\']} to show tool messages while hiding system prompts).');
@@ -144,10 +152,21 @@ export function ChatWindow<TMeta = Record<string, unknown>>({
     if (normalizedMaxRenderedMessages === 0) return [];
     return visible.slice(-normalizedMaxRenderedMessages);
   }, [normalizedMaxRenderedMessages, visible]);
+  const copyAvailable = Boolean(onCopy) || canWriteTextToClipboard();
+  const copyMessage = React.useCallback((message: Message<TMeta>) => {
+    if (onCopy) {
+      onCopy(message);
+      return;
+    }
+
+    writeTextToClipboard(message.text);
+  }, [onCopy]);
 
   const windowRef = React.useRef<HTMLDivElement>(null);
   const bottomRef = React.useRef<HTMLDivElement>(null);
   const shouldAutoScrollRef = React.useRef(true);
+
+  React.useImperativeHandle(ref, () => windowRef.current!);
   const scrollRafRef = React.useRef<number | null>(null);
   const activityKey = React.useMemo(() => visibleActivityKey(visible, typing, streamingMessageId, error), [visible, typing, streamingMessageId, error]);
   const previousActivityKeyRef = React.useRef(activityKey);
@@ -217,14 +236,25 @@ export function ChatWindow<TMeta = Record<string, unknown>>({
   const shouldRenderJumpToBottom = showJumpToBottomButton && isAutoScrollPaused && hasUnreadActivity;
 
   return (
-    <div className="chorus-window" ref={windowRef} role="log" aria-live="polite" aria-label="Chat transcript">
+    <div
+      {...rest}
+      className={["chorus-window", className].filter(Boolean).join(" ")}
+      style={style}
+      ref={windowRef}
+      role="log"
+      aria-live="polite"
+      aria-label="Chat transcript"
+    >
       {renderedVisible.map(m => {
         const isStreaming = m.id === streamingMessageId;
-        const defaultRender = () => {
+        const defaultRender = (slots?: MessageBubbleSlots) => {
           if (m.role === 'tool' && m.toolCall) {
             return (
-              <div className="chorus-msg chorus-tool">
+              <div className="chorus-msg chorus-tool" data-chorus-message-id={m.id}>
+                <MessageSpeakerLabel role={m.role} />
+                {slots?.before}
                 <ToolCallBlock toolCall={m.toolCall} />
+                {slots?.after}
               </div>
             );
           }
@@ -240,6 +270,9 @@ export function ChatWindow<TMeta = Record<string, unknown>>({
               onEdit={onEdit}
               onRegenerate={onRegenerate}
               onDelete={onDelete}
+              onCopy={copyAvailable ? copyMessage : undefined}
+              onFeedback={onFeedback}
+              {...slots}
             />
           );
         };
@@ -253,13 +286,18 @@ export function ChatWindow<TMeta = Record<string, unknown>>({
           } : undefined,
           regenerate: m.role === 'assistant' && onRegenerate ? () => onRegenerate(m.id) : undefined,
           delete: onDelete ? () => onDelete(m.id) : undefined,
+          copy: copyAvailable ? () => copyMessage(m) : undefined,
+          feedback: onFeedback ? (variant) => onFeedback(m, variant) : undefined,
           defaultRender: () => <MessageActionControls message={m} actions={actions} />,
         };
         const context: RenderMessageContext<TMeta> = { isStreaming, defaultRender, actions, message: m };
         const custom = renderMessage?.(m, context);
-        if (custom != null) return <React.Fragment key={m.id}>{custom}</React.Fragment>;
 
-        return <React.Fragment key={m.id}>{defaultRender()}</React.Fragment>;
+        return (
+          <MessageRenderStateProvider key={m.id} messageId={m.id}>
+            {custom != null ? custom : defaultRender()}
+          </MessageRenderStateProvider>
+        );
       })}
 
       {hasEmptyTranscript && emptyState !== undefined && (
@@ -291,3 +329,9 @@ export function ChatWindow<TMeta = Record<string, unknown>>({
     </div>
   );
 }
+
+export const ChatWindow = React.forwardRef(ChatWindowInner) as <TMeta = Record<string, unknown>>(
+  props: ChatWindowProps<TMeta> & React.RefAttributes<HTMLDivElement>,
+) => React.ReactElement | null;
+
+(ChatWindow as React.NamedExoticComponent).displayName = 'ChatWindow';
