@@ -28,7 +28,12 @@ export interface AttachmentError {
   maxAttachments?: number;
 }
 
-export type UploadAttachment = (file: File) => AttachmentUploadResult | Promise<AttachmentUploadResult>;
+export interface UploadAttachmentOptions {
+  /** Aborted when the pending attachment chip is removed, the composer resets/unmounts, or file work is cancelled. */
+  signal: AbortSignal;
+}
+
+export type UploadAttachment = (file: File, options?: UploadAttachmentOptions) => AttachmentUploadResult | Promise<AttachmentUploadResult>;
 
 export interface ToolCall {
   name: string;

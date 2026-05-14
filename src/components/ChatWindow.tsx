@@ -84,10 +84,18 @@ export interface ChatWindowProps<TMeta = Record<string, unknown>> extends Omit<R
   /** Internal optimization hint: render the active assistant message as escaped plain text until it finalizes. */
   streamingMessageId?: string | null;
   suggestedPrompts?: string[];
+  /** Disable default empty-state prompt buttons without hiding them. */
+  suggestedPromptsDisabled?: boolean;
+  suggestedPromptsDisabledReason?: string;
   typing?: boolean;
 }
 
-function DefaultEmptyState({ prompts, onSuggestedPrompt }: { prompts: string[]; onSuggestedPrompt?: (prompt: string) => void }) {
+function DefaultEmptyState({ prompts, onSuggestedPrompt, disabled = false, disabledReason }: {
+  prompts: string[];
+  onSuggestedPrompt?: (prompt: string) => void;
+  disabled?: boolean;
+  disabledReason?: string;
+}) {
   return (
     <div className="chorus-empty-state chorus-empty-state-default">
       <div className="chorus-empty-title">How can I help?</div>
@@ -97,7 +105,10 @@ function DefaultEmptyState({ prompts, onSuggestedPrompt }: { prompts: string[]; 
             key={prompt}
             type="button"
             className="chorus-suggested-prompt"
-            onClick={() => onSuggestedPrompt?.(prompt)}
+            onClick={() => { if (!disabled) onSuggestedPrompt?.(prompt); }}
+            disabled={disabled}
+            aria-disabled={disabled || undefined}
+            title={disabled ? disabledReason : undefined}
           >
             {prompt}
           </button>
@@ -133,6 +144,8 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
   showSystemMessages,
   streamingMessageId,
   suggestedPrompts,
+  suggestedPromptsDisabled = false,
+  suggestedPromptsDisabledReason,
   className,
   style,
   ...rest
@@ -284,7 +297,12 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
         <div className="chorus-empty-state">{emptyState}</div>
       )}
       {shouldRenderSuggestedPrompts && (
-        <DefaultEmptyState prompts={suggestedPromptList} onSuggestedPrompt={onSuggestedPrompt} />
+        <DefaultEmptyState
+          prompts={suggestedPromptList}
+          onSuggestedPrompt={onSuggestedPrompt}
+          disabled={suggestedPromptsDisabled}
+          disabledReason={suggestedPromptsDisabledReason}
+        />
       )}
 
       {typing &&

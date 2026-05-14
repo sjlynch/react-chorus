@@ -271,6 +271,62 @@ describe('Chorus', () => {
     await waitFor(() => expect(composer).toHaveFocus());
   });
 
+  it.each([
+    ['disabled', { disabled: true }],
+    ['read-only', { readOnly: true }],
+  ] as const)('blocks composer sends, suggested prompts, and imperative send while %s', async (label, modeProps) => {
+    const user = userEvent.setup();
+    const ref = React.createRef<ChorusRef>();
+    const onSend = vi.fn<OnSend>(async () => undefined);
+
+    render(
+      <Chorus
+        ref={ref}
+        {...modeProps}
+        disabledReason="Select a conversation first"
+        suggestedPrompts={['Plan a launch checklist']}
+        onSend={onSend}
+      />,
+    );
+
+    const composer = screen.getByRole('textbox', { name: /send a message/i });
+    const prompt = screen.getByRole('button', { name: 'Plan a launch checklist' });
+
+    if (label === 'disabled') expect(composer).toBeDisabled();
+    else expect(composer).toHaveAttribute('readonly');
+    expect(composer).toHaveAttribute('placeholder', 'Select a conversation first');
+    expect(screen.getByRole('button', { name: /send/i })).toBeDisabled();
+    expect(prompt).toBeDisabled();
+
+    await user.click(prompt);
+    expect(composer).toHaveValue('');
+
+    act(() => ref.current?.send('imperative send'));
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['disabled', { disabled: true }],
+    ['read-only', { readOnly: true }],
+  ] as const)('hides write message actions and disables clear while %s', (_label, modeProps) => {
+    render(
+      <Chorus
+        {...modeProps}
+        onSend={vi.fn<OnSend>(async () => undefined)}
+        messages={[
+          { id: 'u1', role: 'user', text: 'Hello' },
+          { id: 'a1', role: 'assistant', text: 'Hi' },
+        ]}
+        showClearButton
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Regenerate' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Clear conversation' })).toBeDisabled();
+  });
+
   it('prefers custom emptyState over suggestedPrompts', () => {
     render(<Chorus emptyState={<div>Custom welcome</div>} suggestedPrompts={['Hidden prompt']} />);
 

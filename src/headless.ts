@@ -66,6 +66,7 @@ export type {
   StorageAdapter,
   ToolCall,
   UploadAttachment,
+  UploadAttachmentOptions,
 } from './types';
 export { useChorusStream } from './hooks/useChorusStream';
 export type { SendCallbacks, StreamOptions, Transport } from './hooks/useChorusStream';

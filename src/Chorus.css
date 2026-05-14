@@ -14,7 +14,8 @@
 .chorus-empty-title { font-size: 22px; font-weight: 600; }
 .chorus-suggested-prompts { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; max-width: 640px; }
 .chorus-suggested-prompt { border: 1px solid var(--chorus-border, #2a2a2a); border-radius: 9999px; padding: 8px 12px; background: var(--chorus-input-bg, #1a1a1a); color: var(--chorus-chat-text, #f3f4f6); cursor: pointer; font: inherit; font-size: 13px; }
-.chorus-suggested-prompt:hover { background: var(--chorus-action-hover-bg, rgba(255,255,255,0.15)); color: var(--chorus-action-hover-text, #eee); }
+.chorus-suggested-prompt:hover:not(:disabled) { background: var(--chorus-action-hover-bg, rgba(255,255,255,0.15)); color: var(--chorus-action-hover-text, #eee); }
+.chorus-suggested-prompt:disabled { opacity: .5; cursor: default; }
 
 /* Floating unread activity affordance */
 .chorus-jump-to-bottom { position: sticky; bottom: 12px; z-index: 3; display: block; margin: 8px auto 0; padding: 6px 12px; border: 1px solid var(--chorus-border, #2a2a2a); border-radius: 9999px; background: var(--chorus-input-bg, #1a1a1a); color: var(--chorus-chat-text, #f3f4f6); box-shadow: 0 8px 24px rgba(0,0,0,.25); cursor: pointer; font: inherit; font-size: 13px; }
@@ -60,16 +61,19 @@
 .chorus-clear-btn:hover:not(:disabled) { background: var(--chorus-action-hover-bg, rgba(255,255,255,0.15)); color: var(--chorus-action-hover-text, #eee); }
 .chorus-clear-btn:disabled { opacity: .5; cursor: default; }
 .chorus-input { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; background: var(--chorus-input-area-bg, transparent); }
+.chorus-input--disabled, .chorus-input--readonly { opacity: .85; }
 .chorus-input-row { position: relative; display: flex; align-items: center; }
 .chorus-input-row textarea { width: 100%; min-height: 44px; max-height: 160px; padding: 12px 50px 12px 14px; border-radius: 12px; border: 1px solid var(--chorus-input-border, #333333); background: var(--chorus-input-bg, #1a1a1a); color: var(--chorus-input-text, #f3f4f6); outline: none; resize: none; overflow: hidden; line-height: 1.4; transition: border-color 0.15s, box-shadow 0.15s; }
 .chorus-input--dragging .chorus-input-row textarea { border-color: var(--chorus-send-bg, #ffffff); box-shadow: 0 0 0 3px var(--chorus-focus-ring, rgba(255,255,255,0.2)); }
 .chorus-input-row textarea::placeholder { color: #a3a3a3; }
 .chorus-input-row textarea:focus { border-color: var(--chorus-send-bg, #ffffff); box-shadow: 0 0 0 3px var(--chorus-focus-ring, rgba(255,255,255,0.2)); }
+.chorus-input-row textarea:disabled { cursor: not-allowed; }
 .chorus-input-row--has-attach textarea { padding-left: 44px; }
 
 /* Attach button (paperclip, left side) */
 .chorus-attach { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); width: 28px; height: 28px; padding: 0; border: none; background: transparent; color: var(--chorus-input-text, #f3f4f6); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; z-index: 2; opacity: .6; border-radius: 6px; }
-.chorus-attach:hover { opacity: 1; background: rgba(255,255,255,.1); }
+.chorus-attach:hover:not(:disabled) { opacity: 1; background: rgba(255,255,255,.1); }
+.chorus-attach:disabled { opacity: .35; cursor: default; }
 .chorus-attach svg { width: 18px; height: 18px; display: block; }
 
 /* Send/Stop button (white circle, black icon) */
@@ -86,7 +90,7 @@
 .chorus-attachment-thumb { width: 40px; height: 40px; object-fit: cover; border-radius: 4px; flex-shrink: 0; }
 .chorus-attachment-name { font-size: 12px; color: var(--chorus-input-text, #f3f4f6); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px; }
 .chorus-attachment-remove { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; padding: 0; border: none; background: rgba(255,255,255,.15); color: var(--chorus-input-text, #f3f4f6); border-radius: 9999px; cursor: pointer; flex-shrink: 0; }
-.chorus-attachment-remove:hover { background: rgba(255,255,255,.3); }
+.chorus-attachment-remove:hover:not(:disabled) { background: rgba(255,255,255,.3); }
 @keyframes chorus-attachment-spin { to { transform: rotate(360deg); } }
 
 /* Message content wrapper (stacks reasoning + bubble + actions vertically) */
