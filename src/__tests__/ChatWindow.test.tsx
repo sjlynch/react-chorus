@@ -180,6 +180,33 @@ describe('ChatWindow', () => {
     expect(screen.getByText('Hi there')).toBeInTheDocument();
   });
 
+  it('suppresses an empty bubble for a reasoning-only assistant message', () => {
+    const { container } = render(<ChatWindow messages={[{ id: 'r1', role: 'assistant', text: '', reasoning: 'thinking only' }]} />);
+
+    expect(screen.getByText('Reasoning')).toBeInTheDocument();
+    expect(screen.getByText('thinking only')).toBeInTheDocument();
+    expect(container.querySelector('.chorus-assistant .chorus-bubble')).not.toBeInTheDocument();
+  });
+
+  it('preserves a bubble for attachment-only user messages', () => {
+    const { container } = render(<ChatWindow messages={[{
+      id: 'u-attachment',
+      role: 'user',
+      text: '',
+      attachments: [{ name: 'photo.png', type: 'image/png', data: 'data:image/png;base64,abc', size: 3 }],
+    }]} />);
+
+    expect(screen.getByAltText('photo.png')).toBeInTheDocument();
+    expect(container.querySelector('.chorus-user .chorus-bubble')).toBeInTheDocument();
+  });
+
+  it('preserves a bubble for normal assistant text', () => {
+    const { container } = render(<ChatWindow messages={[ASST_MSG]} />);
+
+    expect(screen.getByText('Hi there')).toBeInTheDocument();
+    expect(container.querySelector('.chorus-assistant .chorus-bubble')).toBeInTheDocument();
+  });
+
   it('uses renderError instead of the default error banner', async () => {
     const user = userEvent.setup();
     const rawError = new Error('raw upstream');
@@ -606,5 +633,58 @@ describe('ChatWindow', () => {
 
     await waitFor(() => expect(screen.queryByRole('button', { name: /jump to latest/i })).not.toBeInTheDocument());
     expect(transcript.scrollTop).toBe(1000);
+  });
+
+  it('shows a jump-to-bottom button for scrolled-away reasoning deltas', async () => {
+    const { rerender } = render(<ChatWindow messages={[{ ...ASST_MSG, reasoning: 'plan' }]} />);
+    const transcript = screen.getByRole('log', { name: /chat transcript/i });
+
+    Object.defineProperty(transcript, 'scrollHeight', { configurable: true, value: 1000 });
+    Object.defineProperty(transcript, 'clientHeight', { configurable: true, value: 200 });
+    transcript.scrollTop = 0;
+    fireEvent.scroll(transcript);
+
+    rerender(<ChatWindow messages={[{ ...ASST_MSG, reasoning: 'plan more' }]} />);
+
+    expect(await screen.findByRole('button', { name: /jump to latest/i })).toBeInTheDocument();
+  });
+
+  it('shows a jump-to-bottom button for scrolled-away tool-call input and output deltas', async () => {
+    const toolStart: Message = { id: 'tool-stream', role: 'tool', text: '', toolCall: { id: 'call_1', name: 'search', input: '{"q":' } };
+    const { rerender } = render(<ChatWindow messages={[toolStart]} hiddenRoles={['system']} />);
+    const transcript = screen.getByRole('log', { name: /chat transcript/i });
+
+    Object.defineProperty(transcript, 'scrollHeight', { configurable: true, value: 1000 });
+    Object.defineProperty(transcript, 'clientHeight', { configurable: true, value: 200 });
+    transcript.scrollTop = 0;
+    fireEvent.scroll(transcript);
+
+    rerender(<ChatWindow messages={[{ ...toolStart, toolCall: { ...toolStart.toolCall!, input: { q: 'test' } } }]} hiddenRoles={['system']} />);
+    expect(await screen.findByRole('button', { name: /jump to latest/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /jump to latest/i }));
+    transcript.scrollTop = 0;
+    fireEvent.scroll(transcript);
+    rerender(<ChatWindow messages={[{ ...toolStart, toolCall: { ...toolStart.toolCall!, input: { q: 'test' }, output: 'results' } }]} hiddenRoles={['system']} />);
+
+    expect(await screen.findByRole('button', { name: /jump to latest/i })).toBeInTheDocument();
+  });
+
+  it('keeps the view pinned near the bottom for reasoning and tool updates', () => {
+    const { rerender } = render(<ChatWindow messages={[{ ...ASST_MSG, reasoning: 'plan' }]} hiddenRoles={['system']} />);
+    const transcript = screen.getByRole('log', { name: /chat transcript/i });
+
+    Object.defineProperty(transcript, 'clientHeight', { configurable: true, value: 200 });
+    Object.defineProperty(transcript, 'scrollHeight', { configurable: true, value: 1000 });
+    transcript.scrollTop = 760;
+    fireEvent.scroll(transcript);
+
+    Object.defineProperty(transcript, 'scrollHeight', { configurable: true, value: 1200 });
+    rerender(<ChatWindow messages={[{ ...ASST_MSG, reasoning: 'plan more' }]} hiddenRoles={['system']} />);
+    expect(transcript.scrollTop).toBe(1200);
+
+    Object.defineProperty(transcript, 'scrollHeight', { configurable: true, value: 1400 });
+    rerender(<ChatWindow messages={[{ id: 'tool-stream', role: 'tool', text: '', toolCall: { id: 'call_1', name: 'search', input: { q: 'test' } } }]} hiddenRoles={['system']} />);
+    expect(transcript.scrollTop).toBe(1400);
   });
 });

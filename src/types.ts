@@ -31,6 +31,8 @@ export interface AttachmentError {
 export type UploadAttachment = (file: File) => AttachmentUploadResult | Promise<AttachmentUploadResult>;
 
 export interface ToolCall {
+  /** Provider/tool-call id when the streaming connector exposes one. */
+  id?: string;
   name: string;
   input?: unknown;
   output?: unknown;

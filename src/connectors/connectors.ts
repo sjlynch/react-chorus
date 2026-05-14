@@ -9,6 +9,20 @@ export type { Connector, ConnectorResult, ConnectorToolDelta } from './openai';
 export { anthropicConnector } from './anthropic';
 export { geminiConnector } from './gemini';
 
+interface AutoConnectorState {
+  openai?: ReturnType<NonNullable<typeof openaiConnector.createState>>;
+  anthropic?: ReturnType<NonNullable<typeof anthropicConnector.createState>>;
+  gemini?: ReturnType<NonNullable<typeof geminiConnector.createState>>;
+}
+
+function createAutoConnectorState(): AutoConnectorState {
+  return {
+    openai: openaiConnector.createState?.(),
+    anthropic: anthropicConnector.createState?.(),
+    gemini: geminiConnector.createState?.(),
+  };
+}
+
 /**
  * Auto connector:
  * - If data === "[DONE]" => { done: true }
@@ -17,18 +31,19 @@ export { geminiConnector } from './gemini';
  * - If data parses as JSON and looks like Gemini => extract candidates text/reasoning/tool deltas
  * - Else, treat as plain text
  */
-export const autoConnector: Connector = {
+export const autoConnector: Connector<AutoConnectorState> = {
   name: 'auto',
-  extract(data: string) {
-    if (data === '[DONE]') return { done: true };
+  createState: createAutoConnectorState,
+  extract(data: string, state = createAutoConnectorState()) {
+    if (data === '[DONE]') return openaiConnector.extract(data, state.openai) ?? { done: true };
     try {
       const obj = JSON.parse(data);
       const error = extractErrorMessage(obj);
       if (error) return { error };
-      if (obj && Array.isArray(obj.choices)) return openaiConnector.extract(data);
-      if (obj && Array.isArray(obj.candidates)) return geminiConnector.extract(data);
-      if (obj && typeof obj.type === 'string' && obj.type.startsWith('response.')) return openaiConnector.extract(data);
-      if (obj && typeof obj.type === 'string') return anthropicConnector.extract(data);
+      if (obj && Array.isArray(obj.choices)) return openaiConnector.extract(data, state.openai);
+      if (obj && Array.isArray(obj.candidates)) return geminiConnector.extract(data, state.gemini);
+      if (obj && typeof obj.type === 'string' && obj.type.startsWith('response.')) return openaiConnector.extract(data, state.openai);
+      if (obj && typeof obj.type === 'string') return anthropicConnector.extract(data, state.anthropic);
     } catch {}
     return data ? { text: data } : null;
   }

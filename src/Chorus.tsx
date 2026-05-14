@@ -8,14 +8,14 @@ import type { Transport } from './hooks/useChorusStream';
 import { useChorusPersistence, type DeserializeMessages, type SerializeMessages } from './hooks/useChorusPersistence';
 import { useChorusMessages } from './hooks/useChorusMessages';
 import { useAssistantSession } from './hooks/useAssistantSession';
-import type { ChorusFinishContext, ChorusOnFinish, ChorusOnSend, ChorusSendHelpers } from './hooks/useAssistantSession';
+import type { ChorusFinishContext, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusSendHelpers, ChorusStreamDoneContext, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolRegistry } from './hooks/useAssistantSession';
 import type { Connector } from './connectors/connectors';
 import type { MarkdownSanitizer } from './components/Markdown';
 import { isChorusDevMode } from './utils/devMode';
 
 export type { Transport };
 export type { Connector };
-export type { ChorusFinishContext, ChorusOnFinish, ChorusOnSend, ChorusSendHelpers };
+export type { ChorusFinishContext, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusSendHelpers, ChorusStreamDoneContext, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolRegistry };
 
 const DEFAULT_MIN_ASSISTANT_DELAY_MS = 300;
 const DEFAULT_PERSISTENCE_WRITE_DEBOUNCE_MS = 80;
@@ -63,6 +63,14 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
   onFeedback?: (message: Message<TMeta>, feedback: MessageFeedback) => void;
   /** Called exactly once when an assistant message completes normally. */
   onFinish?: ChorusOnFinish<TMeta>;
+  /** Called when a transport stream completes normally, including tool-only turns. */
+  onStreamDone?: ChorusOnStreamDone<TMeta>;
+  /** Called when a completed streamed tool call is ready; return a value to append it as tool output. */
+  onToolCall?: ChorusOnToolCall<TMeta>;
+  /** Observes every accumulated streamed tool-call delta on the transport path. */
+  onToolDelta?: ChorusOnToolDelta<TMeta>;
+  /** Registry of executable tool handlers keyed by tool name. Matching handlers run after stream input completes. */
+  tools?: ChorusToolRegistry<TMeta>;
   /** Called when Chorus cannot write the transcript to persistenceStorage. */
   onPersistenceError?: (error: Error) => void;
   onSend?: ChorusOnSend<TMeta>;
@@ -116,6 +124,9 @@ function ChorusInner<TMeta = Record<string, unknown>>({
   onError,
   onFeedback,
   onFinish,
+  onStreamDone,
+  onToolCall,
+  onToolDelta,
   onPersistenceError,
   onSend,
   palette,
@@ -132,6 +143,7 @@ function ChorusInner<TMeta = Record<string, unknown>>({
   style,
   suggestedPrompts,
   systemPrompt,
+  tools,
   transport,
   uploadAttachment,
   value,
@@ -204,6 +216,10 @@ function ChorusInner<TMeta = Record<string, unknown>>({
     onError,
     onChunkRef,
     onFinish,
+    onStreamDone,
+    onToolCall,
+    onToolDelta,
+    tools,
     flushPersistence: persisted.flush,
     resetToInitialMessages,
     onClear,

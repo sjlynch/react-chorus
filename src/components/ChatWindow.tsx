@@ -27,12 +27,66 @@ function normalizeMaxRenderedMessages(maxRenderedMessages: number | undefined) {
   return Math.max(0, Math.floor(maxRenderedMessages));
 }
 
+const objectActivityIds = new WeakMap<object, number>();
+let nextObjectActivityId = 1;
+
+function objectActivityKey(value: object) {
+  let id = objectActivityIds.get(value);
+  if (!id) {
+    id = nextObjectActivityId;
+    nextObjectActivityId += 1;
+    objectActivityIds.set(value, id);
+  }
+  return `o:${id}`;
+}
+
+function stringActivityKey(value: string) {
+  return `s:${value.length}:${value.slice(0, 24)}:${value.slice(-24)}`;
+}
+
+function unknownActivityKey(value: unknown): string {
+  if (value == null) return 'null';
+  if (typeof value === 'string') return stringActivityKey(value);
+  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') return `${typeof value}:${String(value)}`;
+  if (typeof value === 'symbol') return `symbol:${String(value.description ?? '')}`;
+  if (typeof value === 'function') return objectActivityKey(value);
+  if (typeof value === 'object') return objectActivityKey(value);
+  return typeof value;
+}
+
+function attachmentActivityKey(attachment: NonNullable<Message['attachments']>[number]) {
+  const source = attachment.url ?? attachment.id ?? attachment.data ?? '';
+  return [
+    attachment.name,
+    attachment.type,
+    attachment.size,
+    stringActivityKey(source),
+    unknownActivityKey(attachment.metadata),
+  ].join(',');
+}
+
+function messageActivityKey<TMeta>(message: Message<TMeta>) {
+  const toolCall = message.toolCall;
+  return [
+    message.id,
+    message.role,
+    stringActivityKey(message.text),
+    stringActivityKey(message.reasoning ?? ''),
+    message.attachments?.length ?? 0,
+    ...(message.attachments?.map(attachmentActivityKey) ?? []),
+    toolCall?.id ?? '',
+    toolCall?.name ?? '',
+    toolCall && Object.prototype.hasOwnProperty.call(toolCall, 'input') ? 'input' : '',
+    unknownActivityKey(toolCall?.input),
+    toolCall && Object.prototype.hasOwnProperty.call(toolCall, 'output') ? 'output' : '',
+    unknownActivityKey(toolCall?.output),
+  ].join('~');
+}
+
 function visibleActivityKey<TMeta>(visible: Message<TMeta>[], typing: boolean | undefined, streamingMessageId: string | null | undefined, error: string | null | undefined) {
-  const last = visible[visible.length - 1];
   return [
     visible.length,
-    last?.id ?? '',
-    last?.text.length ?? 0,
+    ...visible.map(messageActivityKey),
     typing ? 'typing' : '',
     streamingMessageId ?? '',
     error ?? '',
