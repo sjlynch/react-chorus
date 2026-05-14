@@ -112,12 +112,17 @@ describe('Chorus', () => {
     act(() => ref.current?.send('hi from ref'));
     await waitFor(() => expect(onSend).toHaveBeenCalledWith('hi from ref', expect.any(Array), expect.any(Object)));
     expect(await screen.findByText('ref reply')).toBeInTheDocument();
+    expect(ref.current?.getMessages()).toEqual([
+      expect.objectContaining({ role: 'user', text: 'hi from ref' }),
+      expect.objectContaining({ id: 'a1', role: 'assistant', text: 'ref reply' }),
+    ]);
 
     act(() => ref.current?.scrollToMessage('a1'));
     expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
 
     act(() => ref.current?.stop());
     act(() => ref.current?.clear());
+    expect(ref.current?.getMessages()).toEqual([]);
     expect(screen.queryByText('hi from ref')).not.toBeInTheDocument();
   });
 
@@ -172,6 +177,158 @@ describe('Chorus', () => {
     expect(toolButton).toBeInTheDocument();
     await user.click(toolButton);
     expect(screen.getByText(/"q": "test"/)).toBeInTheDocument();
+  });
+
+  it('finishes a tool-only OpenAI stream without stale typing and reports stream completion', async () => {
+    const user = userEvent.setup();
+    const onFinish = vi.fn();
+    const onStreamDone = vi.fn();
+    const transport = vi.fn<Transport>(async () => sseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'search', arguments: '{"q":"test"}' } }] } }] }),
+      '[DONE]',
+    ]));
+
+    render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} onFinish={onFinish} onStreamDone={onStreamDone} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'use a tool');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByRole('button', { name: /search/i })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument());
+    expect(screen.queryByRole('status', { name: /assistant is typing/i })).not.toBeInTheDocument();
+    expect(onFinish).not.toHaveBeenCalled();
+    expect(onStreamDone).toHaveBeenCalledWith(expect.objectContaining({
+      assistantMessage: null,
+      toolMessages: [expect.objectContaining({ role: 'tool', toolCall: expect.objectContaining({ id: 'call_1', name: 'search', input: { q: 'test' } }) })],
+      response: expect.any(Response),
+    }));
+  });
+
+  it('finishes a tool-only Anthropic stream and invokes onToolCall with actionable context', async () => {
+    const user = userEvent.setup();
+    const onToolCall = vi.fn();
+    const transport = vi.fn<Transport>(async () => sseResponse([
+      JSON.stringify({ type: 'content_block_start', index: 1, content_block: { type: 'tool_use', id: 'toolu_1', name: 'lookup', input: {} } }),
+      JSON.stringify({ type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: '{"city":"Paris"}' } }),
+      JSON.stringify({ type: 'message_stop' }),
+    ]));
+
+    render(<Chorus transport={transport} connector="anthropic" minAssistantDelayMs={0} onToolCall={onToolCall} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'use anthropic tool');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByRole('button', { name: /lookup/i })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument());
+    expect(onToolCall).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'toolu_1',
+      name: 'lookup',
+      input: { city: 'Paris' },
+      signal: expect.any(AbortSignal),
+      message: expect.objectContaining({ role: 'tool' }),
+      messages: expect.any(Array),
+    }));
+    expect(screen.queryByRole('status', { name: /assistant is typing/i })).not.toBeInTheDocument();
+  });
+
+  it('executes a streamed tool call and keeps final assistant text', async () => {
+    const user = userEvent.setup();
+    const search = vi.fn(async () => ({ results: ['first result'] }));
+    const onFinish = vi.fn();
+    const onToolDelta = vi.fn();
+    const transport = vi.fn<Transport>(async () => sseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'search', arguments: '{"q":"react"}' } }] } }] }),
+      JSON.stringify({ choices: [{ index: 0, delta: { content: 'I found one result.' } }] }),
+      '[DONE]',
+    ]));
+
+    render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} tools={{ search }} onFinish={onFinish} onToolDelta={onToolDelta} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'search react');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByText('I found one result.')).toBeInTheDocument();
+    await waitFor(() => expect(search).toHaveBeenCalledWith({ q: 'react' }, expect.objectContaining({ id: 'call_1', name: 'search' })));
+    await waitFor(() => expect(onFinish).toHaveBeenCalledWith(expect.objectContaining({ message: expect.objectContaining({ text: 'I found one result.' }) })));
+    expect(onToolDelta).toHaveBeenCalledWith(expect.objectContaining({ delta: expect.objectContaining({ id: 'call_1' }) }));
+
+    const toolButton = screen.getByRole('button', { name: /search/i });
+    await user.click(toolButton);
+    expect(screen.getByText(/first result/)).toBeInTheDocument();
+  });
+
+  it('surfaces tool execution failures and appends error output', async () => {
+    const user = userEvent.setup();
+    const onError = vi.fn();
+    const transport = vi.fn<Transport>(async () => sseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'search', arguments: '{"q":"react"}' } }] } }] }),
+      '[DONE]',
+    ]));
+
+    render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} tools={{ search: async () => { throw new Error('tool failed'); } }} onError={onError} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'search react');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByText('Something went wrong. Please try again.')).toBeInTheDocument();
+    await waitFor(() => expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'tool failed' })));
+    const toolButton = screen.getByRole('button', { name: /search/i });
+    await user.click(toolButton);
+    expect(screen.getByText(/tool failed/)).toBeInTheDocument();
+  });
+
+  it('aborts during tool execution without showing an error', async () => {
+    const user = userEvent.setup();
+    let capturedSignal!: AbortSignal;
+    const onError = vi.fn();
+    const transport = vi.fn<Transport>(async () => sseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'slow_tool', arguments: '{"q":"react"}' } }] } }] }),
+      '[DONE]',
+    ]));
+
+    render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} tools={{
+      slow_tool: (_input, context) => {
+        capturedSignal = context.signal;
+        return new Promise((_resolve, reject) => {
+          context.signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+        });
+      },
+    }} onError={onError} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'slow tool');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByRole('button', { name: /slow_tool/i })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: /stop/i })).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: /stop/i }));
+
+    await waitFor(() => expect(capturedSignal.aborted).toBe(true));
+    await waitFor(() => expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument());
+    expect(onError).not.toHaveBeenCalled();
+    expect(screen.queryByText('Something went wrong. Please try again.')).not.toBeInTheDocument();
+  });
+
+  it('allows custom rendering of streamed tool messages while preserving default rendering', async () => {
+    const user = userEvent.setup();
+    const transport = vi.fn<Transport>(async () => sseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'search', arguments: '{"q":"react"}' } }] } }] }),
+      '[DONE]',
+    ]));
+
+    render(<Chorus
+      transport={transport}
+      connector="openai"
+      minAssistantDelayMs={0}
+      renderMessage={(message, context) => message.role === 'tool'
+        ? <div data-testid="custom-tool">Custom {message.toolCall?.name}{context.defaultRender()}</div>
+        : context.defaultRender()}
+    />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'search react');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByTestId('custom-tool')).toHaveTextContent('Custom search');
+    expect(screen.getByRole('button', { name: /search/i })).toBeInTheDocument();
   });
 
   it('accepts a custom connector object on the transport path', async () => {
@@ -259,6 +416,87 @@ describe('Chorus', () => {
     expect(screen.getByText('Welcome!')).toBeInTheDocument();
   });
 
+  it('observes uncontrolled initial messages, streams, and clear without requiring controlled state', async () => {
+    const user = userEvent.setup();
+    const onMessagesChange = vi.fn();
+    const onSend = vi.fn<OnSend>(async (_text, _messages, helpers) => {
+      helpers.appendAssistant('streamed ');
+      helpers.appendAssistant('reply');
+      helpers.finalizeAssistant();
+    });
+
+    render(
+      <Chorus
+        initialMessages={[{ id: 'welcome', role: 'assistant', text: 'Welcome!' }]}
+        onMessagesChange={onMessagesChange}
+        onSend={onSend}
+        minAssistantDelayMs={0}
+        showClearButton
+      />,
+    );
+
+    await waitFor(() => expect(onMessagesChange).toHaveBeenCalledWith(
+      [expect.objectContaining({ id: 'welcome', text: 'Welcome!' })],
+      expect.objectContaining({ source: 'uncontrolled', reason: 'initial' }),
+    ));
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'observe me');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    await waitFor(() => expect(onMessagesChange).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ role: 'assistant', text: 'streamed reply' })]),
+      expect.objectContaining({ source: 'uncontrolled', reason: 'assistant' }),
+    ));
+
+    await user.click(screen.getAllByTitle('Delete')[0]);
+    await waitFor(() => expect(onMessagesChange).toHaveBeenCalledWith(
+      expect.not.arrayContaining([expect.objectContaining({ id: 'welcome' })]),
+      expect.objectContaining({ source: 'uncontrolled', reason: 'delete' }),
+    ));
+
+    await user.click(screen.getByRole('button', { name: /clear conversation/i }));
+    await waitFor(() => expect(onMessagesChange).toHaveBeenLastCalledWith([], expect.objectContaining({ reason: 'clear' })));
+  });
+
+  it('observes controlled value updates without broadening onChange beyond controlled mode', async () => {
+    const user = userEvent.setup();
+    const onMessagesChange = vi.fn();
+    const onChange = vi.fn<(messages: Message[]) => void>();
+
+    function Harness() {
+      const [messages, setMessages] = React.useState<Message[]>([{ id: 'seed', role: 'assistant', text: 'controlled seed' }]);
+      return (
+        <Chorus
+          value={messages}
+          onChange={(next) => {
+            onChange(next);
+            setMessages(next);
+          }}
+          onMessagesChange={onMessagesChange}
+          onSend={() => ({ id: 'controlled-assistant', role: 'assistant', text: 'controlled reply' })}
+          minAssistantDelayMs={0}
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    await waitFor(() => expect(onMessagesChange).toHaveBeenCalledWith(
+      [expect.objectContaining({ id: 'seed' })],
+      expect.objectContaining({ source: 'controlled' }),
+    ));
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'controlled send');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    await waitFor(() => expect(screen.getByText('controlled reply')).toBeInTheDocument());
+    expect(onChange).toHaveBeenCalled();
+    expect(onMessagesChange).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ id: 'controlled-assistant', text: 'controlled reply' })]),
+      expect.objectContaining({ source: 'controlled', reason: 'assistant' }),
+    );
+  });
+
   it('fills and focuses the composer when a suggested prompt is clicked', async () => {
     const user = userEvent.setup();
 
@@ -271,6 +509,62 @@ describe('Chorus', () => {
     await waitFor(() => expect(composer).toHaveFocus());
   });
 
+  it.each([
+    ['disabled', { disabled: true }],
+    ['read-only', { readOnly: true }],
+  ] as const)('blocks composer sends, suggested prompts, and imperative send while %s', async (label, modeProps) => {
+    const user = userEvent.setup();
+    const ref = React.createRef<ChorusRef>();
+    const onSend = vi.fn<OnSend>(async () => undefined);
+
+    render(
+      <Chorus
+        ref={ref}
+        {...modeProps}
+        disabledReason="Select a conversation first"
+        suggestedPrompts={['Plan a launch checklist']}
+        onSend={onSend}
+      />,
+    );
+
+    const composer = screen.getByRole('textbox', { name: /send a message/i });
+    const prompt = screen.getByRole('button', { name: 'Plan a launch checklist' });
+
+    if (label === 'disabled') expect(composer).toBeDisabled();
+    else expect(composer).toHaveAttribute('readonly');
+    expect(composer).toHaveAttribute('placeholder', 'Select a conversation first');
+    expect(screen.getByRole('button', { name: /send/i })).toBeDisabled();
+    expect(prompt).toBeDisabled();
+
+    await user.click(prompt);
+    expect(composer).toHaveValue('');
+
+    act(() => ref.current?.send('imperative send'));
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['disabled', { disabled: true }],
+    ['read-only', { readOnly: true }],
+  ] as const)('hides write message actions and disables clear while %s', (_label, modeProps) => {
+    render(
+      <Chorus
+        {...modeProps}
+        onSend={vi.fn<OnSend>(async () => undefined)}
+        messages={[
+          { id: 'u1', role: 'user', text: 'Hello' },
+          { id: 'a1', role: 'assistant', text: 'Hi' },
+        ]}
+        showClearButton
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Regenerate' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Clear conversation' })).toBeDisabled();
+  });
+
   it('prefers custom emptyState over suggestedPrompts', () => {
     render(<Chorus emptyState={<div>Custom welcome</div>} suggestedPrompts={['Hidden prompt']} />);
 
@@ -278,14 +572,19 @@ describe('Chorus', () => {
     expect(screen.queryByRole('button', { name: 'Hidden prompt' })).not.toBeInTheDocument();
   });
 
-  it('renders and persists initialMessages when persistence storage is empty', async () => {
+  it('renders, observes, and persists initialMessages when persistence storage is empty', async () => {
     const storage = makeSyncStorage();
+    const onMessagesChange = vi.fn();
     const welcome: Message[] = [{ id: 'welcome', role: 'assistant', text: 'Welcome!' }];
 
-    render(<Chorus persistenceKey="chat" persistenceStorage={storage} initialMessages={welcome} />);
+    render(<Chorus persistenceKey="chat" persistenceStorage={storage} initialMessages={welcome} onMessagesChange={onMessagesChange} />);
 
     expect(screen.getByText('Welcome!')).toBeInTheDocument();
     await waitFor(() => expect(storage.store.chat).toBe(JSON.stringify(welcome)));
+    expect(onMessagesChange).toHaveBeenCalledWith(welcome, expect.objectContaining({
+      source: 'persistence',
+      reason: 'persistence-seed',
+    }));
   });
 
   it('uses legacy messages as a persistence seed when storage is empty', async () => {
@@ -312,6 +611,31 @@ describe('Chorus', () => {
 
     expect(screen.getByText('Stored history')).toBeInTheDocument();
     expect(screen.queryByText('Welcome!')).not.toBeInTheDocument();
+  });
+
+  it('observes persistence-backed loads and clears', async () => {
+    const user = userEvent.setup();
+    const stored: Message[] = [{ id: 'stored', role: 'assistant', text: 'Stored observed history' }];
+    const storage = makeSyncStorage({ chat: JSON.stringify(stored) });
+    const onMessagesChange = vi.fn();
+
+    render(
+      <Chorus
+        persistenceKey="chat"
+        persistenceStorage={storage}
+        onMessagesChange={onMessagesChange}
+        showClearButton
+      />,
+    );
+
+    await waitFor(() => expect(onMessagesChange).toHaveBeenCalledWith(
+      stored,
+      expect.objectContaining({ source: 'persistence', reason: 'persistence-load' }),
+    ));
+
+    await user.click(screen.getByRole('button', { name: /clear conversation/i }));
+
+    await waitFor(() => expect(onMessagesChange).toHaveBeenLastCalledWith([], expect.objectContaining({ source: 'persistence', reason: 'clear' })));
   });
 
   it('keeps the initialMessages seed after an empty async persistence load resolves', async () => {
@@ -382,6 +706,19 @@ describe('Chorus', () => {
 
     await new Promise(resolve => setTimeout(resolve, 120));
     expect(storage.setItem).toHaveBeenCalledTimes(callsAfterFinal);
+  });
+
+  it('surfaces persistence read failures through onPersistenceError', async () => {
+    const onPersistenceError = vi.fn();
+    const storage = makeSyncStorage({ chat: 'not json {{' });
+
+    render(<Chorus persistenceKey="chat" persistenceStorage={storage} onPersistenceError={onPersistenceError} />);
+
+    await waitFor(() => expect(onPersistenceError).toHaveBeenCalledWith(expect.objectContaining({
+      key: 'chat',
+      operation: 'deserialize',
+    })));
+    expect(screen.queryByRole('log')).toBeInTheDocument();
   });
 
   it('surfaces persistence write failures through onPersistenceError', async () => {
@@ -1314,6 +1651,30 @@ describe('Chorus', () => {
     expect(screen.queryByText('reply')).not.toBeInTheDocument();
   });
 
+  it('persists the seed when resetToInitialMessages clears a persisted chat', async () => {
+    const user = userEvent.setup();
+    const storage = makeSyncStorage();
+    storage.removeItem = vi.fn((key) => { delete storage.store[key]; });
+    const welcome: Message[] = [{ id: 'welcome', role: 'assistant', text: 'persistent reset welcome' }];
+
+    render(
+      <Chorus
+        persistenceKey="chat"
+        persistenceStorage={storage}
+        initialMessages={welcome}
+        showClearButton
+        resetToInitialMessages
+      />,
+    );
+
+    await waitFor(() => expect(storage.store.chat).toBe(JSON.stringify(welcome)));
+    await user.click(screen.getByRole('button', { name: /clear conversation/i }));
+
+    expect(screen.getByText('persistent reset welcome')).toBeInTheDocument();
+    await waitFor(() => expect(storage.store.chat).toBe(JSON.stringify(welcome)));
+    expect(storage.removeItem).not.toHaveBeenCalled();
+  });
+
   it('controlled clear calls onChange with the reset list', async () => {
     const user = userEvent.setup();
     const onChange = vi.fn<(messages: Message[]) => void>();
@@ -1343,13 +1704,12 @@ describe('Chorus', () => {
     expect(screen.queryByText('controlled message')).not.toBeInTheDocument();
   });
 
-  it('removes the persisted key when clearing with a removeItem-capable adapter', async () => {
+  it('persists [] when clearing a seeded persisted chat with a removeItem-capable adapter', async () => {
     const user = userEvent.setup();
     const storage = makeSyncStorage();
     storage.removeItem = vi.fn((key) => { delete storage.store[key]; });
     const welcome: Message[] = [{ id: 'welcome', role: 'assistant', text: 'persistent welcome' }];
-
-    render(
+    const { unmount } = render(
       <Chorus
         persistenceKey="chat"
         persistenceStorage={storage}
@@ -1361,8 +1721,21 @@ describe('Chorus', () => {
     await waitFor(() => expect(storage.store.chat).toBe(JSON.stringify(welcome)));
     await user.click(screen.getByRole('button', { name: /clear conversation/i }));
 
-    await waitFor(() => expect(storage.removeItem).toHaveBeenCalledWith('chat'));
-    expect(storage.store.chat).toBeUndefined();
+    await waitFor(() => expect(storage.store.chat).toBe(JSON.stringify([])));
+    expect(storage.removeItem).not.toHaveBeenCalled();
+    expect(screen.queryByText('persistent welcome')).not.toBeInTheDocument();
+
+    unmount();
+    render(
+      <Chorus
+        persistenceKey="chat"
+        persistenceStorage={storage}
+        initialMessages={welcome}
+        showClearButton
+      />
+    );
+
+    expect(screen.queryByText('persistent welcome')).not.toBeInTheDocument();
   });
 
   it('passes custom persistence serializer and deserializer hooks through Chorus', async () => {

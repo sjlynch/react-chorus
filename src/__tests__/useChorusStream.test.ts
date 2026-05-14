@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, renderHook } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { useChorusStream, type Transport } from '../hooks/useChorusStream';
 import { createFetchSSETransport } from '../streaming/createFetchSSETransport';
 import { createWebSocketTransport } from '../streaming/createWebSocketTransport';
@@ -37,6 +37,26 @@ function makeOpenSseResponse(tokens: string[], onCancel?: () => void): Response 
     },
   });
   return new Response(stream);
+}
+
+function makeControlledSseResponse() {
+  const encoder = new TextEncoder();
+  let streamController!: ReadableStreamDefaultController<Uint8Array>;
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      streamController = controller;
+    },
+  });
+
+  return {
+    response: new Response(stream),
+    emit(payload: string) {
+      streamController.enqueue(encoder.encode(`data: ${payload}\n\n`));
+    },
+    close() {
+      streamController.close();
+    },
+  };
 }
 
 class MockWebSocket {
@@ -174,6 +194,105 @@ describe('useChorusStream', () => {
     expect(onToolDelta).toHaveBeenCalledTimes(2);
     expect(onToolDelta).toHaveBeenNthCalledWith(1, { id: 'call_1', name: 'search', input: '{"q":' });
     expect(onToolDelta).toHaveBeenNthCalledWith(2, { id: 'call_1', name: 'search', input: { q: 'test' } });
+  });
+
+  it('isolates OpenAI think-tag parser state between simultaneous streams', async () => {
+    const streamA = makeControlledSseResponse();
+    const streamB = makeControlledSseResponse();
+    const onChunkA = vi.fn();
+    const onChunkB = vi.fn();
+    const onReasoningB = vi.fn();
+    const hookA = renderHook(() => useChorusStream(vi.fn<Transport>(() => Promise.resolve(streamA.response)), { connector: 'openai' }));
+    const hookB = renderHook(() => useChorusStream(vi.fn<Transport>(() => Promise.resolve(streamB.response)), { connector: 'openai' }));
+
+    let sendA!: Promise<void>;
+    let sendB!: Promise<void>;
+    await act(async () => {
+      sendA = hookA.result.current.send('a', [], { onChunk: onChunkA });
+      sendB = hookB.result.current.send('b', [], { onChunk: onChunkB, onReasoning: onReasoningB });
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      streamA.emit('<think>');
+      streamB.emit('plain from b');
+    });
+
+    await waitFor(() => expect(onChunkB).toHaveBeenCalledWith('plain from b'));
+    expect(onReasoningB).not.toHaveBeenCalled();
+    expect(onChunkA).not.toHaveBeenCalled();
+
+    await act(async () => {
+      streamA.emit('[DONE]');
+      streamB.emit('[DONE]');
+      await Promise.all([sendA, sendB]);
+    });
+  });
+
+  it('isolates OpenAI tool-call id maps between simultaneous streams', async () => {
+    const streamA = makeControlledSseResponse();
+    const streamB = makeControlledSseResponse();
+    const onToolDeltaA = vi.fn();
+    const onToolDeltaB = vi.fn();
+    const hookA = renderHook(() => useChorusStream(vi.fn<Transport>(() => Promise.resolve(streamA.response)), { connector: 'openai' }));
+    const hookB = renderHook(() => useChorusStream(vi.fn<Transport>(() => Promise.resolve(streamB.response)), { connector: 'openai' }));
+
+    let sendA!: Promise<void>;
+    let sendB!: Promise<void>;
+    await act(async () => {
+      sendA = hookA.result.current.send('a', [], { onChunk: vi.fn(), onToolDelta: onToolDeltaA });
+      sendB = hookB.result.current.send('b', [], { onChunk: vi.fn(), onToolDelta: onToolDeltaB });
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      streamA.emit(JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_A', function: { name: 'search', arguments: '{"a":' } }] } }] }));
+      streamB.emit(JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_B', function: { name: 'search', arguments: '{"b":' } }] } }] }));
+      streamA.emit(JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: '"one"}' } }] } }] }));
+      streamB.emit(JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: '"two"}' } }] } }] }));
+    });
+
+    await waitFor(() => expect(onToolDeltaA).toHaveBeenLastCalledWith({ id: 'call_A', name: 'search', input: { a: 'one' } }));
+    expect(onToolDeltaB).toHaveBeenLastCalledWith({ id: 'call_B', name: 'search', input: { b: 'two' } });
+
+    await act(async () => {
+      streamA.emit('[DONE]');
+      streamB.emit('[DONE]');
+      await Promise.all([sendA, sendB]);
+    });
+  });
+
+  it('isolates Anthropic tool block id maps between simultaneous streams', async () => {
+    const streamA = makeControlledSseResponse();
+    const streamB = makeControlledSseResponse();
+    const onToolDeltaA = vi.fn();
+    const onToolDeltaB = vi.fn();
+    const hookA = renderHook(() => useChorusStream(vi.fn<Transport>(() => Promise.resolve(streamA.response)), { connector: 'anthropic' }));
+    const hookB = renderHook(() => useChorusStream(vi.fn<Transport>(() => Promise.resolve(streamB.response)), { connector: 'anthropic' }));
+
+    let sendA!: Promise<void>;
+    let sendB!: Promise<void>;
+    await act(async () => {
+      sendA = hookA.result.current.send('a', [], { onChunk: vi.fn(), onToolDelta: onToolDeltaA });
+      sendB = hookB.result.current.send('b', [], { onChunk: vi.fn(), onToolDelta: onToolDeltaB });
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      streamA.emit(JSON.stringify({ type: 'content_block_start', index: 2, content_block: { type: 'tool_use', id: 'toolu_A', name: 'search', input: {} } }));
+      streamB.emit(JSON.stringify({ type: 'content_block_start', index: 2, content_block: { type: 'tool_use', id: 'toolu_B', name: 'search', input: {} } }));
+      streamA.emit(JSON.stringify({ type: 'content_block_delta', index: 2, delta: { type: 'input_json_delta', partial_json: '{"a":"one"}' } }));
+      streamB.emit(JSON.stringify({ type: 'content_block_delta', index: 2, delta: { type: 'input_json_delta', partial_json: '{"b":"two"}' } }));
+    });
+
+    await waitFor(() => expect(onToolDeltaA).toHaveBeenLastCalledWith({ id: 'toolu_A', name: 'search', input: { a: 'one' } }));
+    expect(onToolDeltaB).toHaveBeenLastCalledWith({ id: 'toolu_B', name: 'search', input: { b: 'two' } });
+
+    await act(async () => {
+      streamA.emit(JSON.stringify({ type: 'message_stop' }));
+      streamB.emit(JSON.stringify({ type: 'message_stop' }));
+      await Promise.all([sendA, sendB]);
+    });
   });
 
   it('finishes a fetch transport when the connector emits a done sentinel and the body stays open', async () => {

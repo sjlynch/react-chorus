@@ -1,10 +1,12 @@
 import React from 'react';
-import type { StorageAdapter } from '../types';
+import type { Message, StorageAdapter } from '../types';
 import { useLatestRef } from './useLatestRef';
+import { isChorusDevMode } from '../utils/devMode';
 
 const DEFAULT_INDEX_KEY = 'chorus-conversations-index';
 const DEFAULT_MESSAGE_KEY_PREFIX = 'chorus-conversation:';
 const DEFAULT_TITLE = 'New conversation';
+const DEFAULT_FIRST_MESSAGE_TITLE_MAX_LENGTH = 48;
 let fallbackConversationIdCounter = 0;
 
 export interface ConversationSummary {
@@ -13,6 +15,24 @@ export interface ConversationSummary {
   createdAt: string;
   updatedAt: string;
   pinned?: boolean;
+}
+
+export type ConversationStorageOperation = 'read' | 'write' | 'delete';
+
+export interface ConversationStorageError extends Error {
+  key: string;
+  operation: ConversationStorageOperation;
+  conversationId?: string;
+  cause?: unknown;
+}
+
+export interface RenameFromFirstMessageOptions {
+  /** Rename even when the current title no longer matches defaultTitle. Defaults to false. */
+  overwrite?: boolean;
+  /** Maximum generated title length before adding an ellipsis. Defaults to 48. */
+  maxLength?: number;
+  /** Used when no non-empty user message text exists. */
+  fallbackTitle?: string;
 }
 
 export interface UseConversationsOptions {
@@ -30,6 +50,8 @@ export interface UseConversationsOptions {
   createId?: () => string;
   /** Deterministic timestamp hook for tests. */
   now?: () => Date | string | number;
+  /** Called when the index or a transcript delete fails to read/write/delete. */
+  onError?: (error: ConversationStorageError) => void;
 }
 
 export interface UseConversationsResult {
@@ -41,10 +63,13 @@ export interface UseConversationsResult {
   /** Storage wrapper suitable for <Chorus persistenceStorage>; message writes update conversation timestamps. */
   storage: StorageAdapter | null;
   loaded: boolean;
+  /** Last conversation storage error, if any. */
+  error: ConversationStorageError | null;
   getPersistenceKey: (id: string) => string;
   createConversation: (title?: string) => string;
   selectConversation: (id: string) => void;
   renameConversation: (id: string, title: string) => void;
+  renameFromFirstMessage: (id: string, messages: Pick<Message, 'role' | 'text'>[], options?: RenameFromFirstMessageOptions) => void;
   deleteConversation: (id: string) => void;
   pinConversation: (id: string, pinned?: boolean) => void;
 }
@@ -65,6 +90,16 @@ interface PendingIndexRead {
   indexKey: string;
   promise: Promise<string | null>;
   version: number;
+}
+
+interface InitialSyncRead {
+  storage: StorageAdapter;
+  indexKey: string;
+}
+
+interface ParsedConversationState {
+  state: ConversationsState;
+  error: ConversationStorageError | null;
 }
 
 function resolveDefaultStorage(): StorageAdapter | null {
@@ -138,27 +173,23 @@ function chooseActiveId(conversations: ConversationSummary[], preferredId?: stri
 function parseConversationIndex(raw: string | null, preferredActiveId?: string | null): ConversationIndexPayload {
   if (!raw) return { conversations: [], activeId: null };
 
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    const source = Array.isArray(parsed)
-      ? parsed
-      : typeof parsed === 'object' && parsed !== null && Array.isArray((parsed as { conversations?: unknown }).conversations)
-        ? (parsed as { conversations: unknown[] }).conversations
-        : [];
-    const conversations = source.filter(isConversationSummary).map(sanitizeConversation);
-    const storedActiveId = typeof parsed === 'object'
-      && parsed !== null
-      && typeof (parsed as { activeId?: unknown }).activeId === 'string'
-      ? (parsed as { activeId: string }).activeId
-      : null;
+  const parsed = JSON.parse(raw) as unknown;
+  const source = Array.isArray(parsed)
+    ? parsed
+    : typeof parsed === 'object' && parsed !== null && Array.isArray((parsed as { conversations?: unknown }).conversations)
+      ? (parsed as { conversations: unknown[] }).conversations
+      : [];
+  const conversations = source.filter(isConversationSummary).map(sanitizeConversation);
+  const storedActiveId = typeof parsed === 'object'
+    && parsed !== null
+    && typeof (parsed as { activeId?: unknown }).activeId === 'string'
+    ? (parsed as { activeId: string }).activeId
+    : null;
 
-    return {
-      conversations,
-      activeId: chooseActiveId(conversations, preferredActiveId ?? storedActiveId),
-    };
-  } catch {
-    return { conversations: [], activeId: null };
-  }
+  return {
+    conversations,
+    activeId: chooseActiveId(conversations, preferredActiveId ?? storedActiveId),
+  };
 }
 
 function serializeConversationIndex(conversations: ConversationSummary[], activeId: string | null) {
@@ -169,13 +200,57 @@ function emptyState(): ConversationsState {
   return { conversations: [], activeId: null, loaded: true };
 }
 
-function stateFromRaw(raw: string | null, preferredActiveId?: string | null): ConversationsState {
-  const index = parseConversationIndex(raw, preferredActiveId);
-  return { conversations: index.conversations, activeId: index.activeId, loaded: true };
+function toError(error: unknown): Error {
+  if (error instanceof Error) return error;
+  if (typeof DOMException !== 'undefined' && error instanceof DOMException) return error as Error;
+  return new Error(String(error));
+}
+
+function createConversationStorageError(
+  key: string,
+  operation: ConversationStorageOperation,
+  error: unknown,
+  conversationId?: string,
+): ConversationStorageError {
+  const nextError = toError(error) as ConversationStorageError;
+  nextError.key = key;
+  nextError.operation = operation;
+  nextError.conversationId = conversationId;
+  nextError.cause = error;
+  return nextError;
+}
+
+function stateFromRaw(raw: string | null, preferredActiveId: string | null | undefined, indexKey: string): ParsedConversationState {
+  try {
+    const index = parseConversationIndex(raw, preferredActiveId);
+    return {
+      state: { conversations: index.conversations, activeId: index.activeId, loaded: true },
+      error: null,
+    };
+  } catch (error) {
+    return {
+      state: emptyState(),
+      error: createConversationStorageError(indexKey, 'read', error),
+    };
+  }
 }
 
 function getConversationIdFromKey(key: string, prefix: string) {
   return key.startsWith(prefix) ? key.slice(prefix.length) : null;
+}
+
+function titleFromFirstMessage(
+  messages: Pick<Message, 'role' | 'text'>[],
+  { fallbackTitle, maxLength = DEFAULT_FIRST_MESSAGE_TITLE_MAX_LENGTH }: Pick<RenameFromFirstMessageOptions, 'fallbackTitle' | 'maxLength'> = {},
+) {
+  const firstUserText = messages.find(message => message.role === 'user' && message.text.trim().length > 0)?.text;
+  const normalized = (firstUserText ?? fallbackTitle ?? '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return '';
+
+  const limit = Math.max(1, maxLength);
+  if (normalized.length <= limit) return normalized;
+  if (limit === 1) return '…';
+  return `${normalized.slice(0, limit - 1).trimEnd()}…`;
 }
 
 export function useConversations(options: UseConversationsOptions = {}): UseConversationsResult {
@@ -188,6 +263,8 @@ export function useConversations(options: UseConversationsOptions = {}): UseConv
 
   const versionRef = React.useRef(0);
   const initialAsyncReadRef = React.useRef<PendingIndexRead | null>(null);
+  const initialSyncReadRef = React.useRef<InitialSyncRead | null>(null);
+  const initialErrorRef = React.useRef<ConversationStorageError | null>(null);
   const storageRef = React.useRef(storage);
   storageRef.current = storage;
   const indexKeyRef = React.useRef(indexKey);
@@ -197,6 +274,7 @@ export function useConversations(options: UseConversationsOptions = {}): UseConv
   const defaultTitleRef = useLatestRef(defaultTitle);
   const createIdRef = useLatestRef(createId);
   const nowRef = useLatestRef(now);
+  const onErrorRef = useLatestRef(options.onError);
 
   const [state, setState] = React.useState<ConversationsState>(() => {
     if (!storage) return emptyState();
@@ -209,13 +287,40 @@ export function useConversations(options: UseConversationsOptions = {}): UseConv
         initialAsyncReadRef.current = { storage, indexKey, promise, version: versionRef.current };
         return { conversations: [], activeId: null, loaded: false };
       }
-      return stateFromRaw(raw, options.initialActiveId);
-    } catch {
+      initialSyncReadRef.current = { storage, indexKey };
+      const parsed = stateFromRaw(raw, options.initialActiveId, indexKey);
+      initialErrorRef.current = parsed.error;
+      return parsed.state;
+    } catch (readError) {
+      initialSyncReadRef.current = { storage, indexKey };
+      initialErrorRef.current = createConversationStorageError(indexKey, 'read', readError);
       return emptyState();
     }
   });
+  const [error, setError] = React.useState<ConversationStorageError | null>(() => initialErrorRef.current);
   const stateRef = React.useRef(state);
   stateRef.current = state;
+
+  const notifyError = React.useCallback((nextError: ConversationStorageError) => {
+    if (isChorusDevMode()) {
+      console.warn(`[Chorus] Failed to ${nextError.operation} conversation storage.`, nextError);
+    }
+    onErrorRef.current?.(nextError);
+  }, [onErrorRef]);
+
+  const reportError = React.useCallback((rawError: unknown, operation: ConversationStorageOperation, key: string, conversationId?: string) => {
+    const nextError = rawError && typeof rawError === 'object' && 'operation' in rawError && 'key' in rawError
+      ? rawError as ConversationStorageError
+      : createConversationStorageError(key, operation, rawError, conversationId);
+    setError(nextError);
+    notifyError(nextError);
+  }, [notifyError]);
+
+  React.useEffect(() => {
+    if (!initialErrorRef.current) return;
+    notifyError(initialErrorRef.current);
+    initialErrorRef.current = null;
+  }, [notifyError]);
 
   const getPersistenceKey = React.useCallback((id: string) => `${messageKeyPrefixRef.current}${id}`, []);
 
@@ -223,13 +328,14 @@ export function useConversations(options: UseConversationsOptions = {}): UseConv
     const targetStorage = storageRef.current;
     if (!targetStorage) return;
 
+    const key = indexKeyRef.current;
     try {
-      const result = targetStorage.setItem(indexKeyRef.current, serializeConversationIndex(conversations, activeId));
-      if (isPromiseLike<void>(result)) Promise.resolve(result).catch(() => {});
-    } catch {
-      // Index persistence is best-effort; callers still get the in-memory state.
+      const result = targetStorage.setItem(key, serializeConversationIndex(conversations, activeId));
+      if (isPromiseLike<void>(result)) Promise.resolve(result).catch(writeError => reportError(writeError, 'write', key));
+    } catch (writeError) {
+      reportError(writeError, 'write', key);
     }
-  }, []);
+  }, [reportError]);
 
   const commit = React.useCallback((conversations: ConversationSummary[], activeId: string | null) => {
     versionRef.current += 1;
@@ -291,28 +397,31 @@ export function useConversations(options: UseConversationsOptions = {}): UseConv
       const result = targetStorage.removeItem
         ? targetStorage.removeItem(messageKey)
         : targetStorage.setItem(messageKey, '[]');
-      if (isPromiseLike<void>(result)) Promise.resolve(result).catch(() => {});
-    } catch {
-      // Message deletion is best-effort so the index can still update.
+      if (isPromiseLike<void>(result)) Promise.resolve(result).catch(deleteError => reportError(deleteError, 'delete', messageKey, id));
+    } catch (deleteError) {
+      reportError(deleteError, 'delete', messageKey, id);
     }
-  }, []);
+  }, [reportError]);
 
   React.useEffect(() => {
     let cancelled = false;
 
     const applyRead = (raw: string | null, version: number) => {
       if (!cancelled && versionRef.current === version) {
-        const nextState = stateFromRaw(raw, options.initialActiveId);
-        stateRef.current = nextState;
-        setState(nextState);
+        const parsed = stateFromRaw(raw, options.initialActiveId, indexKey);
+        stateRef.current = parsed.state;
+        setState(parsed.state);
+        if (parsed.error) reportError(parsed.error, 'read', indexKey);
+        else setError(null);
       }
     };
 
-    const applyReadError = (version: number) => {
+    const applyReadError = (readError: unknown, version: number) => {
       if (!cancelled && versionRef.current === version) {
         const nextState = emptyState();
         stateRef.current = nextState;
         setState(nextState);
+        reportError(readError, 'read', indexKey);
       }
     };
 
@@ -320,6 +429,12 @@ export function useConversations(options: UseConversationsOptions = {}): UseConv
       const nextState = emptyState();
       stateRef.current = nextState;
       setState(nextState);
+      return () => { cancelled = true; };
+    }
+
+    const initialSyncRead = initialSyncReadRef.current;
+    if (initialSyncRead?.storage === storage && initialSyncRead.indexKey === indexKey) {
+      initialSyncReadRef.current = null;
       return () => { cancelled = true; };
     }
 
@@ -334,7 +449,7 @@ export function useConversations(options: UseConversationsOptions = {}): UseConv
       });
       pendingInitialRead.promise
         .then(raw => applyRead(raw, pendingInitialRead.version))
-        .catch(() => applyReadError(pendingInitialRead.version));
+        .catch(readError => applyReadError(readError, pendingInitialRead.version));
       return () => { cancelled = true; };
     }
 
@@ -352,16 +467,16 @@ export function useConversations(options: UseConversationsOptions = {}): UseConv
         });
         promise
           .then(str => applyRead(str, version))
-          .catch(() => applyReadError(version));
+          .catch(readError => applyReadError(readError, version));
       } else {
         applyRead(raw, version);
       }
-    } catch {
-      applyReadError(version);
+    } catch (readError) {
+      applyReadError(readError, version);
     }
 
     return () => { cancelled = true; };
-  }, [indexKey, options.initialActiveId, storage]);
+  }, [indexKey, options.initialActiveId, reportError, storage]);
 
   const createConversation = React.useCallback((title?: string) => {
     const id = createIdRef.current();
@@ -398,6 +513,22 @@ export function useConversations(options: UseConversationsOptions = {}): UseConv
     commit(conversations, current.activeId);
   }, [commit, nowRef, stateRef]);
 
+  const renameFromFirstMessage = React.useCallback((id: string, messages: Pick<Message, 'role' | 'text'>[], renameOptions: RenameFromFirstMessageOptions = {}) => {
+    const current = stateRef.current;
+    const conversation = current.conversations.find(existing => existing.id === id);
+    if (!conversation) return;
+    if (!renameOptions.overwrite && conversation.title.trim() !== defaultTitleRef.current.trim()) return;
+
+    const generatedTitle = titleFromFirstMessage(messages, renameOptions);
+    if (!generatedTitle || generatedTitle === conversation.title) return;
+
+    const timestamp = getTimestamp(nowRef.current);
+    const conversations = current.conversations.map(existing => (
+      existing.id === id ? { ...existing, title: generatedTitle, updatedAt: timestamp } : existing
+    ));
+    commit(conversations, current.activeId);
+  }, [commit, defaultTitleRef, nowRef, stateRef]);
+
   const deleteConversation = React.useCallback((id: string) => {
     const current = stateRef.current;
     if (!current.conversations.some(conversation => conversation.id === id)) return;
@@ -428,10 +559,12 @@ export function useConversations(options: UseConversationsOptions = {}): UseConv
     activePersistenceKey: state.activeId ? getPersistenceKey(state.activeId) : '',
     storage: conversationStorage,
     loaded: state.loaded,
+    error,
     getPersistenceKey,
     createConversation,
     selectConversation,
     renameConversation,
+    renameFromFirstMessage,
     deleteConversation,
     pinConversation,
   };

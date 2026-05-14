@@ -3,6 +3,26 @@ import type { Message } from '../types';
 import { useLatestRef } from './useLatestRef';
 import { isChorusDevMode } from '../utils/devMode';
 
+export type ChorusMessagesChangeSource = 'controlled' | 'uncontrolled' | 'persistence';
+export type ChorusMessagesChangeReason =
+  | 'initial'
+  | 'external'
+  | 'persistence-load'
+  | 'persistence-seed'
+  | 'send'
+  | 'assistant'
+  | 'retry'
+  | 'edit'
+  | 'regenerate'
+  | 'delete'
+  | 'clear'
+  | 'update';
+
+export interface ChorusMessagesChangeContext {
+  source: ChorusMessagesChangeSource;
+  reason: ChorusMessagesChangeReason;
+}
+
 interface PersistedChangeOptions {
   flush?: boolean;
   removeIfEmpty?: boolean;
@@ -11,6 +31,7 @@ interface PersistedChangeOptions {
 interface UpdateMessagesOptions {
   flushPersistence?: boolean;
   removePersistenceIfEmpty?: boolean;
+  reason?: ChorusMessagesChangeReason;
 }
 
 interface UseChorusMessagesOptions<TMeta = Record<string, unknown>> {
@@ -18,6 +39,7 @@ interface UseChorusMessagesOptions<TMeta = Record<string, unknown>> {
   messages?: Message<TMeta>[];
   initialMessages?: Message<TMeta>[];
   onChange?: (messages: Message<TMeta>[]) => void;
+  onMessagesChange?: (messages: Message<TMeta>[], context: ChorusMessagesChangeContext) => void;
   persistenceKey?: string;
   persistedMessages: Message<TMeta>[];
   persistenceLoaded?: boolean;
@@ -37,11 +59,17 @@ function warnDuplicateMessageIds<TMeta>(next: Message<TMeta>[]) {
   }
 }
 
+function warnObserverError(error: unknown) {
+  if (!isChorusDevMode()) return;
+  console.warn('[Chorus] `onMessagesChange` callback threw and was ignored so it could not interrupt message rendering.', error);
+}
+
 export function useChorusMessages<TMeta = Record<string, unknown>>({
   value,
   messages,
   initialMessages,
   onChange,
+  onMessagesChange,
   persistenceKey,
   persistedMessages,
   persistenceLoaded = true,
@@ -61,11 +89,45 @@ export function useChorusMessages<TMeta = Record<string, unknown>>({
   );
   const persistenceMsgs = shouldUsePersistenceSeed ? seedMessages : persistedMessages;
   const msgs = value !== undefined ? value : persistenceKey ? persistenceMsgs : internalMsgs;
+  const source: ChorusMessagesChangeSource = value !== undefined ? 'controlled' : persistenceKey ? 'persistence' : 'uncontrolled';
 
   const msgsRef = useLatestRef(msgs);
+  const sourceRef = useLatestRef(source);
   const onChangeRef = useLatestRef(onChange);
   const onChunkRef = useLatestRef(onChunk);
+  const onMessagesChangeRef = useLatestRef(onMessagesChange);
   const onPersistedChangeRef = useLatestRef(onPersistedChange);
+  const lastEmittedMessagesRef = React.useRef<Message<TMeta>[] | null>(null);
+  const lastEmittedCallbackRef = React.useRef<typeof onMessagesChange | null>(null);
+
+  const emitMessagesChange = React.useCallback((next: Message<TMeta>[], reason: ChorusMessagesChangeReason) => {
+    const callback = onMessagesChangeRef.current;
+    if (!callback) return;
+    if (lastEmittedMessagesRef.current === next && lastEmittedCallbackRef.current === callback) return;
+
+    lastEmittedMessagesRef.current = next;
+    lastEmittedCallbackRef.current = callback;
+
+    try {
+      callback(next, { source: sourceRef.current, reason });
+    } catch (error) {
+      warnObserverError(error);
+    }
+  }, [onMessagesChangeRef, sourceRef]);
+
+  const observedReason: ChorusMessagesChangeReason = persistenceKey
+    ? shouldUsePersistenceSeed
+      ? 'persistence-seed'
+      : persistenceLoaded
+        ? 'persistence-load'
+        : 'initial'
+    : value !== undefined
+      ? 'external'
+      : 'initial';
+
+  React.useEffect(() => {
+    emitMessagesChange(msgs, observedReason);
+  }, [emitMessagesChange, msgs, observedReason, onMessagesChange]);
 
   React.useEffect(() => {
     if (
@@ -89,8 +151,10 @@ export function useChorusMessages<TMeta = Record<string, unknown>>({
     else if (persistenceKey) onPersistedChangeRef.current(next, { flush: options?.flushPersistence, removeIfEmpty: options?.removePersistenceIfEmpty });
     else setInternalMsgs(next);
 
-    return next;
-  }, [msgsRef, onChangeRef, onPersistedChangeRef, persistenceKey, value]);
+    emitMessagesChange(next, options?.reason ?? 'update');
 
-  return { msgs, updateMsgs, onChangeRef, onChunkRef, seedMessages };
+    return next;
+  }, [emitMessagesChange, msgsRef, onChangeRef, onPersistedChangeRef, persistenceKey, value]);
+
+  return { msgs, messagesRef: msgsRef, updateMsgs, onChangeRef, onChunkRef, seedMessages };
 }

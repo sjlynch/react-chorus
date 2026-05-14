@@ -10,6 +10,10 @@ const CONVERSATIONS: ConversationSummary[] = [
   { id: 'b', title: 'Roadmap ideas', createdAt: '2026-05-14T00:02:00.000Z', updatedAt: '2026-05-14T00:03:00.000Z' },
 ];
 
+function renderedTitles(container: HTMLElement) {
+  return Array.from(container.querySelectorAll('.chorus-conversation-title')).map(node => node.textContent?.trim());
+}
+
 describe('ConversationList', () => {
   it('matches the rendered snapshot', () => {
     const { container } = render(
@@ -20,6 +24,8 @@ describe('ConversationList', () => {
         selectConversation={vi.fn()}
         renameConversation={vi.fn()}
         deleteConversation={vi.fn()}
+        pinConversation={vi.fn()}
+        formatTimestamp={(timestamp) => `formatted ${timestamp}`}
         palette={{ chatBg: '#101010', actionText: '#aaaaaa' }}
       />,
     );
@@ -33,6 +39,7 @@ describe('ConversationList', () => {
     const selectConversation = vi.fn();
     const renameConversation = vi.fn();
     const deleteConversation = vi.fn();
+    const pinConversation = vi.fn();
 
     render(
       <ConversationList
@@ -42,6 +49,7 @@ describe('ConversationList', () => {
         selectConversation={selectConversation}
         renameConversation={renameConversation}
         deleteConversation={deleteConversation}
+        pinConversation={pinConversation}
       />,
     );
 
@@ -60,7 +68,34 @@ describe('ConversationList', () => {
     await user.click(screen.getByRole('button', { name: /save/i }));
     expect(renameConversation).toHaveBeenCalledWith('a', 'Renamed support');
 
+    await user.click(screen.getByRole('button', { name: /pin support chat/i }));
+    expect(pinConversation).toHaveBeenCalledWith('a', true);
+
     await user.click(screen.getByRole('button', { name: /delete roadmap ideas/i }));
     expect(deleteConversation).toHaveBeenCalledWith('b');
+  });
+
+  it('renders pinned conversations first, toggles pinning, and formats timestamps', async () => {
+    const user = userEvent.setup();
+    const pinConversation = vi.fn();
+    const pinnedConversations: ConversationSummary[] = [
+      { id: 'old-pin', title: 'Pinned old', createdAt: '2026-05-14T00:00:00.000Z', updatedAt: '2026-05-14T00:02:00.000Z', pinned: true },
+      { id: 'new-unpinned', title: 'Unpinned new', createdAt: '2026-05-14T00:00:00.000Z', updatedAt: '2026-05-14T00:05:00.000Z' },
+      { id: 'new-pin', title: 'Pinned new', createdAt: '2026-05-14T00:00:00.000Z', updatedAt: '2026-05-14T00:04:00.000Z', pinned: true },
+    ];
+
+    const { container } = render(
+      <ConversationList
+        conversations={pinnedConversations}
+        pinConversation={pinConversation}
+        formatTimestamp={(timestamp, conversation) => `${conversation.title} at ${timestamp.slice(11, 16)}`}
+      />,
+    );
+
+    expect(renderedTitles(container)).toEqual(['★Pinned new', '★Pinned old', 'Unpinned new']);
+    expect(screen.getByText('Pinned new at 00:04')).toHaveAttribute('dateTime', '2026-05-14T00:04:00.000Z');
+
+    await user.click(screen.getByRole('button', { name: /unpin pinned new/i }));
+    expect(pinConversation).toHaveBeenCalledWith('new-pin', false);
   });
 });
