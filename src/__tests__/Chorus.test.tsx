@@ -422,6 +422,41 @@ describe('Chorus', () => {
     expect(screen.queryByText('Stay concise.')).not.toBeInTheDocument();
   });
 
+  it('exposes systemPrompt to onSend helpers without prepending it to messages', async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn<OnSend>(async () => undefined);
+
+    render(<Chorus onSend={onSend} systemPrompt="Stay concise." minAssistantDelayMs={0} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'hi');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
+    const [, messages, helpers] = onSend.mock.calls[0];
+    expect(messages).toEqual([expect.objectContaining({ role: 'user', text: 'hi' })]);
+    expect(messages.some(message => message.role === 'system')).toBe(false);
+    expect(helpers.systemPrompt).toBe('Stay concise.');
+    expect(screen.queryByText('Stay concise.')).not.toBeInTheDocument();
+  });
+
+  it('uses transport instead of onSend when both are provided', async () => {
+    const user = userEvent.setup();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const transport = vi.fn<Transport>(async () => sseResponse([]));
+    const onSend = vi.fn<OnSend>(async () => undefined);
+
+    render(<Chorus transport={transport} onSend={onSend} systemPrompt="Stay concise." minAssistantDelayMs={0} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'hi');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    await waitFor(() => expect(transport).toHaveBeenCalledOnce());
+    expect(onSend).not.toHaveBeenCalled();
+    expect(transport.mock.calls[0][1][0]).toEqual({ id: 'chorus-system-prompt', role: 'system', text: 'Stay concise.' });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('`transport` takes precedence'));
+    warn.mockRestore();
+  });
+
   it('warns in development when an update produces duplicate message IDs', async () => {
     const user = userEvent.setup();
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);

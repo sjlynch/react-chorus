@@ -34,6 +34,36 @@ export { createFetchSSETransport } from './streaming/createFetchSSETransport';
 export type { FetchSSETransportOptions } from './streaming/createFetchSSETransport';
 export { createWebSocketTransport } from './streaming/createWebSocketTransport';
 export type { WebSocketTransportOptions } from './streaming/createWebSocketTransport';
+export {
+  formatAnthropicMessagesBody,
+  formatGeminiGenerateContentBody,
+  formatOpenAIChatCompletionsBody,
+  formatOpenAIResponsesBody,
+  toAnthropicMessages,
+  toAnthropicMessagesBody,
+  toGeminiContents,
+  toGeminiGenerateContentBody,
+  toOpenAIChatCompletionsBody,
+  toOpenAIChatCompletionsMessages,
+  toOpenAIResponsesBody,
+  toOpenAIResponsesInput,
+} from './providerRequests';
+export type {
+  AnthropicMessage,
+  AnthropicMessagesBody,
+  AnthropicMessagesBodyOptions,
+  GeminiContent,
+  GeminiGenerateContentBody,
+  GeminiGenerateContentBodyOptions,
+  OpenAIChatCompletionsBody,
+  OpenAIChatCompletionsBodyOptions,
+  OpenAIChatCompletionsMessage,
+  OpenAIResponsesBody,
+  OpenAIResponsesBodyOptions,
+  OpenAIResponsesInputItem,
+  ProviderMappingOptions,
+  UnsupportedAttachmentText,
+} from './providerRequests';
 export { Markdown } from './components/Markdown';
 export type { MarkdownProps, MarkdownSanitizer } from './components/Markdown';
 

@@ -17,6 +17,11 @@
       "import": "./dist/react-chorus-headless.es.js",
       "require": "./dist/react-chorus-headless.cjs"
     },
+    "./provider-requests": {
+      "types": "./dist/types/providerRequests.d.ts",
+      "import": "./dist/provider-requests.es.js",
+      "require": "./dist/provider-requests.cjs"
+    },
     "./styles.css": {
       "types": "./dist/styles.css.d.ts",
       "default": "./dist/styles.css"

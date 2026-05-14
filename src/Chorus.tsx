@@ -81,7 +81,7 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
   showClearButton?: boolean;
   showJumpToBottomButton?: boolean;
   suggestedPrompts?: string[];
-  /** Hidden system prompt prepended to transport request history. */
+  /** Hidden system prompt. Prepended to transport history; exposed as helpers.systemPrompt on the onSend path. */
   systemPrompt?: string;
   /** Simple path: URL or Transport function. */
   transport?: string | Transport<TMeta>;

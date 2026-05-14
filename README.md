@@ -33,13 +33,23 @@ import 'react-chorus/styles.css';
 ## Quick start
 
 ```tsx
-import { Chorus } from 'react-chorus';
+import 'react-chorus/styles.css';
+import { Chorus, type ChorusOnSend } from 'react-chorus';
+
+const demoReply: ChorusOnSend = async (_text, _messages, helpers) => {
+  for (const chunk of ['This quick start runs ', 'without a backend ', 'and still streams.']) {
+    if (helpers.signal.aborted) return;
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    helpers.appendAssistant(chunk);
+  }
+  helpers.finalizeAssistant();
+};
 
 export default function App() {
   return (
     <div style={{ height: '100dvh' }}>
       <Chorus
-        transport="/api/chat"
+        onSend={demoReply}
         suggestedPrompts={[
           'Summarize today’s release notes',
           'Draft a customer support reply',
@@ -51,7 +61,24 @@ export default function App() {
 }
 ```
 
-Chorus fills its parent, so give the wrapper an explicit height (for example `100dvh`) to make the transcript scroll internally. When the transcript is empty, `suggestedPrompts` renders starter buttons that fill and focus the composer without auto-sending. Chorus POSTs `{ prompt: string, history: Message[] }` to the URL and streams the SSE response into the assistant message automatically. `history` already includes the current user turn; `prompt` is a convenience copy of that latest user text.
+Chorus fills its parent, so give the wrapper an explicit height (for example `100dvh`) to make the transcript scroll internally. When the transcript is empty, `suggestedPrompts` renders starter buttons that fill and focus the composer without auto-sending.
+
+For production, point Chorus at your server-side SSE proxy:
+
+```tsx
+import 'react-chorus/styles.css';
+import { Chorus } from 'react-chorus';
+
+export default function App() {
+  return (
+    <div style={{ height: '100dvh' }}>
+      <Chorus transport="/api/chat" connector="openai" />
+    </div>
+  );
+}
+```
+
+`transport` requires an endpoint that returns Server-Sent Events. Chorus POSTs `{ prompt: string, history: Message[] }` to the URL and streams the SSE response into the assistant message automatically. `history` already includes the current user turn; `prompt` is a convenience copy of that latest user text. See the [Minimal Express + OpenAI backend](#minimal-express--openai-backend) or the runnable [`examples/with-openai`](./examples/with-openai) app for a server-safe proxy.
 
 ## Two usage paths
 
@@ -83,7 +110,7 @@ Seed an uncontrolled chat with a welcome message and include a hidden system pro
 />
 ```
 
-`systemPrompt` is prepended to the request `history` sent through the `transport` prop but is not rendered in the transcript.
+`systemPrompt` is prepended to the request `history` sent through the `transport` prop but is not rendered in the transcript. On the advanced `onSend` path, Chorus does not mutate the `messages` array; read the same value from `helpers.systemPrompt` when building your custom request.
 
 ### Advanced path — `onSend` callback
 
@@ -101,8 +128,13 @@ export default function App() {
   const [messages, setMessages] = React.useState<Message[]>([]);
   const { send, sending } = useChorusStream(transport, { connector: 'openai' });
 
-  const handleSend: ChorusOnSend = (text, msgs, { appendAssistant, finalizeAssistant, signal }) =>
-    send(text, msgs, { onChunk: appendAssistant, onDone: finalizeAssistant }, signal);
+  const handleSend: ChorusOnSend = (text, msgs, { appendAssistant, finalizeAssistant, signal, systemPrompt }) => {
+    const requestMessages = systemPrompt && !msgs.some((m) => m.role === 'system')
+      ? [{ id: 'system', role: 'system' as const, text: systemPrompt }, ...msgs]
+      : msgs;
+
+    return send(text, requestMessages, { onChunk: appendAssistant, onDone: finalizeAssistant }, signal);
+  };
 
   return (
     <div style={{ height: '100dvh' }}>
@@ -111,6 +143,7 @@ export default function App() {
         onChange={setMessages}
         sending={sending}
         onSend={handleSend}
+        systemPrompt="You are a concise engineering assistant."
         placeholder="Type a message…"
         suggestedPrompts={['Explain this code path', 'Write a regression test', 'Summarize the latest logs']}
         errorMessage="The assistant could not complete that request. Please try again."
@@ -123,7 +156,7 @@ export default function App() {
 
 `createFetchSSETransport(url)` posts `{ prompt, history }` to your endpoint and reads the response as a Server-Sent Events stream. `history` includes the latest user message, so backend examples should map `history` directly instead of appending `prompt` again. Pass a `formatBody` option to customise the request shape for OpenAI, FastAPI, FormData uploads, or any other backend. The transport sets `Content-Type: application/json` only for its default JSON body; custom serializers should set JSON headers themselves and FormData/Blob/URLSearchParams are not forced to JSON. The `openai` connector parses the standard selected `choices[0]` text, reasoning, and tool-call delta shapes.
 
-For reusable callbacks, import `ChorusOnSend<TMeta>` or the lower-level `ChorusSendHelpers` type instead of duplicating the helper shape. `ChorusOnSend<TMeta>` preserves your `Message<TMeta>.metadata` type through the `messages` argument and returned assistant message.
+For reusable callbacks, import `ChorusOnSend<TMeta>` or the lower-level `ChorusSendHelpers` type instead of duplicating the helper shape. `ChorusOnSend<TMeta>` preserves your `Message<TMeta>.metadata` type through the `messages` argument and returned assistant message. If you pass `systemPrompt`, read it from `helpers.systemPrompt`; Chorus intentionally does not prepend it to `messages` on the `onSend` path so custom senders that already manage system messages do not get duplicates.
 
 For a non-streaming client, `onSend` may return a complete assistant `Message`. Chorus appends it after the user message (and after `minAssistantDelayMs`):
 
@@ -150,55 +183,24 @@ For a non-streaming client, `onSend` may return a complete assistant `Message`. 
 // server/index.js
 import express from 'express';
 import OpenAI from 'openai';
+import { toOpenAIChatCompletionsBody } from 'react-chorus/provider-requests';
 
 const app = express();
-const openai = new OpenAI(); // reads OPENAI_API_KEY from env
+const openai = new OpenAI(); // reads OPENAI_API_KEY from env; keep this server-side
 
 app.use(express.json({ limit: '10mb' })); // data URL image attachments can be large
 
-function toOpenAIMessage(m) {
-  if (!m || typeof m !== 'object') return null;
-  const text = typeof m.text === 'string' ? m.text : '';
-
-  if (m.role === 'system' || m.role === 'assistant') {
-    return text.trim() ? { role: m.role, content: text } : null;
-  }
-
-  if (m.role === 'user') {
-    const parts = [];
-    if (text.trim()) parts.push({ type: 'text', text });
-    for (const att of Array.isArray(m.attachments) ? m.attachments : []) {
-      if (att?.type?.startsWith('image/') && typeof att.data === 'string' && att.data.startsWith('data:')) {
-        parts.push({ type: 'image_url', image_url: { url: att.data } });
-      } else {
-        parts.push({ type: 'text', text: `[Unsupported attachment omitted: ${att?.name ?? 'attachment'}]` });
-      }
-    }
-    if (!parts.length) return null;
-    return parts.length === 1 && parts[0].type === 'text'
-      ? { role: 'user', content: parts[0].text }
-      : { role: 'user', content: parts };
-  }
-
-  if (m.role === 'tool' && m.toolCall) {
-    // Chorus tool messages do not include OpenAI's required tool_call_id.
-    // Preserve them as context instead of sending an invalid role: 'tool' item.
-    return { role: 'system', content: `Tool ${m.toolCall.name} result:\n${JSON.stringify(m.toolCall.output ?? m.text)}` };
-  }
-
-  return null;
-}
-
 app.post('/api/chat', async (req, res) => {
-  const { history = [] } = req.body;
-  const messages = Array.isArray(history) ? history.map(toOpenAIMessage).filter(Boolean) : [];
+  const history = Array.isArray(req.body?.history) ? req.body.history : [];
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('X-Accel-Buffering', 'no'); // avoid proxy buffering for SSE
 
   try {
-    const stream = await openai.chat.completions.create({ model: 'gpt-4o-mini', messages, stream: true });
+    const stream = await openai.chat.completions.create(
+      toOpenAIChatCompletionsBody(history, { model: 'gpt-4o-mini' }),
+    );
 
     for await (const chunk of stream) {
       res.write(`data: ${JSON.stringify(chunk)}\n\n`);
@@ -268,33 +270,25 @@ Each incoming WebSocket message is treated as one SSE payload, so the same conne
 ### Minimal Node.js `ws` + Claude backend
 
 ```js
-// server.js  —  npm install ws @anthropic-ai/sdk
+// server.js  —  npm install ws @anthropic-ai/sdk react-chorus
 import { WebSocketServer } from 'ws';
 import Anthropic from '@anthropic-ai/sdk';
+import { toAnthropicMessagesBody } from 'react-chorus/provider-requests';
 
 const wss = new WebSocketServer({ port: 8080 });
-const client = new Anthropic();
+const client = new Anthropic(); // reads ANTHROPIC_API_KEY from env; keep this server-side
 
 wss.on('connection', (ws) => {
   ws.on('message', async (raw) => {
     const { history = [] } = JSON.parse(raw.toString());
-    const system = history
-      .filter((m) => m.role === 'system' && m.text)
-      .map((m) => m.text)
-      .join('\n\n') || undefined;
-    const messages = history
-      .filter((m) => (m.role === 'user' || m.role === 'assistant') && m.text)
-      .map((m) => ({ role: m.role, content: m.text }));
-    // Tool messages and attachments need Anthropic content blocks/tool_result
-    // mapping. Do that explicitly instead of passing raw Chorus messages through.
 
     try {
-      const stream = await client.messages.stream({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 1024,
-        system,
-        messages,
-      });
+      const stream = await client.messages.stream(
+        toAnthropicMessagesBody(Array.isArray(history) ? history : [], {
+          model: 'claude-sonnet-4-6',
+          max_tokens: 1024,
+        }),
+      );
 
       // Forward raw Anthropic SDK events verbatim — the front-end
       // `anthropic` connector parses `content_block_delta` / `message_stop`
@@ -315,6 +309,36 @@ wss.on('connection', (ws) => {
 ```
 
 The front-end pairs this with `connector: 'anthropic'` (see the React snippet above) so it reads `content_block_delta` / `message_stop` events out of each WebSocket frame the same way it would over an SSE stream.
+
+## Provider request/body helpers
+
+Connectors parse provider streams on the way back; request helpers serialize Chorus `Message[]` on the way out. Use them on your server proxy (recommended) or as `createFetchSSETransport(..., { formatBody })` body formatters when posting to your own backend.
+
+```ts
+import {
+  formatAnthropicMessagesBody,
+  formatGeminiGenerateContentBody,
+  formatOpenAIChatCompletionsBody,
+  formatOpenAIResponsesBody,
+  toAnthropicMessagesBody,
+  toGeminiGenerateContentBody,
+  toOpenAIChatCompletionsBody,
+  toOpenAIResponsesBody,
+} from 'react-chorus/provider-requests';
+```
+
+These helpers are also re-exported from `react-chorus` for browser apps; the `react-chorus/provider-requests` subpath avoids loading React peer imports in server-only code.
+
+| Helper | Provider request shape | Notes |
+|--------|------------------------|-------|
+| `toOpenAIChatCompletionsBody(history, opts)` / `formatOpenAIChatCompletionsBody(opts)` | `{ model, messages, stream }` | Maps `system`/`user`/`assistant`, user image attachments to `image_url`, unsupported attachments to text notes, and `tool` messages with `metadata.openai.toolCallId` (or `metadata.tool_call_id`) to OpenAI `role: 'tool'`. Without a provider tool id, tool results become safe system context instead of invalid OpenAI messages. |
+| `toOpenAIResponsesBody(history, opts)` / `formatOpenAIResponsesBody(opts)` | `{ model, input, stream }` | Uses Responses `input_text` / `input_image` / `output_text` items and `function_call_output` when an OpenAI call id is present in metadata. |
+| `toAnthropicMessagesBody(history, opts)` / `formatAnthropicMessagesBody(opts)` | `{ model, max_tokens, system, messages, stream }` | Joins Chorus `system` messages into Anthropic's top-level `system`, maps data-URL images to base64 image blocks, and maps `metadata.anthropic.toolUseId` (or `metadata.tool_use_id`) to `tool_result`. |
+| `toGeminiGenerateContentBody(history, opts)` / `formatGeminiGenerateContentBody(opts)` | `{ systemInstruction, contents, ...opts }` | Maps `system` to `systemInstruction`, `assistant` to Gemini `model`, data-URL images to `inlineData`, uploaded file URLs/ids to `fileData`, and Chorus tool outputs to `functionResponse` parts when `toolCall.name` is available. |
+
+All helpers preserve extra provider options you pass (for example `model`, `max_tokens`, `generationConfig`, `tools`) and default OpenAI/Anthropic `stream` to `true`. They insert explicit text fallbacks for unsupported attachments so request mapping failures are visible to the model instead of silently dropping context. Override that text with `unsupportedAttachmentText` when needed.
+
+Keep provider API keys on the server. Browser code may use the `format*Body` helpers to post provider-shaped JSON to your own `/api/chat` proxy, but it should not call OpenAI, Anthropic, or Gemini directly with secret keys.
 
 ## Connectors
 
@@ -438,20 +462,17 @@ Example backend proxy (Express + `@google/generative-ai`):
 
 ```js
 import { GoogleGenerativeAI } from '@google/generative-ai';
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+import { toGeminiGenerateContentBody } from 'react-chorus/provider-requests';
+
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY); // keep this server-side
 
 app.post('/api/chat', async (req, res) => {
-  const { history = [] } = req.body;
+  const history = Array.isArray(req.body?.history) ? req.body.history : [];
   const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-  const contents = history
-    .filter((m) => (m.role === 'user' || m.role === 'assistant') && m.text)
-    .map((m) => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.text }] }));
-  // This text-only example filters system/tool messages. Map image attachments
-  // to Gemini inlineData/fileData parts explicitly before sending them.
 
   res.setHeader('Content-Type', 'text/event-stream');
   try {
-    const result = await model.generateContentStream({ contents });
+    const result = await model.generateContentStream(toGeminiGenerateContentBody(history));
     for await (const chunk of result.stream) {
       res.write(`data: ${JSON.stringify(chunk)}\n\n`);
     }
@@ -560,7 +581,7 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | Prop | Type | Default | Description |
 |------|------|---------|-------------|
 | `transport` | `string \| Transport<TMeta>` | — | Simple path: URL to POST to, or a custom Transport function. Chorus handles all streaming. |
-| `systemPrompt` | `string` | — | Transport-path convenience prop. Prepends a hidden `system` message to the request history for every send. |
+| `systemPrompt` | `string` | — | Hidden instruction for both send paths. With `transport`, Chorus prepends it as a `system` message in request history. With `onSend`, read it from `helpers.systemPrompt`; `messages` is left unchanged to avoid duplicates. |
 | `connector` | `Connector \| 'auto' \| 'openai' \| 'anthropic' \| 'gemini'` | `'auto'` | SSE connector used to parse the stream. `'auto'` detects OpenAI, Anthropic, and Gemini; pass an explicit name when the format is known. |
 | `onSend` | `(text, messages, helpers) => Message<TMeta> \| void \| Promise<Message<TMeta> \| void>` | — | Advanced path: called when the user submits a message. Use `helpers.appendAssistant`/`helpers.finalizeAssistant` to stream tokens, or return a complete assistant `Message` for non-streaming replies. |
 | `value` | `Message<TMeta>[]` | — | Controlled message list. Pair with `onChange`; Chorus renders this array as the source of truth. |
@@ -610,6 +631,7 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `appendAssistant(chunk)` | Append a text chunk to the current assistant message. Chunks are buffered until `minAssistantDelayMs` has elapsed before the first token is shown. |
 | `finalizeAssistant()` | Mark the assistant message complete. If first-token chunks are still buffered, completion waits until they flush. |
 | `signal` | `AbortSignal` — aborted when the user hits Stop. |
+| `systemPrompt` | The optional `systemPrompt` prop. Use it when serializing custom `onSend` requests; Chorus does not insert it into the `messages` argument on this path. |
 
 Call `finalizeAssistant()` when your custom stream is done. In development, Chorus warns if `onSend` appended chunks and then resolved without finalizing; it will still flush those chunks and reset the sending state so the UI cannot get stuck in Stop mode.
 
@@ -899,17 +921,33 @@ Returns a `Transport` that POSTs to `url` and reads the response as a Server-Sen
 | *(any `RequestInit` field)* | | | Forwarded to `fetch` (e.g. `headers`, `credentials`) |
 
 ```ts
-// OpenAI-compatible backend
-const transport = createFetchSSETransport('/api/chat', {
+import { createFetchSSETransport } from 'react-chorus';
+import {
+  formatAnthropicMessagesBody,
+  formatGeminiGenerateContentBody,
+  formatOpenAIChatCompletionsBody,
+} from 'react-chorus/provider-requests';
+
+// Provider-shaped JSON to your own server proxy (do not expose API keys in browser code)
+const openAITransport = createFetchSSETransport('/api/openai-chat', {
   headers: { 'Content-Type': 'application/json' },
-  formatBody: (text, history) =>
-    JSON.stringify({ model: 'gpt-4o', messages: history, stream: true }),
+  formatBody: formatOpenAIChatCompletionsBody({ model: 'gpt-4o-mini' }),
+});
+
+const anthropicTransport = createFetchSSETransport('/api/anthropic-chat', {
+  headers: { 'Content-Type': 'application/json' },
+  formatBody: formatAnthropicMessagesBody({ model: 'claude-sonnet-4-6', max_tokens: 1024 }),
+});
+
+const geminiTransport = createFetchSSETransport('/api/gemini-chat', {
+  headers: { 'Content-Type': 'application/json' },
+  formatBody: formatGeminiGenerateContentBody({ generationConfig: { temperature: 0.2 } }),
 });
 
 // FastAPI / LangChain backend
 const transport = createFetchSSETransport('/api/chat', {
   headers: { 'Content-Type': 'application/json' },
-  formatBody: (text, history) => JSON.stringify({ messages: history }),
+  formatBody: (_text, history) => JSON.stringify({ messages: history }),
 });
 
 // Multipart upload or custom body: no forced JSON Content-Type
@@ -959,9 +997,9 @@ const myConnector: Connector = {
 
 Recommended patterns:
 
-- Keep the default transport body (`{ prompt, history }`) and map `history` safely on your server, as the OpenAI example above does.
-- Or pass `createFetchSSETransport('/api/chat', { formatBody, headers })` and serialize to your backend's exact schema on the client.
-- Filter unsupported roles/attachments explicitly, or convert them to safe text context, instead of passing invalid provider messages through.
+- Keep the default transport body (`{ prompt, history }`) and map `history` safely on your server with `toOpenAIChatCompletionsBody`, `toAnthropicMessagesBody`, or `toGeminiGenerateContentBody`.
+- Or pass a `format*Body` helper to `createFetchSSETransport('/api/chat', { formatBody, headers })` when your own backend expects a provider-shaped JSON body.
+- Keep API keys in that backend proxy. Client-side `formatBody` is for shaping requests to your server, not for calling provider APIs directly with secrets.
 
 ### End-to-end image attachment recipe (OpenAI Chat Completions)
 
@@ -976,41 +1014,35 @@ Front end: enable image selection, paste, and drop. The `accept` prop makes `<Ch
 />
 ```
 
-Backend: map only user image attachments to OpenAI `image_url` content parts, while keeping text-only turns as simple strings.
+Backend: use the OpenAI helper. It maps user image attachments to `image_url` parts and inserts a text note for unsupported attachments.
 
 ```js
-function toOpenAIUserMessage(m) {
-  const parts = [];
-  if (m.text?.trim()) parts.push({ type: 'text', text: m.text });
-  for (const att of Array.isArray(m.attachments) ? m.attachments : []) {
-    if (att?.type?.startsWith('image/') && att.data?.startsWith('data:')) {
-      parts.push({ type: 'image_url', image_url: { url: att.data } });
-    } else {
-      parts.push({ type: 'text', text: `[Unsupported attachment omitted: ${att?.name ?? 'attachment'}]` });
-    }
-  }
-  if (!parts.length) return null;
-  return parts.length === 1 && parts[0].type === 'text'
-    ? { role: 'user', content: parts[0].text }
-    : { role: 'user', content: parts };
-}
+import { toOpenAIChatCompletionsBody } from 'react-chorus/provider-requests';
+
+const history = Array.isArray(req.body?.history) ? req.body.history : [];
+const body = toOpenAIChatCompletionsBody(history, { model: 'gpt-4o-mini' });
+const stream = await openai.chat.completions.create(body);
 ```
 
-The runnable [`examples/with-openai`](./examples/with-openai) app includes this mapping and sets `express.json({ limit: '10mb' })` so data URL images are accepted by the proxy.
+The runnable [`examples/with-openai`](./examples/with-openai) app uses this helper and sets `express.json({ limit: '10mb' })` so data URL images are accepted by the proxy.
 
 ### Tool-call history recipe
 
-Chorus displays tool steps as `role: 'tool'` with `message.toolCall`, but those messages are not a provider-neutral wire format. If your provider requires IDs (for example OpenAI `tool_call_id`) and paired assistant tool-call records, store those provider IDs in `metadata` and serialize them explicitly in `formatBody` or on your server. If you only need the model to see the result, convert the tool message to safe text context:
+Chorus displays tool steps as `role: 'tool'` with `message.toolCall`, but provider APIs need provider-specific identifiers to replay tool results exactly. Store those IDs in `message.metadata` when you have them:
 
-```js
-function toolMessageToContext(m) {
-  if (m.role !== 'tool' || !m.toolCall) return null;
-  return {
-    role: 'system',
-    content: `Tool ${m.toolCall.name} result:\n${JSON.stringify(m.toolCall.output ?? m.text)}`,
-  };
+```ts
+{
+  role: 'tool',
+  text: '',
+  toolCall: { name: 'search', output: { results: [] } },
+  metadata: {
+    openai: { toolCallId: 'call_abc' },       // OpenAI Chat/Responses
+    anthropic: { toolUseId: 'toolu_abc' },    // Anthropic Messages
+  },
 }
 ```
+
+The request helpers use those IDs for OpenAI `tool_call_id` / Responses `call_id` and Anthropic `tool_result.tool_use_id`. When an ID is missing, they convert the tool result to safe text context instead of emitting an invalid provider-specific tool message. Gemini function responses use `toolCall.name` and the output payload.
 
 ## Tool calls and agent steps
 

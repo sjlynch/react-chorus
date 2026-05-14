@@ -30,6 +30,7 @@ export default defineConfig({
       entry: {
         'react-chorus': path.resolve(__dirname, 'src/index.ts'),
         'react-chorus-headless': path.resolve(__dirname, 'src/headless.ts'),
+        'provider-requests': path.resolve(__dirname, 'src/providerRequests.ts'),
       },
       name: 'ReactChorus',
       fileName: (format, entryName) => `${entryName}.${format === 'cjs' ? 'cjs' : 'es.js'}`,

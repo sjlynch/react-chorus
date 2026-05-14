@@ -11,6 +11,8 @@ export interface ChorusSendHelpers {
   appendAssistant: (chunk: string) => void;
   finalizeAssistant: () => void;
   signal: AbortSignal;
+  /** The optional `systemPrompt` prop. Use it in custom `onSend` request mapping; it is not prepended to `messages` on the onSend path. */
+  systemPrompt?: string;
 }
 
 export type ChorusOnSend<TMeta = Record<string, unknown>> = (
@@ -434,13 +436,13 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     const autoFinalizeAssistant = () => requestFinalize(true);
 
     return {
-      helpers: { appendAssistant, finalizeAssistant, signal },
+      helpers: { appendAssistant, finalizeAssistant, signal, systemPrompt: systemPromptRef.current },
       hasPendingAssistant: () => bufferedChunks.length > 0 || finalizeRequested,
       hasAssistantOutput: () => hasStartedAssistantRef.current || bufferedChunks.length > 0,
       wasFinalizeRequested: () => finalizeCalled,
       autoFinalizeAssistant,
     };
-  }, [appendAssistantNow, completeActiveSession, isAssistantSessionActive, minAssistantDelayMsRef]);
+  }, [appendAssistantNow, completeActiveSession, isAssistantSessionActive, minAssistantDelayMsRef, systemPromptRef]);
 
   const resolvedTransport = React.useMemo((): Transport<TMeta> => {
     if (typeof transport === 'string') return createFetchSSETransport<TMeta>(transport);
@@ -583,7 +585,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
         if (controllerRef.current === controller && !isAssistantSessionActive(sessionId)) controllerRef.current = null;
       }
     })();
-  }, [appendAssistantNow, appendAssistantReasoningNow, appendToolDeltaNow, beginAssistantSession, clearStreamError, completeActiveSession, createSessionHelpers, doStream, fallbackErrorMessageRef, historyForTransport, invalidateAssistantSession, isAssistantSessionActive, minAssistantDelayMsRef, messagesRef, onSendRef, rememberSubmittedTurn, removePendingAssistant, resetStreamState, safeOnError, setInternalSending, setTransportBusy, showStreamError, transportRef, updateSessionMessages]);
+  }, [appendAssistantNow, appendAssistantReasoningNow, appendToolDeltaNow, beginAssistantSession, clearStreamError, completeActiveSession, createSessionHelpers, doStream, historyForTransport, invalidateAssistantSession, isAssistantSessionActive, minAssistantDelayMsRef, messagesRef, onSendRef, rememberSubmittedTurn, removePendingAssistant, resetStreamState, safeOnError, setInternalSending, setTransportBusy, showStreamError, transportRef, updateSessionMessages]);
 
   const send = React.useCallback((rawText: string, attachments: Attachment[] = []) => {
     if (isBusy()) return false;
