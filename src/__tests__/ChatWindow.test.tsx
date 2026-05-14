@@ -114,6 +114,14 @@ describe('ChatWindow', () => {
     expect(screen.queryByRole('button', { name: /retry/i })).not.toBeInTheDocument();
   });
 
+  it('renders reasoning in a collapsed details block above the message bubble', () => {
+    render(<ChatWindow messages={[{ ...ASST_MSG, reasoning: 'private plan' }]} />);
+    const summary = screen.getByText('Reasoning');
+    expect(summary.closest('details')).not.toHaveAttribute('open');
+    expect(screen.getByText('private plan')).toBeInTheDocument();
+    expect(screen.getByText('Hi there')).toBeInTheDocument();
+  });
+
   it('renders a ToolCallBlock for tool messages', () => {
     render(<ChatWindow messages={[TOOL_MSG]} showSystemMessages />);
     expect(screen.getByText('search')).toBeInTheDocument();

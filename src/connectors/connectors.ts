@@ -4,16 +4,16 @@ import { anthropicConnector } from './anthropic';
 import { geminiConnector } from './gemini';
 import { extractErrorMessage } from './error';
 
-export type { Connector, ConnectorResult } from './openai';
+export type { Connector, ConnectorResult, ConnectorToolDelta } from './openai';
 export { anthropicConnector } from './anthropic';
 export { geminiConnector } from './gemini';
 
 /**
  * Auto connector:
  * - If data === "[DONE]" => { done: true }
- * - If data parses as JSON and looks like OpenAI Chat => extract delta.content
- * - If data parses as JSON and looks like Anthropic Messages => extract text delta
- * - If data parses as JSON and looks like Gemini => extract candidates text
+ * - If data parses as JSON and looks like OpenAI Chat/Responses => extract text/reasoning/tool deltas
+ * - If data parses as JSON and looks like Anthropic Messages => extract text/reasoning/tool deltas
+ * - If data parses as JSON and looks like Gemini => extract candidates text/reasoning/tool deltas
  * - Else, treat as plain text
  */
 export const autoConnector: Connector = {
@@ -26,6 +26,7 @@ export const autoConnector: Connector = {
       if (error) return { error };
       if (obj && Array.isArray(obj.choices)) return openaiConnector.extract(data);
       if (obj && Array.isArray(obj.candidates)) return geminiConnector.extract(data);
+      if (obj && typeof obj.type === 'string' && obj.type.startsWith('response.')) return openaiConnector.extract(data);
       if (obj && typeof obj.type === 'string') return anthropicConnector.extract(data);
     } catch {}
     return data ? { text: data } : null;

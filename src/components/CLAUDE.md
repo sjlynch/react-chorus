@@ -18,7 +18,7 @@ Standalone wrapper that applies palette CSS variables via `styleVarsFromPalette`
 
 ## `MessageBubble`
 
-Exported from `ChatWindow.tsx` for use in `renderMessage` render-props. It wraps the default role class and bubble, renders `message.attachments` (image previews or file names), and passes text through `Markdown`. The built-in `MessageRow` uses the same attachment renderer and adds edit/regenerate/delete actions.
+Exported from `ChatWindow.tsx` for use in `renderMessage` render-props. It wraps the default role class and bubble, renders `message.reasoning` as a collapsed details block, renders `message.attachments` (image previews or file names), and passes text through `Markdown`. The built-in `MessageRow` uses the same attachment/reasoning renderer and adds edit/regenerate/delete actions.
 
 ## `ToolCallBlock`
 

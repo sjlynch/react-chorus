@@ -32,7 +32,7 @@ export type { WebSocketTransportOptions } from './streaming/createWebSocketTrans
 export { Markdown } from './components/Markdown';
 export type { MarkdownProps, MarkdownSanitizer } from './components/Markdown';
 
-export type { Connector, ConnectorResult } from './connectors/connectors';
+export type { Connector, ConnectorResult, ConnectorToolDelta } from './connectors/connectors';
 export { getConnector, autoConnector } from './connectors/connectors';
 export { openaiConnector } from './connectors/openai';
 export { anthropicConnector } from './connectors/anthropic';

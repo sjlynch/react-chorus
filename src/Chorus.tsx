@@ -9,7 +9,7 @@ import { createFetchSSETransport } from './streaming/createFetchSSETransport';
 import { useChorusPersistence } from './hooks/useChorusPersistence';
 import { useChorusMessages } from './hooks/useChorusMessages';
 import { useRAFQueue } from './hooks/useRAFQueue';
-import type { Connector } from './connectors/connectors';
+import type { Connector, ConnectorToolDelta } from './connectors/connectors';
 import type { MarkdownSanitizer } from './components/Markdown';
 import { isChorusDevMode } from './utils/devMode';
 
@@ -30,6 +30,7 @@ export type ChorusOnSend<TMeta = Record<string, unknown>> = (
 
 const DEFAULT_MIN_ASSISTANT_DELAY_MS = 300;
 const DEFAULT_PERSISTENCE_WRITE_DEBOUNCE_MS = 80;
+const DEFAULT_CHORUS_HIDDEN_ROLES: Role[] = ['system'];
 let fallbackMessageIdCounter = 0;
 
 function createMessageId() {
@@ -115,6 +116,7 @@ export interface ChorusProps<TMeta = Record<string, unknown>> {
   markdownProps?: MessageMarkdownProps;
   /** Convenience alias for markdownProps.sanitizer. Takes precedence when both are provided. */
   markdownSanitizer?: MarkdownSanitizer;
+  /** Message roles hidden by <Chorus>. Defaults to ['system'] so connector tool calls are visible. */
   hiddenRoles?: Role[];
   className?: string;
   style?: React.CSSProperties;
@@ -196,6 +198,8 @@ export function Chorus<TMeta = Record<string, unknown>>({
   const controllerRef = React.useRef<AbortController | null>(null);
   const hasStartedAssistantRef = React.useRef(false);
   const pendingAssistantIdRef = React.useRef<string | null>(null);
+  const pendingToolMessageIdsRef = React.useRef<Set<string>>(new Set());
+  const toolMessageIdsByDeltaIdRef = React.useRef<Map<string, string>>(new Map());
   const activeSessionIdRef = React.useRef(0);
 
   const beginAssistantSession = () => {
@@ -216,36 +220,85 @@ export function Chorus<TMeta = Record<string, unknown>>({
     lastSubmittedTurnRef.current = { text, history: cloneHistoryForRetry(history) };
   };
 
-  const { enqueue: enqueueChunk, cancelPending } = useRAFQueue((add) => {
+  const { enqueue: enqueueTextChunk, cancelPending: cancelPendingText } = useRAFQueue((add) => {
     const id = pendingAssistantIdRef.current;
     if (!id) return;
     updateMsgs(prev => prev.map(m => m.id === id ? { ...m, text: m.text + add } : m));
   });
 
-  const startAssistant = (firstChunk: string) => {
+  const { enqueue: enqueueReasoningChunk, cancelPending: cancelPendingReasoning } = useRAFQueue((add) => {
+    const id = pendingAssistantIdRef.current;
+    if (!id) return;
+    updateMsgs(prev => prev.map(m => m.id === id ? { ...m, reasoning: `${m.reasoning ?? ''}${add}` } : m));
+  });
+
+  const cancelPendingAssistantQueues = (flushPending: boolean) => {
+    cancelPendingText(flushPending);
+    cancelPendingReasoning(flushPending);
+  };
+
+  const startAssistant = ({ text = '', reasoning }: { text?: string; reasoning?: string }) => {
     const id = createMessageId();
     pendingAssistantIdRef.current = id;
     hasStartedAssistantRef.current = true;
-    cancelPending(false);
-    updateMsgs(prev => prev.concat({ id, role: 'assistant', text: firstChunk }));
-    onChunkRef.current?.(firstChunk, id);
+    cancelPendingAssistantQueues(false);
+    updateMsgs(prev => prev.concat({ id, role: 'assistant', text, reasoning }));
+    if (text) onChunkRef.current?.(text, id);
   };
 
   const appendAssistantNow = (chunk: string) => {
     if (!chunk) return;
-    if (!hasStartedAssistantRef.current) startAssistant(chunk);
+    if (!hasStartedAssistantRef.current) startAssistant({ text: chunk });
     else {
-      enqueueChunk(chunk);
+      enqueueTextChunk(chunk);
       const id = pendingAssistantIdRef.current;
       if (id) onChunkRef.current?.(chunk, id);
     }
   };
 
+  const appendAssistantReasoningNow = (chunk: string) => {
+    if (!chunk) return;
+    if (!hasStartedAssistantRef.current) startAssistant({ reasoning: chunk });
+    else enqueueReasoningChunk(chunk);
+  };
+
+  const toolMessageIdForDelta = (deltaId: string) => {
+    const existing = toolMessageIdsByDeltaIdRef.current.get(deltaId);
+    if (existing) return existing;
+    const next = createMessageId();
+    toolMessageIdsByDeltaIdRef.current.set(deltaId, next);
+    return next;
+  };
+
+  const appendToolDeltaNow = (delta: ConnectorToolDelta) => {
+    const messageId = toolMessageIdForDelta(delta.id);
+    pendingToolMessageIdsRef.current.add(messageId);
+    updateMsgs(prev => {
+      const idx = prev.findIndex(m => m.id === messageId);
+      const existing = idx >= 0 ? prev[idx] : undefined;
+      const toolCall = {
+        ...(existing?.toolCall ?? {}),
+        name: delta.name ?? existing?.toolCall?.name ?? delta.id,
+      };
+      if (Object.prototype.hasOwnProperty.call(delta, 'input')) toolCall.input = delta.input;
+      if (Object.prototype.hasOwnProperty.call(delta, 'output')) toolCall.output = delta.output;
+
+      const nextMessage: Message<TMeta> = existing
+        ? { ...existing, role: 'tool', text: existing.text ?? '', toolCall }
+        : { id: messageId, role: 'tool', text: '', toolCall };
+
+      if (idx >= 0) return prev.map(m => m.id === messageId ? nextMessage : m);
+      return prev.concat(nextMessage);
+    });
+  };
+
   const finalizeAssistantNow = () => {
-    cancelPending(true);
+    cancelPendingAssistantQueues(true);
     persisted.flush();
     hasStartedAssistantRef.current = false;
     pendingAssistantIdRef.current = null;
+    pendingToolMessageIdsRef.current.clear();
+    toolMessageIdsByDeltaIdRef.current.clear();
     setInternalSending(false);
   };
 
@@ -355,13 +408,18 @@ export function Chorus<TMeta = Record<string, unknown>>({
   const resetStreamState = () => {
     hasStartedAssistantRef.current = false;
     pendingAssistantIdRef.current = null;
-    cancelPending(false);
+    pendingToolMessageIdsRef.current.clear();
+    toolMessageIdsByDeltaIdRef.current.clear();
+    cancelPendingAssistantQueues(false);
   };
 
   const removePendingAssistant = () => {
     const partialId = pendingAssistantIdRef.current;
+    const toolMessageIds = new Set(pendingToolMessageIdsRef.current);
     resetStreamState();
-    if (partialId) updateMsgs(prev => prev.filter(m => m.id !== partialId), { flushPersistence: true });
+    if (partialId || toolMessageIds.size > 0) {
+      updateMsgs(prev => prev.filter(m => m.id !== partialId && !toolMessageIds.has(m.id)), { flushPersistence: true });
+    }
   };
 
   const historyForTransport = (history: Message<TMeta>[]): Message<TMeta>[] => (
@@ -381,6 +439,12 @@ export function Chorus<TMeta = Record<string, unknown>>({
       doStream(text, historyForTransport(history), {
         onChunk: (chunk) => {
           if (isAssistantSessionActive(sessionId)) appendAssistantNow(chunk);
+        },
+        onReasoning: (chunk) => {
+          if (isAssistantSessionActive(sessionId)) appendAssistantReasoningNow(chunk);
+        },
+        onToolDelta: (delta) => {
+          if (isAssistantSessionActive(sessionId)) appendToolDeltaNow(delta);
         },
         onDone: () => {
           completeActiveSession(sessionId);
@@ -527,7 +591,7 @@ export function Chorus<TMeta = Record<string, unknown>>({
 
   return (
     <div className={["chorus", className].filter(Boolean).join(" ")} style={{ ...paletteVars, ...style }}>
-      <ChatWindow<TMeta> messages={msgs} typing={!!(transport || onSend) && sending && !hasStartedAssistantRef.current} codeTheme={codeBlockTheme} headless={headless} renderMessage={renderMessage} markdownProps={markdownProps} markdownSanitizer={markdownSanitizer} hiddenRoles={hiddenRoles} streamingMessageId={activeStreamingMessageId} onEdit={(transport || onSend) ? handleEdit : undefined} onRegenerate={(transport || onSend) ? handleRegenerate : undefined} onDelete={handleDelete} error={streamError} onRetry={retry} />
+      <ChatWindow<TMeta> messages={msgs} typing={!!(transport || onSend) && sending && !hasStartedAssistantRef.current} codeTheme={codeBlockTheme} headless={headless} renderMessage={renderMessage} markdownProps={markdownProps} markdownSanitizer={markdownSanitizer} hiddenRoles={hiddenRoles ?? DEFAULT_CHORUS_HIDDEN_ROLES} streamingMessageId={activeStreamingMessageId} onEdit={(transport || onSend) ? handleEdit : undefined} onRegenerate={(transport || onSend) ? handleRegenerate : undefined} onDelete={handleDelete} error={streamError} onRetry={retry} />
       {showClearButton && (
         <div className="chorus-clear-row">
           <button type="button" className="chorus-clear-btn" onClick={clearMessages} disabled={!sending && msgs.length === 0}>

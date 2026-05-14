@@ -52,11 +52,17 @@
 .chorus-attachment-remove { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; padding: 0; border: none; background: rgba(255,255,255,.15); color: var(--chorus-input-text, #f3f4f6); border-radius: 9999px; cursor: pointer; flex-shrink: 0; }
 .chorus-attachment-remove:hover { background: rgba(255,255,255,.3); }
 
-/* Message content wrapper (stacks bubble + actions vertically) */
+/* Message content wrapper (stacks reasoning + bubble + actions vertically) */
 .chorus-msg-content { display: flex; flex-direction: column; max-width: 80%; }
 .chorus-user .chorus-msg-content { align-items: flex-end; }
 .chorus-assistant .chorus-msg-content { align-items: flex-start; }
 .chorus-msg-content .chorus-bubble { max-width: 100%; }
+
+/* Collapsed reasoning/thinking trace */
+.chorus-reasoning { max-width: 100%; margin: 0 0 6px; border: 1px solid var(--chorus-border, #2a2a2a); border-radius: 8px; background: var(--chorus-chat-bg, #161616); color: var(--chorus-chat-text, #f3f4f6); overflow: hidden; }
+.chorus-reasoning-summary { padding: 6px 10px; color: var(--chorus-action-text, #a3a3a3); font-size: 12px; font-weight: 600; cursor: pointer; user-select: none; }
+.chorus-reasoning-summary:hover { color: var(--chorus-action-hover-text, #eee); background: var(--chorus-action-hover-bg, rgba(255,255,255,0.15)); }
+.chorus-reasoning-body { padding: 8px 10px; border-top: 1px solid var(--chorus-border, #2a2a2a); font-size: 13px; line-height: 1.4; }
 
 /* Hover-revealed action buttons */
 .chorus-actions { display: flex; gap: 2px; padding: 3px 2px 0; opacity: 0; pointer-events: none; transition: opacity 0.15s; }

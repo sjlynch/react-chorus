@@ -40,6 +40,7 @@ export interface Message<TMeta = Record<string, unknown>> {
   id: string;
   role: Role;
   text: string;
+  reasoning?: string;
   attachments?: Attachment[];
   metadata?: TMeta;
   toolCall?: ToolCall;
