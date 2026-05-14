@@ -67,6 +67,21 @@ describe('createWebSocketTransport', () => {
     expect(events).toEqual(['open', 'close:1000:done']);
   });
 
+  it('rejects when the socket closes before it opens and still calls onClose', async () => {
+    const events: string[] = [];
+    const transport = createWebSocketTransport('wss://api.example.com/chat', {
+      onClose: (code, reason) => events.push(`close:${code}:${reason}`),
+    });
+
+    const promise = transport('hello', [], new AbortController().signal);
+    const ws = MockWebSocket.instances[0];
+
+    ws.emitClose(1006, 'handshake failed');
+
+    await expect(promise).rejects.toThrow(/code 1006: handshake failed/);
+    expect(events).toEqual(['close:1006:handshake failed']);
+  });
+
   it('calls onError in addition to rejecting the transport', async () => {
     const errorEvent = new Event('error');
     const events: string[] = [];

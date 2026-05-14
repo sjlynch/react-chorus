@@ -33,6 +33,8 @@ export default function App() {
         sending={sending}
         placeholder="Type a message and press Enter…"
         accept="image/*"
+        errorMessage="The OpenAI example could not complete that request. Please try again."
+        onError={(error) => console.error(error)}
       />
     </div>
   );

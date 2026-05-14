@@ -34,6 +34,11 @@ export default function App() {
       <Chorus
         onSend={handleSend}
         placeholder="Type a message and press Enter…"
+        persistenceKey="react-chorus-basic-example"
+        showClearButton
+        errorMessage="The demo reply failed. Please try again."
+        onError={(error) => console.error(error)}
+        onPersistenceError={(error) => console.error('Unable to save chat history', error)}
       />
     </div>
   );

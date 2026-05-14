@@ -2,6 +2,7 @@ import React from 'react';
 import type { ConnectorName, Message } from '../types';
 import { getConnector, type Connector, type ConnectorToolDelta } from '../connectors/connectors';
 import { useLatestRef } from './useLatestRef';
+import { isChorusDevMode } from '../utils/devMode';
 
 export interface SendCallbacks {
   /**
@@ -15,7 +16,7 @@ export interface SendCallbacks {
   onReasoning?: (chunk: string) => void;
   /** Receives accumulated tool-call deltas when the connector exposes them. */
   onToolDelta?: (toolDelta: ConnectorToolDelta) => void;
-  onDone?: () => void;
+  onDone?: (response?: Response) => void;
   onError?: (err: Error) => void;
   /** Minimum elapsed time from send() start before delivering the first chunk. */
   minDelayMs?: number;
@@ -84,6 +85,71 @@ function createToolDeltaAccumulator() {
     pending.set(delta.id, next);
     return next;
   };
+}
+
+function toError(error: unknown): Error {
+  if (error instanceof Error) return error;
+  if (typeof DOMException !== 'undefined' && error instanceof DOMException) return error as Error;
+  return new Error(String(error));
+}
+
+const MAX_ERROR_BODY_CHARS = 2048;
+const ERROR_BODY_READ_TIMEOUT_MS = 250;
+
+async function readErrorBodySnippet(res: Response, maxChars = MAX_ERROR_BODY_CHARS): Promise<{ text: string; truncated: boolean }> {
+  const clone = res.clone();
+  if (!clone.body) return { text: '', truncated: false };
+
+  const reader = clone.body.getReader();
+  const decoder = new TextDecoder();
+  let text = '';
+  let truncated = false;
+  let timedOut = false;
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+
+  const readWithTimeout = () => new Promise<ReadableStreamReadResult<Uint8Array>>((resolve, reject) => {
+    timeout = setTimeout(() => {
+      timedOut = true;
+      reject(new Error('Timed out reading error response body'));
+    }, ERROR_BODY_READ_TIMEOUT_MS);
+
+    reader.read().then(resolve, reject).finally(() => {
+      if (timeout !== null) clearTimeout(timeout);
+      timeout = null;
+    });
+  });
+
+  try {
+    while (text.length < maxChars) {
+      const { value, done } = await readWithTimeout();
+      if (done) {
+        text += decoder.decode();
+        return { text, truncated };
+      }
+
+      text += decoder.decode(value, { stream: true });
+      if (text.length >= maxChars) {
+        truncated = true;
+        text = text.slice(0, maxChars);
+        break;
+      }
+    }
+  } catch {
+    truncated = truncated || timedOut;
+  } finally {
+    reader.cancel().catch(() => undefined);
+    if (timeout !== null) clearTimeout(timeout);
+  }
+
+  return { text, truncated };
+}
+
+async function createHttpResponseError(res: Response) {
+  const statusText = res.statusText ? ` ${res.statusText}` : '';
+  const { text, truncated } = await readErrorBodySnippet(res);
+  const detail = text.trim();
+  const bodyDetail = detail ? `: ${detail}${truncated ? '…' : ''}` : '';
+  return new Error(`HTTP ${res.status}${statusText}${bodyDetail}`);
 }
 
 function createDelayedChunkEmitter(cb: SendCallbacks, startedAt: number, signal: AbortSignal) {
@@ -312,8 +378,20 @@ export function useChorusStream<TMeta = Record<string, unknown>>(transport: Tran
   const isSendingRef = React.useRef(false);
   const controllerRef = React.useRef<AbortController | null>(null);
 
+  React.useEffect(() => () => {
+    controllerRef.current?.abort();
+  }, []);
+
   const send = React.useCallback(async (text: string, history: Message<TMeta>[], cb: SendCallbacks, externalSignal?: AbortSignal) => {
-    if (isSendingRef.current) return;
+    if (externalSignal?.aborted) return;
+
+    if (isSendingRef.current) {
+      if (isChorusDevMode()) {
+        console.warn('[Chorus] useChorusStream.send was called while a previous send is still in flight; the new call was ignored. Wait for the previous send to finish (await the promise) or call abort() before re-sending.');
+      }
+      return;
+    }
+
     isSendingRef.current = true;
 
     let controller: AbortController | null = null;
@@ -332,18 +410,12 @@ export function useChorusStream<TMeta = Record<string, unknown>>(transport: Tran
     const startedAt = Date.now();
     const delayedChunks = createDelayedChunkEmitter(cb, startedAt, signal);
     const accumulateToolDelta = createToolDeltaAccumulator();
-
-    const finish = async () => {
-      await delayedChunks.flushBeforeDone();
-      cb.onDone?.();
-      isSendingRef.current = false;
-      setSending(false);
-      if (controllerRef.current === controller) controllerRef.current = null;
-    };
+    let errorToThrow: unknown;
 
     try {
       const res = await transportRef.current(text, history, signal);
-      if (!res.ok || !res.body) throw new Error(`Bad response (${res.status}) or missing body`);
+      if (!res.ok) throw await createHttpResponseError(res);
+      if (!res.body) throw new Error(`Response body was missing for HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''}`);
 
       await readSSEStream(res, (payload) => {
         const out = connectorRef.current.extract(payload);
@@ -361,14 +433,30 @@ export function useChorusStream<TMeta = Record<string, unknown>>(transport: Tran
         if (out.done) return false;
       });
 
-      await finish();
+      await delayedChunks.flushBeforeDone();
+      try {
+        cb.onDone?.(res);
+      } catch (callbackError) {
+        errorToThrow = callbackError;
+      }
     } catch (e: unknown) {
       delayedChunks.cancel();
-      if (!isAbortError(e)) cb.onError?.(e instanceof Error ? e : new Error(String(e)));
+      if (!isAbortError(e)) {
+        const error = toError(e);
+        try {
+          cb.onError?.(error);
+        } catch (callbackError) {
+          errorToThrow = callbackError;
+        }
+        if (errorToThrow === undefined) errorToThrow = error;
+      }
+    } finally {
       isSendingRef.current = false;
       setSending(false);
       if (controllerRef.current === controller) controllerRef.current = null;
     }
+
+    if (errorToThrow !== undefined) throw errorToThrow;
   }, [transportRef, connectorRef]);
 
   const abort = React.useCallback(() => { controllerRef.current?.abort(); }, []);

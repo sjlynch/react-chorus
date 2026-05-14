@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render } from '@testing-library/react';
+import { cleanup, render, waitFor } from '@testing-library/react';
 import { ChatWindow } from '../components/ChatWindow';
+import { Chorus } from '../Chorus';
 import type { Message } from '../types';
 
 const USER_MSG: Message = { id: 'u1', role: 'user', text: 'Hello' };
@@ -46,5 +47,48 @@ describe('development warnings', () => {
 
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('showSystemMessages'));
+  });
+
+  it('warns when both messages and initialMessages are provided', async () => {
+    process.env.NODE_ENV = 'development';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    render(<Chorus messages={[]} initialMessages={[]} />);
+
+    await waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining('Both `messages` and `initialMessages`')));
+  });
+
+  it('warns when connector is provided for an onSend-only flow', async () => {
+    process.env.NODE_ENV = 'development';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    render(<Chorus connector="anthropic" onSend={vi.fn()} />);
+
+    await waitFor(() => expect(warn).toHaveBeenCalledWith('[Chorus] `connector` only applies to the `transport` send path. With `onSend` you parse the response yourself — pass `connector` into the `useChorusStream` call inside your `onSend` if you need it.'));
+  });
+
+  it('warns when value is provided without onChange', async () => {
+    process.env.NODE_ENV = 'development';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    render(<Chorus value={[]} />);
+
+    await waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining('`value` makes Chorus controlled')));
+  });
+
+  it('warns when an unknown connector string falls back to auto', async () => {
+    process.env.NODE_ENV = 'development';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    render(
+      <Chorus
+        transport={async () => new Response(null, { status: 200 })}
+        // @ts-expect-error exercising JavaScript callers with a misspelled string
+        connector="openia"
+      />,
+    );
+
+    await waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining('Unknown connector `openia`')));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('auto, openai, anthropic, gemini'));
   });
 });
