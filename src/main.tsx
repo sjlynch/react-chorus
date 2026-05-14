@@ -3,29 +3,44 @@ import ReactDOM from 'react-dom/client';
 import { Chorus } from './Chorus';
 import type { Attachment, Message } from './types';
 
-const DEMO_CHUNK_DELAY_MS = 45;
+const DEMO_CHUNK_DELAY_MS = 28;
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
 
 const initialMessages: Message[] = [
   {
     id: 'welcome',
     role: 'assistant',
-    text: 'Welcome to the react-chorus playground. Try a streaming prompt, paste or drop an image, then use the message actions to edit, retry, regenerate, or delete turns.',
+    text: "**Welcome to react-chorus.** This playground simulates a streaming assistant locally — no backend needed.\n\nTry asking anything, paste an image, or use the message actions on hover.",
   },
 ];
 
-const REPLIES = [
-  'Here is a streamed response from the local playground transport.',
-  'react-chorus keeps the drop-in defaults while exposing composable hooks and components.',
-  'This demo is running without a backend; swap in transport="/api/chat" when you are ready for production streaming.',
-  'Attachments are validated in the composer and travel with the current user turn.',
+const SUGGESTED_PROMPTS = [
+  'Show me a code sample',
+  'Summarize the key features',
+  'Give me a markdown demo',
 ];
 
+const REPLIES: Record<string, string> = {
+  code: "Here's a tiny streaming setup:\n\n```tsx\nimport { Chorus } from 'react-chorus';\nimport 'react-chorus/styles.css';\n\nexport default function App() {\n  return <Chorus transport=\"/api/chat\" />;\n}\n```\n\nDrop in `transport`, ship a chat UI.",
+  summary: "react-chorus gives you:\n\n- **Streaming UI** with token-by-token rendering and stop/retry\n- **Composable hooks** for transport, persistence, and message state\n- **Attachments** via paste, drop, or file picker\n- **Themeable defaults** through palette variables\n- **Markdown + code highlighting** out of the box",
+  markdown: "Here's a quick markdown tour:\n\n### Lists work\n\n1. Numbered items\n2. *Italic* and **bold** text\n3. `inline code`\n\n> Block quotes render cleanly too.\n\n```js\nconst chunks = await response.body.getReader().read();\n```\n\nThat's the gist.",
+  default: "react-chorus keeps the drop-in defaults while exposing composable hooks and components. Swap in `transport=\"/api/chat\"` when you're ready for real streaming.",
+};
+
+function pickReply(prompt: string): string {
+  const lower = prompt.toLowerCase();
+  if (lower.includes('code') || lower.includes('sample')) return REPLIES.code;
+  if (lower.includes('summar') || lower.includes('feature')) return REPLIES.summary;
+  if (lower.includes('markdown')) return REPLIES.markdown;
+  return REPLIES.default;
+}
+
 async function streamWords(reply: string, appendAssistant: (chunk: string) => void, signal: AbortSignal) {
-  for (const word of reply.split(' ')) {
+  const tokens = reply.match(/\S+\s*|\s+/g) ?? [reply];
+  for (const token of tokens) {
     if (signal.aborted) break;
     await new Promise((r) => setTimeout(r, DEMO_CHUNK_DELAY_MS));
-    appendAssistant(`${word} `);
+    appendAssistant(token);
   }
 }
 
@@ -44,31 +59,13 @@ async function handleSend(
 ) {
   const currentTurn = messages[messages.length - 1];
   const attachments: Attachment[] = currentTurn?.attachments ?? [];
-  const attachmentSummary = attachments.length
-    ? ` I received ${attachments.length} attachment${attachments.length === 1 ? '' : 's'}: ${attachments.map(att => att.name).join(', ')}.`
+  const reply = pickReply(text);
+  const attachmentNote = attachments.length
+    ? `\n\n_Received ${attachments.length} attachment${attachments.length === 1 ? '' : 's'}: ${attachments.map(a => a.name).join(', ')}._`
     : '';
-  const base = REPLIES[Math.floor(Math.random() * REPLIES.length)];
-  const promptSummary = text ? ` You said: “${text}”.` : ' You sent an attachment-only turn.';
 
-  await streamWords(`${base}${promptSummary}${attachmentSummary}`, appendAssistant, signal);
+  await streamWords(`${reply}${attachmentNote}`, appendAssistant, signal);
   finalizeAssistant();
-}
-
-function FeaturePanel() {
-  return (
-    <aside className="playground-panel" aria-label="Playground features">
-      <p className="playground-eyebrow">Built-in demo</p>
-      <h1>react-chorus playground</h1>
-      <p className="playground-copy">A branded first look at the batteries-included chat shell.</p>
-      <ul>
-        <li>Token-by-token streaming with stop/retry</li>
-        <li>Paste, drop, or pick image attachments</li>
-        <li>Edit/regenerate/delete message actions</li>
-        <li>Themeable defaults via palette variables</li>
-      </ul>
-      <p className="playground-note">No backend required — this page simulates an assistant stream locally.</p>
-    </aside>
-  );
 }
 
 function App() {
@@ -77,58 +74,192 @@ function App() {
   return (
     <>
       <style>{`
-        :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+        :root {
+          color-scheme: dark;
+          font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        }
         * { box-sizing: border-box; }
-        body { margin: 0; background: #0f0f10; color: #f4f4f5; }
-        .playground-shell { min-height: 100dvh; display: grid; grid-template-columns: minmax(260px, 380px) minmax(0, 1fr); gap: 24px; padding: 24px; background: radial-gradient(circle at top left, rgba(237, 115, 46, 0.24), transparent 38%), #0f0f10; }
-        .playground-panel { align-self: stretch; border: 1px solid rgba(255,255,255,0.10); border-radius: 24px; padding: 28px; background: rgba(22,22,22,0.82); box-shadow: 0 20px 60px rgba(0,0,0,0.35); }
-        .playground-eyebrow { margin: 0 0 12px; color: #ed732e; font-size: 12px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; }
-        .playground-panel h1 { margin: 0; font-size: clamp(32px, 5vw, 52px); line-height: 0.95; letter-spacing: -0.05em; }
-        .playground-copy { color: #d4d4d8; line-height: 1.6; }
-        .playground-panel ul { display: grid; gap: 10px; margin: 24px 0; padding: 0; list-style: none; }
-        .playground-panel li { padding: 10px 12px; border-radius: 12px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08); }
-        .playground-note { color: #a1a1aa; font-size: 13px; line-height: 1.5; }
-        .playground-chat-card { min-height: 0; display: flex; flex-direction: column; border: 1px solid rgba(255,255,255,0.10); border-radius: 24px; padding: 16px; background: rgba(18,18,19,0.72); box-shadow: 0 20px 60px rgba(0,0,0,0.35); }
-        .playground-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 4px 14px; color: #a1a1aa; font-size: 13px; }
-        .playground-brand { display: inline-flex; align-items: center; gap: 10px; color: #fafafa; font-weight: 700; }
-        .playground-logo { width: 28px; height: 28px; border-radius: 9px; display: inline-grid; place-items: center; background: #ed732e; color: #fff; }
-        .playground-notice { color: #fbbf24; }
-        @media (max-width: 860px) { .playground-shell { grid-template-columns: 1fr; padding: 14px; } .playground-panel { padding: 20px; } .playground-chat-card { height: 70dvh; } }
-        @media (min-width: 861px) { .playground-chat-card { height: calc(100dvh - 48px); } }
+        body {
+          margin: 0;
+          background:
+            radial-gradient(1100px 600px at 85% -10%, rgba(237,115,46,0.10), transparent 60%),
+            radial-gradient(900px 500px at -10% 110%, rgba(99,102,241,0.08), transparent 60%),
+            #0b0b0d;
+          color: #e7e7ea;
+          min-height: 100dvh;
+        }
+        .pg-shell {
+          min-height: 100dvh;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          padding: 28px 20px;
+          gap: 20px;
+        }
+        .pg-header {
+          width: 100%;
+          max-width: 820px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+        }
+        .pg-brand {
+          display: inline-flex;
+          align-items: center;
+          gap: 10px;
+          font-weight: 600;
+          font-size: 15px;
+          color: #fafafa;
+        }
+        .pg-logo {
+          width: 28px;
+          height: 28px;
+          border-radius: 8px;
+          display: inline-grid;
+          place-items: center;
+          background: linear-gradient(135deg, #ed732e, #c95e22);
+          color: #fff;
+          font-size: 14px;
+          box-shadow: 0 6px 16px rgba(237,115,46,0.35);
+        }
+        .pg-tag {
+          font-size: 12px;
+          color: #a1a1aa;
+          padding: 4px 10px;
+          border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 9999px;
+          background: rgba(255,255,255,0.02);
+        }
+        .pg-card {
+          width: 100%;
+          max-width: 820px;
+          flex: 1 1 auto;
+          min-height: 0;
+          display: flex;
+          flex-direction: column;
+          background: rgba(20,20,22,0.78);
+          border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 18px;
+          box-shadow: 0 30px 80px rgba(0,0,0,0.45);
+          padding: 14px;
+          backdrop-filter: blur(6px);
+        }
+        .pg-card-head {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 4px 6px 10px;
+          font-size: 12px;
+          color: #a1a1aa;
+        }
+        .pg-status {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+        }
+        .pg-status-dot {
+          width: 7px;
+          height: 7px;
+          border-radius: 9999px;
+          background: #22c55e;
+          box-shadow: 0 0 8px rgba(34,197,94,0.6);
+        }
+        .pg-notice {
+          color: #fbbf24;
+        }
+        .pg-chorus-wrap {
+          flex: 1 1 auto;
+          min-height: 0;
+          display: flex;
+        }
+        .pg-chorus-wrap > .chorus {
+          flex: 1 1 auto;
+          min-height: 0;
+        }
+        .pg-card .chorus-window {
+          border: 0;
+          padding: 4px 4px 0;
+        }
+        .pg-card .chorus-input {
+          margin-top: 8px;
+        }
+        .pg-card .chorus-input-row textarea {
+          border-radius: 14px;
+          min-height: 48px;
+        }
+        .pg-footer {
+          font-size: 12px;
+          color: #71717a;
+          text-align: center;
+        }
+        .pg-footer a {
+          color: #a1a1aa;
+          text-decoration: none;
+          border-bottom: 1px dashed rgba(255,255,255,0.18);
+        }
+        .pg-footer a:hover { color: #fafafa; }
+        @media (max-width: 640px) {
+          .pg-shell { padding: 16px 12px; }
+          .pg-card { padding: 10px; border-radius: 14px; }
+        }
       `}</style>
-      <main className="playground-shell">
-        <FeaturePanel />
-        <section className="playground-chat-card" aria-label="react-chorus demo chat">
-          <div className="playground-toolbar">
-            <span className="playground-brand"><span className="playground-logo">✦</span> react-chorus</span>
-            <span className="playground-notice">{attachmentNotice ?? `Images ≤ ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)} MB, up to 3`}</span>
+      <main className="pg-shell">
+        <header className="pg-header">
+          <span className="pg-brand">
+            <span className="pg-logo">✦</span>
+            react-chorus
+          </span>
+          <span className="pg-tag">Live playground</span>
+        </header>
+        <section className="pg-card" aria-label="react-chorus demo chat">
+          <div className="pg-card-head">
+            <span className="pg-status">
+              <span className="pg-status-dot" aria-hidden="true" />
+              Streaming locally
+            </span>
+            <span className={attachmentNotice ? 'pg-notice' : undefined}>
+              {attachmentNotice ?? `Images ≤ ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)} MB, up to 3`}
+            </span>
           </div>
-          <Chorus
-            onSend={handleSend}
-            initialMessages={initialMessages}
-            placeholder="Ask about react-chorus, or paste/drop an image…"
-            accept="image/*"
-            maxAttachmentBytes={MAX_IMAGE_BYTES}
-            maxAttachments={3}
-            onAttachmentError={(error) => {
-              setAttachmentNotice(error.message);
-              window.setTimeout(() => setAttachmentNotice(null), 4000);
-            }}
-            palette={{
-              chatBg: '#161616',
-              chatText: '#f4f4f5',
-              assistantBubbleBg: '#ed732e',
-              assistantBorder: '#c95e22',
-              userBubbleBg: '#f4f4f5',
-              userText: '#111111',
-              inputBg: '#101011',
-              inputBorder: '#3f3f46',
-              sendButtonBg: '#ed732e',
-              sendButtonText: '#ffffff',
-              focusRing: 'rgba(237,115,46,0.28)',
-            }}
-          />
+          <div className="pg-chorus-wrap">
+            <Chorus
+              onSend={handleSend}
+              initialMessages={initialMessages}
+              suggestedPrompts={SUGGESTED_PROMPTS}
+              placeholder="Ask react-chorus anything, or paste/drop an image…"
+              accept="image/*"
+              maxAttachmentBytes={MAX_IMAGE_BYTES}
+              maxAttachments={3}
+              onAttachmentError={(error) => {
+                setAttachmentNotice(error.message);
+                window.setTimeout(() => setAttachmentNotice(null), 4000);
+              }}
+              palette={{
+                chatBg: 'transparent',
+                chatText: '#e7e7ea',
+                assistantBubbleBg: 'rgba(255,255,255,0.05)',
+                assistantBorder: 'rgba(255,255,255,0.08)',
+                assistantText: '#f4f4f5',
+                userBubbleBg: '#ed732e',
+                userBorder: '#c95e22',
+                userText: '#ffffff',
+                inputBg: 'rgba(255,255,255,0.04)',
+                inputBorder: 'rgba(255,255,255,0.10)',
+                inputText: '#f4f4f5',
+                sendButtonBg: '#ed732e',
+                sendButtonText: '#ffffff',
+                focusRing: 'rgba(237,115,46,0.30)',
+                border: 'rgba(255,255,255,0.06)',
+              }}
+            />
+          </div>
         </section>
+        <p className="pg-footer">
+          <a href="https://github.com/sjlynch/react-chorus" target="_blank" rel="noreferrer">View on GitHub</a>
+          {' · '}
+          <a href="https://www.npmjs.com/package/react-chorus" target="_blank" rel="noreferrer">npm</a>
+        </p>
       </main>
     </>
   );

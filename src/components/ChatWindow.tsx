@@ -167,7 +167,6 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
   const shouldAutoScrollRef = React.useRef(true);
 
   React.useImperativeHandle(ref, () => windowRef.current!);
-  const scrollRafRef = React.useRef<number | null>(null);
   const activityKey = React.useMemo(() => visibleActivityKey(visible, typing, streamingMessageId, error), [visible, typing, streamingMessageId, error]);
   const previousActivityKeyRef = React.useRef(activityKey);
   const [hasUnreadActivity, setHasUnreadActivity] = React.useState(false);
@@ -175,10 +174,8 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
 
   const scrollToBottom = React.useCallback(() => {
     const el = windowRef.current;
-    if (typeof bottomRef.current?.scrollIntoView === 'function') {
-      bottomRef.current.scrollIntoView({ block: 'end' });
-    }
-    if (el) el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
     shouldAutoScrollRef.current = true;
     setIsAutoScrollPaused(false);
     setHasUnreadActivity(false);
@@ -206,29 +203,12 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
     previousActivityKeyRef.current = activityKey;
   }, [activityKey]);
 
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     if (!shouldAutoScrollRef.current) return;
-
-    const runScrollToBottom = () => {
-      scrollRafRef.current = null;
-      if (!shouldAutoScrollRef.current) return;
-      scrollToBottom();
-    };
-
-    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
-      if (scrollRafRef.current != null) return;
-      scrollRafRef.current = window.requestAnimationFrame(runScrollToBottom);
-      return;
-    }
-
-    runScrollToBottom();
-  }, [visible, typing, error, streamingMessageId, scrollToBottom]);
-
-  React.useEffect(() => () => {
-    if (scrollRafRef.current != null && typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {
-      window.cancelAnimationFrame(scrollRafRef.current);
-    }
-  }, []);
+    const el = windowRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [activityKey]);
 
   const hasEmptyTranscript = visible.length === 0 && !typing;
   const suggestedPromptList = suggestedPrompts ?? [];
