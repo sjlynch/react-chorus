@@ -7,7 +7,7 @@ export { ToolCallBlock } from './components/ToolCallBlock';
 export { Chorus } from './Chorus';
 export { ChorusTheme } from './components/ChorusTheme';
 export type { Palette } from './components/ChorusTheme';
-export type { ChorusOnSend, ChorusProps, ChorusSendHelpers } from './Chorus';
+export type { ChorusFinishContext, ChorusOnFinish, ChorusOnSend, ChorusProps, ChorusRef, ChorusSendHelpers } from './Chorus';
 
 export type { Message } from './types';
 export type {

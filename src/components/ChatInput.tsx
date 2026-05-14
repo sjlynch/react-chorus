@@ -11,7 +11,7 @@ import type {
 
 const MAX_HEIGHT = 160;
 
-export interface ChatInputProps {
+export interface ChatInputProps extends Omit<React.HTMLAttributes<HTMLDivElement>, 'onChange'> {
   value: string;
   onChange: (v: string) => void;
   onSend: (attachments: Attachment[]) => void;
@@ -108,7 +108,7 @@ function filesFromTransfer(transfer: DataTransfer) {
     .filter((file): file is File => file !== null);
 }
 
-export function ChatInput({
+export const ChatInput = React.forwardRef<HTMLDivElement, ChatInputProps>(function ChatInput({
   value,
   onChange,
   onSend,
@@ -120,9 +120,18 @@ export function ChatInput({
   maxAttachments,
   onAttachmentError,
   uploadAttachment,
-}: ChatInputProps) {
+  className,
+  style,
+  onPaste: onPasteProp,
+  onDragEnter: onDragEnterProp,
+  onDragOver: onDragOverProp,
+  onDragLeave: onDragLeaveProp,
+  onDrop: onDropProp,
+  ...rest
+}: ChatInputProps, ref) {
   const [attachments, setAttachments] = React.useState<Attachment[]>([]);
   const [draggingFiles, setDraggingFiles] = React.useState(false);
+  const rootRef = React.useRef<HTMLDivElement>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const attachmentsRef = React.useRef(attachments);
@@ -131,6 +140,17 @@ export function ChatInput({
   React.useEffect(() => {
     attachmentsRef.current = attachments;
   }, [attachments]);
+
+  React.useImperativeHandle(ref, () => {
+    const root = rootRef.current!;
+    const focusTextarea = () => textareaRef.current?.focus();
+    try {
+      Object.defineProperty(root, 'focus', { value: focusTextarea, configurable: true });
+    } catch {
+      root.focus = focusTextarea;
+    }
+    return root;
+  });
 
   const canSend = value.trim().length > 0 || attachments.length > 0;
   const showAttachBtn = accept !== undefined;
@@ -309,14 +329,42 @@ export function ChatInput({
     return next;
   });
 
+  const handleRootPaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
+    onPasteProp?.(e);
+    if (!e.defaultPrevented) handlePaste(e);
+  };
+
+  const handleRootDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
+    onDragEnterProp?.(e);
+    if (!e.defaultPrevented) handleDragEnter(e);
+  };
+
+  const handleRootDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    onDragOverProp?.(e);
+    if (!e.defaultPrevented) handleDragOver(e);
+  };
+
+  const handleRootDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    onDragLeaveProp?.(e);
+    if (!e.defaultPrevented) handleDragLeave(e);
+  };
+
+  const handleRootDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    onDropProp?.(e);
+    if (!e.defaultPrevented) handleDrop(e);
+  };
+
   return (
     <div
-      className={`chorus-input${draggingFiles ? ' chorus-input--dragging' : ''}`}
-      onPaste={handlePaste}
-      onDragEnter={handleDragEnter}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
+      {...rest}
+      ref={rootRef}
+      className={[`chorus-input${draggingFiles ? ' chorus-input--dragging' : ''}`, className].filter(Boolean).join(' ')}
+      style={style}
+      onPaste={handleRootPaste}
+      onDragEnter={handleRootDragEnter}
+      onDragOver={handleRootDragOver}
+      onDragLeave={handleRootDragLeave}
+      onDrop={handleRootDrop}
     >
       {attachments.length > 0 && (
         <div className="chorus-attachments">
@@ -359,4 +407,4 @@ export function ChatInput({
       </div>
     </div>
   );
-}
+});

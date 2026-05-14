@@ -25,7 +25,7 @@ export interface RenderMessageContext<TMeta = Record<string, unknown>> {
   message: Message<TMeta>;
 }
 
-export interface ChatWindowProps<TMeta = Record<string, unknown>> {
+export interface ChatWindowProps<TMeta = Record<string, unknown>> extends React.HTMLAttributes<HTMLDivElement> {
   messages: Message<TMeta>[];
   typing?: boolean;
   codeTheme?: 'dark' | 'light';
@@ -48,7 +48,7 @@ export interface ChatWindowProps<TMeta = Record<string, unknown>> {
   streamingMessageId?: string | null;
 }
 
-export function ChatWindow<TMeta = Record<string, unknown>>({ messages, typing, codeTheme = 'dark', headless = false, renderMessage, markdownProps, markdownSanitizer, hiddenRoles, showSystemMessages, onEdit, onRegenerate, onDelete, error, onRetry, streamingMessageId }: ChatWindowProps<TMeta>) {
+function ChatWindowInner<TMeta = Record<string, unknown>>({ messages, typing, codeTheme = 'dark', headless = false, renderMessage, markdownProps, markdownSanitizer, hiddenRoles, showSystemMessages, onEdit, onRegenerate, onDelete, error, onRetry, streamingMessageId, className, style, ...rest }: ChatWindowProps<TMeta>, ref: React.ForwardedRef<HTMLDivElement>) {
   React.useEffect(() => {
     if (!isChorusDevMode() || showSystemMessages === undefined || didWarnShowSystemMessages) return;
     console.warn('[Chorus] `showSystemMessages` is deprecated. Use `hiddenRoles` instead (for example hiddenRoles={[\'system\']} to show tool messages while hiding system prompts).');
@@ -62,6 +62,8 @@ export function ChatWindow<TMeta = Record<string, unknown>>({ messages, typing, 
   const windowRef = React.useRef<HTMLDivElement>(null);
   const bottomRef = React.useRef<HTMLDivElement>(null);
   const shouldAutoScrollRef = React.useRef(true);
+
+  React.useImperativeHandle(ref, () => windowRef.current!);
   const scrollRafRef = React.useRef<number | null>(null);
 
   React.useEffect(() => {
@@ -103,13 +105,21 @@ export function ChatWindow<TMeta = Record<string, unknown>>({ messages, typing, 
   }, []);
 
   return (
-    <div className="chorus-window" ref={windowRef} role="log" aria-live="polite" aria-label="Chat transcript">
+    <div
+      className={["chorus-window", className].filter(Boolean).join(" ")}
+      style={style}
+      ref={windowRef}
+      role="log"
+      aria-live="polite"
+      aria-label="Chat transcript"
+      {...rest}
+    >
       {visible.map(m => {
         const isStreaming = m.id === streamingMessageId;
         const defaultRender = () => {
           if (m.role === 'tool' && m.toolCall) {
             return (
-              <div className="chorus-msg chorus-tool">
+              <div className="chorus-msg chorus-tool" data-chorus-message-id={m.id}>
                 <ToolCallBlock toolCall={m.toolCall} />
               </div>
             );
@@ -163,3 +173,9 @@ export function ChatWindow<TMeta = Record<string, unknown>>({ messages, typing, 
     </div>
   );
 }
+
+export const ChatWindow = React.forwardRef(ChatWindowInner) as <TMeta = Record<string, unknown>>(
+  props: ChatWindowProps<TMeta> & React.RefAttributes<HTMLDivElement>,
+) => React.ReactElement | null;
+
+(ChatWindow as React.NamedExoticComponent).displayName = 'ChatWindow';

@@ -73,7 +73,7 @@ function MessageBubbleLayout<TMeta = Record<string, unknown>>({ message, codeThe
 export function MessageBubble<TMeta = Record<string, unknown>>({ message, className, style, codeTheme = 'dark', headless, streaming = false, markdownProps, markdownSanitizer }: MessageBubbleProps<TMeta>) {
   const cls = ['chorus-msg', `chorus-${message.role}`, className].filter(Boolean).join(' ');
   return (
-    <div className={cls} style={style}>
+    <div className={cls} style={style} data-chorus-message-id={message.id}>
       <MessageBubbleLayout message={message} codeTheme={codeTheme} headless={headless ?? false} streaming={streaming} markdownProps={markdownProps} markdownSanitizer={markdownSanitizer} />
     </div>
   );
@@ -182,7 +182,7 @@ export function MessageRow<TMeta = Record<string, unknown>>({ m, codeTheme, head
   };
 
   return (
-    <div className={`chorus-msg chorus-${m.role}`}>
+    <div className={`chorus-msg chorus-${m.role}`} data-chorus-message-id={m.id}>
       {editing ? (
         <div className="chorus-edit-wrap">
           <textarea
