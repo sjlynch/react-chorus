@@ -181,6 +181,25 @@ describe('Chorus', () => {
     expect(screen.getByText('Welcome!')).toBeInTheDocument();
   });
 
+  it('fills and focuses the composer when a suggested prompt is clicked', async () => {
+    const user = userEvent.setup();
+
+    render(<Chorus suggestedPrompts={['Plan a launch checklist', 'Write a test plan']} />);
+
+    await user.click(screen.getByRole('button', { name: 'Plan a launch checklist' }));
+
+    const composer = screen.getByRole('textbox', { name: /send a message/i });
+    expect(composer).toHaveValue('Plan a launch checklist');
+    await waitFor(() => expect(composer).toHaveFocus());
+  });
+
+  it('prefers custom emptyState over suggestedPrompts', () => {
+    render(<Chorus emptyState={<div>Custom welcome</div>} suggestedPrompts={['Hidden prompt']} />);
+
+    expect(screen.getByText('Custom welcome')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Hidden prompt' })).not.toBeInTheDocument();
+  });
+
   it('renders and persists initialMessages when persistence storage is empty', async () => {
     const storage = makeSyncStorage();
     const welcome: Message[] = [{ id: 'welcome', role: 'assistant', text: 'Welcome!' }];
@@ -578,6 +597,40 @@ describe('Chorus', () => {
 
     expect(await screen.findByText('Something went wrong. Please try again.')).toBeInTheDocument();
     expect(screen.queryByText(/upstream boom/i)).not.toBeInTheDocument();
+  });
+
+  it('custom renderError receives error context and dismiss clears the banner without retrying', async () => {
+    const user = userEvent.setup();
+    const rawError = new Error('upstream boom');
+    const onSend = vi.fn(async () => {
+      throw rawError;
+    });
+    const renderError = vi.fn(({ error, rawError, dismiss }) => (
+      <div role="alert">
+        <span>{error}</span>
+        <span>{rawError?.message}</span>
+        <button type="button" onClick={dismiss}>Dismiss problem</button>
+      </div>
+    ));
+
+    render(<Chorus onSend={onSend} renderError={renderError} minAssistantDelayMs={0} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'trigger error');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Something went wrong. Please try again.');
+    expect(screen.getByRole('alert')).toHaveTextContent('upstream boom');
+    expect(renderError).toHaveBeenCalledWith(expect.objectContaining({
+      error: 'Something went wrong. Please try again.',
+      rawError,
+      retry: expect.any(Function),
+      dismiss: expect.any(Function),
+    }));
+
+    await user.click(screen.getByRole('button', { name: /dismiss problem/i }));
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(onSend).toHaveBeenCalledTimes(1);
   });
 
   it('onSend abort (user stop) does not invoke onError and shows no banner', async () => {

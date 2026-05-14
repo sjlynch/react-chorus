@@ -1,6 +1,6 @@
 import React from 'react';
 import './Chorus.css';
-import { ChatWindow, type MessageMarkdownProps, type RenderMessageContext } from './components/ChatWindow';
+import { ChatWindow, type MessageMarkdownProps, type RenderErrorContext, type RenderMessageContext } from './components/ChatWindow';
 import { ChatInput } from './components/ChatInput';
 import { styleVarsFromPalette, type Palette } from './components/ChorusTheme';
 import type { Attachment, AttachmentError, ConnectorName, Message, Role, StorageAdapter, UploadAttachment } from './types';
@@ -73,89 +73,100 @@ function findLastUserMessage<TMeta>(history: Message<TMeta>[]) {
 }
 
 export interface ChorusProps<TMeta = Record<string, unknown>> {
-  messages?: Message<TMeta>[];
-  /** Initial messages for uncontrolled mode. Useful for welcome messages. */
-  initialMessages?: Message<TMeta>[];
-  value?: Message<TMeta>[];
-  onChange?: (messages: Message<TMeta>[]) => void;
-  /** Simple path: URL or Transport function. */
-  transport?: string | Transport<TMeta>;
-  /** Hidden system prompt prepended to transport request history. */
-  systemPrompt?: string;
-  connector?: Connector | ConnectorName;
-  onSend?: ChorusOnSend<TMeta>;
-  placeholder?: string;
-  palette?: Palette;
-  sending?: boolean;
-  minAssistantDelayMs?: number;
-  errorMessage?: string;
-  onError?: (error: Error) => void;
-  onChunk?: (chunk: string, messageId: string) => void;
-  codeBlockTheme?: 'dark' | 'light';
   accept?: string;
-  maxAttachmentBytes?: number;
-  maxAttachments?: number;
-  onAttachmentError?: (error: AttachmentError) => void;
-  uploadAttachment?: UploadAttachment;
-  persistenceKey?: string;
-  persistenceStorage?: StorageAdapter;
-  /** Called when Chorus cannot write the transcript to persistenceStorage. */
-  onPersistenceError?: (error: Error) => void;
-  /** Show a built-in button that clears/resets the conversation. */
-  showClearButton?: boolean;
+  className?: string;
   /** Accessible/button label for the built-in clear action. */
   clearLabel?: string;
-  /** Called after the clear/reset action chooses the next message list. */
-  onClear?: (messages: Message<TMeta>[]) => void;
-  /** When clearing, restore initialMessages/messages instead of clearing to []. Defaults to false. */
-  resetToInitialMessages?: boolean;
+  codeBlockTheme?: 'dark' | 'light';
+  connector?: Connector | ConnectorName;
+  emptyState?: React.ReactNode;
+  errorMessage?: string;
   headless?: boolean;
-  renderMessage?: (message: Message<TMeta>, context: RenderMessageContext<TMeta>) => React.ReactNode;
+  hiddenRoles?: Role[];
+  /** Initial messages for uncontrolled mode. Useful for welcome messages. */
+  initialMessages?: Message<TMeta>[];
   /** Props forwarded to the built-in Markdown renderer for message text. */
   markdownProps?: MessageMarkdownProps;
   /** Convenience alias for markdownProps.sanitizer. Takes precedence when both are provided. */
   markdownSanitizer?: MarkdownSanitizer;
-  hiddenRoles?: Role[];
-  className?: string;
+  maxAttachmentBytes?: number;
+  maxAttachments?: number;
+  /** Render only the latest N visible messages. Typing and error rows still render outside this message window. */
+  maxRenderedMessages?: number;
+  messages?: Message<TMeta>[];
+  minAssistantDelayMs?: number;
+  onAttachmentError?: (error: AttachmentError) => void;
+  onChange?: (messages: Message<TMeta>[]) => void;
+  onChunk?: (chunk: string, messageId: string) => void;
+  /** Called after the clear/reset action chooses the next message list. */
+  onClear?: (messages: Message<TMeta>[]) => void;
+  onError?: (error: Error) => void;
+  /** Called when Chorus cannot write the transcript to persistenceStorage. */
+  onPersistenceError?: (error: Error) => void;
+  onSend?: ChorusOnSend<TMeta>;
+  palette?: Palette;
+  persistenceKey?: string;
+  persistenceStorage?: StorageAdapter;
+  placeholder?: string;
+  renderError?: (context: RenderErrorContext) => React.ReactNode;
+  renderMessage?: (message: Message<TMeta>, context: RenderMessageContext<TMeta>) => React.ReactNode;
+  /** When clearing, restore initialMessages/messages instead of clearing to []. Defaults to false. */
+  resetToInitialMessages?: boolean;
+  sending?: boolean;
+  /** Show a built-in button that clears/resets the conversation. */
+  showClearButton?: boolean;
+  showJumpToBottomButton?: boolean;
   style?: React.CSSProperties;
+  suggestedPrompts?: string[];
+  /** Hidden system prompt prepended to transport request history. */
+  systemPrompt?: string;
+  /** Simple path: URL or Transport function. */
+  transport?: string | Transport<TMeta>;
+  uploadAttachment?: UploadAttachment;
+  value?: Message<TMeta>[];
 }
 
 export function Chorus<TMeta = Record<string, unknown>>({
-  messages,
-  initialMessages,
-  value,
-  onChange,
-  transport,
-  systemPrompt,
-  connector,
-  onSend,
-  placeholder,
-  palette,
-  sending: sendingProp,
-  minAssistantDelayMs = DEFAULT_MIN_ASSISTANT_DELAY_MS,
-  errorMessage,
-  onError,
-  onChunk,
-  codeBlockTheme = 'dark',
   accept,
-  maxAttachmentBytes,
-  maxAttachments,
-  onAttachmentError,
-  uploadAttachment,
-  persistenceKey,
-  persistenceStorage,
-  onPersistenceError,
-  showClearButton = false,
+  className,
   clearLabel = 'Clear conversation',
-  onClear,
-  resetToInitialMessages = false,
+  codeBlockTheme = 'dark',
+  connector,
+  emptyState,
+  errorMessage,
   headless = false,
-  renderMessage,
+  hiddenRoles,
+  initialMessages,
   markdownProps,
   markdownSanitizer,
-  hiddenRoles,
-  className,
+  maxAttachmentBytes,
+  maxAttachments,
+  maxRenderedMessages,
+  messages,
+  minAssistantDelayMs = DEFAULT_MIN_ASSISTANT_DELAY_MS,
+  onAttachmentError,
+  onChange,
+  onChunk,
+  onClear,
+  onError,
+  onPersistenceError,
+  onSend,
+  palette,
+  persistenceKey,
+  persistenceStorage,
+  placeholder,
+  renderError,
+  renderMessage,
+  resetToInitialMessages = false,
+  sending: sendingProp,
+  showClearButton = false,
+  showJumpToBottomButton = !headless,
   style,
+  suggestedPrompts,
+  systemPrompt,
+  transport,
+  uploadAttachment,
+  value,
 }: ChorusProps<TMeta>) {
   const persisted = useChorusPersistence<TMeta>(persistenceKey ?? '', {
     storage: persistenceStorage,
@@ -191,6 +202,8 @@ export function Chorus<TMeta = Record<string, unknown>>({
   const [draft, setDraft] = React.useState('');
   const [internalSending, setInternalSending] = React.useState(false);
   const [streamError, setStreamError] = React.useState<string | null>(null);
+  const [streamRawError, setStreamRawError] = React.useState<Error | null>(null);
+  const rootRef = React.useRef<HTMLDivElement>(null);
   const fallbackErrorMessage = errorMessage ?? 'Something went wrong. Please try again.';
   const lastSubmittedTurnRef = React.useRef<SubmittedUserTurn<TMeta> | null>(null);
   const controllerRef = React.useRef<AbortController | null>(null);
@@ -351,6 +364,35 @@ export function Chorus<TMeta = Record<string, unknown>>({
   const sending = sendingProp ?? (transport ? streamSending : internalSending);
   const paletteVars = React.useMemo(() => styleVarsFromPalette(palette), [palette]);
   const activeStreamingMessageId = sending && hasStartedAssistantRef.current ? pendingAssistantIdRef.current : null;
+  const canRenderEmptyAffordance = value !== undefined || !persistenceKey || persisted.loaded;
+
+  const clearStreamError = React.useCallback(() => {
+    setStreamError(null);
+    setStreamRawError(null);
+  }, []);
+
+  const showStreamError = React.useCallback((rawError: Error | null) => {
+    setStreamRawError(rawError);
+    setStreamError(fallbackErrorMessage);
+  }, [fallbackErrorMessage]);
+
+  const handleSuggestedPrompt = React.useCallback((prompt: string) => {
+    setDraft(prompt);
+
+    const focusComposer = () => {
+      const el = rootRef.current?.querySelector<HTMLTextAreaElement>('.chorus-input textarea');
+      if (!el) return;
+      el.focus();
+      el.selectionStart = el.value.length;
+      el.selectionEnd = el.value.length;
+    };
+
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+      window.requestAnimationFrame(focusComposer);
+    } else {
+      focusComposer();
+    }
+  }, []);
 
   const resetStreamState = () => {
     hasStartedAssistantRef.current = false;
@@ -377,7 +419,7 @@ export function Chorus<TMeta = Record<string, unknown>>({
         console.warn('[Chorus] Both `transport` and `onSend` props were provided. `transport` takes precedence and `onSend` will be ignored. Remove one of the two props to silence this warning.');
       }
       resetStreamState();
-      setStreamError(null);
+      clearStreamError();
       doStream(text, historyForTransport(history), {
         onChunk: (chunk) => {
           if (isAssistantSessionActive(sessionId)) appendAssistantNow(chunk);
@@ -390,7 +432,7 @@ export function Chorus<TMeta = Record<string, unknown>>({
           removePendingAssistant();
           invalidateAssistantSession(sessionId);
           onError?.(err);
-          setStreamError(fallbackErrorMessage);
+          showStreamError(err);
         },
         minDelayMs: minAssistantDelayMs,
       });
@@ -406,7 +448,7 @@ export function Chorus<TMeta = Record<string, unknown>>({
     const controller = new AbortController();
     controllerRef.current = controller;
     setInternalSending(true);
-    setStreamError(null);
+    clearStreamError();
     resetStreamState();
 
     const startedAt = Date.now();
@@ -447,7 +489,7 @@ export function Chorus<TMeta = Record<string, unknown>>({
         if (!isAbortError(e)) {
           const error = e instanceof Error ? e : new Error(String(e));
           onError?.(error);
-          setStreamError(fallbackErrorMessage);
+          showStreamError(error);
         }
       }
     } finally {
@@ -492,7 +534,7 @@ export function Chorus<TMeta = Record<string, unknown>>({
   const clearMessages = () => {
     if (sending) stopActiveAssistant();
     setDraft('');
-    setStreamError(null);
+    clearStreamError();
     lastSubmittedTurnRef.current = null;
     const next = resetToInitialMessages ? seedMessages : [];
     updateMsgs(() => next, { flushPersistence: true });
@@ -526,8 +568,31 @@ export function Chorus<TMeta = Record<string, unknown>>({
   const handleDelete = (id: string) => updateMsgs(prev => prev.filter(m => m.id !== id), { flushPersistence: true });
 
   return (
-    <div className={["chorus", className].filter(Boolean).join(" ")} style={{ ...paletteVars, ...style }}>
-      <ChatWindow<TMeta> messages={msgs} typing={!!(transport || onSend) && sending && !hasStartedAssistantRef.current} codeTheme={codeBlockTheme} headless={headless} renderMessage={renderMessage} markdownProps={markdownProps} markdownSanitizer={markdownSanitizer} hiddenRoles={hiddenRoles} streamingMessageId={activeStreamingMessageId} onEdit={(transport || onSend) ? handleEdit : undefined} onRegenerate={(transport || onSend) ? handleRegenerate : undefined} onDelete={handleDelete} error={streamError} onRetry={retry} />
+    <div ref={rootRef} className={["chorus", className].filter(Boolean).join(" ")} style={{ ...paletteVars, ...style }}>
+      <ChatWindow<TMeta>
+        messages={msgs}
+        typing={!!(transport || onSend) && sending && !hasStartedAssistantRef.current}
+        codeTheme={codeBlockTheme}
+        emptyState={canRenderEmptyAffordance ? emptyState : undefined}
+        error={streamError}
+        headless={headless}
+        hiddenRoles={hiddenRoles}
+        markdownProps={markdownProps}
+        markdownSanitizer={markdownSanitizer}
+        maxRenderedMessages={maxRenderedMessages}
+        onDelete={handleDelete}
+        onDismissError={clearStreamError}
+        onEdit={(transport || onSend) ? handleEdit : undefined}
+        onRegenerate={(transport || onSend) ? handleRegenerate : undefined}
+        onRetry={retry}
+        onSuggestedPrompt={handleSuggestedPrompt}
+        rawError={streamRawError}
+        renderError={renderError}
+        renderMessage={renderMessage}
+        showJumpToBottomButton={showJumpToBottomButton}
+        streamingMessageId={activeStreamingMessageId}
+        suggestedPrompts={canRenderEmptyAffordance ? suggestedPrompts : undefined}
+      />
       {showClearButton && (
         <div className="chorus-clear-row">
           <button type="button" className="chorus-clear-btn" onClick={clearMessages} disabled={!sending && msgs.length === 0}>
@@ -535,7 +600,19 @@ export function Chorus<TMeta = Record<string, unknown>>({
           </button>
         </div>
       )}
-      <ChatInput value={draft} onChange={setDraft} onSend={send} onStop={stop} sending={sending} placeholder={placeholder} accept={accept} maxAttachmentBytes={maxAttachmentBytes} maxAttachments={maxAttachments} onAttachmentError={onAttachmentError} uploadAttachment={uploadAttachment} />
+      <ChatInput
+        value={draft}
+        onChange={setDraft}
+        onSend={send}
+        onStop={stop}
+        sending={sending}
+        placeholder={placeholder}
+        accept={accept}
+        maxAttachmentBytes={maxAttachmentBytes}
+        maxAttachments={maxAttachments}
+        onAttachmentError={onAttachmentError}
+        uploadAttachment={uploadAttachment}
+      />
     </div>
   );
 }

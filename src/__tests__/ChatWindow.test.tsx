@@ -1,7 +1,7 @@
 import type React from 'react';
 import { readFileSync } from 'node:fs';
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ChatWindow, MessageBubble } from '../components/ChatWindow';
 import type { Message } from '../types';
@@ -79,8 +79,47 @@ describe('ChatWindow', () => {
     expect(container.querySelector('.chorus-typing')).not.toBeInTheDocument();
   });
 
+  it('renders a custom empty state only while the visible transcript is empty', () => {
+    const { rerender } = render(<ChatWindow messages={[]} emptyState={<p>Ask Chorus anything</p>} />);
+
+    expect(screen.getByText('Ask Chorus anything')).toBeInTheDocument();
+
+    rerender(<ChatWindow messages={[SYS_MSG]} emptyState={<p>Ask Chorus anything</p>} />);
+
+    expect(screen.getByText('Ask Chorus anything')).toBeInTheDocument();
+    expect(screen.queryByText('You are helpful.')).not.toBeInTheDocument();
+
+    rerender(<ChatWindow messages={[USER_MSG]} emptyState={<p>Ask Chorus anything</p>} />);
+
+    expect(screen.queryByText('Ask Chorus anything')).not.toBeInTheDocument();
+    expect(screen.getByText('Hello')).toBeInTheDocument();
+  });
+
+  it('renders suggested prompts as the default empty state and hides them once a message exists', async () => {
+    const user = userEvent.setup();
+    const onSuggestedPrompt = vi.fn();
+    const { rerender } = render(
+      <ChatWindow messages={[]} suggestedPrompts={['Summarize this', 'Write tests']} onSuggestedPrompt={onSuggestedPrompt} />
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Summarize this' }));
+
+    expect(onSuggestedPrompt).toHaveBeenCalledWith('Summarize this');
+
+    rerender(<ChatWindow messages={[USER_MSG]} suggestedPrompts={['Summarize this', 'Write tests']} />);
+
+    expect(screen.queryByRole('button', { name: 'Summarize this' })).not.toBeInTheDocument();
+  });
+
   it('renders an alert error message when error is provided', () => {
     render(<ChatWindow messages={[]} error="Network error" />);
+    expect(screen.getByRole('alert')).toHaveTextContent('Network error');
+  });
+
+  it('renders errors alongside an active empty state', () => {
+    render(<ChatWindow messages={[]} emptyState={<p>Empty welcome</p>} error="Network error" />);
+
+    expect(screen.getByText('Empty welcome')).toBeInTheDocument();
     expect(screen.getByRole('alert')).toHaveTextContent('Network error');
   });
 
@@ -112,6 +151,48 @@ describe('ChatWindow', () => {
   it('does not show retry button when error is present but onRetry is absent', () => {
     render(<ChatWindow messages={[]} error="Oops" />);
     expect(screen.queryByRole('button', { name: /retry/i })).not.toBeInTheDocument();
+  });
+
+  it('uses renderError instead of the default error banner', async () => {
+    const user = userEvent.setup();
+    const rawError = new Error('raw upstream');
+    const onRetry = vi.fn();
+    const onDismissError = vi.fn();
+    const renderError = vi.fn(({ error, rawError, retry, dismiss }) => (
+      <div role="alert" data-testid="custom-error">
+        <span>{error}</span>
+        <span>{rawError?.message}</span>
+        <button type="button" onClick={retry}>Try custom retry</button>
+        <button type="button" onClick={dismiss}>Dismiss custom error</button>
+      </div>
+    ));
+
+    render(
+      <ChatWindow
+        messages={[]}
+        error="Friendly error"
+        rawError={rawError}
+        onRetry={onRetry}
+        onDismissError={onDismissError}
+        renderError={renderError}
+      />
+    );
+
+    expect(screen.getByTestId('custom-error')).toHaveTextContent('Friendly error');
+    expect(screen.getByTestId('custom-error')).toHaveTextContent('raw upstream');
+    expect(document.querySelector('.chorus-error')).not.toBeInTheDocument();
+    expect(renderError).toHaveBeenCalledWith(expect.objectContaining({
+      error: 'Friendly error',
+      rawError,
+      retry: expect.any(Function),
+      dismiss: expect.any(Function),
+    }));
+
+    await user.click(screen.getByRole('button', { name: 'Try custom retry' }));
+    await user.click(screen.getByRole('button', { name: 'Dismiss custom error' }));
+
+    expect(onRetry).toHaveBeenCalledOnce();
+    expect(onDismissError).toHaveBeenCalledOnce();
   });
 
   it('renders a ToolCallBlock for tool messages', () => {
@@ -257,5 +338,65 @@ describe('ChatWindow', () => {
     const sanitizer = vi.fn((html: string) => html);
     render(<ChatWindow messages={[USER_MSG]} markdownSanitizer={sanitizer} />);
     expect(screen.getByTestId('markdown')).toHaveAttribute('data-sanitizer', 'true');
+  });
+
+  it('limits rendering to the latest visible message window while preserving typing and error rows', () => {
+    const messages = Array.from({ length: 100 }, (_, i): Message => ({
+      id: `m${i}`,
+      role: i % 2 === 0 ? 'user' : 'assistant',
+      text: `Message ${i}`,
+    }));
+
+    render(<ChatWindow messages={messages} maxRenderedMessages={5} typing error="Still accessible" />);
+
+    expect(screen.getAllByTestId('markdown')).toHaveLength(5);
+    expect(screen.queryByText('Message 94')).not.toBeInTheDocument();
+    expect(screen.getByText('Message 95')).toBeInTheDocument();
+    expect(screen.getByText('Message 99')).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: /assistant is typing/i })).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('Still accessible');
+  });
+
+  it('keeps actions wired to original message ids when a render window is active', async () => {
+    const user = userEvent.setup();
+    const onDelete = vi.fn();
+    const messages = Array.from({ length: 20 }, (_, i): Message => ({
+      id: `m${i}`,
+      role: 'assistant',
+      text: `Windowed ${i}`,
+    }));
+
+    render(<ChatWindow messages={messages} maxRenderedMessages={1} onDelete={onDelete} />);
+
+    expect(screen.queryByText('Windowed 18')).not.toBeInTheDocument();
+    expect(screen.getByText('Windowed 19')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Delete' }));
+
+    expect(onDelete).toHaveBeenCalledWith('m19');
+  });
+
+  it('shows a jump-to-bottom button for unread activity after the user scrolls away', async () => {
+    const user = userEvent.setup();
+    const messages: Message[] = [USER_MSG, ASST_MSG];
+    const { rerender } = render(<ChatWindow messages={messages} />);
+    const transcript = screen.getByRole('log', { name: /chat transcript/i });
+
+    Object.defineProperty(transcript, 'scrollHeight', { configurable: true, value: 1000 });
+    Object.defineProperty(transcript, 'clientHeight', { configurable: true, value: 200 });
+    transcript.scrollTop = 0;
+    fireEvent.scroll(transcript);
+
+    expect(screen.queryByRole('button', { name: /jump to latest/i })).not.toBeInTheDocument();
+
+    rerender(<ChatWindow messages={[...messages, { id: 'a2', role: 'assistant', text: 'Newest reply' }]} />);
+
+    const jumpButton = await screen.findByRole('button', { name: /jump to latest/i });
+    expect(jumpButton).toHaveClass('chorus-jump-to-bottom');
+
+    await user.click(jumpButton);
+
+    await waitFor(() => expect(screen.queryByRole('button', { name: /jump to latest/i })).not.toBeInTheDocument());
+    expect(transcript.scrollTop).toBe(1000);
   });
 });
