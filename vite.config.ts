@@ -3,9 +3,30 @@ import react from '@vitejs/plugin-react';
 import path from 'node:path';
 
 const reactPeerDependencies = new Set(['react', 'react-dom']);
+// Runtime dependencies stay declared in package.json but external to the published
+// library chunks so consumers can dedupe and update compatible versions.
+const externalRuntimeDependencies = new Set([
+  'dompurify',
+  'highlight.js',
+  'lucide-react',
+  'marked',
+  'marked-highlight',
+]);
+const externalRuntimeDependencyPrefixes = [
+  'lucide-react/',
+];
 
 function isReactPeerDependency(id: string) {
   return reactPeerDependencies.has(id) || id.startsWith('react/') || id.startsWith('react-dom/');
+}
+
+function isExternalDependency(id: string) {
+  const normalizedId = id.split('?')[0];
+  return (
+    isReactPeerDependency(normalizedId) ||
+    externalRuntimeDependencies.has(normalizedId) ||
+    externalRuntimeDependencyPrefixes.some(prefix => normalizedId.startsWith(prefix))
+  );
 }
 
 export default defineConfig({
@@ -30,6 +51,7 @@ export default defineConfig({
       entry: {
         'react-chorus': path.resolve(__dirname, 'src/index.ts'),
         'react-chorus-headless': path.resolve(__dirname, 'src/headless.ts'),
+        'react-chorus-transport': path.resolve(__dirname, 'src/transport.ts'),
       },
       name: 'ReactChorus',
       fileName: (format, entryName) => `${entryName}.${format === 'cjs' ? 'cjs' : 'es.js'}`,
@@ -37,7 +59,7 @@ export default defineConfig({
       formats: ['es', 'cjs']
     },
     rollupOptions: {
-      external: isReactPeerDependency,
+      external: isExternalDependency,
       output: {
         // Keep package.json "./styles.css" export aligned with the generated CSS file.
         assetFileNames: (assetInfo) =>
@@ -46,7 +68,12 @@ export default defineConfig({
           react: 'React',
           'react-dom': 'ReactDOM',
           'react/jsx-runtime': 'ReactJSXRuntime',
-          'react/jsx-dev-runtime': 'ReactJSXDevRuntime'
+          'react/jsx-dev-runtime': 'ReactJSXDevRuntime',
+          dompurify: 'DOMPurify',
+          'highlight.js': 'hljs',
+          'lucide-react': 'LucideReact',
+          marked: 'marked',
+          'marked-highlight': 'markedHighlight'
         }
       }
     }

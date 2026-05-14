@@ -265,6 +265,12 @@ export default function App() {
 
 Each incoming WebSocket message is treated as one SSE payload, so the same connector/extraction pipeline applies unchanged.
 
+If you only need the non-React transport factories, import them from the transport-only subpath to avoid pulling UI or Markdown code into that bundle:
+
+```ts
+import { createFetchSSETransport, createWebSocketTransport } from 'react-chorus/transport';
+```
+
 ### Minimal Node.js `ws` + Claude backend
 
 ```js
@@ -525,13 +531,20 @@ npm run dev
 
 ## Bundle size
 
-`highlight.js` (the syntax-highlighting engine used by the `Markdown` component) is ~600 KB minified. To keep initial page load fast, **react-chorus lazy-loads highlight.js at runtime** — it is only fetched the first time a fenced code block (` ``` ` or `~~~`) appears in the rendered text.
+react-chorus keeps React/ReactDOM as peer dependencies and externalizes runtime packages (`dompurify`, `marked`, `marked-highlight`, `lucide-react`, and `highlight.js`) from the published library build. They remain regular `dependencies` so installs work out of the box, while app bundlers can dedupe them and pick up compatible dependency fixes without a react-chorus republish.
 
-**Impact:**
-- Pages that never render code blocks pay zero cost — highlight.js is never downloaded.
-- Pages that do render code blocks load highlight.js asynchronously on demand. The matching GitHub dark/light token-color stylesheet is also injected on demand based on `codeBlockTheme`. The code renders immediately as plain text and is re-rendered with syntax highlighting once the chunk arrives.
-- While an assistant message is actively streaming, Chorus renders that growing message as React-escaped plain text and switches to full Markdown parsing/sanitization when the stream finalizes. This avoids reparsing and resanitizing the entire message on every token.
-- Bundlers (Vite, webpack, Rollup) will automatically split highlight.js into a separate async chunk, so it does not inflate the main bundle.
+`npm run verify:bundle-size` builds tiny consumer bundles from the published entry points with React peers excluded, reports minified/gzip sizes, and fails CI if budgets are exceeded or if external/lazy dependencies move into the wrong graph. Current numbers:
+
+| Entry | Initial JS | gzip | Notes |
+|-------|------------|------|-------|
+| `react-chorus` (`<Chorus>`) | 127.5 kB | 42.7 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
+| `react-chorus/headless` | 127.8 kB | 42.8 kB | Headless defaults, same behavior surface. |
+| `react-chorus/transport` | 1.5 kB | 0.8 kB | Transport factories only; no React/UI/Markdown runtime. |
+| Lazy `highlight.js` runtime | 891.4 kB | 295.9 kB | Async code-fence chunk, never part of initial JS. |
+
+`highlight.js` is only fetched the first time a fenced code block (` ``` ` or `~~~`) appears in rendered text. The matching GitHub dark/light token-color stylesheet is also injected on demand based on `codeBlockTheme`; code renders immediately as plain text and is re-rendered with syntax highlighting once the chunk arrives. While an assistant message is actively streaming, Chorus renders that growing message as React-escaped plain text and switches to full Markdown parsing/sanitization when the stream finalizes.
+
+The playground has a separate budget because it intentionally bundles a complete demo app. `npm run build:playground` also runs `npm run verify:playground-size`; the current playground initial JS graph is 326.6 kB / 103.8 kB gzip and its largest lazy chunk (highlight.js) is 890.9 kB / 295.7 kB gzip. Vite's chunk warning limit is raised to that documented lazy budget so the playground build stays free of Vite chunk warnings while the budget script tracks regressions.
 
 ## SSR and Markdown sanitization
 
@@ -1303,15 +1316,17 @@ Use Node.js 20 or newer (Node 20.19+ or 22.12+ recommended for the Vite toolchai
 Release/CI quality gates:
 
 ```bash
-npm run lint
+npm run lint              # zero warnings enforced
 npm run typecheck
 npm test
 npm run build
+npm run verify:bundle-size
 npm run typecheck:consumer
 npm run verify:pack
+npm run build:playground  # includes the playground bundle-size budget
 ```
 
-`npm run prepublishOnly` runs the same publish gate, including tests, the consumer typecheck, and package-content verification.
+`npm run prepublishOnly` runs the package publish gate through build, bundle-size verification, consumer typecheck, and package-content verification. PR CI also runs the playground build on Node 22 so the GitHub Pages demo cannot regress unnoticed.
 
 ## License
 

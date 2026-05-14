@@ -13,6 +13,10 @@ export default defineConfig({
     outDir: 'dist-playground',
     emptyOutDir: true,
     sourcemap: false,
+    // The playground intentionally keeps highlight.js as an async code-fence chunk.
+    // It is larger than Vite's 500 kB default but is only fetched when Markdown
+    // code blocks render; `npm run verify:playground-size` enforces the explicit budget.
+    chunkSizeWarningLimit: 950,
   },
   optimizeDeps: {
     include: [

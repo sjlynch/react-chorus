@@ -17,6 +17,11 @@
       "import": "./dist/react-chorus-headless.es.js",
       "require": "./dist/react-chorus-headless.cjs"
     },
+    "./transport": {
+      "types": "./dist/types/transport.d.ts",
+      "import": "./dist/react-chorus-transport.es.js",
+      "require": "./dist/react-chorus-transport.cjs"
+    },
     "./styles.css": {
       "types": "./dist/styles.css.d.ts",
       "default": "./dist/styles.css"
@@ -56,12 +61,14 @@
   },
   "scripts": {
     "dev": "vite",
-    "lint": "eslint .",
+    "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.type-tests.json --noEmit",
     "build": "vite build && tsc -p tsconfig.json --emitDeclarationOnly && node scripts/finalize-declarations.mjs",
-    "build:playground": "vite build --config vite.playground.config.ts",
-    "prepublishOnly": "npm run lint && npm run typecheck && npm test && npm run build && npm run typecheck:consumer && npm run verify:pack",
+    "build:playground": "vite build --config vite.playground.config.ts && npm run verify:playground-size",
+    "prepublishOnly": "npm run lint && npm run typecheck && npm test && npm run build && npm run verify:bundle-size && npm run typecheck:consumer && npm run verify:pack",
     "typecheck:consumer": "tsc -p fixtures/consumer-typecheck/tsconfig.json",
+    "verify:bundle-size": "node scripts/verify-bundle-size.mjs",
+    "verify:playground-size": "node scripts/verify-bundle-size.mjs --playground",
     "verify:pack": "node scripts/assert-package-contents.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
