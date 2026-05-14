@@ -1,33 +1,12 @@
-import { execFile } from 'node:child_process';
+import { execFile as nodeExecFile } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { promisify } from 'node:util';
 
-const execFileAsync = promisify(execFile);
-const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const scriptPath = fileURLToPath(import.meta.url);
+const rootDir = path.resolve(path.dirname(scriptPath), '..');
 const npmBin = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
-const { stdout } = await execFileAsync(npmBin, ['pack', '--dry-run', '--json'], {
-  cwd: rootDir,
-  maxBuffer: 1024 * 1024 * 10,
-  shell: process.platform === 'win32',
-});
-
-let packages;
-try {
-  packages = JSON.parse(stdout.trim());
-} catch (error) {
-  console.error('Failed to parse npm pack --dry-run --json output.');
-  console.error(stdout);
-  throw error;
-}
-
-const packedFiles = packages.flatMap((pkg) => pkg.files ?? []).map((file) => {
-  const filePath = typeof file === 'string' ? file : file.path;
-  return filePath.replace(/\\/g, '/').replace(/^\.\//, '');
-});
-
-const forbiddenEntries = [
+export const forbiddenEntries = [
   {
     label: 'test declarations',
     pattern: /^dist\/types\/__tests__(?:\/|$)/,
@@ -46,17 +25,71 @@ const forbiddenEntries = [
   },
 ];
 
-const forbiddenFiles = packedFiles.filter((filePath) =>
-  forbiddenEntries.some(({ pattern }) => pattern.test(filePath)),
-);
+export function normalizePackedFilePath(file) {
+  const filePath = typeof file === 'string' ? file : file.path;
+  return filePath.replace(/\\/g, '/').replace(/^\.\//, '');
+}
 
-if (forbiddenFiles.length > 0) {
-  console.error('Unexpected internal files would be included in the npm package:');
-  for (const filePath of forbiddenFiles) {
-    const entry = forbiddenEntries.find(({ pattern }) => pattern.test(filePath));
-    console.error(`- ${filePath}${entry ? ` (${entry.label})` : ''}`);
+export function parsePackedFiles(packJson) {
+  const packages = JSON.parse(packJson.trim());
+  return packages.flatMap((pkg) => pkg.files ?? []).map(normalizePackedFilePath);
+}
+
+export function findForbiddenFiles(packedFiles, entries = forbiddenEntries) {
+  return packedFiles.flatMap((filePath) => {
+    const normalizedPath = normalizePackedFilePath(filePath);
+    const entry = entries.find(({ pattern }) => pattern.test(normalizedPath));
+    return entry ? [{ filePath: normalizedPath, label: entry.label }] : [];
+  });
+}
+
+function execFileAsync(execFileImpl, file, args, options) {
+  return new Promise((resolve, reject) => {
+    execFileImpl(file, args, options, (error, stdout, stderr) => {
+      if (error) {
+        reject(error);
+      } else {
+        resolve({ stdout, stderr });
+      }
+    });
+  });
+}
+
+export async function runAssertPackageContents({
+  execFileImpl = nodeExecFile,
+  cwd = rootDir,
+  command = npmBin,
+  logger = console,
+} = {}) {
+  const { stdout } = await execFileAsync(execFileImpl, command, ['pack', '--dry-run', '--json'], {
+    cwd,
+    maxBuffer: 1024 * 1024 * 10,
+    shell: process.platform === 'win32',
+  });
+
+  let packedFiles;
+  try {
+    packedFiles = parsePackedFiles(stdout);
+  } catch (error) {
+    logger.error('Failed to parse npm pack --dry-run --json output.');
+    logger.error(stdout);
+    throw error;
   }
-  process.exitCode = 1;
-} else {
-  console.log(`Package contents OK (${packedFiles.length} files checked).`);
+
+  const forbiddenFiles = findForbiddenFiles(packedFiles);
+
+  if (forbiddenFiles.length > 0) {
+    logger.error('Unexpected internal files would be included in the npm package:');
+    for (const { filePath, label } of forbiddenFiles) {
+      logger.error(`- ${filePath}${label ? ` (${label})` : ''}`);
+    }
+    return 1;
+  }
+
+  logger.log(`Package contents OK (${packedFiles.length} files checked).`);
+  return 0;
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === scriptPath) {
+  process.exitCode = await runAssertPackageContents();
 }

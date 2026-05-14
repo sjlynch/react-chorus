@@ -2,6 +2,7 @@
 
 Drop a polished, streaming AI chat experience into React — then peel back the layers when you need custom transport, rendering, persistence, tools, attachments, or theming.
 
+[![CI](https://github.com/sjlynch/react-chorus/actions/workflows/ci.yml/badge.svg)](https://github.com/sjlynch/react-chorus/actions/workflows/ci.yml)
 [![Open in StackBlitz](https://developer.stackblitz.com/img/open_in_stackblitz.svg)](https://stackblitz.com/github/sjlynch/react-chorus?file=src%2Fmain.tsx)
 
 The root playground showcases streaming replies, paste/drop image attachments, retry/edit/regenerate/delete actions, and palette theming. Run `npm run dev` locally or open the StackBlitz link above for a fast first look before reading the API details.
@@ -15,6 +16,8 @@ react-chorus is for React developers who want a drop-in AI chat UI that stays co
 - **Versus rolling your own:** you get SSE parsing, retry/edit/regenerate flows, Markdown, attachment handling, and local persistence without rebuilding the common edge cases.
 
 ## Install
+
+react-chorus requires Node.js 20 or newer for package installation and server-side usage. Contributors running the Vite-powered dev/build tooling should use Node 20.19+ or Node 22.12+.
 
 ```bash
 npm install react-chorus
@@ -390,7 +393,7 @@ app.post('/api/chat', async (req, res) => {
 
 ## Examples
 
-Runnable examples live in the [`/examples`](./examples) directory:
+Runnable examples live in the [`/examples`](./examples) directory. They declare the same Node.js 20+ floor as the root package and consume the local build after `npm run build`.
 
 | Example | Description |
 |---------|-------------|
@@ -1004,6 +1007,23 @@ The same generic flows through public components and hooks:
 ```
 
 The generic `Message` declaration shape is a minor semver-level type declaration change while remaining source-compatible.
+
+## Development and release
+
+Use Node.js 20 or newer (Node 20.19+ or 22.12+ recommended for the Vite toolchain), then install dependencies with `npm ci`.
+
+Release/CI quality gates:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+npm run build
+npm run typecheck:consumer
+npm run verify:pack
+```
+
+`npm run prepublishOnly` runs the same publish gate, including tests, the consumer typecheck, and package-content verification.
 
 ## License
 
