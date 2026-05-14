@@ -8,6 +8,7 @@ pnpm-debug.log*
 
 # Build outputs (library + playground)
 dist/
+dist-playground/
 dist-ssr/
 build/
 .vite/
