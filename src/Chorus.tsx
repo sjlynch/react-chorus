@@ -6,26 +6,27 @@ import { styleVarsFromPalette, type Palette } from './components/ChorusTheme';
 import type { Attachment, AttachmentError, ConnectorName, Message, Role, StorageAdapter, UploadAttachment } from './types';
 import type { Transport } from './hooks/useChorusStream';
 import { useChorusPersistence, type DeserializeMessages, type SerializeMessages } from './hooks/useChorusPersistence';
-import { useChorusMessages } from './hooks/useChorusMessages';
+import { useChorusMessages, type ChorusMessagesChangeContext } from './hooks/useChorusMessages';
 import { useAssistantSession } from './hooks/useAssistantSession';
-import type { ChorusFinishContext, ChorusOnFinish, ChorusOnSend, ChorusSendHelpers } from './hooks/useAssistantSession';
+import type { ChorusFinishContext, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusSendHelpers, ChorusStreamDoneContext, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolRegistry } from './hooks/useAssistantSession';
 import type { Connector } from './connectors/connectors';
 import type { MarkdownSanitizer } from './components/Markdown';
 import { isChorusDevMode } from './utils/devMode';
 
 export type { Transport };
 export type { Connector };
-export type { ChorusFinishContext, ChorusOnFinish, ChorusOnSend, ChorusSendHelpers };
+export type { ChorusFinishContext, ChorusMessagesChangeContext, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusSendHelpers, ChorusStreamDoneContext, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolRegistry };
 
 const DEFAULT_MIN_ASSISTANT_DELAY_MS = 300;
 const DEFAULT_PERSISTENCE_WRITE_DEBOUNCE_MS = 80;
 const DEFAULT_CHORUS_HIDDEN_ROLES: Role[] = ['system'];
 
-export interface ChorusRef {
+export interface ChorusRef<TMeta = Record<string, unknown>> {
   send(text: string, attachments?: Attachment[]): void;
   stop(): void;
   clear(): void;
   focus(): void;
+  getMessages(): Message<TMeta>[];
   scrollToMessage(id: string): void;
 }
 
@@ -35,6 +36,10 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
   clearLabel?: string;
   codeBlockTheme?: 'dark' | 'light';
   connector?: Connector | ConnectorName;
+  /** Disable composer input, attachment ingestion, prompt fills, and write actions. Stop remains available while sending. */
+  disabled?: boolean;
+  /** Optional explanation used by the composer placeholder/accessible description while disabled or read-only. */
+  disabledReason?: string;
   /** Override built-in JSON persistence deserialization/revival. */
   deserializeMessages?: DeserializeMessages<TMeta>;
   emptyState?: React.ReactNode;
@@ -63,7 +68,17 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
   onFeedback?: (message: Message<TMeta>, feedback: MessageFeedback) => void;
   /** Called exactly once when an assistant message completes normally. */
   onFinish?: ChorusOnFinish<TMeta>;
-  /** Called when Chorus cannot write the transcript to persistenceStorage. */
+  /** Observes transcript changes in controlled, uncontrolled, and persistence-backed modes without making Chorus controlled. */
+  onMessagesChange?: (messages: Message<TMeta>[], context: ChorusMessagesChangeContext) => void;
+  /** Called when a transport stream completes normally, including tool-only turns. */
+  onStreamDone?: ChorusOnStreamDone<TMeta>;
+  /** Called when a completed streamed tool call is ready; return a value to append it as tool output. */
+  onToolCall?: ChorusOnToolCall<TMeta>;
+  /** Observes every accumulated streamed tool-call delta on the transport path. */
+  onToolDelta?: ChorusOnToolDelta<TMeta>;
+  /** Registry of executable tool handlers keyed by tool name. Matching handlers run after stream input completes. */
+  tools?: ChorusToolRegistry<TMeta>;
+  /** Called when Chorus cannot read, deserialize, write, or remove the transcript in persistenceStorage. */
   onPersistenceError?: (error: Error) => void;
   onSend?: ChorusOnSend<TMeta>;
   palette?: Palette;
@@ -72,6 +87,8 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
   placeholder?: string;
   renderError?: (context: RenderErrorContext) => React.ReactNode;
   renderMessage?: (message: Message<TMeta>, context: RenderMessageContext<TMeta>) => React.ReactNode;
+  /** Prevent compose/edit/regenerate/delete/retry/clear while leaving read-only actions like copy and scroll available. */
+  readOnly?: boolean;
   /** When clearing, restore initialMessages/messages instead of clearing to []. Defaults to false. */
   resetToInitialMessages?: boolean;
   sending?: boolean;
@@ -81,7 +98,7 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
   showClearButton?: boolean;
   showJumpToBottomButton?: boolean;
   suggestedPrompts?: string[];
-  /** Hidden system prompt prepended to transport request history. */
+  /** Hidden system prompt. Prepended to transport history; exposed as helpers.systemPrompt on the onSend path. */
   systemPrompt?: string;
   /** Simple path: URL or Transport function. */
   transport?: string | Transport<TMeta>;
@@ -95,6 +112,8 @@ function ChorusInner<TMeta = Record<string, unknown>>({
   clearLabel = 'Clear conversation',
   codeBlockTheme = 'dark',
   connector,
+  disabled = false,
+  disabledReason,
   deserializeMessages,
   emptyState,
   errorMessage,
@@ -116,6 +135,10 @@ function ChorusInner<TMeta = Record<string, unknown>>({
   onError,
   onFeedback,
   onFinish,
+  onMessagesChange,
+  onStreamDone,
+  onToolCall,
+  onToolDelta,
   onPersistenceError,
   onSend,
   palette,
@@ -124,6 +147,7 @@ function ChorusInner<TMeta = Record<string, unknown>>({
   placeholder,
   renderError,
   renderMessage,
+  readOnly = false,
   resetToInitialMessages = false,
   sending: sendingProp,
   serializeMessages,
@@ -132,14 +156,16 @@ function ChorusInner<TMeta = Record<string, unknown>>({
   style,
   suggestedPrompts,
   systemPrompt,
+  tools,
   transport,
   uploadAttachment,
   value,
   ...rest
-}: ChorusProps<TMeta>, ref: React.ForwardedRef<ChorusRef>) {
+}: ChorusProps<TMeta>, ref: React.ForwardedRef<ChorusRef<TMeta>>) {
   const rootRef = React.useRef<HTMLDivElement>(null);
   const inputRef = React.useRef<HTMLDivElement>(null);
   const [draft, setDraft] = React.useState('');
+  const [composerResetKey, setComposerResetKey] = React.useState(0);
   const fallbackErrorMessage = errorMessage ?? 'Something went wrong. Please try again.';
 
   const persisted = useChorusPersistence<TMeta>(persistenceKey ?? '', {
@@ -149,11 +175,12 @@ function ChorusInner<TMeta = Record<string, unknown>>({
     serializeMessages,
     deserializeMessages,
   });
-  const { msgs, updateMsgs, onChunkRef, seedMessages } = useChorusMessages<TMeta>({
+  const { msgs, messagesRef, updateMsgs, onChunkRef, seedMessages } = useChorusMessages<TMeta>({
     value,
     messages,
     initialMessages,
     onChange,
+    onMessagesChange,
     persistenceKey,
     persistedMessages: persisted.value,
     persistenceLoaded: persisted.loaded,
@@ -204,6 +231,10 @@ function ChorusInner<TMeta = Record<string, unknown>>({
     onError,
     onChunkRef,
     onFinish,
+    onStreamDone,
+    onToolCall,
+    onToolDelta,
+    tools,
     flushPersistence: persisted.flush,
     resetToInitialMessages,
     onClear,
@@ -214,17 +245,25 @@ function ChorusInner<TMeta = Record<string, unknown>>({
   const canAssistantRespond = Boolean(transport || onSend);
   const resolvedShowJumpToBottomButton = showJumpToBottomButton ?? !headless;
   const canRenderEmptyAffordance = value !== undefined || !persistenceKey || persisted.loaded;
+  const writesDisabled = disabled || readOnly;
+  const resetComposer = React.useCallback(() => {
+    setDraft('');
+    setComposerResetKey(key => key + 1);
+  }, []);
 
   const handleInputSend = React.useCallback((attachments: Attachment[] = []) => {
+    if (writesDisabled) return;
     if (session.send(draft, attachments)) setDraft('');
-  }, [draft, session]);
+  }, [draft, session, writesDisabled]);
 
   const handleClear = React.useCallback(() => {
-    setDraft('');
+    if (writesDisabled) return;
+    resetComposer();
     session.clear();
-  }, [session]);
+  }, [resetComposer, session, writesDisabled]);
 
   const handleSuggestedPrompt = React.useCallback((prompt: string) => {
+    if (writesDisabled) return;
     setDraft(prompt);
 
     const focusComposer = () => {
@@ -240,21 +279,26 @@ function ChorusInner<TMeta = Record<string, unknown>>({
     } else {
       focusComposer();
     }
-  }, []);
+  }, [writesDisabled]);
 
   React.useImperativeHandle(ref, () => ({
     send(text: string, attachments: Attachment[] = []) {
+      if (writesDisabled) return;
       if (session.send(text, attachments)) setDraft('');
     },
     stop() {
       session.stop();
     },
     clear() {
-      setDraft('');
+      if (writesDisabled) return;
+      resetComposer();
       session.clear();
     },
     focus() {
       inputRef.current?.focus();
+    },
+    getMessages() {
+      return messagesRef.current.slice();
     },
     scrollToMessage(id: string) {
       const root = rootRef.current;
@@ -263,10 +307,16 @@ function ChorusInner<TMeta = Record<string, unknown>>({
       const target = Array.from(nodes).find(node => node.dataset.chorusMessageId === id);
       target?.scrollIntoView({ block: 'nearest' });
     },
-  }), [session]);
+  }), [messagesRef, resetComposer, session, writesDisabled]);
 
   return (
-    <div {...rest} ref={rootRef} className={["chorus", className].filter(Boolean).join(" ")} style={{ ...paletteVars, ...style }}>
+    <div
+      {...rest}
+      ref={rootRef}
+      className={["chorus", disabled && "chorus--disabled", readOnly && "chorus--readonly", className].filter(Boolean).join(" ")}
+      style={{ ...paletteVars, ...style }}
+      aria-disabled={writesDisabled ? true : rest['aria-disabled']}
+    >
       <ChatWindow<TMeta>
         messages={msgs}
         typing={canAssistantRespond && visualSending && !session.hasStartedAssistant}
@@ -279,23 +329,25 @@ function ChorusInner<TMeta = Record<string, unknown>>({
         markdownSanitizer={markdownSanitizer}
         maxRenderedMessages={maxRenderedMessages}
         onCopy={onCopy}
-        onDelete={session.handleDelete}
+        onDelete={writesDisabled ? undefined : session.handleDelete}
         onDismissError={session.dismissError}
-        onEdit={canAssistantRespond ? session.handleEdit : undefined}
-        onFeedback={onFeedback}
-        onRegenerate={canAssistantRespond ? session.handleRegenerate : undefined}
-        onRetry={session.retry}
-        onSuggestedPrompt={handleSuggestedPrompt}
+        onEdit={!writesDisabled && canAssistantRespond ? session.handleEdit : undefined}
+        onFeedback={writesDisabled ? undefined : onFeedback}
+        onRegenerate={!writesDisabled && canAssistantRespond ? session.handleRegenerate : undefined}
+        onRetry={writesDisabled ? undefined : session.retry}
+        onSuggestedPrompt={writesDisabled ? undefined : handleSuggestedPrompt}
         rawError={session.streamRawError}
         renderError={renderError}
         renderMessage={renderMessage}
         showJumpToBottomButton={resolvedShowJumpToBottomButton}
         streamingMessageId={session.streamingMessageId}
         suggestedPrompts={canRenderEmptyAffordance ? suggestedPrompts : undefined}
+        suggestedPromptsDisabled={writesDisabled}
+        suggestedPromptsDisabledReason={disabledReason}
       />
       {showClearButton && (
         <div className="chorus-clear-row">
-          <button type="button" className="chorus-clear-btn" onClick={handleClear} disabled={!session.sending && msgs.length === 0}>
+          <button type="button" className="chorus-clear-btn" onClick={handleClear} disabled={writesDisabled || (!session.sending && msgs.length === 0)}>
             {clearLabel}
           </button>
         </div>
@@ -307,6 +359,10 @@ function ChorusInner<TMeta = Record<string, unknown>>({
         onSend={handleInputSend}
         onStop={session.stop}
         sending={visualSending}
+        disabled={disabled}
+        readOnly={readOnly}
+        disabledReason={disabledReason}
+        resetKey={composerResetKey}
         placeholder={placeholder}
         accept={accept}
         maxAttachmentBytes={maxAttachmentBytes}
@@ -319,7 +375,7 @@ function ChorusInner<TMeta = Record<string, unknown>>({
 }
 
 export const Chorus = React.forwardRef(ChorusInner) as <TMeta = Record<string, unknown>>(
-  props: ChorusProps<TMeta> & React.RefAttributes<ChorusRef>,
+  props: ChorusProps<TMeta> & React.RefAttributes<ChorusRef<TMeta>>,
 ) => React.ReactElement | null;
 
 (Chorus as React.NamedExoticComponent).displayName = 'Chorus';

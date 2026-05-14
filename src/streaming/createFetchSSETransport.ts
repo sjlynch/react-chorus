@@ -13,7 +13,9 @@ export interface FetchSSETransportOptions<TMeta = Record<string, unknown>> exten
    *
    * @example OpenAI-compatible backend
    * ```ts
-   * formatBody: (text, history) => JSON.stringify({ model: 'gpt-4o', messages: history, stream: true })
+   * import { formatOpenAIChatCompletionsBody } from 'react-chorus/provider-requests';
+   *
+   * formatBody: formatOpenAIChatCompletionsBody({ model: 'gpt-4o-mini' })
    * ```
    */
   formatBody?: (text: string, history: Message<TMeta>[]) => BodyInit;

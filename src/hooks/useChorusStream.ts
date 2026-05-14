@@ -410,6 +410,8 @@ export function useChorusStream<TMeta = Record<string, unknown>>(transport: Tran
     const startedAt = Date.now();
     const delayedChunks = createDelayedChunkEmitter(cb, startedAt, signal);
     const accumulateToolDelta = createToolDeltaAccumulator();
+    const activeConnector = connectorRef.current;
+    const connectorState = activeConnector.createState?.();
     let errorToThrow: unknown;
 
     try {
@@ -418,7 +420,7 @@ export function useChorusStream<TMeta = Record<string, unknown>>(transport: Tran
       if (!res.body) throw new Error(`Response body was missing for HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''}`);
 
       await readSSEStream(res, (payload) => {
-        const out = connectorRef.current.extract(payload);
+        const out = activeConnector.extract(payload, connectorState);
         if (!out) return;
 
         const chunk = out.text || '';

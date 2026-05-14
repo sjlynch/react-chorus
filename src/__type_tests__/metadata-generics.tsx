@@ -1,5 +1,6 @@
+import type { RefObject } from 'react';
 import { ChatWindow, Chorus, MessageBubble, createFetchSSETransport, createWebSocketTransport, useChorusPersistence, useChorusStream } from '../index';
-import type { ChorusOnSend, ChorusSendHelpers, Message, Transport } from '../index';
+import type { ChorusOnSend, ChorusRef, ChorusSendHelpers, Message, Transport } from '../index';
 import type {
   AttachmentError as HeadlessAttachmentError,
   AttachmentErrorReason as HeadlessAttachmentErrorReason,
@@ -36,6 +37,12 @@ export const typedChorusElement = (
       void latency;
     }}
     transport={typedTransport}
+    onMessagesChange={(next, context) => {
+      const latency: number | undefined = next[0].metadata?.latencyMs;
+      const source: 'controlled' | 'uncontrolled' | 'persistence' = context.source;
+      void latency;
+      void source;
+    }}
     renderMessage={(message) => {
       const model: string | undefined = message.metadata?.model;
       // @ts-expect-error MyMeta does not include traceId
@@ -53,6 +60,10 @@ const fetchTransport = createFetchSSETransport<MyMeta>('/api/chat', {
 const webSocketTransport = createWebSocketTransport<MyMeta>('wss://api.example.com/chat', {
   formatMessage: (_text, history) => JSON.stringify({ latency: history[0].metadata?.latencyMs }),
 });
+
+const typedRef = { current: null } as RefObject<ChorusRef<MyMeta> | null>;
+const typedRefMessages: Message<MyMeta>[] | undefined = typedRef.current?.getMessages();
+void typedRefMessages;
 
 const typedHelpers: ChorusSendHelpers = {
   appendAssistant: (_chunk) => undefined,

@@ -22,6 +22,11 @@
       "import": "./dist/react-chorus-transport.es.js",
       "require": "./dist/react-chorus-transport.cjs"
     },
+    "./provider-requests": {
+      "types": "./dist/types/providerRequests.d.ts",
+      "import": "./dist/provider-requests.es.js",
+      "require": "./dist/provider-requests.cjs"
+    },
     "./styles.css": {
       "types": "./dist/styles.css.d.ts",
       "default": "./dist/styles.css"
@@ -65,11 +70,12 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.type-tests.json --noEmit",
     "build": "vite build && tsc -p tsconfig.json --emitDeclarationOnly && node scripts/finalize-declarations.mjs",
     "build:playground": "vite build --config vite.playground.config.ts && npm run verify:playground-size",
-    "prepublishOnly": "npm run lint && npm run typecheck && npm test && npm run build && npm run verify:bundle-size && npm run typecheck:consumer && npm run verify:pack",
+    "prepublishOnly": "npm run lint && npm run typecheck && npm test && npm run build && npm run verify:bundle-size && npm run typecheck:consumer && npm run verify:pack && npm run verify:examples",
     "typecheck:consumer": "tsc -p fixtures/consumer-typecheck/tsconfig.json",
     "verify:bundle-size": "node scripts/verify-bundle-size.mjs",
     "verify:playground-size": "node scripts/verify-bundle-size.mjs --playground",
     "verify:pack": "node scripts/assert-package-contents.mjs",
+    "verify:examples": "node scripts/check-example-metadata.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
