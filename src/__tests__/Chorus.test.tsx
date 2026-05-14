@@ -2,7 +2,8 @@ import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { Chorus, type ChorusOnSend, type ChorusProps, type ChorusSendHelpers, type Transport } from '../Chorus';
+import { Chorus, type ChorusOnSend, type ChorusProps, type ChorusRef, type ChorusSendHelpers, type Transport } from '../Chorus';
+import { useChorusStream } from '../hooks/useChorusStream';
 import type { Message, StorageAdapter } from '../types';
 
 type OnSend = ChorusOnSend;
@@ -63,9 +64,11 @@ function makeSyncStorage(initial: Record<string, string> = {}): StorageAdapter &
 }
 
 describe('Chorus', () => {
-  it('applies className, style, and palette variables to the root element', () => {
+  it('applies className, style, palette variables, and HTML attributes to the root element', () => {
     const { container } = render(
       <Chorus
+        id="chorus-root"
+        data-testid="chorus-root"
         className="my-chat"
         style={{ height: '500px' }}
         palette={{
@@ -83,6 +86,8 @@ describe('Chorus', () => {
     const root = container.firstElementChild as HTMLElement;
 
     expect(root).toHaveClass('chorus', 'my-chat');
+    expect(root).toHaveAttribute('id', 'chorus-root');
+    expect(root).toHaveAttribute('data-testid', 'chorus-root');
     expect(root.style.height).toBe('500px');
     expect(root.style.getPropertyValue('--chorus-chat-bg')).toBe('#000');
     expect(root.style.getPropertyValue('--chorus-action-text')).toBe('#111');
@@ -91,6 +96,29 @@ describe('Chorus', () => {
     expect(root.style.getPropertyValue('--chorus-error-bg')).toBe('#444');
     expect(root.style.getPropertyValue('--chorus-error-border')).toBe('#555');
     expect(root.style.getPropertyValue('--chorus-error-text')).toBe('#666');
+  });
+
+  it('exposes an imperative ChorusRef for send, focus, clear, stop, and scrollToMessage', async () => {
+    const ref = React.createRef<ChorusRef>();
+    const scrollIntoView = vi.fn();
+    window.HTMLElement.prototype.scrollIntoView = scrollIntoView;
+    const onSend = vi.fn<OnSend>(async () => ({ id: 'a1', role: 'assistant', text: 'ref reply' }));
+
+    render(<Chorus ref={ref} onSend={onSend} minAssistantDelayMs={0} showClearButton />);
+
+    act(() => ref.current?.focus());
+    expect(screen.getByRole('textbox')).toHaveFocus();
+
+    act(() => ref.current?.send('hi from ref'));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith('hi from ref', expect.any(Array), expect.any(Object)));
+    expect(await screen.findByText('ref reply')).toBeInTheDocument();
+
+    act(() => ref.current?.scrollToMessage('a1'));
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
+
+    act(() => ref.current?.stop());
+    act(() => ref.current?.clear());
+    expect(screen.queryByText('hi from ref')).not.toBeInTheDocument();
   });
 
   it('transport path send() fires transport and streams tokens into the message list', async () => {
@@ -106,6 +134,56 @@ describe('Chorus', () => {
     expect(transport.mock.calls[0][0]).toBe('hi');
     expect(screen.getByText('hi')).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText('Hello')).toBeInTheDocument());
+  });
+
+  it('renders streamed reasoning in a collapsed details block on the assistant message', async () => {
+    const user = userEvent.setup();
+    const transport = vi.fn<Transport>(async () => sseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { reasoning_content: 'plan first' } }] }),
+      JSON.stringify({ choices: [{ index: 0, delta: { content: 'final answer' } }] }),
+      '[DONE]',
+    ]));
+
+    render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'why');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByText('final answer')).toBeInTheDocument();
+    const summary = screen.getByText('Reasoning');
+    expect(summary.closest('details')).not.toHaveAttribute('open');
+    expect(screen.getByText('plan first')).toBeInTheDocument();
+  });
+
+  it('renders streamed connector tool calls as visible tool rows by default', async () => {
+    const user = userEvent.setup();
+    const transport = vi.fn<Transport>(async () => sseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'search', arguments: '{"q":' } }] } }] }),
+      JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: '"test"}' } }] } }] }),
+      '[DONE]',
+    ]));
+
+    render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'use a tool');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    const toolButton = await screen.findByRole('button', { name: /search/i });
+    expect(toolButton).toBeInTheDocument();
+    await user.click(toolButton);
+    expect(screen.getByText(/"q": "test"/)).toBeInTheDocument();
+  });
+
+  it('accepts a custom connector object on the transport path', async () => {
+    const user = userEvent.setup();
+    const transport = vi.fn<Transport>(async () => sseResponse(['ignored']));
+
+    render(<Chorus transport={transport} connector={{ name: 'custom', extract: () => ({ text: 'X' }) }} minAssistantDelayMs={0} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'hi');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByText('X')).toBeInTheDocument();
   });
 
   it('delays the first transport token until minAssistantDelayMs elapses', async () => {
@@ -179,6 +257,25 @@ describe('Chorus', () => {
     render(<Chorus initialMessages={[{ id: 'welcome', role: 'assistant', text: 'Welcome!' }]} />);
 
     expect(screen.getByText('Welcome!')).toBeInTheDocument();
+  });
+
+  it('fills and focuses the composer when a suggested prompt is clicked', async () => {
+    const user = userEvent.setup();
+
+    render(<Chorus suggestedPrompts={['Plan a launch checklist', 'Write a test plan']} />);
+
+    await user.click(screen.getByRole('button', { name: 'Plan a launch checklist' }));
+
+    const composer = screen.getByRole('textbox', { name: /send a message/i });
+    expect(composer).toHaveValue('Plan a launch checklist');
+    await waitFor(() => expect(composer).toHaveFocus());
+  });
+
+  it('prefers custom emptyState over suggestedPrompts', () => {
+    render(<Chorus emptyState={<div>Custom welcome</div>} suggestedPrompts={['Hidden prompt']} />);
+
+    expect(screen.getByText('Custom welcome')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Hidden prompt' })).not.toBeInTheDocument();
   });
 
   it('renders and persists initialMessages when persistence storage is empty', async () => {
@@ -400,6 +497,31 @@ describe('Chorus', () => {
     warn.mockRestore();
   });
 
+  it('warns once at send time when neither transport nor onSend is provided', async () => {
+    const user = userEvent.setup();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    render(<Chorus />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'hello');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+    await user.type(screen.getByPlaceholderText('Send a message'), 'again');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    await waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining('`transport` nor `onSend`')));
+    expect(warn.mock.calls.filter(call => String(call[0]).includes('`transport` nor `onSend`'))).toHaveLength(1);
+    warn.mockRestore();
+  });
+
+  it('warns when sending is provided with a transport', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    render(<Chorus transport={async () => sseResponse([])} sending={false} />);
+
+    await waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining('`sending` was provided alongside `transport`')));
+    warn.mockRestore();
+  });
+
   it('onSend can return a message for a non-streaming assistant response', async () => {
     const user = userEvent.setup();
     const onSend = vi.fn<OnSend>(async () => ({
@@ -416,6 +538,94 @@ describe('Chorus', () => {
 
     await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
     expect(await screen.findByText('non-streamed reply')).toBeInTheDocument();
+  });
+
+  it('calls onFinish for completed transport streams with the final assistant message', async () => {
+    const user = userEvent.setup();
+    const transport = vi.fn<Transport>(async () => sseResponse(['Hel', 'lo']));
+    const onFinish = vi.fn();
+
+    render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} onFinish={onFinish} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'finish transport');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    await waitFor(() => expect(onFinish).toHaveBeenCalledOnce());
+    expect(onFinish.mock.calls[0][0]).toEqual(expect.objectContaining({
+      reason: 'done',
+      message: expect.objectContaining({ role: 'assistant', text: 'Hello' }),
+      response: expect.any(Response),
+    }));
+    expect(onFinish.mock.calls[0][0].messages.at(-1)).toEqual(expect.objectContaining({ text: 'Hello' }));
+  });
+
+  it('calls onFinish for helper streams, auto-finalized helper streams, and returned messages', async () => {
+    const user = userEvent.setup();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const onFinish = vi.fn();
+    const onSend = vi.fn<OnSend>(async (text, _messages, helpers) => {
+      if (text === 'stream') {
+        helpers.appendAssistant('helper done');
+        helpers.finalizeAssistant();
+        return;
+      }
+      if (text === 'auto') {
+        helpers.appendAssistant('auto done');
+        return;
+      }
+      return { id: 'returned', role: 'assistant', text: 'returned done' };
+    });
+
+    render(<Chorus onSend={onSend} minAssistantDelayMs={0} onFinish={onFinish} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'stream');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+    await waitFor(() => expect(onFinish).toHaveBeenCalledTimes(1));
+    expect(onFinish.mock.calls[0][0]).toEqual(expect.objectContaining({ reason: 'done', message: expect.objectContaining({ text: 'helper done' }) }));
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'auto');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+    await waitFor(() => expect(onFinish).toHaveBeenCalledTimes(2));
+    expect(onFinish.mock.calls[1][0]).toEqual(expect.objectContaining({ reason: 'done', message: expect.objectContaining({ text: 'auto done' }) }));
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'return');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+    await waitFor(() => expect(onFinish).toHaveBeenCalledTimes(3));
+    expect(onFinish.mock.calls[2][0]).toEqual(expect.objectContaining({ reason: 'returned-message', message: expect.objectContaining({ text: 'returned done' }) }));
+    warn.mockRestore();
+  });
+
+  it('does not call onFinish on aborts, errors, or sends with no assistant output', async () => {
+    const user = userEvent.setup();
+    const onFinish = vi.fn();
+    let helpers!: OnSendHelpers;
+    const onSend = vi.fn<OnSend>((text, _messages, h) => {
+      helpers = h;
+      if (text === 'error') throw new Error('boom');
+      if (text === 'empty') return undefined;
+      h.appendAssistant('partial');
+      return new Promise<void>((_resolve, reject) => {
+        h.signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+      });
+    });
+
+    render(<Chorus onSend={onSend} minAssistantDelayMs={0} onFinish={onFinish} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'stop');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /stop/i })).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: /stop/i }));
+    await waitFor(() => expect(helpers.signal.aborted).toBe(true));
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'error');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+    await screen.findByText('Something went wrong. Please try again.');
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'empty');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith('empty', expect.any(Array), expect.any(Object)));
+
+    expect(onFinish).not.toHaveBeenCalled();
   });
 
   it('onSend path calls onSend with text, messages, and helpers', async () => {
@@ -499,6 +709,30 @@ describe('Chorus', () => {
     warn.mockRestore();
   });
 
+  it('auto-finalizes helper chunks without a process global', async () => {
+    const user = userEvent.setup();
+    const originalProcess = globalThis.process;
+    const processWithoutEnv = Object.create(originalProcess ?? null) as typeof process;
+    Object.defineProperty(processWithoutEnv, 'env', { value: undefined, configurable: true, writable: true });
+    const onSend = vi.fn<OnSend>(async (_text, _messages, helpers) => {
+      helpers.appendAssistant('browser finalize');
+    });
+
+    Object.defineProperty(globalThis, 'process', { value: processWithoutEnv, configurable: true, writable: true });
+    try {
+      render(<Chorus onSend={onSend} minAssistantDelayMs={0} />);
+
+      await user.type(screen.getByPlaceholderText('Send a message'), 'stream');
+      await user.click(screen.getByRole('button', { name: /send/i }));
+
+      expect(await screen.findByText('browser finalize')).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument());
+      expect(screen.queryByText('Something went wrong. Please try again.')).not.toBeInTheDocument();
+    } finally {
+      Object.defineProperty(globalThis, 'process', { value: originalProcess, configurable: true, writable: true });
+    }
+  });
+
   it('shows an error banner when the transport path fails', async () => {
     const user = userEvent.setup();
     const transport = vi.fn<Transport>(async () => sseResponse([], 500));
@@ -523,9 +757,9 @@ describe('Chorus', () => {
 
     await waitFor(() => expect(onError).toHaveBeenCalledOnce());
     expect(onError.mock.calls[0][0]).toBeInstanceOf(Error);
-    expect(onError.mock.calls[0][0].message).toMatch(/Bad response \(500\) or missing body/i);
+    expect(onError.mock.calls[0][0].message).toMatch(/HTTP 500/i);
     expect(await screen.findByText('Something went wrong. Please try again.')).toBeInTheDocument();
-    expect(screen.queryByText(/Bad response \(500\) or missing body/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/HTTP 500/i)).not.toBeInTheDocument();
   });
 
   it('transport path surfaces in-band error payloads through onError and the UI banner', async () => {
@@ -545,6 +779,92 @@ describe('Chorus', () => {
     expect(onError.mock.calls[0][0]).toBeInstanceOf(Error);
     expect(onError.mock.calls[0][0].message).toBe('stream failed');
     expect(await screen.findByText('Something went wrong. Please try again.')).toBeInTheDocument();
+  });
+
+  it('passes Gemini safety finish reasons to onError while keeping the UI banner generic', async () => {
+    const user = userEvent.setup();
+    const transport = vi.fn<Transport>(async () => sseResponse([
+      JSON.stringify({ candidates: [{ finishReason: 'SAFETY', content: { parts: [] } }] }),
+    ]));
+    const onError = vi.fn();
+
+    render(<Chorus transport={transport} connector="gemini" minAssistantDelayMs={0} onError={onError} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'blocked');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    await waitFor(() => expect(onError).toHaveBeenCalledOnce());
+    expect(onError.mock.calls[0][0].message).toContain('finishReason: SAFETY');
+    expect(await screen.findByText('Something went wrong. Please try again.')).toBeInTheDocument();
+    expect(screen.queryByText(/finishReason: SAFETY/)).not.toBeInTheDocument();
+  });
+
+  it('surfaces errors from the documented useChorusStream onSend bridge', async () => {
+    const user = userEvent.setup();
+    const bridgeTransport = vi.fn<Transport>(async () => new Response('bad gateway', { status: 502, statusText: 'Bad Gateway' }));
+    const onError = vi.fn();
+
+    function Bridge() {
+      const { send } = useChorusStream(bridgeTransport);
+      return (
+        <Chorus
+          minAssistantDelayMs={0}
+          onError={onError}
+          onSend={(text, messages, helpers) => send(text, messages, {
+            onChunk: helpers.appendAssistant,
+            onDone: helpers.finalizeAssistant,
+          }, helpers.signal)}
+        />
+      );
+    }
+
+    render(<Bridge />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'boom');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    await waitFor(() => expect(onError).toHaveBeenCalledOnce());
+    expect(onError.mock.calls[0][0].message).toContain('HTTP 502 Bad Gateway: bad gateway');
+    expect(await screen.findByText('Something went wrong. Please try again.')).toBeInTheDocument();
+  });
+
+  it('ignores throwing onChunk observers on the transport path', async () => {
+    const user = userEvent.setup();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const onChunk = vi.fn(() => { throw new Error('analytics failed'); });
+    const transport = vi.fn<Transport>(async () => sseResponse(['safe']));
+
+    render(<Chorus transport={transport} onChunk={onChunk} minAssistantDelayMs={0} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'hello');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByText('safe')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument());
+    expect(screen.queryByText('Something went wrong. Please try again.')).not.toBeInTheDocument();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('`onChunk` callback threw'), expect.any(Error));
+    warn.mockRestore();
+  });
+
+  it('ignores throwing onChunk observers on the onSend helper path', async () => {
+    const user = userEvent.setup();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const onChunk = vi.fn(() => { throw new Error('analytics failed'); });
+    const onSend = vi.fn<OnSend>(async (_text, _messages, helpers) => {
+      helpers.appendAssistant('helper safe');
+      helpers.finalizeAssistant();
+    });
+
+    render(<Chorus onSend={onSend} onChunk={onChunk} minAssistantDelayMs={0} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'hello');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByText('helper safe')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument());
+    expect(screen.queryByText('Something went wrong. Please try again.')).not.toBeInTheDocument();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('`onChunk` callback threw'), expect.any(Error));
+    warn.mockRestore();
   });
 
   it('onSend non-abort error invokes onError with the Error object', async () => {
@@ -578,6 +898,40 @@ describe('Chorus', () => {
 
     expect(await screen.findByText('Something went wrong. Please try again.')).toBeInTheDocument();
     expect(screen.queryByText(/upstream boom/i)).not.toBeInTheDocument();
+  });
+
+  it('custom renderError receives error context and dismiss clears the banner without retrying', async () => {
+    const user = userEvent.setup();
+    const rawError = new Error('upstream boom');
+    const onSend = vi.fn(async () => {
+      throw rawError;
+    });
+    const renderError = vi.fn(({ error, rawError, dismiss }) => (
+      <div role="alert">
+        <span>{error}</span>
+        <span>{rawError?.message}</span>
+        <button type="button" onClick={dismiss}>Dismiss problem</button>
+      </div>
+    ));
+
+    render(<Chorus onSend={onSend} renderError={renderError} minAssistantDelayMs={0} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'trigger error');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Something went wrong. Please try again.');
+    expect(screen.getByRole('alert')).toHaveTextContent('upstream boom');
+    expect(renderError).toHaveBeenCalledWith(expect.objectContaining({
+      error: 'Something went wrong. Please try again.',
+      rawError,
+      retry: expect.any(Function),
+      dismiss: expect.any(Function),
+    }));
+
+    await user.click(screen.getByRole('button', { name: /dismiss problem/i }));
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(onSend).toHaveBeenCalledTimes(1);
   });
 
   it('onSend abort (user stop) does not invoke onError and shows no banner', async () => {
@@ -773,6 +1127,26 @@ describe('Chorus', () => {
     );
   });
 
+  it('blocks built-in sends during an active transport request even when sending is visually overridden false', async () => {
+    const user = userEvent.setup();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const transport = vi.fn<Transport>(() => new Promise<Response>(() => undefined));
+
+    render(<Chorus transport={transport} sending={false} minAssistantDelayMs={0} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'first');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+    await waitFor(() => expect(transport).toHaveBeenCalledTimes(1));
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'second');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(screen.getAllByText('first')).toHaveLength(1);
+    expect(screen.getByRole('log')).not.toHaveTextContent('second');
+    warn.mockRestore();
+  });
+
   it('Stop button aborts the active transport stream', async () => {
     const user = userEvent.setup();
     let capturedSignal: AbortSignal | undefined;
@@ -934,7 +1308,55 @@ describe('Chorus', () => {
     expect(screen.queryByText('controlled message')).not.toBeInTheDocument();
   });
 
-  it('persists cleared conversations so initialMessages do not resurrect on reload', async () => {
+  it('removes the persisted key when clearing with a removeItem-capable adapter', async () => {
+    const user = userEvent.setup();
+    const storage = makeSyncStorage();
+    storage.removeItem = vi.fn((key) => { delete storage.store[key]; });
+    const welcome: Message[] = [{ id: 'welcome', role: 'assistant', text: 'persistent welcome' }];
+
+    render(
+      <Chorus
+        persistenceKey="chat"
+        persistenceStorage={storage}
+        initialMessages={welcome}
+        showClearButton
+      />
+    );
+
+    await waitFor(() => expect(storage.store.chat).toBe(JSON.stringify(welcome)));
+    await user.click(screen.getByRole('button', { name: /clear conversation/i }));
+
+    await waitFor(() => expect(storage.removeItem).toHaveBeenCalledWith('chat'));
+    expect(storage.store.chat).toBeUndefined();
+  });
+
+  it('passes custom persistence serializer and deserializer hooks through Chorus', async () => {
+    const user = userEvent.setup();
+    const storage = makeSyncStorage({ chat: 'custom:read' });
+    const serializeMessages = vi.fn(() => 'custom:write');
+    const deserializeMessages = vi.fn(() => [{ id: 'stored', role: 'assistant', text: 'Stored custom' } as Message]);
+
+    render(
+      <Chorus
+        persistenceKey="chat"
+        persistenceStorage={storage}
+        serializeMessages={serializeMessages}
+        deserializeMessages={deserializeMessages}
+        initialMessages={[{ id: 'welcome', role: 'assistant', text: 'Welcome!' }]}
+      />
+    );
+
+    expect(screen.getByText('Stored custom')).toBeInTheDocument();
+    expect(deserializeMessages).toHaveBeenCalledWith('custom:read');
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'new message');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    await waitFor(() => expect(serializeMessages).toHaveBeenCalled());
+    await waitFor(() => expect(storage.store.chat).toBe('custom:write'));
+  });
+
+  it('persists cleared conversations so initialMessages do not resurrect on reload when removeItem is unavailable', async () => {
     const user = userEvent.setup();
     const storage = makeSyncStorage();
     const welcome: Message[] = [{ id: 'welcome', role: 'assistant', text: 'persistent welcome' }];

@@ -1,17 +1,22 @@
 import React from 'react';
 import type { ConnectorName, Message } from '../types';
-import { getConnector, type Connector } from '../connectors/connectors';
+import { getConnector, type Connector, type ConnectorToolDelta } from '../connectors/connectors';
 import { useLatestRef } from './useLatestRef';
+import { isChorusDevMode } from '../utils/devMode';
 
 export interface SendCallbacks {
   /**
-   * Optional notification fired when the first non-empty stream chunk is delivered.
-   * The same first chunk is also delivered to onChunk.
+   * Optional notification fired when the first non-empty text stream chunk is delivered.
+   * The same first text chunk is also delivered to onChunk.
    */
   onStart?: (firstChunk: string) => void;
-  /** Receives every non-empty stream chunk, including the first one. */
+  /** Receives every non-empty text stream chunk, including the first one. */
   onChunk: (chunk: string) => void;
-  onDone?: () => void;
+  /** Receives non-empty reasoning/thinking chunks when the connector exposes them. */
+  onReasoning?: (chunk: string) => void;
+  /** Receives accumulated tool-call deltas when the connector exposes them. */
+  onToolDelta?: (toolDelta: ConnectorToolDelta) => void;
+  onDone?: (response?: Response) => void;
   onError?: (err: Error) => void;
   /** Minimum elapsed time from send() start before delivering the first chunk. */
   minDelayMs?: number;
@@ -33,12 +38,126 @@ function createAbortError() {
   return err;
 }
 
+type DelayedStreamEvent =
+  | { type: 'text'; chunk: string }
+  | { type: 'reasoning'; chunk: string }
+  | { type: 'toolDelta'; toolDelta: ConnectorToolDelta };
+
+function hasOwn(value: object, key: PropertyKey) {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function tryParseJSON(value: string): unknown {
+  const trimmed = value.trim();
+  if (!trimmed || (!trimmed.startsWith('{') && !trimmed.startsWith('['))) return value;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return value;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function mergeToolValue(previous: unknown, next: unknown) {
+  if (typeof next === 'string') {
+    const combined = typeof previous === 'string' ? previous + next : next;
+    return tryParseJSON(combined);
+  }
+
+  if (isRecord(previous) && isRecord(next)) return { ...previous, ...next };
+  return next;
+}
+
+function createToolDeltaAccumulator() {
+  const pending = new Map<string, ConnectorToolDelta>();
+
+  return (delta: ConnectorToolDelta): ConnectorToolDelta => {
+    const current = pending.get(delta.id) ?? { id: delta.id };
+    const next: ConnectorToolDelta = { ...current };
+
+    if (delta.name) next.name = delta.name;
+    if (hasOwn(delta, 'input')) next.input = mergeToolValue(current.input, delta.input);
+    if (hasOwn(delta, 'output')) next.output = mergeToolValue(current.output, delta.output);
+
+    pending.set(delta.id, next);
+    return next;
+  };
+}
+
+function toError(error: unknown): Error {
+  if (error instanceof Error) return error;
+  if (typeof DOMException !== 'undefined' && error instanceof DOMException) return error as Error;
+  return new Error(String(error));
+}
+
+const MAX_ERROR_BODY_CHARS = 2048;
+const ERROR_BODY_READ_TIMEOUT_MS = 250;
+
+async function readErrorBodySnippet(res: Response, maxChars = MAX_ERROR_BODY_CHARS): Promise<{ text: string; truncated: boolean }> {
+  const clone = res.clone();
+  if (!clone.body) return { text: '', truncated: false };
+
+  const reader = clone.body.getReader();
+  const decoder = new TextDecoder();
+  let text = '';
+  let truncated = false;
+  let timedOut = false;
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+
+  const readWithTimeout = () => new Promise<ReadableStreamReadResult<Uint8Array>>((resolve, reject) => {
+    timeout = setTimeout(() => {
+      timedOut = true;
+      reject(new Error('Timed out reading error response body'));
+    }, ERROR_BODY_READ_TIMEOUT_MS);
+
+    reader.read().then(resolve, reject).finally(() => {
+      if (timeout !== null) clearTimeout(timeout);
+      timeout = null;
+    });
+  });
+
+  try {
+    while (text.length < maxChars) {
+      const { value, done } = await readWithTimeout();
+      if (done) {
+        text += decoder.decode();
+        return { text, truncated };
+      }
+
+      text += decoder.decode(value, { stream: true });
+      if (text.length >= maxChars) {
+        truncated = true;
+        text = text.slice(0, maxChars);
+        break;
+      }
+    }
+  } catch {
+    truncated = truncated || timedOut;
+  } finally {
+    reader.cancel().catch(() => undefined);
+    if (timeout !== null) clearTimeout(timeout);
+  }
+
+  return { text, truncated };
+}
+
+async function createHttpResponseError(res: Response) {
+  const statusText = res.statusText ? ` ${res.statusText}` : '';
+  const { text, truncated } = await readErrorBodySnippet(res);
+  const detail = text.trim();
+  const bodyDetail = detail ? `: ${detail}${truncated ? '…' : ''}` : '';
+  return new Error(`HTTP ${res.status}${statusText}${bodyDetail}`);
+}
+
 function createDelayedChunkEmitter(cb: SendCallbacks, startedAt: number, signal: AbortSignal) {
   const minDelayMs = Math.max(0, cb.minDelayMs ?? 0);
-  let hasDeliveredFirstChunk = false;
+  let hasDeliveredFirstTextChunk = false;
   let released = minDelayMs === 0;
   let cancelled = false;
-  let bufferedChunks: string[] = [];
+  let bufferedEvents: DelayedStreamEvent[] = [];
   let releasePromise: Promise<void> | null = null;
   let resolveRelease: (() => void) | null = null;
   let rejectRelease: ((err: Error) => void) | null = null;
@@ -74,27 +193,38 @@ function createDelayedChunkEmitter(cb: SendCallbacks, startedAt: number, signal:
     reject?.(err);
   };
 
-  const deliverChunk = (chunk: string) => {
+  const deliverEvent = (event: DelayedStreamEvent) => {
     if (cancelled) return;
-    if (!hasDeliveredFirstChunk) {
-      hasDeliveredFirstChunk = true;
-      cb.onStart?.(chunk);
+
+    if (event.type === 'text') {
+      if (!hasDeliveredFirstTextChunk) {
+        hasDeliveredFirstTextChunk = true;
+        cb.onStart?.(event.chunk);
+      }
+      cb.onChunk(event.chunk);
+      return;
     }
-    cb.onChunk(chunk);
+
+    if (event.type === 'reasoning') {
+      cb.onReasoning?.(event.chunk);
+      return;
+    }
+
+    cb.onToolDelta?.(event.toolDelta);
   };
 
-  const flushBufferedChunks = () => {
+  const flushBufferedEvents = () => {
     if (cancelled || released) return;
     released = true;
-    const chunks = bufferedChunks;
-    bufferedChunks = [];
+    const events = bufferedEvents;
+    bufferedEvents = [];
     settleScheduledRelease();
-    for (const chunk of chunks) deliverChunk(chunk);
+    for (const event of events) deliverEvent(event);
   };
 
   const cancel = () => {
     cancelled = true;
-    bufferedChunks = [];
+    bufferedEvents = [];
     rejectScheduledRelease(createAbortError());
   };
 
@@ -103,7 +233,7 @@ function createDelayedChunkEmitter(cb: SendCallbacks, startedAt: number, signal:
 
     const wait = Math.max(0, minDelayMs - (Date.now() - startedAt));
     if (wait <= 0) {
-      flushBufferedChunks();
+      flushBufferedEvents();
       return Promise.resolve();
     }
 
@@ -118,35 +248,42 @@ function createDelayedChunkEmitter(cb: SendCallbacks, startedAt: number, signal:
         rejectRelease = reject;
         abortListener = () => {
           cancelled = true;
-          bufferedChunks = [];
+          bufferedEvents = [];
           rejectScheduledRelease(createAbortError());
         };
         signal.addEventListener('abort', abortListener, { once: true });
-        releaseTimer = setTimeout(flushBufferedChunks, wait);
+        releaseTimer = setTimeout(flushBufferedEvents, wait);
       });
     }
 
     return releasePromise;
   };
 
-  const handleChunk = (chunk: string) => {
-    if (!chunk || cancelled) return;
+  const handleEvent = (event: DelayedStreamEvent) => {
+    if (cancelled) return;
+    if ((event.type === 'text' || event.type === 'reasoning') && !event.chunk) return;
 
     if (released || Date.now() - startedAt >= minDelayMs) {
-      if (!released) flushBufferedChunks();
-      deliverChunk(chunk);
+      if (!released) flushBufferedEvents();
+      deliverEvent(event);
       return;
     }
 
-    bufferedChunks.push(chunk);
+    bufferedEvents.push(event);
     void scheduleRelease().catch(() => undefined);
   };
 
   const flushBeforeDone = async () => {
-    if (!released && bufferedChunks.length > 0) await scheduleRelease();
+    if (!released && bufferedEvents.length > 0) await scheduleRelease();
   };
 
-  return { handleChunk, flushBeforeDone, cancel };
+  return {
+    handleChunk: (chunk: string) => handleEvent({ type: 'text', chunk }),
+    handleReasoning: (chunk: string) => handleEvent({ type: 'reasoning', chunk }),
+    handleToolDelta: (toolDelta: ConnectorToolDelta) => handleEvent({ type: 'toolDelta', toolDelta }),
+    flushBeforeDone,
+    cancel,
+  };
 }
 
 /**
@@ -241,8 +378,20 @@ export function useChorusStream<TMeta = Record<string, unknown>>(transport: Tran
   const isSendingRef = React.useRef(false);
   const controllerRef = React.useRef<AbortController | null>(null);
 
+  React.useEffect(() => () => {
+    controllerRef.current?.abort();
+  }, []);
+
   const send = React.useCallback(async (text: string, history: Message<TMeta>[], cb: SendCallbacks, externalSignal?: AbortSignal) => {
-    if (isSendingRef.current) return;
+    if (externalSignal?.aborted) return;
+
+    if (isSendingRef.current) {
+      if (isChorusDevMode()) {
+        console.warn('[Chorus] useChorusStream.send was called while a previous send is still in flight; the new call was ignored. Wait for the previous send to finish (await the promise) or call abort() before re-sending.');
+      }
+      return;
+    }
+
     isSendingRef.current = true;
 
     let controller: AbortController | null = null;
@@ -260,38 +409,54 @@ export function useChorusStream<TMeta = Record<string, unknown>>(transport: Tran
     setSending(true);
     const startedAt = Date.now();
     const delayedChunks = createDelayedChunkEmitter(cb, startedAt, signal);
-
-    const finish = async () => {
-      await delayedChunks.flushBeforeDone();
-      cb.onDone?.();
-      isSendingRef.current = false;
-      setSending(false);
-      if (controllerRef.current === controller) controllerRef.current = null;
-    };
+    const accumulateToolDelta = createToolDeltaAccumulator();
+    let errorToThrow: unknown;
 
     try {
       const res = await transportRef.current(text, history, signal);
-      if (!res.ok || !res.body) throw new Error(`Bad response (${res.status}) or missing body`);
+      if (!res.ok) throw await createHttpResponseError(res);
+      if (!res.body) throw new Error(`Response body was missing for HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''}`);
 
       await readSSEStream(res, (payload) => {
         const out = connectorRef.current.extract(payload);
         if (!out) return;
-        if (out.error) throw new Error(out.error);
 
         const chunk = out.text || '';
         if (chunk) delayedChunks.handleChunk(chunk);
 
+        const reasoning = out.reasoning || '';
+        if (reasoning) delayedChunks.handleReasoning(reasoning);
+
+        if (out.toolDelta) delayedChunks.handleToolDelta(accumulateToolDelta(out.toolDelta));
+
+        if (out.error) throw new Error(out.error);
         if (out.done) return false;
       });
 
-      await finish();
+      await delayedChunks.flushBeforeDone();
+      try {
+        cb.onDone?.(res);
+      } catch (callbackError) {
+        errorToThrow = callbackError;
+      }
     } catch (e: unknown) {
       delayedChunks.cancel();
-      if (!isAbortError(e)) cb.onError?.(e instanceof Error ? e : new Error(String(e)));
+      if (!isAbortError(e)) {
+        const error = toError(e);
+        try {
+          cb.onError?.(error);
+        } catch (callbackError) {
+          errorToThrow = callbackError;
+        }
+        if (errorToThrow === undefined) errorToThrow = error;
+      }
+    } finally {
       isSendingRef.current = false;
       setSending(false);
       if (controllerRef.current === controller) controllerRef.current = null;
     }
+
+    if (errorToThrow !== undefined) throw errorToThrow;
   }, [transportRef, connectorRef]);
 
   const abort = React.useCallback(() => { controllerRef.current?.abort(); }, []);

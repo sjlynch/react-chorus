@@ -1,9 +1,10 @@
+import { createRef } from 'react';
 import type React from 'react';
 import { readFileSync } from 'node:fs';
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { ChatWindow, MessageBubble } from '../components/ChatWindow';
+import { ChatWindow, MessageBubble, type RenderMessageContext } from '../components/ChatWindow';
 import type { Message } from '../types';
 
 // Mock Markdown to avoid DOMPurify/highlight.js complexity in unit tests
@@ -23,6 +24,15 @@ const TOOL_MSG: Message = {
   toolCall: { name: 'search', input: { q: 'test' }, output: 'results' },
 };
 
+function readmeMessageRenderer(msg: Message, ctx: RenderMessageContext) {
+  return (
+    <>
+      <MessageBubble message={msg} streaming={ctx.isStreaming} />
+      {ctx.actions.defaultRender()}
+    </>
+  );
+}
+
 // ---------------------------------------------------------------------------
 
 describe('ChatWindow', () => {
@@ -30,6 +40,15 @@ describe('ChatWindow', () => {
     render(<ChatWindow messages={[USER_MSG, ASST_MSG]} />);
     expect(screen.getByText('Hello')).toBeInTheDocument();
     expect(screen.getByText('Hi there')).toBeInTheDocument();
+  });
+
+  it('forwards root refs and HTML attributes', () => {
+    const ref = createRef<HTMLDivElement>();
+    render(<ChatWindow ref={ref} messages={[USER_MSG]} id="transcript" data-testid="chat-window" />);
+
+    const transcript = screen.getByTestId('chat-window');
+    expect(ref.current).toBe(transcript);
+    expect(transcript).toHaveAttribute('id', 'transcript');
   });
 
   it('exposes the transcript as a polite live log region', () => {
@@ -79,8 +98,47 @@ describe('ChatWindow', () => {
     expect(container.querySelector('.chorus-typing')).not.toBeInTheDocument();
   });
 
+  it('renders a custom empty state only while the visible transcript is empty', () => {
+    const { rerender } = render(<ChatWindow messages={[]} emptyState={<p>Ask Chorus anything</p>} />);
+
+    expect(screen.getByText('Ask Chorus anything')).toBeInTheDocument();
+
+    rerender(<ChatWindow messages={[SYS_MSG]} emptyState={<p>Ask Chorus anything</p>} />);
+
+    expect(screen.getByText('Ask Chorus anything')).toBeInTheDocument();
+    expect(screen.queryByText('You are helpful.')).not.toBeInTheDocument();
+
+    rerender(<ChatWindow messages={[USER_MSG]} emptyState={<p>Ask Chorus anything</p>} />);
+
+    expect(screen.queryByText('Ask Chorus anything')).not.toBeInTheDocument();
+    expect(screen.getByText('Hello')).toBeInTheDocument();
+  });
+
+  it('renders suggested prompts as the default empty state and hides them once a message exists', async () => {
+    const user = userEvent.setup();
+    const onSuggestedPrompt = vi.fn();
+    const { rerender } = render(
+      <ChatWindow messages={[]} suggestedPrompts={['Summarize this', 'Write tests']} onSuggestedPrompt={onSuggestedPrompt} />
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Summarize this' }));
+
+    expect(onSuggestedPrompt).toHaveBeenCalledWith('Summarize this');
+
+    rerender(<ChatWindow messages={[USER_MSG]} suggestedPrompts={['Summarize this', 'Write tests']} />);
+
+    expect(screen.queryByRole('button', { name: 'Summarize this' })).not.toBeInTheDocument();
+  });
+
   it('renders an alert error message when error is provided', () => {
     render(<ChatWindow messages={[]} error="Network error" />);
+    expect(screen.getByRole('alert')).toHaveTextContent('Network error');
+  });
+
+  it('renders errors alongside an active empty state', () => {
+    render(<ChatWindow messages={[]} emptyState={<p>Empty welcome</p>} error="Network error" />);
+
+    expect(screen.getByText('Empty welcome')).toBeInTheDocument();
     expect(screen.getByRole('alert')).toHaveTextContent('Network error');
   });
 
@@ -112,6 +170,56 @@ describe('ChatWindow', () => {
   it('does not show retry button when error is present but onRetry is absent', () => {
     render(<ChatWindow messages={[]} error="Oops" />);
     expect(screen.queryByRole('button', { name: /retry/i })).not.toBeInTheDocument();
+  });
+
+  it('renders reasoning in a collapsed details block above the message bubble', () => {
+    render(<ChatWindow messages={[{ ...ASST_MSG, reasoning: 'private plan' }]} />);
+    const summary = screen.getByText('Reasoning');
+    expect(summary.closest('details')).not.toHaveAttribute('open');
+    expect(screen.getByText('private plan')).toBeInTheDocument();
+    expect(screen.getByText('Hi there')).toBeInTheDocument();
+  });
+
+  it('uses renderError instead of the default error banner', async () => {
+    const user = userEvent.setup();
+    const rawError = new Error('raw upstream');
+    const onRetry = vi.fn();
+    const onDismissError = vi.fn();
+    const renderError = vi.fn(({ error, rawError, retry, dismiss }) => (
+      <div role="alert" data-testid="custom-error">
+        <span>{error}</span>
+        <span>{rawError?.message}</span>
+        <button type="button" onClick={retry}>Try custom retry</button>
+        <button type="button" onClick={dismiss}>Dismiss custom error</button>
+      </div>
+    ));
+
+    render(
+      <ChatWindow
+        messages={[]}
+        error="Friendly error"
+        rawError={rawError}
+        onRetry={onRetry}
+        onDismissError={onDismissError}
+        renderError={renderError}
+      />
+    );
+
+    expect(screen.getByTestId('custom-error')).toHaveTextContent('Friendly error');
+    expect(screen.getByTestId('custom-error')).toHaveTextContent('raw upstream');
+    expect(document.querySelector('.chorus-error')).not.toBeInTheDocument();
+    expect(renderError).toHaveBeenCalledWith(expect.objectContaining({
+      error: 'Friendly error',
+      rawError,
+      retry: expect.any(Function),
+      dismiss: expect.any(Function),
+    }));
+
+    await user.click(screen.getByRole('button', { name: 'Try custom retry' }));
+    await user.click(screen.getByRole('button', { name: 'Dismiss custom error' }));
+
+    expect(onRetry).toHaveBeenCalledOnce();
+    expect(onDismissError).toHaveBeenCalledOnce();
   });
 
   it('renders a ToolCallBlock for tool messages', () => {
@@ -187,6 +295,7 @@ describe('ChatWindow', () => {
   it('reveals message actions on hover and keyboard focus', () => {
     const css = readFileSync('src/Chorus.css', 'utf8');
     expect(css).toContain('.chorus-msg:hover .chorus-actions, .chorus-msg:focus-within .chorus-actions');
+    expect(css).toContain('.chorus-msg:hover + .chorus-render-actions .chorus-actions');
   });
 
   it('calls onDelete with message id when delete button is clicked', async () => {
@@ -205,6 +314,64 @@ describe('ChatWindow', () => {
     expect(onRegenerate).toHaveBeenCalledWith('a1');
   });
 
+  it('renders copy and feedback actions when callbacks are provided', async () => {
+    const user = userEvent.setup();
+    const onCopy = vi.fn();
+    const onFeedback = vi.fn();
+    render(<ChatWindow messages={[ASST_MSG]} onCopy={onCopy} onFeedback={onFeedback} />);
+
+    await user.click(screen.getByRole('button', { name: 'Copy' }));
+    await user.click(screen.getByRole('button', { name: 'Thumbs up' }));
+    expect(screen.getByRole('button', { name: 'Thumbs up' })).toHaveAttribute('aria-pressed', 'true');
+    await user.click(screen.getByRole('button', { name: 'Thumbs down' }));
+
+    expect(onCopy).toHaveBeenCalledWith(ASST_MSG);
+    expect(onFeedback).toHaveBeenNthCalledWith(1, ASST_MSG, 'up');
+    expect(onFeedback).toHaveBeenNthCalledWith(2, ASST_MSG, 'down');
+    expect(screen.getByRole('button', { name: 'Thumbs down' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('copies with navigator.clipboard by default when available', async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    const originalClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+
+    try {
+      render(<ChatWindow messages={[ASST_MSG]} />);
+      await user.click(screen.getByRole('button', { name: 'Copy' }));
+      expect(writeText).toHaveBeenCalledWith('Hi there');
+    } finally {
+      if (originalClipboard) Object.defineProperty(navigator, 'clipboard', originalClipboard);
+      else Reflect.deleteProperty(navigator, 'clipboard');
+    }
+  });
+
+  it('exposes copy and feedback through renderMessage actions', async () => {
+    const user = userEvent.setup();
+    const onCopy = vi.fn();
+    const onFeedback = vi.fn();
+    render(
+      <ChatWindow
+        messages={[ASST_MSG]}
+        onCopy={onCopy}
+        onFeedback={onFeedback}
+        renderMessage={(_message, ctx) => (
+          <div>
+            <button type="button" onClick={ctx.actions.copy}>Custom copy</button>
+            <button type="button" onClick={() => ctx.actions.feedback?.('down')}>Custom down</button>
+          </div>
+        )}
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Custom copy' }));
+    await user.click(screen.getByRole('button', { name: 'Custom down' }));
+
+    expect(onCopy).toHaveBeenCalledWith(ASST_MSG);
+    expect(onFeedback).toHaveBeenCalledWith(ASST_MSG, 'down');
+  });
+
   it('preserves local edit state when messages stream in', async () => {
     const user = userEvent.setup();
     const onEdit = vi.fn();
@@ -218,6 +385,78 @@ describe('ChatWindow', () => {
     expect(screen.getByRole('textbox', { name: 'Edit message' })).toHaveValue('Hello draft');
   });
 
+  it('renders identical inline editor markup in default and renderMessage action paths', async () => {
+    const user = userEvent.setup();
+    const defaultView = render(<ChatWindow messages={[USER_MSG]} onEdit={vi.fn()} />);
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    const defaultMarkup = defaultView.container.querySelector('.chorus-edit-wrap')?.outerHTML;
+    defaultView.unmount();
+
+    const customView = render(<ChatWindow messages={[USER_MSG]} onEdit={vi.fn()} renderMessage={readmeMessageRenderer} />);
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+
+    expect(customView.container.querySelector('.chorus-edit-wrap')?.outerHTML).toBe(defaultMarkup);
+  });
+
+  for (const variant of [
+    { name: 'default row', renderMessage: undefined },
+    { name: 'renderMessage action controls', renderMessage: readmeMessageRenderer },
+  ] as const) {
+    it(`handles Enter, Escape, and Shift+Enter identically in the ${variant.name} editor`, async () => {
+      const user = userEvent.setup();
+      const onEdit = vi.fn();
+      render(<ChatWindow messages={[USER_MSG]} onEdit={onEdit} renderMessage={variant.renderMessage} />);
+
+      await user.click(screen.getByRole('button', { name: 'Edit' }));
+      const textarea = screen.getByRole('textbox', { name: 'Edit message' });
+      await user.clear(textarea);
+      await user.type(textarea, 'Line 1{Shift>}{Enter}{/Shift}Line 2');
+
+      expect(textarea).toHaveValue('Line 1\nLine 2');
+      expect(onEdit).not.toHaveBeenCalled();
+
+      await user.keyboard('{Escape}');
+      expect(screen.queryByRole('textbox', { name: 'Edit message' })).not.toBeInTheDocument();
+      expect(onEdit).not.toHaveBeenCalled();
+
+      await user.click(screen.getByRole('button', { name: 'Edit' }));
+      await user.clear(screen.getByRole('textbox', { name: 'Edit message' }));
+      await user.type(screen.getByRole('textbox', { name: 'Edit message' }), 'Saved{Enter}');
+
+      expect(onEdit).toHaveBeenCalledWith('u1', 'Saved');
+      expect(screen.queryByRole('textbox', { name: 'Edit message' })).not.toBeInTheDocument();
+    });
+  }
+
+  it('supports the README MessageBubble plus actions.defaultRender pattern without duplicate bubbles', async () => {
+    const user = userEvent.setup();
+    const onEdit = vi.fn();
+    const onRegenerate = vi.fn();
+    const onDelete = vi.fn();
+    render(
+      <ChatWindow
+        messages={[USER_MSG, ASST_MSG]}
+        onEdit={onEdit}
+        onRegenerate={onRegenerate}
+        onDelete={onDelete}
+        renderMessage={readmeMessageRenderer}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Regenerate' })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Delete' })).toHaveLength(2);
+
+    await user.click(screen.getByRole('button', { name: 'Regenerate' }));
+    await user.click(screen.getAllByRole('button', { name: 'Delete' })[0]);
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+
+    expect(onRegenerate).toHaveBeenCalledWith('a1');
+    expect(onDelete).toHaveBeenCalledWith('u1');
+    expect(screen.getByRole('textbox', { name: 'Edit message' })).toHaveValue('Hello');
+    expect(screen.queryAllByTestId('markdown').map(el => el.textContent)).not.toContain('Hello');
+  });
+
   it('MessageBubble preserves the default row layout when used from renderMessage', () => {
     const { container } = render(
       <ChatWindow
@@ -228,6 +467,54 @@ describe('ChatWindow', () => {
 
     const bubble = container.querySelector('.chorus-msg.chorus-user > .chorus-msg-content > .chorus-bubble');
     expect(bubble).toHaveTextContent('Hello');
+  });
+
+  it('adds screen-reader speaker labels to built-in rows and exported MessageBubble', () => {
+    const { container, unmount } = render(<ChatWindow messages={[USER_MSG, ASST_MSG, SYS_MSG, TOOL_MSG]} hiddenRoles={[]} />);
+    expect(Array.from(container.querySelectorAll('.chorus-msg > .chorus-sr-only')).map(el => el.textContent)).toEqual([
+      'User message',
+      'Assistant message',
+      'System message',
+      'Tool message',
+    ]);
+    unmount();
+
+    const bubbleView = render(<MessageBubble message={USER_MSG} />);
+    expect(bubbleView.container.querySelector('.chorus-msg > .chorus-sr-only')).toHaveTextContent('User message');
+  });
+
+  it('renders MessageBubble decoration slots in the expected layout positions', () => {
+    const { container } = render(
+      <MessageBubble
+        message={ASST_MSG}
+        before={<span data-testid="before">Avatar</span>}
+        headerSlot={<span data-testid="header">Assistant · 14:32</span>}
+        footerSlot={<span data-testid="footer">gpt-4o</span>}
+        after={<span data-testid="after">Status</span>}
+      />
+    );
+
+    const row = container.querySelector('.chorus-msg')!;
+    const content = row.querySelector('.chorus-msg-content')!;
+    expect(row.querySelector('[data-testid="before"]')?.nextElementSibling).toBe(content);
+    expect(content.firstElementChild).toHaveAttribute('data-testid', 'header');
+    expect(content.querySelector('.chorus-bubble')?.nextElementSibling).toHaveAttribute('data-testid', 'footer');
+    expect(content.nextElementSibling).toHaveAttribute('data-testid', 'after');
+  });
+
+  it('passes decoration slots through ctx.defaultRender', () => {
+    render(
+      <ChatWindow
+        messages={[USER_MSG]}
+        renderMessage={(_message, ctx) => ctx.defaultRender({
+          headerSlot: <span data-testid="ctx-header">You · now</span>,
+          footerSlot: <span data-testid="ctx-footer">sent</span>,
+        })}
+      />
+    );
+
+    expect(screen.getByTestId('ctx-header')).toHaveTextContent('You · now');
+    expect(screen.getByTestId('ctx-footer')).toHaveTextContent('sent');
   });
 
   it('MessageBubble renders message attachments', () => {
@@ -244,6 +531,8 @@ describe('ChatWindow', () => {
     const { container } = render(<MessageBubble message={message} />);
 
     expect(screen.getByAltText('photo.png')).toHaveAttribute('src', 'data:image/png;base64,abc');
+    expect(screen.getByAltText('photo.png')).toHaveAttribute('loading', 'lazy');
+    expect(screen.getByAltText('photo.png')).toHaveAttribute('decoding', 'async');
     expect(screen.getByText('notes.txt')).toBeInTheDocument();
     expect(container.querySelector('.chorus-msg-attachments')).toBeInTheDocument();
   });
@@ -257,5 +546,65 @@ describe('ChatWindow', () => {
     const sanitizer = vi.fn((html: string) => html);
     render(<ChatWindow messages={[USER_MSG]} markdownSanitizer={sanitizer} />);
     expect(screen.getByTestId('markdown')).toHaveAttribute('data-sanitizer', 'true');
+  });
+
+  it('limits rendering to the latest visible message window while preserving typing and error rows', () => {
+    const messages = Array.from({ length: 100 }, (_, i): Message => ({
+      id: `m${i}`,
+      role: i % 2 === 0 ? 'user' : 'assistant',
+      text: `Message ${i}`,
+    }));
+
+    render(<ChatWindow messages={messages} maxRenderedMessages={5} typing error="Still accessible" />);
+
+    expect(screen.getAllByTestId('markdown')).toHaveLength(5);
+    expect(screen.queryByText('Message 94')).not.toBeInTheDocument();
+    expect(screen.getByText('Message 95')).toBeInTheDocument();
+    expect(screen.getByText('Message 99')).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: /assistant is typing/i })).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('Still accessible');
+  });
+
+  it('keeps actions wired to original message ids when a render window is active', async () => {
+    const user = userEvent.setup();
+    const onDelete = vi.fn();
+    const messages = Array.from({ length: 20 }, (_, i): Message => ({
+      id: `m${i}`,
+      role: 'assistant',
+      text: `Windowed ${i}`,
+    }));
+
+    render(<ChatWindow messages={messages} maxRenderedMessages={1} onDelete={onDelete} />);
+
+    expect(screen.queryByText('Windowed 18')).not.toBeInTheDocument();
+    expect(screen.getByText('Windowed 19')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Delete' }));
+
+    expect(onDelete).toHaveBeenCalledWith('m19');
+  });
+
+  it('shows a jump-to-bottom button for unread activity after the user scrolls away', async () => {
+    const user = userEvent.setup();
+    const messages: Message[] = [USER_MSG, ASST_MSG];
+    const { rerender } = render(<ChatWindow messages={messages} />);
+    const transcript = screen.getByRole('log', { name: /chat transcript/i });
+
+    Object.defineProperty(transcript, 'scrollHeight', { configurable: true, value: 1000 });
+    Object.defineProperty(transcript, 'clientHeight', { configurable: true, value: 200 });
+    transcript.scrollTop = 0;
+    fireEvent.scroll(transcript);
+
+    expect(screen.queryByRole('button', { name: /jump to latest/i })).not.toBeInTheDocument();
+
+    rerender(<ChatWindow messages={[...messages, { id: 'a2', role: 'assistant', text: 'Newest reply' }]} />);
+
+    const jumpButton = await screen.findByRole('button', { name: /jump to latest/i });
+    expect(jumpButton).toHaveClass('chorus-jump-to-bottom');
+
+    await user.click(jumpButton);
+
+    await waitFor(() => expect(screen.queryByRole('button', { name: /jump to latest/i })).not.toBeInTheDocument());
+    expect(transcript.scrollTop).toBe(1000);
   });
 });

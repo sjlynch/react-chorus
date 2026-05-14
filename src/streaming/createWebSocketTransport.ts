@@ -70,6 +70,7 @@ export function createWebSocketTransport<TMeta = Record<string, unknown>>(
       const cleanup = () => signal.removeEventListener('abort', onAbort);
 
       const onAbort = () => {
+        cleanup();
         ws.close();
         if (resolved) {
           try { streamController.error(new DOMException('Aborted', 'AbortError')); } catch {}
@@ -99,6 +100,10 @@ export function createWebSocketTransport<TMeta = Record<string, unknown>>(
         cleanup();
         try { streamController?.close(); } catch {}
         opts?.onClose?.(event.code, event.reason);
+        if (!resolved) {
+          const reason = event.reason ? `: ${event.reason}` : '';
+          reject(new Error(`WebSocket closed before opening (code ${event.code}${reason})`));
+        }
       };
 
       ws.onerror = (event: Event) => {
