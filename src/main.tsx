@@ -408,6 +408,7 @@ function App() {
               selectConversation={conversations.selectConversation}
               renameConversation={conversations.renameConversation}
               deleteConversation={conversations.deleteConversation}
+              pinConversation={conversations.pinConversation}
               newConversationLabel="+ New chat"
               emptyLabel="No conversations yet"
             />
@@ -436,6 +437,9 @@ function App() {
                   accept="image/*"
                   maxAttachmentBytes={MAX_IMAGE_BYTES}
                   maxAttachments={3}
+                  onMessagesChange={(messages) => {
+                    if (conversations.activeId) conversations.renameFromFirstMessage(conversations.activeId, messages);
+                  }}
                   onAttachmentError={(error) => {
                     setAttachmentNotice(error.message);
                     window.setTimeout(() => setAttachmentNotice(null), 4000);

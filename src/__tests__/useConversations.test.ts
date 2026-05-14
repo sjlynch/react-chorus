@@ -108,4 +108,99 @@ describe('useConversations', () => {
 
     expect(result.current.conversations[0].updatedAt).toBe('2026-05-14T00:00:05.000Z');
   });
+
+  it('renames a default-titled conversation from the first user message', () => {
+    const storage = makeSyncStorage();
+    const { result } = renderHook(() => useConversations({
+      storage,
+      createId: () => 'abc',
+      now: () => '2026-05-14T00:00:00.000Z',
+      defaultTitle: 'New chat',
+    }));
+
+    act(() => { result.current.createConversation(); });
+    act(() => result.current.renameFromFirstMessage('abc', [
+      { role: 'assistant', text: 'Welcome' },
+      { role: 'user', text: '  Please summarize this very long document for the weekly leadership review  ' },
+    ], { maxLength: 22 }));
+
+    expect(result.current.conversations[0].title).toBe('Please summarize this…');
+
+    act(() => result.current.renameFromFirstMessage('abc', [{ role: 'user', text: 'Do not overwrite' }]));
+    expect(result.current.conversations[0].title).toBe('Please summarize this…');
+  });
+
+  it('surfaces invalid index JSON through error and onError while falling back to empty state', async () => {
+    const onError = vi.fn();
+    const storage = makeSyncStorage({ 'chorus-conversations-index': 'not json {{' });
+
+    const { result } = renderHook(() => useConversations({ storage, onError }));
+
+    expect(result.current.conversations).toEqual([]);
+    expect(result.current.error).toEqual(expect.objectContaining({
+      key: 'chorus-conversations-index',
+      operation: 'read',
+    }));
+    await act(async () => { await Promise.resolve(); });
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ operation: 'read', key: 'chorus-conversations-index' }));
+  });
+
+  it('surfaces rejected async index reads through error and onError', async () => {
+    const readError = new Error('blocked');
+    const onError = vi.fn();
+    const storage: StorageAdapter = {
+      getItem: vi.fn().mockRejectedValue(readError),
+      setItem: vi.fn(),
+    };
+
+    const { result } = renderHook(() => useConversations({ storage, onError }));
+
+    await act(async () => { await Promise.resolve(); });
+
+    expect(result.current.conversations).toEqual([]);
+    expect(result.current.error).toEqual(expect.objectContaining({ operation: 'read', key: 'chorus-conversations-index' }));
+    expect(result.current.error?.cause).toBe(readError);
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ operation: 'read', key: 'chorus-conversations-index' }));
+  });
+
+  it('surfaces rejected index writes through error and onError while keeping in-memory state', async () => {
+    const writeError = new Error('quota');
+    const onError = vi.fn();
+    const storage: StorageAdapter = {
+      getItem: vi.fn(() => null),
+      setItem: vi.fn(() => Promise.reject(writeError)),
+      removeItem: vi.fn(),
+    };
+
+    const { result } = renderHook(() => useConversations({ storage, onError, createId: () => 'abc' }));
+
+    act(() => { result.current.createConversation('Saved in memory'); });
+    expect(result.current.conversations[0].title).toBe('Saved in memory');
+
+    await act(async () => { await Promise.resolve(); });
+
+    expect(result.current.error).toEqual(expect.objectContaining({ operation: 'write', key: 'chorus-conversations-index' }));
+    expect(result.current.error?.cause).toBe(writeError);
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ operation: 'write', key: 'chorus-conversations-index' }));
+  });
+
+  it('surfaces failed transcript deletion through error and onError while deleting the index entry', async () => {
+    const deleteError = new Error('delete failed');
+    const onError = vi.fn();
+    const storage = makeSyncStorage();
+    storage.removeItem.mockImplementation(() => { throw deleteError; });
+    const { result } = renderHook(() => useConversations({ storage, onError, createId: () => 'abc' }));
+
+    act(() => { result.current.createConversation('Delete me'); });
+    act(() => result.current.deleteConversation('abc'));
+
+    expect(result.current.conversations).toEqual([]);
+    expect(result.current.error).toEqual(expect.objectContaining({
+      operation: 'delete',
+      key: 'chorus-conversation:abc',
+      conversationId: 'abc',
+    }));
+    expect(result.current.error?.cause).toBe(deleteError);
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ operation: 'delete', key: 'chorus-conversation:abc' }));
+  });
 });

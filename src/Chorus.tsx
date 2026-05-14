@@ -6,7 +6,7 @@ import { styleVarsFromPalette, type Palette } from './components/ChorusTheme';
 import type { Attachment, AttachmentError, ConnectorName, Message, Role, StorageAdapter, UploadAttachment } from './types';
 import type { Transport } from './hooks/useChorusStream';
 import { useChorusPersistence, type DeserializeMessages, type SerializeMessages } from './hooks/useChorusPersistence';
-import { useChorusMessages } from './hooks/useChorusMessages';
+import { useChorusMessages, type ChorusMessagesChangeContext } from './hooks/useChorusMessages';
 import { useAssistantSession } from './hooks/useAssistantSession';
 import type { ChorusFinishContext, ChorusOnFinish, ChorusOnSend, ChorusSendHelpers } from './hooks/useAssistantSession';
 import type { Connector } from './connectors/connectors';
@@ -15,17 +15,18 @@ import { isChorusDevMode } from './utils/devMode';
 
 export type { Transport };
 export type { Connector };
-export type { ChorusFinishContext, ChorusOnFinish, ChorusOnSend, ChorusSendHelpers };
+export type { ChorusFinishContext, ChorusMessagesChangeContext, ChorusOnFinish, ChorusOnSend, ChorusSendHelpers };
 
 const DEFAULT_MIN_ASSISTANT_DELAY_MS = 300;
 const DEFAULT_PERSISTENCE_WRITE_DEBOUNCE_MS = 80;
 const DEFAULT_CHORUS_HIDDEN_ROLES: Role[] = ['system'];
 
-export interface ChorusRef {
+export interface ChorusRef<TMeta = Record<string, unknown>> {
   send(text: string, attachments?: Attachment[]): void;
   stop(): void;
   clear(): void;
   focus(): void;
+  getMessages(): Message<TMeta>[];
   scrollToMessage(id: string): void;
 }
 
@@ -63,7 +64,9 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
   onFeedback?: (message: Message<TMeta>, feedback: MessageFeedback) => void;
   /** Called exactly once when an assistant message completes normally. */
   onFinish?: ChorusOnFinish<TMeta>;
-  /** Called when Chorus cannot write the transcript to persistenceStorage. */
+  /** Observes transcript changes in controlled, uncontrolled, and persistence-backed modes without making Chorus controlled. */
+  onMessagesChange?: (messages: Message<TMeta>[], context: ChorusMessagesChangeContext) => void;
+  /** Called when Chorus cannot read, deserialize, write, or remove the transcript in persistenceStorage. */
   onPersistenceError?: (error: Error) => void;
   onSend?: ChorusOnSend<TMeta>;
   palette?: Palette;
@@ -116,6 +119,7 @@ function ChorusInner<TMeta = Record<string, unknown>>({
   onError,
   onFeedback,
   onFinish,
+  onMessagesChange,
   onPersistenceError,
   onSend,
   palette,
@@ -136,7 +140,7 @@ function ChorusInner<TMeta = Record<string, unknown>>({
   uploadAttachment,
   value,
   ...rest
-}: ChorusProps<TMeta>, ref: React.ForwardedRef<ChorusRef>) {
+}: ChorusProps<TMeta>, ref: React.ForwardedRef<ChorusRef<TMeta>>) {
   const rootRef = React.useRef<HTMLDivElement>(null);
   const inputRef = React.useRef<HTMLDivElement>(null);
   const [draft, setDraft] = React.useState('');
@@ -149,11 +153,12 @@ function ChorusInner<TMeta = Record<string, unknown>>({
     serializeMessages,
     deserializeMessages,
   });
-  const { msgs, updateMsgs, onChunkRef, seedMessages } = useChorusMessages<TMeta>({
+  const { msgs, messagesRef, updateMsgs, onChunkRef, seedMessages } = useChorusMessages<TMeta>({
     value,
     messages,
     initialMessages,
     onChange,
+    onMessagesChange,
     persistenceKey,
     persistedMessages: persisted.value,
     persistenceLoaded: persisted.loaded,
@@ -256,6 +261,9 @@ function ChorusInner<TMeta = Record<string, unknown>>({
     focus() {
       inputRef.current?.focus();
     },
+    getMessages() {
+      return messagesRef.current.slice();
+    },
     scrollToMessage(id: string) {
       const root = rootRef.current;
       if (!root) return;
@@ -263,7 +271,7 @@ function ChorusInner<TMeta = Record<string, unknown>>({
       const target = Array.from(nodes).find(node => node.dataset.chorusMessageId === id);
       target?.scrollIntoView({ block: 'nearest' });
     },
-  }), [session]);
+  }), [messagesRef, session]);
 
   return (
     <div {...rest} ref={rootRef} className={["chorus", className].filter(Boolean).join(" ")} style={{ ...paletteVars, ...style }}>
@@ -319,7 +327,7 @@ function ChorusInner<TMeta = Record<string, unknown>>({
 }
 
 export const Chorus = React.forwardRef(ChorusInner) as <TMeta = Record<string, unknown>>(
-  props: ChorusProps<TMeta> & React.RefAttributes<ChorusRef>,
+  props: ChorusProps<TMeta> & React.RefAttributes<ChorusRef<TMeta>>,
 ) => React.ReactElement | null;
 
 (Chorus as React.NamedExoticComponent).displayName = 'Chorus';

@@ -112,12 +112,17 @@ describe('Chorus', () => {
     act(() => ref.current?.send('hi from ref'));
     await waitFor(() => expect(onSend).toHaveBeenCalledWith('hi from ref', expect.any(Array), expect.any(Object)));
     expect(await screen.findByText('ref reply')).toBeInTheDocument();
+    expect(ref.current?.getMessages()).toEqual([
+      expect.objectContaining({ role: 'user', text: 'hi from ref' }),
+      expect.objectContaining({ id: 'a1', role: 'assistant', text: 'ref reply' }),
+    ]);
 
     act(() => ref.current?.scrollToMessage('a1'));
     expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
 
     act(() => ref.current?.stop());
     act(() => ref.current?.clear());
+    expect(ref.current?.getMessages()).toEqual([]);
     expect(screen.queryByText('hi from ref')).not.toBeInTheDocument();
   });
 
@@ -259,6 +264,87 @@ describe('Chorus', () => {
     expect(screen.getByText('Welcome!')).toBeInTheDocument();
   });
 
+  it('observes uncontrolled initial messages, streams, and clear without requiring controlled state', async () => {
+    const user = userEvent.setup();
+    const onMessagesChange = vi.fn();
+    const onSend = vi.fn<OnSend>(async (_text, _messages, helpers) => {
+      helpers.appendAssistant('streamed ');
+      helpers.appendAssistant('reply');
+      helpers.finalizeAssistant();
+    });
+
+    render(
+      <Chorus
+        initialMessages={[{ id: 'welcome', role: 'assistant', text: 'Welcome!' }]}
+        onMessagesChange={onMessagesChange}
+        onSend={onSend}
+        minAssistantDelayMs={0}
+        showClearButton
+      />,
+    );
+
+    await waitFor(() => expect(onMessagesChange).toHaveBeenCalledWith(
+      [expect.objectContaining({ id: 'welcome', text: 'Welcome!' })],
+      expect.objectContaining({ source: 'uncontrolled', reason: 'initial' }),
+    ));
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'observe me');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    await waitFor(() => expect(onMessagesChange).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ role: 'assistant', text: 'streamed reply' })]),
+      expect.objectContaining({ source: 'uncontrolled', reason: 'assistant' }),
+    ));
+
+    await user.click(screen.getAllByTitle('Delete')[0]);
+    await waitFor(() => expect(onMessagesChange).toHaveBeenCalledWith(
+      expect.not.arrayContaining([expect.objectContaining({ id: 'welcome' })]),
+      expect.objectContaining({ source: 'uncontrolled', reason: 'delete' }),
+    ));
+
+    await user.click(screen.getByRole('button', { name: /clear conversation/i }));
+    await waitFor(() => expect(onMessagesChange).toHaveBeenLastCalledWith([], expect.objectContaining({ reason: 'clear' })));
+  });
+
+  it('observes controlled value updates without broadening onChange beyond controlled mode', async () => {
+    const user = userEvent.setup();
+    const onMessagesChange = vi.fn();
+    const onChange = vi.fn<(messages: Message[]) => void>();
+
+    function Harness() {
+      const [messages, setMessages] = React.useState<Message[]>([{ id: 'seed', role: 'assistant', text: 'controlled seed' }]);
+      return (
+        <Chorus
+          value={messages}
+          onChange={(next) => {
+            onChange(next);
+            setMessages(next);
+          }}
+          onMessagesChange={onMessagesChange}
+          onSend={() => ({ id: 'controlled-assistant', role: 'assistant', text: 'controlled reply' })}
+          minAssistantDelayMs={0}
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    await waitFor(() => expect(onMessagesChange).toHaveBeenCalledWith(
+      [expect.objectContaining({ id: 'seed' })],
+      expect.objectContaining({ source: 'controlled' }),
+    ));
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'controlled send');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    await waitFor(() => expect(screen.getByText('controlled reply')).toBeInTheDocument());
+    expect(onChange).toHaveBeenCalled();
+    expect(onMessagesChange).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ id: 'controlled-assistant', text: 'controlled reply' })]),
+      expect.objectContaining({ source: 'controlled', reason: 'assistant' }),
+    );
+  });
+
   it('fills and focuses the composer when a suggested prompt is clicked', async () => {
     const user = userEvent.setup();
 
@@ -278,14 +364,19 @@ describe('Chorus', () => {
     expect(screen.queryByRole('button', { name: 'Hidden prompt' })).not.toBeInTheDocument();
   });
 
-  it('renders and persists initialMessages when persistence storage is empty', async () => {
+  it('renders, observes, and persists initialMessages when persistence storage is empty', async () => {
     const storage = makeSyncStorage();
+    const onMessagesChange = vi.fn();
     const welcome: Message[] = [{ id: 'welcome', role: 'assistant', text: 'Welcome!' }];
 
-    render(<Chorus persistenceKey="chat" persistenceStorage={storage} initialMessages={welcome} />);
+    render(<Chorus persistenceKey="chat" persistenceStorage={storage} initialMessages={welcome} onMessagesChange={onMessagesChange} />);
 
     expect(screen.getByText('Welcome!')).toBeInTheDocument();
     await waitFor(() => expect(storage.store.chat).toBe(JSON.stringify(welcome)));
+    expect(onMessagesChange).toHaveBeenCalledWith(welcome, expect.objectContaining({
+      source: 'persistence',
+      reason: 'persistence-seed',
+    }));
   });
 
   it('uses legacy messages as a persistence seed when storage is empty', async () => {
@@ -312,6 +403,31 @@ describe('Chorus', () => {
 
     expect(screen.getByText('Stored history')).toBeInTheDocument();
     expect(screen.queryByText('Welcome!')).not.toBeInTheDocument();
+  });
+
+  it('observes persistence-backed loads and clears', async () => {
+    const user = userEvent.setup();
+    const stored: Message[] = [{ id: 'stored', role: 'assistant', text: 'Stored observed history' }];
+    const storage = makeSyncStorage({ chat: JSON.stringify(stored) });
+    const onMessagesChange = vi.fn();
+
+    render(
+      <Chorus
+        persistenceKey="chat"
+        persistenceStorage={storage}
+        onMessagesChange={onMessagesChange}
+        showClearButton
+      />,
+    );
+
+    await waitFor(() => expect(onMessagesChange).toHaveBeenCalledWith(
+      stored,
+      expect.objectContaining({ source: 'persistence', reason: 'persistence-load' }),
+    ));
+
+    await user.click(screen.getByRole('button', { name: /clear conversation/i }));
+
+    await waitFor(() => expect(onMessagesChange).toHaveBeenLastCalledWith([], expect.objectContaining({ source: 'persistence', reason: 'clear' })));
   });
 
   it('keeps the initialMessages seed after an empty async persistence load resolves', async () => {
@@ -382,6 +498,19 @@ describe('Chorus', () => {
 
     await new Promise(resolve => setTimeout(resolve, 120));
     expect(storage.setItem).toHaveBeenCalledTimes(callsAfterFinal);
+  });
+
+  it('surfaces persistence read failures through onPersistenceError', async () => {
+    const onPersistenceError = vi.fn();
+    const storage = makeSyncStorage({ chat: 'not json {{' });
+
+    render(<Chorus persistenceKey="chat" persistenceStorage={storage} onPersistenceError={onPersistenceError} />);
+
+    await waitFor(() => expect(onPersistenceError).toHaveBeenCalledWith(expect.objectContaining({
+      key: 'chat',
+      operation: 'deserialize',
+    })));
+    expect(screen.queryByRole('log')).toBeInTheDocument();
   });
 
   it('surfaces persistence write failures through onPersistenceError', async () => {
@@ -1279,6 +1408,30 @@ describe('Chorus', () => {
     expect(screen.queryByText('reply')).not.toBeInTheDocument();
   });
 
+  it('persists the seed when resetToInitialMessages clears a persisted chat', async () => {
+    const user = userEvent.setup();
+    const storage = makeSyncStorage();
+    storage.removeItem = vi.fn((key) => { delete storage.store[key]; });
+    const welcome: Message[] = [{ id: 'welcome', role: 'assistant', text: 'persistent reset welcome' }];
+
+    render(
+      <Chorus
+        persistenceKey="chat"
+        persistenceStorage={storage}
+        initialMessages={welcome}
+        showClearButton
+        resetToInitialMessages
+      />,
+    );
+
+    await waitFor(() => expect(storage.store.chat).toBe(JSON.stringify(welcome)));
+    await user.click(screen.getByRole('button', { name: /clear conversation/i }));
+
+    expect(screen.getByText('persistent reset welcome')).toBeInTheDocument();
+    await waitFor(() => expect(storage.store.chat).toBe(JSON.stringify(welcome)));
+    expect(storage.removeItem).not.toHaveBeenCalled();
+  });
+
   it('controlled clear calls onChange with the reset list', async () => {
     const user = userEvent.setup();
     const onChange = vi.fn<(messages: Message[]) => void>();
@@ -1308,13 +1461,12 @@ describe('Chorus', () => {
     expect(screen.queryByText('controlled message')).not.toBeInTheDocument();
   });
 
-  it('removes the persisted key when clearing with a removeItem-capable adapter', async () => {
+  it('persists [] when clearing a seeded persisted chat with a removeItem-capable adapter', async () => {
     const user = userEvent.setup();
     const storage = makeSyncStorage();
     storage.removeItem = vi.fn((key) => { delete storage.store[key]; });
     const welcome: Message[] = [{ id: 'welcome', role: 'assistant', text: 'persistent welcome' }];
-
-    render(
+    const { unmount } = render(
       <Chorus
         persistenceKey="chat"
         persistenceStorage={storage}
@@ -1326,8 +1478,21 @@ describe('Chorus', () => {
     await waitFor(() => expect(storage.store.chat).toBe(JSON.stringify(welcome)));
     await user.click(screen.getByRole('button', { name: /clear conversation/i }));
 
-    await waitFor(() => expect(storage.removeItem).toHaveBeenCalledWith('chat'));
-    expect(storage.store.chat).toBeUndefined();
+    await waitFor(() => expect(storage.store.chat).toBe(JSON.stringify([])));
+    expect(storage.removeItem).not.toHaveBeenCalled();
+    expect(screen.queryByText('persistent welcome')).not.toBeInTheDocument();
+
+    unmount();
+    render(
+      <Chorus
+        persistenceKey="chat"
+        persistenceStorage={storage}
+        initialMessages={welcome}
+        showClearButton
+      />
+    );
+
+    expect(screen.queryByText('persistent welcome')).not.toBeInTheDocument();
   });
 
   it('passes custom persistence serializer and deserializer hooks through Chorus', async () => {

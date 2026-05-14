@@ -31,6 +31,7 @@ export type ChorusOnFinish<TMeta = Record<string, unknown>> = (context: ChorusFi
 interface UpdateMessagesOptions {
   flushPersistence?: boolean;
   removePersistenceIfEmpty?: boolean;
+  reason?: 'send' | 'assistant' | 'retry' | 'edit' | 'regenerate' | 'delete' | 'clear' | 'update';
 }
 
 interface SubmittedUserTurn<TMeta = Record<string, unknown>> {
@@ -234,13 +235,13 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
   const { enqueue: enqueueTextChunk, cancelPending: cancelPendingText } = useRAFQueue((add) => {
     const id = pendingAssistantIdRef.current;
     if (!id) return;
-    updateSessionMessages(prev => prev.map(m => m.id === id ? { ...m, text: m.text + add } : m));
+    updateSessionMessages(prev => prev.map(m => m.id === id ? { ...m, text: m.text + add } : m), { reason: 'assistant' });
   });
 
   const { enqueue: enqueueReasoningChunk, cancelPending: cancelPendingReasoning } = useRAFQueue((add) => {
     const id = pendingAssistantIdRef.current;
     if (!id) return;
-    updateSessionMessages(prev => prev.map(m => m.id === id ? { ...m, reasoning: `${m.reasoning ?? ''}${add}` } : m));
+    updateSessionMessages(prev => prev.map(m => m.id === id ? { ...m, reasoning: `${m.reasoning ?? ''}${add}` } : m), { reason: 'assistant' });
   });
 
   const cancelPending = React.useCallback((flushPending: boolean) => {
@@ -262,7 +263,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     pendingAssistantIdRef.current = id;
     hasStartedAssistantRef.current = true;
     cancelPending(false);
-    updateSessionMessages(prev => prev.concat({ id, role: 'assistant', text, reasoning }));
+    updateSessionMessages(prev => prev.concat({ id, role: 'assistant', text, reasoning }), { reason: 'assistant' });
     if (text) safeOnChunk(text, id);
     forceRender();
   }, [cancelPending, safeOnChunk, updateSessionMessages]);
@@ -310,7 +311,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
 
       if (idx >= 0) return prev.map(m => m.id === messageId ? nextMessage : m);
       return prev.concat(nextMessage);
-    });
+    }, { reason: 'assistant' });
   }, [toolMessageIdForDelta, updateSessionMessages]);
 
   const finalizeAssistantNow = React.useCallback(() => {
@@ -463,7 +464,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     const toolMessageIds = new Set(pendingToolMessageIdsRef.current);
     resetStreamState();
     if (partialId || toolMessageIds.size > 0) {
-      updateSessionMessages(prev => prev.filter(m => m.id !== partialId && !toolMessageIds.has(m.id)), { flushPersistence: true });
+      updateSessionMessages(prev => prev.filter(m => m.id !== partialId && !toolMessageIds.has(m.id)), { flushPersistence: true, reason: 'delete' });
     }
   }, [resetStreamState, updateSessionMessages]);
 
@@ -553,7 +554,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
             role: returnedMessage.role ?? 'assistant',
             text: returnedMessage.text ?? '',
           };
-          updateSessionMessages(prev => prev.concat(normalizedMessage));
+          updateSessionMessages(prev => prev.concat(normalizedMessage), { reason: 'assistant' });
           completeActiveSession(sessionId, { reason: 'returned-message', message: normalizedMessage });
         }
 
@@ -583,7 +584,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
         if (controllerRef.current === controller && !isAssistantSessionActive(sessionId)) controllerRef.current = null;
       }
     })();
-  }, [appendAssistantNow, appendAssistantReasoningNow, appendToolDeltaNow, beginAssistantSession, clearStreamError, completeActiveSession, createSessionHelpers, doStream, fallbackErrorMessageRef, historyForTransport, invalidateAssistantSession, isAssistantSessionActive, minAssistantDelayMsRef, messagesRef, onSendRef, rememberSubmittedTurn, removePendingAssistant, resetStreamState, safeOnError, setInternalSending, setTransportBusy, showStreamError, transportRef, updateSessionMessages]);
+  }, [appendAssistantNow, appendAssistantReasoningNow, appendToolDeltaNow, beginAssistantSession, clearStreamError, completeActiveSession, createSessionHelpers, doStream, historyForTransport, invalidateAssistantSession, isAssistantSessionActive, minAssistantDelayMsRef, messagesRef, onSendRef, rememberSubmittedTurn, removePendingAssistant, resetStreamState, safeOnError, setInternalSending, setTransportBusy, showStreamError, transportRef, updateSessionMessages]);
 
   const send = React.useCallback((rawText: string, attachments: Attachment[] = []) => {
     if (isBusy()) return false;
@@ -595,7 +596,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
       role: 'user',
       text,
       attachments: attachments.length > 0 ? attachments : undefined,
-    }));
+    }), { reason: 'send' });
     triggerAssistant(text, next);
     return true;
   }, [isBusy, triggerAssistant, updateSessionMessages]);
@@ -604,7 +605,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     const submitted = lastSubmittedTurnRef.current;
     if (!submitted || isBusy()) return;
     if (streamError && messagesRef.current[messagesRef.current.length - 1]?.role === 'assistant') {
-      updateSessionMessages(prev => dropTrailingAssistant(prev), { flushPersistence: true });
+      updateSessionMessages(prev => dropTrailingAssistant(prev), { flushPersistence: true, reason: 'retry' });
     }
     triggerAssistant(submitted.text, cloneHistoryForRetry(submitted.history));
   }, [isBusy, messagesRef, streamError, triggerAssistant, updateSessionMessages]);
@@ -630,7 +631,11 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     clearStreamError();
     lastSubmittedTurnRef.current = null;
     const next = resetToInitialMessages ? seedMessagesRef.current : [];
-    updateSessionMessages(() => next, { flushPersistence: true, removePersistenceIfEmpty: !resetToInitialMessages });
+    updateSessionMessages(() => next, {
+      flushPersistence: true,
+      removePersistenceIfEmpty: !resetToInitialMessages && seedMessagesRef.current.length === 0,
+      reason: 'clear',
+    });
     onClearRef.current?.(next);
   }, [clearStreamError, isBusy, onClearRef, resetToInitialMessages, seedMessagesRef, stopActiveAssistant, updateSessionMessages]);
 
@@ -640,7 +645,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     const idx = currentMessages.findIndex(m => m.id === id);
     if (idx === -1) return;
     const edited: Message<TMeta> = { ...currentMessages[idx], text: newText };
-    const next = updateSessionMessages(prev => [...prev.slice(0, idx), edited], { flushPersistence: true });
+    const next = updateSessionMessages(prev => [...prev.slice(0, idx), edited], { flushPersistence: true, reason: 'edit' });
     triggerAssistant(newText, next);
   }, [isBusy, messagesRef, triggerAssistant, updateSessionMessages]);
 
@@ -656,12 +661,12 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     const next = updateSessionMessages(prev => {
       const history = streamError ? dropTrailingAssistant(prev) : prev;
       return history.slice(0, userIdx + 1);
-    }, { flushPersistence: true });
+    }, { flushPersistence: true, reason: 'regenerate' });
     triggerAssistant(userMsg.text, next);
   }, [isBusy, messagesRef, streamError, triggerAssistant, updateSessionMessages]);
 
   const handleDelete = React.useCallback((id: string) => {
-    updateSessionMessages(prev => prev.filter(m => m.id !== id), { flushPersistence: true });
+    updateSessionMessages(prev => prev.filter(m => m.id !== id), { flushPersistence: true, reason: 'delete' });
   }, [updateSessionMessages]);
 
   const streamingMessageId = sending && hasStartedAssistantRef.current ? pendingAssistantIdRef.current : null;

@@ -14,7 +14,7 @@ const handleSend: ChorusOnSend = async (text, _messages, { appendAssistant, fina
 };
 
 export default function App() {
-  const conversations = useConversations();
+  const conversations = useConversations({ defaultTitle: 'New chat' });
   const { loaded, createConversation } = conversations;
   const conversationCount = conversations.conversations.length;
   const seededRef = React.useRef(false);
@@ -28,13 +28,16 @@ export default function App() {
 
   return (
     <div style={{ height: '100dvh', display: 'flex', gap: 12, padding: 12, boxSizing: 'border-box', background: '#0f0f0f' }}>
-      <ConversationList {...conversations} style={{ width: 280, flex: '0 0 280px' }} />
+      <ConversationList {...conversations} newConversationLabel="+ New chat" style={{ width: 280, flex: '0 0 280px' }} />
       <main style={{ minWidth: 0, flex: 1 }}>
         <Chorus
           key={conversations.activeId ?? 'no-conversation'}
           persistenceKey={conversations.activePersistenceKey}
           persistenceStorage={conversations.storage ?? undefined}
           onSend={handleSend}
+          onMessagesChange={(messages) => {
+            if (conversations.activeId) conversations.renameFromFirstMessage(conversations.activeId, messages);
+          }}
           placeholder="Type in the selected conversation…"
           showClearButton
         />

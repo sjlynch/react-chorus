@@ -471,6 +471,7 @@ Runnable examples live in the [`/examples`](./examples) directory. They declare 
 | Example | Description |
 |---------|-------------|
 | [`examples/basic`](./examples/basic) | Zero-backend demo using a simulated streaming response, local persistence, clear/reset, and a custom error banner — great for local development |
+| [`examples/multi-conversation`](./examples/multi-conversation) | Sidebar-driven local conversations with pinned chats, per-chat persistence, and first-message auto-titles |
 | [`examples/with-openai`](./examples/with-openai) | Full-stack example: Vite frontend + Express backend proxying to OpenAI |
 
 ### Running the basic example
@@ -481,6 +482,18 @@ npm run build
 
 # Install and start
 cd examples/basic
+npm install
+npm run dev
+```
+
+### Running the multi-conversation example
+
+```bash
+# Build the library first
+npm run build
+
+# Install and start
+cd examples/multi-conversation
 npm install
 npm run dev
 ```
@@ -555,7 +568,7 @@ When `persistenceKey` is combined with `initialMessages` (or legacy `messages`),
 
 Persistence writes are debounced while assistant tokens stream, flushed when a message finalizes and on explicit edits/deletes/clears, and serialized for async adapters so older saves cannot overwrite newer transcripts. Pending debounced writes are also flushed on `pagehide` and `visibilitychange` → `hidden`; synchronous adapters such as `localStorage` can complete that final write during tab close, while Promise-based adapters cannot block navigation. For remote/IndexedDB persistence, prefer a synchronous localStorage fallback plus an async backup when data loss on close is unacceptable.
 
-Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message data must be JSON-serializable: Dates are restored as strings, classes are not revived, and values such as `BigInt` fail serialization and surface through `onPersistenceError` / `useChorusPersistence().error`. Pass `serializeMessages` and/or `deserializeMessages` to customize validation, compression, or Date revival.
+Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message data must be JSON-serializable: Dates are restored as strings, classes are not revived, and values such as `BigInt` fail serialization and surface through `onPersistenceError` / `useChorusPersistence().error`. Read, deserialization, write, and remove failures are reported with `error.key` and `error.operation` (`'read' | 'deserialize' | 'write' | 'remove'`) while Chorus keeps rendering a safe empty fallback when needed. Pass `serializeMessages` and/or `deserializeMessages` to customize validation, compression, or Date revival.
 
 | Prop | Type | Default | Description |
 |------|------|---------|-------------|
@@ -565,6 +578,7 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `onSend` | `(text, messages, helpers) => Message<TMeta> \| void \| Promise<Message<TMeta> \| void>` | — | Advanced path: called when the user submits a message. Use `helpers.appendAssistant`/`helpers.finalizeAssistant` to stream tokens, or return a complete assistant `Message` for non-streaming replies. |
 | `value` | `Message<TMeta>[]` | — | Controlled message list. Pair with `onChange`; Chorus renders this array as the source of truth. |
 | `onChange` | `(messages: Message<TMeta>[]) => void` | — | Called whenever Chorus wants to change the message list in controlled mode (`value` is provided). Not called for legacy `messages`-only uncontrolled state. |
+| `onMessagesChange` | `(messages, context) => void` | — | Read-only transcript observer for controlled, uncontrolled, and persistence-backed modes. Fires for initial/loaded messages, sends, stream chunks, returned messages, edits, deletes, retry/regenerate truncation, and clear without making Chorus controlled. `context.source` is `'controlled'`, `'uncontrolled'`, or `'persistence'`. |
 | `messages` | `Message<TMeta>[]` | — | Legacy initial-only seed for uncontrolled mode. Read once on mount; later prop changes are ignored. Prefer `initialMessages` for seeding or `value` + `onChange` for controlled mode. |
 | `initialMessages` | `Message<TMeta>[]` | — | Initial-only seed for uncontrolled mode. Useful for welcome messages; `system` messages are hidden by default via `hiddenRoles`. Tool calls remain visible by default. |
 | `emptyState` | `ReactNode` | — | Custom content shown in the transcript when the visible message list is empty and the assistant is not typing. |
@@ -588,14 +602,14 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `onFeedback` | `(message: Message<TMeta>, feedback: 'up' \| 'down') => void` | — | Enables built-in thumbs-up / thumbs-down per-message feedback actions and reports the selected variant. |
 | `onFinish` | `({ message, messages, reason, response }) => void` | — | Called once when an assistant message completes normally. Use it for telemetry, persistence handoff, moderation, or post-response UI. Not called for aborts, Stop, or errors. |
 | `persistenceKey` | `string` | — | Uncontrolled-mode persistence key. When set without `value`, Chorus saves/restores messages using this key (defaults to localStorage). If `value` is provided, controlled state wins and built-in persistence is not used. |
-| `persistenceStorage` | `StorageAdapter` | `localStorage` | Custom storage adapter for persistenceKey. The default `localStorage` is resolved lazily; if browser storage is blocked or unavailable, Chorus keeps working without persistence. Implement optional `removeItem(key)` to delete cleared/deleted conversation keys; adapters without it fall back to writing `[]`. |
-| `onPersistenceError` | `(error: Error) => void` | — | Called when a persistence write throws or rejects. The hook also exposes the latest write error as `useChorusPersistence().error`. |
+| `persistenceStorage` | `StorageAdapter` | `localStorage` | Custom storage adapter for persistenceKey. The default `localStorage` is resolved lazily; if browser storage is blocked or unavailable, Chorus keeps working without persistence. Implement optional `removeItem(key)` to delete unseeded empty transcripts and deleted conversation keys; seeded clears persist `[]` so the clear survives reloads. |
+| `onPersistenceError` | `(error: Error & { key?: string; operation?: string }) => void` | — | Called when a persistence read, deserialization, write, or remove operation throws/rejects. The hook also exposes the latest error as `useChorusPersistence().error`. |
 | `serializeMessages` | `(messages: Message<TMeta>[]) => string` | `JSON.stringify` | Optional persistence serializer. Use it for custom formats or to reject unsupported data explicitly. |
 | `deserializeMessages` | `(raw: string) => Message<TMeta>[]` | JSON parse + array guard | Optional persistence deserializer/reviver. Use it to validate stored payloads or revive Dates/classes. |
 | `showClearButton` | `boolean` | `false` | Shows a built-in clear/reset conversation button above the input. |
 | `clearLabel` | `string` | `'Clear conversation'` | Label for the built-in clear/reset button. |
 | `onClear` | `(messages: Message<TMeta>[]) => void` | — | Called with the reset message list after the built-in clear action runs. |
-| `resetToInitialMessages` | `boolean` | `false` | When clearing, restore the initial `messages`/`initialMessages` seed instead of removing (or fallback-saving `[]` to) the empty conversation key. |
+| `resetToInitialMessages` | `boolean` | `false` | When clearing, restore the initial `messages`/`initialMessages` seed instead of saving an empty transcript. |
 | `showJumpToBottomButton` | `boolean` | `true` (`false` in headless exports) | Shows a floating “Jump to latest” button when auto-scroll is paused and new activity arrives. |
 | `headless` | `boolean` | `false` | Strip all default styles and inline style injection. |
 | `renderMessage` | `(message: Message<TMeta>, ctx: RenderMessageContext<TMeta>) => ReactNode` | — | Custom per-message renderer. Return `null` to fall back to default rendering. `ctx` includes `isStreaming`, `defaultRender(slots?)`, and action callbacks/default action controls. Existing one-argument renderers continue to work. |
@@ -629,6 +643,12 @@ import { Chorus, type ChorusRef } from 'react-chorus';
 export function SupportChat() {
   const chorusRef = React.useRef<ChorusRef>(null);
   const suggestions = ['Summarize my account', 'Explain my last invoice'];
+  const exportTranscript = () => {
+    const blob = new Blob([JSON.stringify(chorusRef.current?.getMessages() ?? [], null, 2)], {
+      type: 'application/json',
+    });
+    window.open(URL.createObjectURL(blob), '_blank');
+  };
 
   return (
     <>
@@ -638,13 +658,16 @@ export function SupportChat() {
         </button>
       ))}
       <button type="button" onClick={() => chorusRef.current?.focus()}>Focus chat</button>
+      <button type="button" onClick={exportTranscript}>
+        Export transcript
+      </button>
       <Chorus ref={chorusRef} transport="/api/chat" />
     </>
   );
 }
 ```
 
-The ref exposes `send(text, attachments?)`, `stop()`, `clear()`, `focus()`, and `scrollToMessage(id)`.
+The ref exposes `send(text, attachments?)`, `stop()`, `clear()`, `focus()`, `getMessages()`, and `scrollToMessage(id)`.
 
 ### Clearing/resetting a conversation
 
@@ -659,7 +682,7 @@ Use the built-in clear button for uncontrolled or persisted chats:
 />
 ```
 
-By default, clearing writes an empty conversation. If the storage adapter implements `removeItem`, Chorus removes the key; adapters without `removeItem` fall back to saving `[]` for backward compatibility. Pass `resetToInitialMessages` to reset back to the seed welcome messages instead. In controlled mode, the same button calls `onChange(resetMessages)` and `onClear(resetMessages)`; keep the canonical list in your state as usual.
+By default, clearing writes an empty conversation. If the chat was seeded with `initialMessages`/legacy `messages`, Chorus persists `[]` even when the adapter supports `removeItem`; that explicit empty transcript prevents welcome messages from resurrecting on reload. If there is no seed, a `removeItem`-capable adapter may delete the key, while adapters without `removeItem` fall back to saving `[]`. Pass `resetToInitialMessages` to restore and persist the seed welcome messages instead. In controlled mode, the same button calls `onChange(resetMessages)` and `onClear(resetMessages)`; keep the canonical list in your state as usual.
 
 A storage adapter can be synchronous (like `localStorage`) or Promise-based:
 
@@ -671,19 +694,23 @@ interface StorageAdapter {
 }
 ```
 
-For multiple saved chats, use `useConversations` with `ConversationList` and pass the active persistence key/storage into Chorus:
+For multiple saved chats, use `useConversations` with `ConversationList` and pass the active persistence key/storage into Chorus. The list renders pinned conversations first, formats timestamps for display while keeping ISO `dateTime` attributes, and exposes pin/rename/delete affordances when you pass the corresponding hook actions:
 
 ```tsx
-const conversations = useConversations();
+const conversations = useConversations({ defaultTitle: 'New chat' });
 
 <ConversationList {...conversations} />
 <Chorus
+  key={conversations.activeId ?? 'none'}
   persistenceKey={conversations.activePersistenceKey}
   persistenceStorage={conversations.storage ?? undefined}
+  onMessagesChange={(messages) => {
+    if (conversations.activeId) conversations.renameFromFirstMessage(conversations.activeId, messages);
+  }}
 />
 ```
 
-`useConversations({ indexKey, messageKeyPrefix, storage })` stores a JSON index of `{ id, title, createdAt, updatedAt }` records under `indexKey` (default `chorus-conversations-index`) and stores each transcript under `${messageKeyPrefix}${id}`. `deleteConversation(id)` removes the transcript key via `removeItem` when available.
+`useConversations({ indexKey, messageKeyPrefix, storage, onError })` stores a JSON index of `{ id, title, createdAt, updatedAt, pinned }` records under `indexKey` (default `chorus-conversations-index`) and stores each transcript under `${messageKeyPrefix}${id}`. `deleteConversation(id)` removes the transcript key via `removeItem` when available (or writes `[]` without it). Index read/write and transcript delete failures surface through `result.error` and `onError(error)` with `error.key`, `error.operation` (`'read' | 'write' | 'delete'`), and `error.conversationId` for transcript deletes.
 
 ### Persistence examples
 
@@ -751,6 +778,29 @@ Use `onFinish` when you need the final assistant message rather than token-by-to
 ```
 
 `onFinish` is not called for Stop/abort, transport errors, provider error payloads, or sends that produce no assistant message.
+
+### Transcript observer and export
+
+Use `onMessagesChange` when you want a drop-in `<Chorus>` but still need audit logging, analytics, live stats, or transcript export. Unlike `onChange`, it fires in every message-source mode and does not make the component controlled:
+
+```tsx
+const latestMessages = React.useRef<Message[]>([]);
+
+<Chorus
+  persistenceKey="support-chat"
+  transport="/api/chat"
+  onMessagesChange={(messages, context) => {
+    latestMessages.current = messages;
+    auditLog.enqueue({ source: context.source, reason: context.reason, messages });
+  }}
+/>
+
+<button type="button" onClick={() => downloadTranscript(latestMessages.current)}>
+  Download transcript
+</button>
+```
+
+For one-off reads from outside React state, call `chorusRef.current?.getMessages()`.
 
 ### Attachment composer UX
 

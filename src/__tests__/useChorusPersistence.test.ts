@@ -118,10 +118,15 @@ describe('useChorusPersistence', () => {
     }
   });
 
-  it('returns empty array when stored value is invalid JSON', () => {
+  it('surfaces invalid JSON through error and onError while returning an empty array', async () => {
+    const onError = vi.fn();
     const storage = makeSyncStorage('not json {{');
-    const { result } = renderHook(() => useChorusPersistence('key', { storage }));
+    const { result } = renderHook(() => useChorusPersistence('key', { storage, onError }));
+
     expect(result.current.value).toEqual([]);
+    expect(result.current.error).toEqual(expect.objectContaining({ key: 'key', operation: 'deserialize' }));
+    await act(async () => { await Promise.resolve(); });
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ key: 'key', operation: 'deserialize' }));
   });
 
   it('returns empty array when storage has no value for the key', () => {
@@ -220,17 +225,22 @@ describe('useChorusPersistence', () => {
     expect(result.current.value).toEqual([MSG]);
   });
 
-  it('silently handles rejected async storage on read', async () => {
+  it('surfaces rejected async storage reads through error and onError', async () => {
+    const readError = new Error('storage unavailable');
+    const onError = vi.fn();
     const asyncStorage: StorageAdapter = {
-      getItem: vi.fn().mockRejectedValue(new Error('storage unavailable')),
+      getItem: vi.fn().mockRejectedValue(readError),
       setItem: vi.fn(),
     };
 
-    const { result } = renderHook(() => useChorusPersistence('key', { storage: asyncStorage }));
+    const { result } = renderHook(() => useChorusPersistence('key', { storage: asyncStorage, onError }));
 
     await act(async () => { await Promise.resolve(); });
 
     expect(result.current.value).toEqual([]);
+    expect(result.current.error).toBe(readError);
+    expect(result.current.error).toEqual(expect.objectContaining({ key: 'key', operation: 'read' }));
+    expect(onError).toHaveBeenCalledWith(readError);
   });
 
   it('ignores stale async reads after onChange writes newer messages', async () => {
@@ -251,6 +261,23 @@ describe('useChorusPersistence', () => {
     });
 
     expect(result.current.value).toEqual([MSG]);
+  });
+
+  it('surfaces throwing custom deserializers through error and onError', async () => {
+    const deserializeError = new Error('bad payload');
+    const onError = vi.fn();
+    const storage = makeSyncStorage('custom:bad');
+    const { result } = renderHook(() => useChorusPersistence('key', {
+      storage,
+      onError,
+      deserializeMessages: () => { throw deserializeError; },
+    }));
+
+    expect(result.current.value).toEqual([]);
+    expect(result.current.error).toBe(deserializeError);
+    expect(result.current.error).toEqual(expect.objectContaining({ key: 'key', operation: 'deserialize' }));
+    await act(async () => { await Promise.resolve(); });
+    expect(onError).toHaveBeenCalledWith(deserializeError);
   });
 
   it('uses custom serializer and deserializer hooks', () => {
@@ -299,6 +326,7 @@ describe('useChorusPersistence', () => {
     act(() => result.current.onChange([message]));
 
     expect(result.current.error).toBeInstanceOf(TypeError);
+    expect(result.current.error).toEqual(expect.objectContaining({ key: 'key', operation: 'write' }));
     expect(onError).toHaveBeenCalledWith(expect.any(TypeError));
     expect(storage.store.key).toBeUndefined();
     warn.mockRestore();
@@ -320,6 +348,7 @@ describe('useChorusPersistence', () => {
     await act(async () => { await Promise.resolve(); });
 
     expect(result.current.error).toBe(quotaError);
+    expect(result.current.error).toEqual(expect.objectContaining({ key: 'key', operation: 'write' }));
     expect(onError).toHaveBeenCalledWith(quotaError);
     expect(warn).toHaveBeenCalledWith('[Chorus] Failed to persist messages.', quotaError);
     warn.mockRestore();
@@ -348,6 +377,20 @@ describe('useChorusPersistence', () => {
     } finally {
       Object.defineProperty(globalThis, 'process', { value: originalProcess, configurable: true, writable: true });
     }
+  });
+
+  it('records and surfaces removeItem failures with remove context', async () => {
+    const removeError = new Error('remove failed');
+    const onError = vi.fn();
+    const storage = makeSyncStorage(JSON.stringify(MSGS));
+    storage.removeItem = vi.fn(() => { throw removeError; });
+    const { result } = renderHook(() => useChorusPersistence('key', { storage, onError }));
+
+    act(() => result.current.onChange([], { flush: true, removeIfEmpty: true }));
+
+    expect(result.current.error).toBe(removeError);
+    expect(result.current.error).toEqual(expect.objectContaining({ key: 'key', operation: 'remove' }));
+    expect(onError).toHaveBeenCalledWith(removeError);
   });
 
   it('records and surfaces rejected async write failures without throwing', async () => {

@@ -60,9 +60,10 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.type-tests.json --noEmit",
     "build": "vite build && tsc -p tsconfig.json --emitDeclarationOnly && node scripts/finalize-declarations.mjs",
     "build:playground": "vite build --config vite.playground.config.ts",
-    "prepublishOnly": "npm run lint && npm run typecheck && npm test && npm run build && npm run typecheck:consumer && npm run verify:pack",
+    "prepublishOnly": "npm run lint && npm run typecheck && npm test && npm run build && npm run typecheck:consumer && npm run verify:pack && npm run verify:examples",
     "typecheck:consumer": "tsc -p fixtures/consumer-typecheck/tsconfig.json",
     "verify:pack": "node scripts/assert-package-contents.mjs",
+    "verify:examples": "node scripts/check-example-metadata.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"

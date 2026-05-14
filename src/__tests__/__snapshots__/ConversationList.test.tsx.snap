@@ -17,6 +17,53 @@ exports[`ConversationList > matches the rendered snapshot 1`] = `
     role="list"
   >
     <div
+      class="chorus-conversation-item"
+      role="listitem"
+    >
+      <button
+        class="chorus-conversation-select"
+        type="button"
+      >
+        <span
+          class="chorus-conversation-title"
+        >
+          Roadmap ideas
+        </span>
+        <time
+          class="chorus-conversation-time"
+          datetime="2026-05-14T00:03:00.000Z"
+        >
+          formatted 2026-05-14T00:03:00.000Z
+        </time>
+      </button>
+      <div
+        class="chorus-conversation-actions"
+      >
+        <button
+          aria-label="Pin Roadmap ideas"
+          aria-pressed="false"
+          class="chorus-conversation-action chorus-conversation-pin"
+          type="button"
+        >
+          Pin
+        </button>
+        <button
+          aria-label="Rename Roadmap ideas"
+          class="chorus-conversation-action"
+          type="button"
+        >
+          Rename
+        </button>
+        <button
+          aria-label="Delete Roadmap ideas"
+          class="chorus-conversation-action"
+          type="button"
+        >
+          Delete
+        </button>
+      </div>
+    </div>
+    <div
       class="chorus-conversation-item chorus-conversation-item--active"
       data-active="true"
       role="listitem"
@@ -35,12 +82,20 @@ exports[`ConversationList > matches the rendered snapshot 1`] = `
           class="chorus-conversation-time"
           datetime="2026-05-14T00:01:00.000Z"
         >
-          2026-05-14T00:01:00.000Z
+          formatted 2026-05-14T00:01:00.000Z
         </time>
       </button>
       <div
         class="chorus-conversation-actions"
       >
+        <button
+          aria-label="Pin Support chat"
+          aria-pressed="false"
+          class="chorus-conversation-action chorus-conversation-pin"
+          type="button"
+        >
+          Pin
+        </button>
         <button
           aria-label="Rename Support chat"
           class="chorus-conversation-action"
@@ -50,45 +105,6 @@ exports[`ConversationList > matches the rendered snapshot 1`] = `
         </button>
         <button
           aria-label="Delete Support chat"
-          class="chorus-conversation-action"
-          type="button"
-        >
-          Delete
-        </button>
-      </div>
-    </div>
-    <div
-      class="chorus-conversation-item"
-      role="listitem"
-    >
-      <button
-        class="chorus-conversation-select"
-        type="button"
-      >
-        <span
-          class="chorus-conversation-title"
-        >
-          Roadmap ideas
-        </span>
-        <time
-          class="chorus-conversation-time"
-          datetime="2026-05-14T00:03:00.000Z"
-        >
-          2026-05-14T00:03:00.000Z
-        </time>
-      </button>
-      <div
-        class="chorus-conversation-actions"
-      >
-        <button
-          aria-label="Rename Roadmap ideas"
-          class="chorus-conversation-action"
-          type="button"
-        >
-          Rename
-        </button>
-        <button
-          aria-label="Delete Roadmap ideas"
           class="chorus-conversation-action"
           type="button"
         >
