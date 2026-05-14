@@ -1,6 +1,6 @@
 import React from 'react';
 import type { Attachment, ConnectorName, Message } from '../types';
-import type { Connector } from '../connectors/connectors';
+import type { Connector, ConnectorToolDelta } from '../connectors/connectors';
 import { useChorusStream, type Transport } from './useChorusStream';
 import { createFetchSSETransport } from '../streaming/createFetchSSETransport';
 import { useRAFQueue } from './useRAFQueue';
@@ -164,6 +164,8 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
   const controllerRef = React.useRef<AbortController | null>(null);
   const hasStartedAssistantRef = React.useRef(false);
   const pendingAssistantIdRef = React.useRef<string | null>(null);
+  const pendingToolMessageIdsRef = React.useRef<Set<string>>(new Set());
+  const toolMessageIdsByDeltaIdRef = React.useRef<Map<string, string>>(new Map());
   const activeSessionIdRef = React.useRef(0);
   const warnedMissingHandlerRef = React.useRef(false);
   const warnedTransportOnSendRef = React.useRef(false);
@@ -229,38 +231,87 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     lastSubmittedTurnRef.current = { text, history: cloneHistoryForRetry(history) };
   }, []);
 
-  const { enqueue: enqueueChunk, cancelPending } = useRAFQueue((add) => {
+  const { enqueue: enqueueTextChunk, cancelPending: cancelPendingText } = useRAFQueue((add) => {
     const id = pendingAssistantIdRef.current;
     if (!id) return;
     updateSessionMessages(prev => prev.map(m => m.id === id ? { ...m, text: m.text + add } : m));
   });
 
+  const { enqueue: enqueueReasoningChunk, cancelPending: cancelPendingReasoning } = useRAFQueue((add) => {
+    const id = pendingAssistantIdRef.current;
+    if (!id) return;
+    updateSessionMessages(prev => prev.map(m => m.id === id ? { ...m, reasoning: `${m.reasoning ?? ''}${add}` } : m));
+  });
+
+  const cancelPending = React.useCallback((flushPending: boolean) => {
+    cancelPendingText(flushPending);
+    cancelPendingReasoning(flushPending);
+  }, [cancelPendingText, cancelPendingReasoning]);
+
   const resetStreamState = React.useCallback(() => {
     hasStartedAssistantRef.current = false;
     pendingAssistantIdRef.current = null;
+    pendingToolMessageIdsRef.current.clear();
+    toolMessageIdsByDeltaIdRef.current.clear();
     cancelPending(false);
     forceRender();
   }, [cancelPending]);
 
-  const startAssistant = React.useCallback((firstChunk: string) => {
+  const startAssistant = React.useCallback(({ text = '', reasoning }: { text?: string; reasoning?: string }) => {
     const id = createMessageId();
     pendingAssistantIdRef.current = id;
     hasStartedAssistantRef.current = true;
     cancelPending(false);
-    updateSessionMessages(prev => prev.concat({ id, role: 'assistant', text: firstChunk }));
-    safeOnChunk(firstChunk, id);
+    updateSessionMessages(prev => prev.concat({ id, role: 'assistant', text, reasoning }));
+    if (text) safeOnChunk(text, id);
     forceRender();
   }, [cancelPending, safeOnChunk, updateSessionMessages]);
 
   const appendAssistantNow = React.useCallback((chunk: string) => {
     if (!chunk) return;
-    if (!hasStartedAssistantRef.current) startAssistant(chunk);
+    if (!hasStartedAssistantRef.current) startAssistant({ text: chunk });
     else {
-      enqueueChunk(chunk);
+      enqueueTextChunk(chunk);
       const id = pendingAssistantIdRef.current;
       if (id) safeOnChunk(chunk, id);
     }
-  }, [enqueueChunk, safeOnChunk, startAssistant]);
+  }, [enqueueTextChunk, safeOnChunk, startAssistant]);
+
+  const appendAssistantReasoningNow = React.useCallback((chunk: string) => {
+    if (!chunk) return;
+    if (!hasStartedAssistantRef.current) startAssistant({ reasoning: chunk });
+    else enqueueReasoningChunk(chunk);
+  }, [enqueueReasoningChunk, startAssistant]);
+
+  const toolMessageIdForDelta = React.useCallback((deltaId: string) => {
+    const existing = toolMessageIdsByDeltaIdRef.current.get(deltaId);
+    if (existing) return existing;
+    const next = createMessageId();
+    toolMessageIdsByDeltaIdRef.current.set(deltaId, next);
+    return next;
+  }, []);
+
+  const appendToolDeltaNow = React.useCallback((delta: ConnectorToolDelta) => {
+    const messageId = toolMessageIdForDelta(delta.id);
+    pendingToolMessageIdsRef.current.add(messageId);
+    updateSessionMessages(prev => {
+      const idx = prev.findIndex(m => m.id === messageId);
+      const existing = idx >= 0 ? prev[idx] : undefined;
+      const toolCall = {
+        ...(existing?.toolCall ?? {}),
+        name: delta.name ?? existing?.toolCall?.name ?? delta.id,
+      };
+      if (Object.prototype.hasOwnProperty.call(delta, 'input')) toolCall.input = delta.input;
+      if (Object.prototype.hasOwnProperty.call(delta, 'output')) toolCall.output = delta.output;
+
+      const nextMessage: Message<TMeta> = existing
+        ? { ...existing, role: 'tool', text: existing.text ?? '', toolCall }
+        : { id: messageId, role: 'tool', text: '', toolCall };
+
+      if (idx >= 0) return prev.map(m => m.id === messageId ? nextMessage : m);
+      return prev.concat(nextMessage);
+    });
+  }, [toolMessageIdForDelta, updateSessionMessages]);
 
   const finalizeAssistantNow = React.useCallback(() => {
     cancelPending(true);
@@ -269,6 +320,8 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     const message = id ? messagesRef.current.find(m => m.id === id) ?? null : null;
     hasStartedAssistantRef.current = false;
     pendingAssistantIdRef.current = null;
+    pendingToolMessageIdsRef.current.clear();
+    toolMessageIdsByDeltaIdRef.current.clear();
     setInternalSending(false);
     forceRender();
     return message;
@@ -286,6 +339,8 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
       flushPersistence();
       hasStartedAssistantRef.current = false;
       pendingAssistantIdRef.current = null;
+      pendingToolMessageIdsRef.current.clear();
+      toolMessageIdsByDeltaIdRef.current.clear();
       setInternalSending(false);
       forceRender();
     }
@@ -405,8 +460,11 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
 
   const removePendingAssistant = React.useCallback(() => {
     const partialId = pendingAssistantIdRef.current;
+    const toolMessageIds = new Set(pendingToolMessageIdsRef.current);
     resetStreamState();
-    if (partialId) updateSessionMessages(prev => prev.filter(m => m.id !== partialId), { flushPersistence: true });
+    if (partialId || toolMessageIds.size > 0) {
+      updateSessionMessages(prev => prev.filter(m => m.id !== partialId && !toolMessageIds.has(m.id)), { flushPersistence: true });
+    }
   }, [resetStreamState, updateSessionMessages]);
 
   const historyForTransport = React.useCallback((history: Message<TMeta>[]): Message<TMeta>[] => (
@@ -432,6 +490,12 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
       void doStream(text, historyForTransport(history), {
         onChunk: (chunk) => {
           if (isAssistantSessionActive(sessionId)) appendAssistantNow(chunk);
+        },
+        onReasoning: (chunk) => {
+          if (isAssistantSessionActive(sessionId)) appendAssistantReasoningNow(chunk);
+        },
+        onToolDelta: (delta) => {
+          if (isAssistantSessionActive(sessionId)) appendToolDeltaNow(delta);
         },
         onDone: (response) => {
           if (!isAssistantSessionActive(sessionId)) return;
@@ -519,7 +583,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
         if (controllerRef.current === controller && !isAssistantSessionActive(sessionId)) controllerRef.current = null;
       }
     })();
-  }, [appendAssistantNow, beginAssistantSession, clearStreamError, completeActiveSession, createSessionHelpers, doStream, fallbackErrorMessageRef, historyForTransport, invalidateAssistantSession, isAssistantSessionActive, minAssistantDelayMsRef, messagesRef, onSendRef, rememberSubmittedTurn, removePendingAssistant, resetStreamState, safeOnError, setInternalSending, setTransportBusy, showStreamError, transportRef, updateSessionMessages]);
+  }, [appendAssistantNow, appendAssistantReasoningNow, appendToolDeltaNow, beginAssistantSession, clearStreamError, completeActiveSession, createSessionHelpers, doStream, fallbackErrorMessageRef, historyForTransport, invalidateAssistantSession, isAssistantSessionActive, minAssistantDelayMsRef, messagesRef, onSendRef, rememberSubmittedTurn, removePendingAssistant, resetStreamState, safeOnError, setInternalSending, setTransportBusy, showStreamError, transportRef, updateSessionMessages]);
 
   const send = React.useCallback((rawText: string, attachments: Attachment[] = []) => {
     if (isBusy()) return false;

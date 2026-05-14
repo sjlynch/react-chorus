@@ -97,6 +97,26 @@ export interface MessageBubbleProps<TMeta = Record<string, unknown>> extends Mes
   markdownSanitizer?: MarkdownSanitizer;
 }
 
+function MessageReasoning({ reasoning, codeTheme, headless, streaming = false, markdownProps, markdownSanitizer }: {
+  reasoning?: string;
+  codeTheme: 'dark' | 'light';
+  headless?: boolean;
+  streaming?: boolean;
+  markdownProps?: MessageMarkdownProps;
+  markdownSanitizer?: MarkdownSanitizer;
+}) {
+  if (!reasoning) return null;
+
+  return (
+    <details className="chorus-reasoning">
+      <summary className="chorus-reasoning-summary">Reasoning</summary>
+      <div className="chorus-reasoning-body">
+        <Markdown {...markdownProps} text={reasoning} codeTheme={codeTheme} headless={headless} streaming={streaming} sanitizer={markdownSanitizer ?? markdownProps?.sanitizer} />
+      </div>
+    </details>
+  );
+}
+
 function MessageBubbleLayout<TMeta = Record<string, unknown>>({ message, codeTheme, headless, streaming = false, markdownProps, markdownSanitizer, before, headerSlot, footerSlot, after, children }: {
   message: Message<TMeta>;
   codeTheme: 'dark' | 'light';
@@ -111,6 +131,7 @@ function MessageBubbleLayout<TMeta = Record<string, unknown>>({ message, codeThe
       {before}
       <div className="chorus-msg-content">
         {headerSlot}
+        <MessageReasoning reasoning={message.reasoning} codeTheme={codeTheme} headless={headless} streaming={streaming} markdownProps={markdownProps} markdownSanitizer={markdownSanitizer} />
         <div className="chorus-bubble">
           <MessageAttachments attachments={message.attachments} />
           <Markdown {...markdownProps} text={message.text} codeTheme={codeTheme} headless={headless} streaming={streaming} sanitizer={markdownSanitizer ?? markdownProps?.sanitizer} />

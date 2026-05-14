@@ -19,11 +19,44 @@ describe('openaiConnector', () => {
     expect(openaiConnector.extract(data)).toEqual({ text: 'Hello' });
   });
 
-  it('concatenates text across multiple choices', () => {
+  it('selects choice index 0 instead of concatenating alternatives', () => {
     const data = JSON.stringify({
-      choices: [{ delta: { content: 'foo' } }, { delta: { content: 'bar' } }],
+      choices: [
+        { index: 1, delta: { content: 'alternative' } },
+        { index: 0, delta: { content: 'selected' } },
+      ],
     });
-    expect(openaiConnector.extract(data)).toEqual({ text: 'foobar' });
+    expect(openaiConnector.extract(data)).toEqual({ text: 'selected' });
+  });
+
+  it('extracts reasoning deltas', () => {
+    const data = JSON.stringify({ choices: [{ index: 0, delta: { reasoning_content: 'thinking' } }] });
+    expect(openaiConnector.extract(data)).toEqual({ reasoning: 'thinking' });
+  });
+
+  it('splits DeepSeek-style think tags out of text content', () => {
+    const data = JSON.stringify({ choices: [{ index: 0, delta: { content: '<think>plan</think>answer' } }] });
+    expect(openaiConnector.extract(data)).toEqual({ reasoning: 'plan', text: 'answer' });
+    expect(openaiConnector.extract('[DONE]')).toEqual({ done: true });
+  });
+
+  it('extracts tool call deltas and keeps the provider id for argument chunks', () => {
+    const start = JSON.stringify({
+      choices: [{
+        index: 0,
+        delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'search', arguments: '{"q":' } }] },
+      }],
+    });
+    const next = JSON.stringify({
+      choices: [{
+        index: 0,
+        delta: { tool_calls: [{ index: 0, function: { arguments: '"test"}' } }] },
+      }],
+    });
+
+    expect(openaiConnector.extract(start)).toEqual({ toolDelta: { id: 'call_1', name: 'search', input: '{"q":' } });
+    expect(openaiConnector.extract(next)).toEqual({ toolDelta: { id: 'call_1', input: '"test"}' } });
+    expect(openaiConnector.extract('[DONE]')).toEqual({ done: true });
   });
 
   it('returns null for role-only delta (no content)', () => {
@@ -104,12 +137,29 @@ describe('anthropicConnector', () => {
     expect(anthropicConnector.extract('')).toBeNull();
   });
 
-  it('returns null for input_json_delta (tool use)', () => {
+  it('extracts thinking deltas as reasoning', () => {
     const data = JSON.stringify({
       type: 'content_block_delta',
-      delta: { type: 'input_json_delta', partial_json: '{"q":' },
+      delta: { type: 'thinking_delta', thinking: 'considering' },
     });
-    expect(anthropicConnector.extract(data)).toBeNull();
+    expect(anthropicConnector.extract(data)).toEqual({ reasoning: 'considering' });
+  });
+
+  it('extracts tool_use blocks and input_json_delta chunks', () => {
+    const start = JSON.stringify({
+      type: 'content_block_start',
+      index: 2,
+      content_block: { type: 'tool_use', id: 'toolu_1', name: 'search', input: {} },
+    });
+    const delta = JSON.stringify({
+      type: 'content_block_delta',
+      index: 2,
+      delta: { type: 'input_json_delta', partial_json: '{"q":"test"}' },
+    });
+
+    expect(anthropicConnector.extract(start)).toEqual({ toolDelta: { id: 'toolu_1', name: 'search', input: {} } });
+    expect(anthropicConnector.extract(delta)).toEqual({ toolDelta: { id: 'toolu_1', input: '{"q":"test"}' } });
+    expect(anthropicConnector.extract(JSON.stringify({ type: 'message_stop' }))).toEqual({ done: true });
   });
 
   it('returns an in-band error payload', () => {
@@ -136,28 +186,70 @@ describe('geminiConnector', () => {
     expect(geminiConnector.extract(data)).toEqual({ text: 'foobar' });
   });
 
-  it('concatenates text across multiple candidates', () => {
+  it('selects candidate index 0 instead of concatenating alternatives', () => {
     const data = JSON.stringify({
       candidates: [
-        { content: { parts: [{ text: 'a' }] } },
-        { content: { parts: [{ text: 'b' }] } },
+        { index: 1, content: { parts: [{ text: 'alternative' }] } },
+        { index: 0, content: { parts: [{ text: 'selected' }] } },
       ],
     });
-    expect(geminiConnector.extract(data)).toEqual({ text: 'ab' });
+    expect(geminiConnector.extract(data)).toEqual({ text: 'selected' });
   });
 
-  it('returns done when finishReason is set with no text', () => {
+  it('extracts thought parts as reasoning', () => {
+    const data = JSON.stringify({
+      candidates: [{ content: { parts: [{ text: 'hidden chain', thought: true }] } }],
+    });
+    expect(geminiConnector.extract(data)).toEqual({ reasoning: 'hidden chain' });
+  });
+
+  it('extracts functionCall parts as tool deltas', () => {
+    const data = JSON.stringify({
+      candidates: [{ index: 0, content: { parts: [{ functionCall: { name: 'lookup', args: { q: 'test' } } }] } }],
+    });
+    expect(geminiConnector.extract(data)).toEqual({
+      toolDelta: { id: 'gemini-0-function-0-lookup', name: 'lookup', input: { q: 'test' } },
+    });
+  });
+
+  it('returns done for normal STOP with no text', () => {
     const data = JSON.stringify({
       candidates: [{ finishReason: 'STOP', content: { parts: [] } }],
     });
     expect(geminiConnector.extract(data)).toEqual({ done: true });
   });
 
-  it('returns text and done when finishReason is set alongside text', () => {
+  it('returns text and done for normal STOP alongside text', () => {
     const data = JSON.stringify({
       candidates: [{ finishReason: 'STOP', content: { parts: [{ text: 'end' }] } }],
     });
     expect(geminiConnector.extract(data)).toEqual({ text: 'end', done: true });
+  });
+
+  it('returns done for MAX_TOKENS while preserving emitted text', () => {
+    const data = JSON.stringify({
+      candidates: [{ finishReason: 'MAX_TOKENS', content: { parts: [{ text: 'truncated' }] } }],
+    });
+    expect(geminiConnector.extract(data)).toEqual({ text: 'truncated', done: true });
+  });
+
+  it('returns an error for blocked SAFETY with no text', () => {
+    const data = JSON.stringify({
+      candidates: [{ finishReason: 'SAFETY', content: { parts: [] }, safetyRatings: [{ category: 'HARM_CATEGORY_DANGEROUS_CONTENT' }] }],
+    });
+    expect(geminiConnector.extract(data)).toEqual({
+      error: 'Gemini response was blocked and returned no text (finishReason: SAFETY)',
+    });
+  });
+
+  it('returns partial text and an error for blocked SAFETY with text', () => {
+    const data = JSON.stringify({
+      candidates: [{ finishReason: 'SAFETY', content: { parts: [{ text: 'partial' }] } }],
+    });
+    expect(geminiConnector.extract(data)).toEqual({
+      text: 'partial',
+      error: 'Gemini response ended with blocked finishReason: SAFETY',
+    });
   });
 
   it('returns null when candidates array is empty', () => {

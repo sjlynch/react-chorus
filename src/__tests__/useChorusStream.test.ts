@@ -155,6 +155,27 @@ describe('useChorusStream', () => {
     expect(calls).toEqual(['chunk:first', 'chunk:last', 'done']);
   });
 
+  it('emits reasoning chunks and accumulated tool deltas from connectors', async () => {
+    const transport = vi.fn<Transport>(() => Promise.resolve(makeSseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { reasoning_content: 'plan' } }] }),
+      JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'search', arguments: '{"q":' } }] } }] }),
+      JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: '"test"}' } }] } }] }),
+      '[DONE]',
+    ])));
+    const onReasoning = vi.fn();
+    const onToolDelta = vi.fn();
+    const { result } = renderHook(() => useChorusStream(transport, { connector: 'openai' }));
+
+    await act(async () => {
+      await result.current.send('hello', [], { onChunk: vi.fn(), onReasoning, onToolDelta });
+    });
+
+    expect(onReasoning).toHaveBeenCalledWith('plan');
+    expect(onToolDelta).toHaveBeenCalledTimes(2);
+    expect(onToolDelta).toHaveBeenNthCalledWith(1, { id: 'call_1', name: 'search', input: '{"q":' });
+    expect(onToolDelta).toHaveBeenNthCalledWith(2, { id: 'call_1', name: 'search', input: { q: 'test' } });
+  });
+
   it('finishes a fetch transport when the connector emits a done sentinel and the body stays open', async () => {
     let cancelled = false;
     const fetchMock = vi.fn(async () => makeOpenSseResponse(['[DONE]'], () => { cancelled = true; }));

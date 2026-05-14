@@ -136,6 +136,44 @@ describe('Chorus', () => {
     await waitFor(() => expect(screen.getByText('Hello')).toBeInTheDocument());
   });
 
+  it('renders streamed reasoning in a collapsed details block on the assistant message', async () => {
+    const user = userEvent.setup();
+    const transport = vi.fn<Transport>(async () => sseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { reasoning_content: 'plan first' } }] }),
+      JSON.stringify({ choices: [{ index: 0, delta: { content: 'final answer' } }] }),
+      '[DONE]',
+    ]));
+
+    render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'why');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByText('final answer')).toBeInTheDocument();
+    const summary = screen.getByText('Reasoning');
+    expect(summary.closest('details')).not.toHaveAttribute('open');
+    expect(screen.getByText('plan first')).toBeInTheDocument();
+  });
+
+  it('renders streamed connector tool calls as visible tool rows by default', async () => {
+    const user = userEvent.setup();
+    const transport = vi.fn<Transport>(async () => sseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'search', arguments: '{"q":' } }] } }] }),
+      JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: '"test"}' } }] } }] }),
+      '[DONE]',
+    ]));
+
+    render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'use a tool');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    const toolButton = await screen.findByRole('button', { name: /search/i });
+    expect(toolButton).toBeInTheDocument();
+    await user.click(toolButton);
+    expect(screen.getByText(/"q": "test"/)).toBeInTheDocument();
+  });
+
   it('accepts a custom connector object on the transport path', async () => {
     const user = userEvent.setup();
     const transport = vi.fn<Transport>(async () => sseResponse(['ignored']));
@@ -741,6 +779,24 @@ describe('Chorus', () => {
     expect(onError.mock.calls[0][0]).toBeInstanceOf(Error);
     expect(onError.mock.calls[0][0].message).toBe('stream failed');
     expect(await screen.findByText('Something went wrong. Please try again.')).toBeInTheDocument();
+  });
+
+  it('passes Gemini safety finish reasons to onError while keeping the UI banner generic', async () => {
+    const user = userEvent.setup();
+    const transport = vi.fn<Transport>(async () => sseResponse([
+      JSON.stringify({ candidates: [{ finishReason: 'SAFETY', content: { parts: [] } }] }),
+    ]));
+    const onError = vi.fn();
+
+    render(<Chorus transport={transport} connector="gemini" minAssistantDelayMs={0} onError={onError} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'blocked');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    await waitFor(() => expect(onError).toHaveBeenCalledOnce());
+    expect(onError.mock.calls[0][0].message).toContain('finishReason: SAFETY');
+    expect(await screen.findByText('Something went wrong. Please try again.')).toBeInTheDocument();
+    expect(screen.queryByText(/finishReason: SAFETY/)).not.toBeInTheDocument();
   });
 
   it('surfaces errors from the documented useChorusStream onSend bridge', async () => {

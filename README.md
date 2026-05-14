@@ -117,7 +117,7 @@ export default function App() {
 }
 ```
 
-`createFetchSSETransport(url)` posts `{ prompt, history }` to your endpoint and reads the response as a Server-Sent Events stream. `history` includes the latest user message, so backend examples should map `history` directly instead of appending `prompt` again. Pass a `formatBody` option to customise the request shape for OpenAI, FastAPI, FormData uploads, or any other backend. The transport sets `Content-Type: application/json` only for its default JSON body; custom serializers should set JSON headers themselves and FormData/Blob/URLSearchParams are not forced to JSON. The `openai` connector parses the standard `choices[*].delta.content` shape.
+`createFetchSSETransport(url)` posts `{ prompt, history }` to your endpoint and reads the response as a Server-Sent Events stream. `history` includes the latest user message, so backend examples should map `history` directly instead of appending `prompt` again. Pass a `formatBody` option to customise the request shape for OpenAI, FastAPI, FormData uploads, or any other backend. The transport sets `Content-Type: application/json` only for its default JSON body; custom serializers should set JSON headers themselves and FormData/Blob/URLSearchParams are not forced to JSON. The `openai` connector parses the standard selected `choices[0]` text, reasoning, and tool-call delta shapes.
 
 For reusable callbacks, import `ChorusOnSend<TMeta>` or the lower-level `ChorusSendHelpers` type instead of duplicating the helper shape. `ChorusOnSend<TMeta>` preserves your `Message<TMeta>.metadata` type through the `messages` argument and returned assistant message.
 
@@ -320,14 +320,32 @@ Connectors tell Chorus how to parse the streaming response from different AI pro
 
 | Name | Provider | SSE format |
 |------|----------|------------|
-| `'openai'` | OpenAI Chat Completions | `choices[*].delta.content` |
-| `'anthropic'` | Anthropic Messages API | `content_block_delta` / `delta.text` |
-| `'gemini'` | Google Gemini (AI / Vertex AI) | `candidates[*].content.parts[*].text` |
+| `'openai'` | OpenAI Chat Completions / Responses-compatible streams | selected `choices[0].delta.content`, reasoning fields, `tool_calls`, and common Responses API deltas |
+| `'anthropic'` | Anthropic Messages API | `content_block_delta` text/thinking deltas plus `tool_use` / `input_json_delta` |
+| `'gemini'` | Google Gemini (AI / Vertex AI) | selected `candidates[0].content.parts[*].text`, thought parts, and `functionCall` parts |
 | `'auto'` *(default)* | Auto-detect | Tries OpenAI, then Gemini, then Anthropic, then plain text |
 
 All built-in connectors also recognise in-band stream errors. If a backend has already started a `200` SSE/WebSocket stream, send `data: {"error":"message"}` (or `{"error":{"message":"message"}}`) to abort the response, call `onError` with an `Error`, and show the configured error banner.
 
-Built-in connectors are text-delta connectors. OpenAI `delta.tool_calls`, Anthropic `tool_use` / `input_json_delta`, and Gemini function-call deltas are intentionally ignored rather than converted to `toolCall` messages. For agent-step UIs, handle provider tool events in your own client/server layer (for example with `onSend`, a custom `Connector`, or by appending `role: 'tool'` messages yourself after the tool finishes).
+Built-in connectors emit three additive delta types:
+
+- `text` appends to the active assistant bubble.
+- `reasoning` appends to `message.reasoning` and renders as a collapsed **Reasoning** details block above the assistant bubble.
+- `toolDelta` becomes/updates a `role: 'tool'` message with `message.toolCall`, so the existing `<ToolCallBlock>` renderer shows streaming tool calls automatically in `<Chorus>`.
+
+Custom connectors can return the same shape:
+
+```ts
+type ConnectorResult = {
+  text?: string;
+  reasoning?: string;
+  toolDelta?: { id: string; name?: string; input?: unknown; output?: unknown };
+  done?: boolean;
+  error?: string;
+};
+```
+
+When providers return multiple alternatives (`choices` / `candidates`), the built-in OpenAI and Gemini connectors select alternative index `0` by default. They do **not** concatenate alternatives into one message. If your app intentionally requests `n > 1` / `candidateCount > 1`, provide a custom `Connector` (or multiple UI messages) that models those alternatives explicitly.
 
 ### Usage
 
@@ -347,27 +365,70 @@ const { send } = useChorusStream(transport, { connector: 'gemini' });
 const { send } = useChorusStream(transport);
 ```
 
+## OpenAI SSE format
+
+The `openaiConnector` reads the selected Chat Completions alternative (`choices[index === 0]`, or the first array entry when indexes are omitted). It maps:
+
+- `choices[0].delta.content` → assistant text. DeepSeek-style `<think>...</think>` spans inside content are split into `reasoning` instead of being rendered in the answer.
+- `choices[0].delta.reasoning`, `reasoning_content`, or `reasoning_summary` → assistant `reasoning`.
+- `choices[0].delta.tool_calls[*].id/function.name/function.arguments` → `toolDelta { id, name, input }`. Argument string fragments are accumulated and parsed as JSON when complete before they are written to the tool message.
+
+```
+data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"search","arguments":"{\"q\":"}}]}}]}
+
+data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"react-chorus\"}"}}]}}]}
+
+data: {"choices":[{"index":0,"delta":{"content":"Done"}}]}
+
+data: [DONE]
+```
+
+That tool stream becomes a Chorus message similar to:
+
+```ts
+{ role: 'tool', text: '', toolCall: { name: 'search', input: { q: 'react-chorus' } } }
+```
+
+For OpenAI Responses API-style streams, common `response.output_text.delta`, `response.reasoning_summary_text.delta`, `response.output_item.added`, and `response.function_call_arguments.delta` events are also recognised.
+
 ## Anthropic SSE format
 
-The Anthropic Messages API streams server-sent events. The `anthropicConnector` extracts text from `content_block_delta` events and signals completion on `message_stop`:
+The Anthropic Messages API streams server-sent events. The `anthropicConnector` extracts text and thinking/tool-use deltas from content block events and signals completion on `message_stop`:
 
 ```
 event: content_block_delta
 data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}
 
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"thinking_delta","thinking":"Checking tools"}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"toolu_1","name":"search","input":{}}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"q\":\"react-chorus\"}"}}
+
 event: message_stop
 data: {"type":"message_stop"}
 ```
 
+Anthropic `tool_use` maps to a Chorus tool message by `content_block.id` (`toolDelta.id`), `content_block.name` (`toolCall.name`), and accumulated `input_json_delta.partial_json` (`toolCall.input`).
+
 ## Gemini SSE format
 
-The Google Gemini streaming API (Google AI and Vertex AI) sends server-sent events where each chunk contains a `candidates` array. The `geminiConnector` collects text from `candidates[*].content.parts[*].text` and signals completion when any candidate has a `finishReason`:
+The Google Gemini streaming API (Google AI and Vertex AI) sends server-sent events where each chunk contains a `candidates` array. The `geminiConnector` reads only candidate index `0`, collects text from `content.parts[*].text`, maps `thought: true` text/thinking fields to reasoning, maps `functionCall` parts to tool messages, and signals completion for normal `STOP` / `MAX_TOKENS` finish reasons:
 
 ```
-data: {"candidates":[{"content":{"parts":[{"text":"Hello"}]},"index":0}]}
+data: {"candidates":[{"index":0,"content":{"parts":[{"text":"Thinking","thought":true}]}}]}
 
-data: {"candidates":[{"content":{"parts":[{"text":" world"}]},"finishReason":"STOP","index":0}],"usageMetadata":{...}}
+data: {"candidates":[{"index":0,"content":{"parts":[{"functionCall":{"name":"search","args":{"q":"react-chorus"}}}]}}]}
+
+data: {"candidates":[{"index":0,"content":{"parts":[{"text":"Hello world"}]},"finishReason":"STOP"}],"usageMetadata":{...}}
 ```
+
+Gemini `functionCall.name` maps to `toolCall.name`, `functionCall.args` maps to `toolCall.input`, and the connector generates a stable tool delta id from the candidate/part index when Gemini does not provide one.
+
+Gemini blocked finish reasons such as `SAFETY`, `RECITATION`, `BLOCKLIST`, or `PROHIBITED_CONTENT` are treated as stream errors instead of silent completion. The `Error` passed to `onError` includes the raw `finishReason` (for example `finishReason: SAFETY`); the default UI still shows the generic `errorMessage`. `MAX_TOKENS` is treated as a completed, possibly truncated response.
 
 Example backend proxy (Express + `@google/generative-ai`):
 
@@ -501,7 +562,7 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `value` | `Message<TMeta>[]` | — | Controlled message list. Pair with `onChange`; Chorus renders this array as the source of truth. |
 | `onChange` | `(messages: Message<TMeta>[]) => void` | — | Called whenever Chorus wants to change the message list in controlled mode (`value` is provided). Not called for legacy `messages`-only uncontrolled state. |
 | `messages` | `Message<TMeta>[]` | — | Legacy initial-only seed for uncontrolled mode. Read once on mount; later prop changes are ignored. Prefer `initialMessages` for seeding or `value` + `onChange` for controlled mode. |
-| `initialMessages` | `Message<TMeta>[]` | — | Initial-only seed for uncontrolled mode. Useful for welcome messages; `system` and `tool` messages are hidden by default via `hiddenRoles`. |
+| `initialMessages` | `Message<TMeta>[]` | — | Initial-only seed for uncontrolled mode. Useful for welcome messages; `system` messages are hidden by default via `hiddenRoles`. Tool calls remain visible by default. |
 | `emptyState` | `ReactNode` | — | Custom content shown in the transcript when the visible message list is empty and the assistant is not typing. |
 | `suggestedPrompts` | `string[]` | — | Default empty-state prompt buttons. Clicking one fills and focuses the composer without sending. Ignored when `emptyState` is provided. |
 | `placeholder` | `string` | `"Send a message"` | Input placeholder text. |
@@ -536,7 +597,7 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `renderMessage` | `(message: Message<TMeta>, ctx: RenderMessageContext<TMeta>) => ReactNode` | — | Custom per-message renderer. Return `null` to fall back to default rendering. `ctx` includes `isStreaming`, `defaultRender(slots?)`, and action callbacks/default action controls. Existing one-argument renderers continue to work. |
 | `markdownProps` | `Omit<MarkdownProps, 'text' \| 'codeTheme' \| 'headless' \| 'streaming'>` | — | Props forwarded to the built-in Markdown renderer for every message, including `sanitizer`, `markedOptions`, and `markedExtensions`. |
 | `markdownSanitizer` | `MarkdownSanitizer` | — | Convenience alias for `markdownProps.sanitizer`; takes precedence when both are provided. |
-| `hiddenRoles` | `Role[]` | `['system', 'tool']` | Message roles hidden from the transcript. Pass `['system']` to show tool calls while hiding system prompts, or `[]` to show all roles. `<Chorus>` accepts `hiddenRoles` only — `showSystemMessages` exists on `<ChatWindow>` for backwards compatibility. |
+| `hiddenRoles` | `Role[]` | `['system']` | Message roles hidden from the transcript. Tool calls are visible by default in `<Chorus>`; pass `['system', 'tool']` to hide them, or `[]` to show all roles. `<Chorus>` accepts `hiddenRoles` only — `showSystemMessages` exists on `<ChatWindow>` for backwards compatibility. |
 
 ### `helpers` (passed to `onSend`)
 
@@ -735,18 +796,18 @@ If you return only `url` or `id`, Chorus normalizes `attachment.data` to that va
 
 While an async `uploadAttachment` is in flight, the composer shows a pending attachment chip with a spinner and disables Send so an empty placeholder cannot be submitted. Users can remove the pending chip to cancel it from the outgoing message; upload failures call `onAttachmentError` with `reason: 'upload-failed'` and remove the chip.
 
-### Hiding system messages while showing tool calls
+### Hiding or showing tool calls
 
-`<Chorus>` uses `hiddenRoles` to control which roles appear in the transcript (`showSystemMessages` is only available on `<ChatWindow>`, for backwards compatibility). A common agent-UI pattern is to render tool call blocks while still hiding system prompts:
+`<Chorus>` uses `hiddenRoles` to control which roles appear in the transcript (`showSystemMessages` is only available on `<ChatWindow>`, for backwards compatibility). By default `<Chorus>` hides system prompts and shows tool call blocks, which is the usual agent-UI pattern:
 
 ```tsx
 <Chorus
   transport="/api/chat"
-  hiddenRoles={['system']} // show user, assistant, and tool — hide system prompts
+  hiddenRoles={['system']} // default: show user, assistant, and tool — hide system prompts
 />
 ```
 
-Pass `hiddenRoles={[]}` to show every role, or omit it to keep the default `['system', 'tool']`.
+Pass `hiddenRoles={['system', 'tool']}` to hide tool calls as well, or `hiddenRoles={[]}` to show every role.
 
 For controlled mode, seed your own state instead of using `initialMessages`, and include hidden system/tool messages directly when you want full control over the request history:
 
@@ -819,9 +880,10 @@ const { send, abort, sending } = useChorusStream<MyMeta>(transport, { connector:
 
 - `transport` — async function `(text, history: Message<TMeta>[], signal) => Promise<Response>`. Use `createFetchSSETransport<TMeta>(url)` or write your own.
 - `send(..., { minDelayMs })` buffers the first streamed chunks until that many milliseconds have elapsed from send start, then flushes them before continuing normally.
+- `send(..., { onReasoning, onToolDelta })` receives connector-emitted reasoning chunks and accumulated tool deltas when you use the hook directly. `<Chorus>` wires these into `Message.reasoning` and `role: 'tool'` messages automatically.
 - Non-abort transport, HTTP, connector, and in-band provider errors call `onError` when supplied and reject the returned `send()` promise. This lets README-style `await send(...)` bridges surface the friendly Chorus error banner through the surrounding `onSend` catch path.
 - `onError` receives raw transport details (including bounded HTTP response body snippets); the built-in UI continues to show only `errorMessage`.
-- `opts.connector` — `'openai'` | `'anthropic'` | `'gemini'` | `'auto'` | custom `Connector`. Defaults to `'auto'` which handles OpenAI, Gemini, Anthropic JSON, plain-text SSE, and in-band `{ error }` payloads.
+- `opts.connector` — `'openai'` | `'anthropic'` | `'gemini'` | `'auto'` | custom `Connector`. Defaults to `'auto'` which handles OpenAI, Gemini, Anthropic JSON, plain-text SSE, reasoning/tool deltas, and in-band `{ error }` payloads.
 
 ### `createFetchSSETransport(url, init?)`
 
@@ -970,7 +1032,7 @@ setMessages(prev => [
 ]);
 ```
 
-The block shows the tool name in a header. Clicking expands it to reveal the input and output formatted as JSON. Tool messages are hidden by default alongside system messages; pass `hiddenRoles={['system']}` to `<Chorus>` or `<ChatWindow>` to display tool calls while keeping system prompts hidden.
+The block shows the tool name in a header. Clicking expands it to reveal the input and output formatted as JSON. `<Chorus>` shows tool messages by default while hiding system messages; pass `hiddenRoles={['system', 'tool']}` to hide them. Standalone `<ChatWindow>` keeps its historical default of hiding both `system` and `tool` unless you pass `hiddenRoles={['system']}`.
 
 ### Custom renderer via `renderMessage`
 
@@ -1067,6 +1129,7 @@ When neither `renderMessage` nor a custom `MessageBubble` is used, each message 
 <div class="chorus-msg chorus-{role}">
   <span class="chorus-sr-only">User message</span>
   <div class="chorus-msg-content">
+    <details class="chorus-reasoning"><!-- optional reasoning trace --></details>
     <div class="chorus-bubble"><!-- attachments + Markdown content --></div>
     <div class="chorus-actions"><!-- optional action buttons --></div>
   </div>
@@ -1083,6 +1146,8 @@ Target these classes in your CSS to restyle without a render prop:
 .chorus-msg.chorus-user   .chorus-bubble { background: #0070f3; color: #fff; }
 .chorus-msg.chorus-assistant .chorus-bubble { background: #f0f0f0; color: #111; }
 ```
+
+Reasoning blocks reuse existing palette variables (`--chorus-chat-bg`, `--chorus-chat-text`, `--chorus-border`, `--chorus-action-text`, and hover tokens), so they follow your `<Chorus palette={…}>` theme automatically.
 
 ### CSS custom properties for tool blocks
 
@@ -1171,6 +1236,7 @@ interface Message<TMeta = Record<string, unknown>> {
   id: string;
   role: Role;
   text: string; // supports CommonMark + GFM
+  reasoning?: string; // optional thinking/reasoning trace rendered in a collapsed details block
   attachments?: Attachment[]; // populated by <ChatInput accept="..." />
   toolCall?: ToolCall; // populated when role === 'tool'
   metadata?: TMeta; // optional typed data (timestamps, model, latency, etc.)

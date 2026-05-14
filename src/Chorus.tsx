@@ -19,6 +19,7 @@ export type { ChorusFinishContext, ChorusOnFinish, ChorusOnSend, ChorusSendHelpe
 
 const DEFAULT_MIN_ASSISTANT_DELAY_MS = 300;
 const DEFAULT_PERSISTENCE_WRITE_DEBOUNCE_MS = 80;
+const DEFAULT_CHORUS_HIDDEN_ROLES: Role[] = ['system'];
 
 export interface ChorusRef {
   send(text: string, attachments?: Attachment[]): void;
@@ -273,7 +274,7 @@ function ChorusInner<TMeta = Record<string, unknown>>({
         emptyState={canRenderEmptyAffordance ? emptyState : undefined}
         error={session.streamError}
         headless={headless}
-        hiddenRoles={hiddenRoles}
+        hiddenRoles={hiddenRoles ?? DEFAULT_CHORUS_HIDDEN_ROLES}
         markdownProps={markdownProps}
         markdownSanitizer={markdownSanitizer}
         maxRenderedMessages={maxRenderedMessages}
