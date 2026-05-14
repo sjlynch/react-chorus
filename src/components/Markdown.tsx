@@ -1,5 +1,5 @@
 import React from 'react';
-import { Marked } from 'marked';
+import { Marked, type MarkedExtension, type MarkedOptions } from 'marked';
 import { markedHighlight } from 'marked-highlight';
 import DOMPurify from 'dompurify';
 import { getHljs, highlightCode, isHljsLoaded, loadHljsTheme, type CodeTheme } from '../utils/hljsLoader';
@@ -8,18 +8,24 @@ import { normalizeStreamingMarkdown } from '../utils/markdownNormalizer';
 export { normalizeStreamingMarkdown };
 
 const COPY_FEEDBACK_DURATION_MS = 1200;
+const DEFAULT_MARKED_OPTIONS: MarkedOptions = { gfm: true, breaks: true };
 
-const markedInstance = new Marked({ gfm: true, breaks: true });
-markedInstance.use(markedHighlight({
-  langPrefix: 'hljs language-',
-  highlight: highlightCode,
-}));
+function createHighlightExtension() {
+  return markedHighlight({
+    langPrefix: 'hljs language-',
+    highlight: highlightCode,
+  });
+}
 
-const safeMarkedInstance = new Marked({ gfm: true, breaks: true });
-safeMarkedInstance.use(markedHighlight({
-  langPrefix: 'hljs language-',
-  highlight: highlightCode,
-}));
+function createMarkedInstance(options?: MarkedOptions) {
+  const instance = new Marked();
+  instance.setOptions(options ?? { ...DEFAULT_MARKED_OPTIONS });
+  instance.use(createHighlightExtension());
+  return instance;
+}
+
+const markedInstance = createMarkedInstance();
+const safeMarkedInstance = createMarkedInstance();
 
 export type MarkdownSanitizer = ((html: string) => string) | { sanitize: (html: string) => string };
 type SanitizerFn = (html: string) => string;
@@ -38,6 +44,10 @@ export interface MarkdownProps {
   streaming?: boolean;
   /** Optional sanitizer override, useful for SSR frameworks that provide their own DOMPurify instance. */
   sanitizer?: MarkdownSanitizer;
+  /** Optional marked parser options. Passing this creates an isolated Marked instance for this render. */
+  markedOptions?: MarkedOptions;
+  /** Optional marked extensions registered on an isolated Marked instance for this render. */
+  markedExtensions?: MarkedExtension[];
 }
 
 function escapeHtml(value: string) {
@@ -66,7 +76,7 @@ const URL_CHARACTER_REFERENCES = new Map([
 
 let browserDOMPurifySanitizer: SanitizerFn | undefined;
 
-safeMarkedInstance.use({
+const safeRendererExtension: MarkedExtension = {
   renderer: {
     html() {
       return '';
@@ -84,7 +94,25 @@ safeMarkedInstance.use({
       return `<img src="${escapeHtml(href)}" alt="${escapeHtml(alt)}"${title ? ` title="${escapeHtml(title)}"` : ''}>`;
     },
   },
-});
+};
+
+safeMarkedInstance.use(safeRendererExtension);
+
+function hasCustomMarkedConfig(markedOptions?: MarkedOptions, markedExtensions?: MarkedExtension[]) {
+  return markedOptions !== undefined || (markedExtensions?.length ?? 0) > 0;
+}
+
+function createConfiguredMarkedInstance(markedOptions: MarkedOptions | undefined, markedExtensions: MarkedExtension[] | undefined, safe: boolean) {
+  const instance = createMarkedInstance(markedOptions);
+  if (markedExtensions?.length) instance.use(...markedExtensions);
+  if (safe) instance.use(safeRendererExtension);
+  return instance;
+}
+
+function resolveMarkedInstance(safe: boolean, markedOptions?: MarkedOptions, markedExtensions?: MarkedExtension[]) {
+  if (!hasCustomMarkedConfig(markedOptions, markedExtensions)) return safe ? safeMarkedInstance : markedInstance;
+  return createConfiguredMarkedInstance(markedOptions, markedExtensions, safe);
+}
 
 function decodeUrlCharacterReferences(value: string) {
   let output = '';
@@ -202,25 +230,218 @@ function resolveSanitizer(sanitizer?: MarkdownSanitizer): SanitizerFn | undefine
   return undefined;
 }
 
-function renderMarkdown(text: string, sanitizer?: MarkdownSanitizer) {
+function renderMarkdown(text: string, sanitizer?: MarkdownSanitizer, markedOptions?: MarkedOptions, markedExtensions?: MarkedExtension[]) {
   const balanced = normalizeStreamingMarkdown(text);
   const sanitize = resolveSanitizer(sanitizer);
+  const instance = resolveMarkedInstance(!sanitize, markedOptions, markedExtensions);
+  const parsed = parseWithMarked(instance, balanced);
 
-  if (!sanitize) return parseWithMarked(safeMarkedInstance, balanced);
-  return sanitize(parseWithMarked(markedInstance, balanced));
+  if (!sanitize) return parsed;
+  return sanitize(parsed);
+}
+
+const VOID_HTML_ELEMENTS = new Set([
+  'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta',
+  'param', 'source', 'track', 'wbr',
+]);
+
+interface HtmlTagMatch {
+  start: number;
+  end: number;
+  name: string;
+  closing: boolean;
+  selfClosing: boolean;
+}
+
+function copyButtonHtml() {
+  return '<span class="chorus-copy-btn" role="button" aria-label="Copy code" tabindex="0">Copy</span>';
+}
+
+function codeBlockWrapperStart(themeClass: string) {
+  return `<div class="chorus-codeblock ${themeClass}">${copyButtonHtml()}`;
+}
+
+function addCodeBlockChromeWithDOM(html: string, themeClass: string) {
+  if (typeof DOMParser === 'undefined') return undefined;
+
+  try {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const codeBlocks = Array.from(doc.querySelectorAll('pre > code'));
+
+    for (const code of codeBlocks) {
+      const pre = code.parentElement;
+      if (!pre || pre.parentElement?.classList.contains('chorus-codeblock')) continue;
+
+      const wrapper = doc.createElement('div');
+      wrapper.className = `chorus-codeblock ${themeClass}`;
+      const copyButton = doc.createElement('span');
+      copyButton.className = 'chorus-copy-btn';
+      copyButton.setAttribute('role', 'button');
+      copyButton.setAttribute('aria-label', 'Copy code');
+      copyButton.setAttribute('tabindex', '0');
+      copyButton.textContent = 'Copy';
+
+      pre.parentNode?.insertBefore(wrapper, pre);
+      wrapper.append(copyButton, pre);
+    }
+
+    return doc.body.innerHTML;
+  } catch {
+    return undefined;
+  }
+}
+
+function isHtmlNameChar(char: string | undefined) {
+  return !!char && /[A-Za-z0-9:-]/.test(char);
+}
+
+function isAsciiWhitespace(char: string | undefined) {
+  return char === ' ' || char === '\n' || char === '\t' || char === '\r' || char === '\f';
+}
+
+function findHtmlTagEnd(html: string, start: number) {
+  let quote: '"' | "'" | null = null;
+
+  for (let i = start + 1; i < html.length; i++) {
+    const char = html[i];
+    if (quote) {
+      if (char === quote) quote = null;
+    } else if (char === '"' || char === "'") {
+      quote = char;
+    } else if (char === '>') {
+      return i;
+    }
+  }
+
+  return -1;
+}
+
+function readHtmlTag(html: string, start: number): HtmlTagMatch | null {
+  if (html[start] !== '<') return null;
+
+  const end = findHtmlTagEnd(html, start);
+  if (end === -1) return null;
+
+  let cursor = start + 1;
+  const marker = html[cursor];
+  if (marker === '!' || marker === '?') return { start, end, name: '', closing: false, selfClosing: true };
+
+  let closing = false;
+  if (marker === '/') {
+    closing = true;
+    cursor += 1;
+  }
+
+  while (isAsciiWhitespace(html[cursor])) cursor += 1;
+  const nameStart = cursor;
+  while (isHtmlNameChar(html[cursor])) cursor += 1;
+  if (cursor === nameStart) return { start, end, name: '', closing, selfClosing: true };
+
+  let beforeEnd = end - 1;
+  while (isAsciiWhitespace(html[beforeEnd])) beforeEnd -= 1;
+
+  return {
+    start,
+    end,
+    name: html.slice(nameStart, cursor).toLowerCase(),
+    closing,
+    selfClosing: !closing && html[beforeEnd] === '/',
+  };
+}
+
+function findNextHtmlTag(html: string, from: number): HtmlTagMatch | null {
+  let start = html.indexOf('<', from);
+
+  while (start !== -1) {
+    const tag = readHtmlTag(html, start);
+    if (tag) return tag;
+    start = html.indexOf('<', start + 1);
+  }
+
+  return null;
+}
+
+function findMatchingCloseTag(html: string, tagName: string, from: number) {
+  let depth = 1;
+  let cursor = from;
+
+  while (cursor < html.length) {
+    const tag = findNextHtmlTag(html, cursor);
+    if (!tag) return null;
+    cursor = tag.end + 1;
+    if (tag.name !== tagName) continue;
+
+    if (tag.closing) {
+      depth -= 1;
+      if (depth === 0) return tag;
+    } else if (!tag.selfClosing && !VOID_HTML_ELEMENTS.has(tag.name)) {
+      depth += 1;
+    }
+  }
+
+  return null;
+}
+
+function hasDirectCodeChild(html: string, from: number, to: number) {
+  let depth = 0;
+  let cursor = from;
+
+  while (cursor < to) {
+    const tag = findNextHtmlTag(html, cursor);
+    if (!tag || tag.start >= to || tag.end >= to) return false;
+    cursor = tag.end + 1;
+
+    if (!tag.name) continue;
+    if (tag.name === 'code' && !tag.closing && depth === 0) return true;
+
+    if (tag.closing) depth = Math.max(0, depth - 1);
+    else if (!tag.selfClosing && !VOID_HTML_ELEMENTS.has(tag.name)) depth += 1;
+  }
+
+  return false;
+}
+
+function addCodeBlockChromeWithServerWalker(html: string, themeClass: string) {
+  let output = '';
+  let cursor = 0;
+  let scan = 0;
+
+  while (scan < html.length) {
+    const tag = findNextHtmlTag(html, scan);
+    if (!tag) break;
+    scan = tag.end + 1;
+
+    if (tag.name !== 'pre' || tag.closing || tag.selfClosing) continue;
+
+    const close = findMatchingCloseTag(html, 'pre', tag.end + 1);
+    if (!close) continue;
+
+    if (hasDirectCodeChild(html, tag.end + 1, close.start)) {
+      output += html.slice(cursor, tag.start);
+      output += codeBlockWrapperStart(themeClass);
+      output += html.slice(tag.start, close.end + 1);
+      output += '</div>';
+      cursor = close.end + 1;
+    }
+
+    scan = close.end + 1;
+  }
+
+  output += html.slice(cursor);
+  return output;
 }
 
 function addCodeBlockChrome(html: string, codeTheme: CodeTheme) {
   const themeClass = codeTheme === 'light' ? 'chorus-codeblock-light' : 'chorus-codeblock-dark';
-  return html.replace(/<pre><code([^>]*)>([\s\S]*?)<\/code><\/pre>/g, (_match, attrs: string, code: string) => (
-    `<div class="chorus-codeblock ${themeClass}">` +
-      '<span class="chorus-copy-btn" role="button" aria-label="Copy code" tabindex="0">Copy</span>' +
-      `<pre><code${attrs}>${code}</code></pre>` +
-    '</div>'
-  ));
+  return addCodeBlockChromeWithDOM(html, themeClass) ?? addCodeBlockChromeWithServerWalker(html, themeClass);
 }
 
-export function Markdown({ text, codeTheme = 'dark', headless = false, streaming = false, sanitizer }: MarkdownProps) {
+function getCodeCopyText(codeEl: HTMLElement | null) {
+  const raw = codeEl?.textContent ?? codeEl?.innerText ?? '';
+  return raw.replace(/\r?\n$/, '');
+}
+
+export function Markdown({ text, codeTheme = 'dark', headless = false, streaming = false, sanitizer, markedOptions, markedExtensions }: MarkdownProps) {
   const containerRef = React.useRef<HTMLDivElement>(null);
   const [hljsReady, setHljsReady] = React.useState(isHljsLoaded());
 
@@ -255,11 +476,11 @@ export function Markdown({ text, codeTheme = 'dark', headless = false, streaming
     if (streaming) return '';
     void hljsReady;
 
-    const sanitized = renderMarkdown(text, sanitizer);
+    const sanitized = renderMarkdown(text, sanitizer, markedOptions, markedExtensions);
     if (headless) return sanitized;
 
     return addCodeBlockChrome(sanitized, codeTheme);
-  }, [text, codeTheme, headless, hljsReady, streaming, sanitizer]);
+  }, [text, codeTheme, headless, hljsReady, streaming, sanitizer, markedOptions, markedExtensions]);
 
   React.useEffect(() => {
     const el = containerRef.current;
@@ -268,7 +489,7 @@ export function Markdown({ text, codeTheme = 'dark', headless = false, streaming
     const handleCopy = async (btn: HTMLElement) => {
       const wrapper = btn.closest('.chorus-codeblock') as HTMLElement | null;
       const codeEl = wrapper?.querySelector('pre > code') as HTMLElement | null;
-      const raw = codeEl?.innerText ?? '';
+      const raw = getCodeCopyText(codeEl);
       try {
         await navigator.clipboard.writeText(raw);
         const prev = btn.textContent;

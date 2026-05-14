@@ -1,5 +1,5 @@
 export { ChatWindow, MessageBubble } from './components/ChatWindow';
-export type { ChatWindowProps, MessageBubbleProps, RenderMessageContext, MessageMarkdownProps, MessageRenderActions } from './components/ChatWindow';
+export type { ChatWindowProps, MessageBubbleProps, MessageBubbleSlots, MessageFeedback, RenderErrorContext, RenderMessageContext, MessageMarkdownProps, MessageRenderActions } from './components/ChatWindow';
 export { ChatInput } from './components/ChatInput';
 export type { ChatInputProps } from './components/ChatInput';
 export { ToolCallBlock } from './components/ToolCallBlock';
@@ -9,7 +9,7 @@ export type { ConversationListProps } from './components/ConversationList';
 export { Chorus } from './Chorus';
 export { ChorusTheme } from './components/ChorusTheme';
 export type { Palette } from './components/ChorusTheme';
-export type { ChorusOnSend, ChorusProps, ChorusSendHelpers } from './Chorus';
+export type { ChorusFinishContext, ChorusOnFinish, ChorusOnSend, ChorusProps, ChorusRef, ChorusSendHelpers } from './Chorus';
 
 export type { Message } from './types';
 export type {

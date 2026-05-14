@@ -1,6 +1,7 @@
 import React from 'react';
 import type { Message, StorageAdapter } from '../types';
 import { useLatestRef } from './useLatestRef';
+import { isChorusDevMode } from '../utils/devMode';
 
 export type SerializeMessages<TMeta = Record<string, unknown>> = (messages: Message<TMeta>[]) => string;
 export type DeserializeMessages<TMeta = Record<string, unknown>> = (raw: string) => Message<TMeta>[];
@@ -216,7 +217,7 @@ export function useChorusPersistence<TMeta = Record<string, unknown>>(
     const nextError = toError(rawError);
     if (mountedRef.current) setError(nextError);
 
-    if (process.env.NODE_ENV !== 'production') {
+    if (isChorusDevMode()) {
       console.warn('[Chorus] Failed to persist messages.', nextError);
     }
 
