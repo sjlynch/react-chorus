@@ -126,16 +126,22 @@ function MessageBubbleLayout<TMeta = Record<string, unknown>>({ message, codeThe
   markdownSanitizer?: MarkdownSanitizer;
   children?: React.ReactNode;
 } & MessageBubbleSlots) {
+  const hasAttachments = Boolean(message.attachments?.length);
+  const hasBubbleText = message.text.trim().length > 0;
+  const shouldRenderBubble = hasBubbleText || hasAttachments;
+
   return (
     <>
       {before}
       <div className="chorus-msg-content">
         {headerSlot}
         <MessageReasoning reasoning={message.reasoning} codeTheme={codeTheme} headless={headless} streaming={streaming} markdownProps={markdownProps} markdownSanitizer={markdownSanitizer} />
-        <div className="chorus-bubble">
-          <MessageAttachments attachments={message.attachments} />
-          <Markdown {...markdownProps} text={message.text} codeTheme={codeTheme} headless={headless} streaming={streaming} sanitizer={markdownSanitizer ?? markdownProps?.sanitizer} />
-        </div>
+        {shouldRenderBubble && (
+          <div className="chorus-bubble">
+            <MessageAttachments attachments={message.attachments} />
+            {hasBubbleText && <Markdown {...markdownProps} text={message.text} codeTheme={codeTheme} headless={headless} streaming={streaming} sanitizer={markdownSanitizer ?? markdownProps?.sanitizer} />}
+          </div>
+        )}
         {footerSlot}
         {children}
       </div>

@@ -174,6 +174,158 @@ describe('Chorus', () => {
     expect(screen.getByText(/"q": "test"/)).toBeInTheDocument();
   });
 
+  it('finishes a tool-only OpenAI stream without stale typing and reports stream completion', async () => {
+    const user = userEvent.setup();
+    const onFinish = vi.fn();
+    const onStreamDone = vi.fn();
+    const transport = vi.fn<Transport>(async () => sseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'search', arguments: '{"q":"test"}' } }] } }] }),
+      '[DONE]',
+    ]));
+
+    render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} onFinish={onFinish} onStreamDone={onStreamDone} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'use a tool');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByRole('button', { name: /search/i })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument());
+    expect(screen.queryByRole('status', { name: /assistant is typing/i })).not.toBeInTheDocument();
+    expect(onFinish).not.toHaveBeenCalled();
+    expect(onStreamDone).toHaveBeenCalledWith(expect.objectContaining({
+      assistantMessage: null,
+      toolMessages: [expect.objectContaining({ role: 'tool', toolCall: expect.objectContaining({ id: 'call_1', name: 'search', input: { q: 'test' } }) })],
+      response: expect.any(Response),
+    }));
+  });
+
+  it('finishes a tool-only Anthropic stream and invokes onToolCall with actionable context', async () => {
+    const user = userEvent.setup();
+    const onToolCall = vi.fn();
+    const transport = vi.fn<Transport>(async () => sseResponse([
+      JSON.stringify({ type: 'content_block_start', index: 1, content_block: { type: 'tool_use', id: 'toolu_1', name: 'lookup', input: {} } }),
+      JSON.stringify({ type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: '{"city":"Paris"}' } }),
+      JSON.stringify({ type: 'message_stop' }),
+    ]));
+
+    render(<Chorus transport={transport} connector="anthropic" minAssistantDelayMs={0} onToolCall={onToolCall} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'use anthropic tool');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByRole('button', { name: /lookup/i })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument());
+    expect(onToolCall).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'toolu_1',
+      name: 'lookup',
+      input: { city: 'Paris' },
+      signal: expect.any(AbortSignal),
+      message: expect.objectContaining({ role: 'tool' }),
+      messages: expect.any(Array),
+    }));
+    expect(screen.queryByRole('status', { name: /assistant is typing/i })).not.toBeInTheDocument();
+  });
+
+  it('executes a streamed tool call and keeps final assistant text', async () => {
+    const user = userEvent.setup();
+    const search = vi.fn(async () => ({ results: ['first result'] }));
+    const onFinish = vi.fn();
+    const onToolDelta = vi.fn();
+    const transport = vi.fn<Transport>(async () => sseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'search', arguments: '{"q":"react"}' } }] } }] }),
+      JSON.stringify({ choices: [{ index: 0, delta: { content: 'I found one result.' } }] }),
+      '[DONE]',
+    ]));
+
+    render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} tools={{ search }} onFinish={onFinish} onToolDelta={onToolDelta} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'search react');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByText('I found one result.')).toBeInTheDocument();
+    await waitFor(() => expect(search).toHaveBeenCalledWith({ q: 'react' }, expect.objectContaining({ id: 'call_1', name: 'search' })));
+    await waitFor(() => expect(onFinish).toHaveBeenCalledWith(expect.objectContaining({ message: expect.objectContaining({ text: 'I found one result.' }) })));
+    expect(onToolDelta).toHaveBeenCalledWith(expect.objectContaining({ delta: expect.objectContaining({ id: 'call_1' }) }));
+
+    const toolButton = screen.getByRole('button', { name: /search/i });
+    await user.click(toolButton);
+    expect(screen.getByText(/first result/)).toBeInTheDocument();
+  });
+
+  it('surfaces tool execution failures and appends error output', async () => {
+    const user = userEvent.setup();
+    const onError = vi.fn();
+    const transport = vi.fn<Transport>(async () => sseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'search', arguments: '{"q":"react"}' } }] } }] }),
+      '[DONE]',
+    ]));
+
+    render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} tools={{ search: async () => { throw new Error('tool failed'); } }} onError={onError} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'search react');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByText('Something went wrong. Please try again.')).toBeInTheDocument();
+    await waitFor(() => expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'tool failed' })));
+    const toolButton = screen.getByRole('button', { name: /search/i });
+    await user.click(toolButton);
+    expect(screen.getByText(/tool failed/)).toBeInTheDocument();
+  });
+
+  it('aborts during tool execution without showing an error', async () => {
+    const user = userEvent.setup();
+    let capturedSignal!: AbortSignal;
+    const onError = vi.fn();
+    const transport = vi.fn<Transport>(async () => sseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'slow_tool', arguments: '{"q":"react"}' } }] } }] }),
+      '[DONE]',
+    ]));
+
+    render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} tools={{
+      slow_tool: (_input, context) => {
+        capturedSignal = context.signal;
+        return new Promise((_resolve, reject) => {
+          context.signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+        });
+      },
+    }} onError={onError} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'slow tool');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByRole('button', { name: /slow_tool/i })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: /stop/i })).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: /stop/i }));
+
+    await waitFor(() => expect(capturedSignal.aborted).toBe(true));
+    await waitFor(() => expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument());
+    expect(onError).not.toHaveBeenCalled();
+    expect(screen.queryByText('Something went wrong. Please try again.')).not.toBeInTheDocument();
+  });
+
+  it('allows custom rendering of streamed tool messages while preserving default rendering', async () => {
+    const user = userEvent.setup();
+    const transport = vi.fn<Transport>(async () => sseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'search', arguments: '{"q":"react"}' } }] } }] }),
+      '[DONE]',
+    ]));
+
+    render(<Chorus
+      transport={transport}
+      connector="openai"
+      minAssistantDelayMs={0}
+      renderMessage={(message, context) => message.role === 'tool'
+        ? <div data-testid="custom-tool">Custom {message.toolCall?.name}{context.defaultRender()}</div>
+        : context.defaultRender()}
+    />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'search react');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByTestId('custom-tool')).toHaveTextContent('Custom search');
+    expect(screen.getByRole('button', { name: /search/i })).toBeInTheDocument();
+  });
+
   it('accepts a custom connector object on the transport path', async () => {
     const user = userEvent.setup();
     const transport = vi.fn<Transport>(async () => sseResponse(['ignored']));

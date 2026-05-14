@@ -1,10 +1,16 @@
 import { extractErrorMessage } from './error';
 import type { Connector, ConnectorResult, ConnectorToolDelta } from './openai';
 
-const toolIdsByBlockIndex = new Map<string, string>();
+export interface AnthropicConnectorState {
+  toolIdsByBlockIndex: Map<string, string>;
+}
 
-function resetAnthropicState() {
-  toolIdsByBlockIndex.clear();
+export function createAnthropicConnectorState(): AnthropicConnectorState {
+  return { toolIdsByBlockIndex: new Map<string, string>() };
+}
+
+function resetAnthropicState(state: AnthropicConnectorState) {
+  state.toolIdsByBlockIndex.clear();
 }
 
 function hasOwn(value: object, key: PropertyKey) {
@@ -29,9 +35,10 @@ function fallbackToolId(index: unknown) {
  * Usage example:
  *   const { send } = useChorusStream(transport, { connector: 'anthropic' });
  */
-export const anthropicConnector: Connector = {
+export const anthropicConnector: Connector<AnthropicConnectorState> = {
   name: 'anthropic',
-  extract(data: string): ConnectorResult | null {
+  createState: createAnthropicConnectorState,
+  extract(data: string, state = createAnthropicConnectorState()): ConnectorResult | null {
     try {
       const obj = JSON.parse(data);
       const error = extractErrorMessage(obj);
@@ -39,7 +46,7 @@ export const anthropicConnector: Connector = {
       if (!obj || typeof obj.type !== 'string') return null;
 
       if (obj.type === 'message_stop') {
-        resetAnthropicState();
+        resetAnthropicState(state);
         return { done: true };
       }
 
@@ -54,7 +61,7 @@ export const anthropicConnector: Connector = {
 
         if (block.type === 'tool_use') {
           const id = typeof block.id === 'string' && block.id ? block.id : fallbackToolId(obj.index);
-          toolIdsByBlockIndex.set(blockIndexKey(obj.index), id);
+          state.toolIdsByBlockIndex.set(blockIndexKey(obj.index), id);
           const toolDelta: ConnectorToolDelta = { id };
           if (typeof block.name === 'string' && block.name) toolDelta.name = block.name;
           if (hasOwn(block, 'input')) toolDelta.input = block.input;
@@ -83,7 +90,7 @@ export const anthropicConnector: Connector = {
 
         if (obj.delta?.type === 'input_json_delta' && typeof obj.delta.partial_json === 'string') {
           const key = blockIndexKey(obj.index);
-          const id = toolIdsByBlockIndex.get(key) ?? fallbackToolId(obj.index);
+          const id = state.toolIdsByBlockIndex.get(key) ?? fallbackToolId(obj.index);
           return { toolDelta: { id, input: obj.delta.partial_json } };
         }
       }
