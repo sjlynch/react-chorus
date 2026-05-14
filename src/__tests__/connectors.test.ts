@@ -41,6 +41,7 @@ describe('openaiConnector', () => {
   });
 
   it('extracts tool call deltas and keeps the provider id for argument chunks', () => {
+    const state = openaiConnector.createState?.();
     const start = JSON.stringify({
       choices: [{
         index: 0,
@@ -54,9 +55,10 @@ describe('openaiConnector', () => {
       }],
     });
 
-    expect(openaiConnector.extract(start)).toEqual({ toolDelta: { id: 'call_1', name: 'search', input: '{"q":' } });
-    expect(openaiConnector.extract(next)).toEqual({ toolDelta: { id: 'call_1', input: '"test"}' } });
-    expect(openaiConnector.extract('[DONE]')).toEqual({ done: true });
+    expect(state).toBeDefined();
+    expect(openaiConnector.extract(start, state)).toEqual({ toolDelta: { id: 'call_1', name: 'search', input: '{"q":' } });
+    expect(openaiConnector.extract(next, state)).toEqual({ toolDelta: { id: 'call_1', input: '"test"}' } });
+    expect(openaiConnector.extract('[DONE]', state)).toEqual({ done: true });
   });
 
   it('returns null for role-only delta (no content)', () => {
@@ -146,6 +148,7 @@ describe('anthropicConnector', () => {
   });
 
   it('extracts tool_use blocks and input_json_delta chunks', () => {
+    const state = anthropicConnector.createState?.();
     const start = JSON.stringify({
       type: 'content_block_start',
       index: 2,
@@ -157,9 +160,10 @@ describe('anthropicConnector', () => {
       delta: { type: 'input_json_delta', partial_json: '{"q":"test"}' },
     });
 
-    expect(anthropicConnector.extract(start)).toEqual({ toolDelta: { id: 'toolu_1', name: 'search', input: {} } });
-    expect(anthropicConnector.extract(delta)).toEqual({ toolDelta: { id: 'toolu_1', input: '{"q":"test"}' } });
-    expect(anthropicConnector.extract(JSON.stringify({ type: 'message_stop' }))).toEqual({ done: true });
+    expect(state).toBeDefined();
+    expect(anthropicConnector.extract(start, state)).toEqual({ toolDelta: { id: 'toolu_1', name: 'search', input: {} } });
+    expect(anthropicConnector.extract(delta, state)).toEqual({ toolDelta: { id: 'toolu_1', input: '{"q":"test"}' } });
+    expect(anthropicConnector.extract(JSON.stringify({ type: 'message_stop' }), state)).toEqual({ done: true });
   });
 
   it('returns an in-band error payload', () => {

@@ -21,11 +21,27 @@ export interface ChatInputProps extends Omit<React.HTMLAttributes<HTMLDivElement
   onStop?: () => void;
   placeholder?: string;
   sending?: boolean;
+  /** Disable every composer affordance except Stop while a send is active. */
+  disabled?: boolean;
+  /** Keep the composer visible but prevent changing text, attachments, or sending. */
+  readOnly?: boolean;
+  /** Optional explanation surfaced as placeholder/title/description when disabled or read-only. */
+  disabledReason?: string;
+  /** Increment or change to clear composer attachments and cancel pending file work. */
+  resetKey?: unknown;
   accept?: string;
   maxAttachmentBytes?: number;
   maxAttachments?: number;
   onAttachmentError?: (error: AttachmentError) => void;
   uploadAttachment?: UploadAttachment;
+}
+
+interface PendingAttachmentWork {
+  file: File;
+  pendingId: string;
+  controller: AbortController;
+  operation: 'read' | 'upload';
+  placeholder: Attachment;
 }
 
 function formatBytes(bytes: number) {
@@ -56,15 +72,64 @@ function matchesAccept(file: File, accept: string) {
   });
 }
 
-function readFileAsDataURL(file: File) {
+function createAbortError(message: string) {
+  if (typeof DOMException === 'function') return new DOMException(message, 'AbortError');
+  const error = new Error(message);
+  error.name = 'AbortError';
+  return error;
+}
+
+function isAbortError(error: unknown) {
+  return typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError';
+}
+
+function readFileAsDataURL(file: File, signal: AbortSignal) {
   return new Promise<string>((resolve, reject) => {
+    if (signal.aborted) {
+      reject(createAbortError(`Reading ${file.name} was cancelled.`));
+      return;
+    }
+
     const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') resolve(reader.result);
-      else reject(new Error(`Unable to read ${file.name} as a data URL.`));
+    let settled = false;
+
+    const cleanup = () => signal.removeEventListener('abort', abortRead);
+    const settleResolve = (value: string) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(value);
     };
-    reader.onerror = () => reject(reader.error ?? new Error(`Unable to read ${file.name}.`));
-    reader.readAsDataURL(file);
+    const settleReject = (error: unknown) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+    const rejectAbort = () => settleReject(createAbortError(`Reading ${file.name} was cancelled.`));
+    const abortRead = () => {
+      try {
+        if (reader.readyState === FileReader.LOADING) reader.abort();
+      } catch {
+        // Ignore FileReader implementations that throw during abort; the promise still rejects below.
+      }
+      rejectAbort();
+    };
+
+    reader.onload = () => {
+      if (typeof reader.result === 'string') settleResolve(reader.result);
+      else settleReject(new Error(`Unable to read ${file.name} as a data URL.`));
+    };
+    reader.onerror = () => settleReject(reader.error ?? new Error(`Unable to read ${file.name}.`));
+    reader.onabort = rejectAbort;
+
+    signal.addEventListener('abort', abortRead, { once: true });
+
+    try {
+      reader.readAsDataURL(file);
+    } catch (error) {
+      settleReject(error instanceof Error ? error : new Error(String(error)));
+    }
   });
 }
 
@@ -89,17 +154,21 @@ function getPendingAttachmentId(att: Attachment) {
   return typeof att.metadata?.pendingId === 'string' ? att.metadata.pendingId : undefined;
 }
 
+function getPendingAttachmentOperation(att: Attachment) {
+  return att.metadata?.operation === 'read' ? 'read' : 'upload';
+}
+
 function isPendingAttachment(att: Attachment) {
   return att.metadata?.status === PENDING_ATTACHMENT_STATUS && typeof att.metadata?.pendingId === 'string';
 }
 
-function createPendingAttachment(file: File, pendingId: string): Attachment {
+function createPendingAttachment(file: File, pendingId: string, operation: PendingAttachmentWork['operation']): Attachment {
   return {
     name: file.name,
     type: file.type,
     size: file.size,
     data: '',
-    metadata: { status: PENDING_ATTACHMENT_STATUS, pendingId },
+    metadata: { status: PENDING_ATTACHMENT_STATUS, pendingId, operation },
   };
 }
 
@@ -132,6 +201,10 @@ export const ChatInput = React.forwardRef<HTMLDivElement, ChatInputProps>(functi
   onStop,
   placeholder,
   sending,
+  disabled = false,
+  readOnly = false,
+  disabledReason,
+  resetKey,
   accept,
   maxAttachmentBytes,
   maxAttachments,
@@ -153,10 +226,47 @@ export const ChatInput = React.forwardRef<HTMLDivElement, ChatInputProps>(functi
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const attachmentsRef = React.useRef(attachments);
   const dragDepthRef = React.useRef(0);
+  const pendingControllersRef = React.useRef<Map<string, AbortController>>(new Map());
+  const previousResetKeyRef = React.useRef(resetKey);
+  const reasonId = React.useId();
 
   React.useEffect(() => {
     attachmentsRef.current = attachments;
   }, [attachments]);
+
+  const abortPendingAttachment = React.useCallback((pendingId: string) => {
+    const controller = pendingControllersRef.current.get(pendingId);
+    if (controller && !controller.signal.aborted) controller.abort();
+    pendingControllersRef.current.delete(pendingId);
+  }, []);
+
+  const abortAllPendingAttachments = React.useCallback(() => {
+    for (const controller of pendingControllersRef.current.values()) {
+      if (!controller.signal.aborted) controller.abort();
+    }
+    pendingControllersRef.current.clear();
+  }, []);
+
+  const clearAttachmentsAndPendingWork = React.useCallback(() => {
+    abortAllPendingAttachments();
+    setAttachments([]);
+  }, [abortAllPendingAttachments]);
+
+  React.useEffect(() => () => abortAllPendingAttachments(), [abortAllPendingAttachments]);
+
+  React.useEffect(() => {
+    if (Object.is(previousResetKeyRef.current, resetKey)) return;
+    previousResetKeyRef.current = resetKey;
+    clearAttachmentsAndPendingWork();
+  }, [clearAttachmentsAndPendingWork, resetKey]);
+
+  React.useEffect(() => {
+    if (!disabled && !readOnly) return;
+    abortAllPendingAttachments();
+    dragDepthRef.current = 0;
+    setDraggingFiles(false);
+    setAttachments(prev => prev.filter(att => !isPendingAttachment(att)));
+  }, [abortAllPendingAttachments, disabled, readOnly]);
 
   React.useEffect(() => {
     const el = textareaRef.current;
@@ -177,8 +287,14 @@ export const ChatInput = React.forwardRef<HTMLDivElement, ChatInputProps>(functi
   });
 
   const hasPendingAttachments = attachments.some(isPendingAttachment);
-  const canSend = (value.trim().length > 0 || attachments.length > 0) && !hasPendingAttachments;
+  const hasSendableAttachment = attachments.some(att => !isPendingAttachment(att));
+  const composerInactive = disabled || readOnly;
+  const canSend = !composerInactive && (value.trim().length > 0 || hasSendableAttachment) && !hasPendingAttachments;
   const showAttachBtn = accept !== undefined;
+  const canIngestFiles = showAttachBtn && !composerInactive;
+  const stopAvailable = Boolean(sending && onStop);
+  const inactiveReason = disabledReason || (readOnly ? 'Composer is read-only.' : disabled ? 'Composer is disabled.' : undefined);
+  const placeholderText = inactiveReason || placeholder || 'Send a message';
 
   const resizeTextarea = () => {
     const el = textareaRef.current;
@@ -189,14 +305,15 @@ export const ChatInput = React.forwardRef<HTMLDivElement, ChatInputProps>(functi
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    if (composerInactive) return;
     onChange(e.target.value);
     resizeTextarea();
   };
 
   const handleSend = () => {
-    if (hasPendingAttachments) return;
-    onSend(attachments);
-    setAttachments([]);
+    if (!canSend) return;
+    onSend(attachments.filter(att => !isPendingAttachment(att)));
+    clearAttachmentsAndPendingWork();
     const el = textareaRef.current;
     if (el) el.style.height = '';
   };
@@ -209,8 +326,11 @@ export const ChatInput = React.forwardRef<HTMLDivElement, ChatInputProps>(functi
   };
 
   const handleClick = () => {
-    if (sending) { onStop?.(); }
-    else if (canSend) { handleSend(); }
+    if (sending) {
+      onStop?.();
+    } else if (canSend) {
+      handleSend();
+    }
   };
 
   const reportAttachmentError = React.useCallback((
@@ -230,19 +350,19 @@ export const ChatInput = React.forwardRef<HTMLDivElement, ChatInputProps>(functi
     });
   }, [accept, maxAttachmentBytes, maxAttachments, onAttachmentError]);
 
-  const convertFile = React.useCallback(async (file: File): Promise<Attachment> => {
-    if (uploadAttachment) return normalizeAttachment(file, await uploadAttachment(file));
+  const convertFile = React.useCallback(async (file: File, signal: AbortSignal): Promise<Attachment> => {
+    if (uploadAttachment) return normalizeAttachment(file, await uploadAttachment(file, { signal }));
 
     return {
       name: file.name,
       type: file.type,
-      data: await readFileAsDataURL(file),
+      data: await readFileAsDataURL(file, signal),
       size: file.size,
     };
   }, [uploadAttachment]);
 
   const handleFiles = React.useCallback(async (incomingFiles: FileList | File[] | null, source: AttachmentSource) => {
-    if (!showAttachBtn) return;
+    if (!canIngestFiles) return;
 
     const files = listFiles(incomingFiles);
     if (files.length === 0) return;
@@ -287,52 +407,55 @@ export const ChatInput = React.forwardRef<HTMLDivElement, ChatInputProps>(functi
 
     if (acceptedFiles.length === 0) return;
 
-    if (uploadAttachment) {
-      const pendingUploads = acceptedFiles.map(file => {
-        const pendingId = createPendingAttachmentId();
-        return { file, pendingId, placeholder: createPendingAttachment(file, pendingId) };
-      });
+    const operation: PendingAttachmentWork['operation'] = uploadAttachment ? 'upload' : 'read';
+    const pendingWork = acceptedFiles.map((file): PendingAttachmentWork => {
+      const pendingId = createPendingAttachmentId();
+      const controller = new AbortController();
+      pendingControllersRef.current.set(pendingId, controller);
+      return {
+        file,
+        pendingId,
+        controller,
+        operation,
+        placeholder: createPendingAttachment(file, pendingId, operation),
+      };
+    });
 
-      setAttachments(prev => [...prev, ...pendingUploads.map(upload => upload.placeholder)]);
+    setAttachments(prev => [...prev, ...pendingWork.map(work => work.placeholder)]);
 
-      await Promise.all(pendingUploads.map(async ({ file, pendingId }) => {
-        try {
-          const attachment = await convertFile(file);
-          setAttachments(prev => {
-            let replaced = false;
-            const next = prev.map(att => {
-              if (getPendingAttachmentId(att) !== pendingId) return att;
-              replaced = true;
-              return attachment;
-            });
-            return replaced ? next : prev;
-          });
-        } catch (error) {
-          const detail = error instanceof Error ? error.message : String(error);
-          reportAttachmentError('upload-failed', source, file, `${file.name} could not be uploaded: ${detail}`);
-          setAttachments(prev => prev.filter(att => getPendingAttachmentId(att) !== pendingId));
-        }
-      }));
-      return;
-    }
-
-    const converted = await Promise.all(acceptedFiles.map(async file => {
+    await Promise.all(pendingWork.map(async ({ file, pendingId, controller }) => {
       try {
-        return await convertFile(file);
+        const attachment = await convertFile(file, controller.signal);
+        if (controller.signal.aborted) return;
+        setAttachments(prev => {
+          let replaced = false;
+          const next = prev.map(att => {
+            if (getPendingAttachmentId(att) !== pendingId) return att;
+            replaced = true;
+            return attachment;
+          });
+          return replaced ? next : prev;
+        });
       } catch (error) {
-        const detail = error instanceof Error ? error.message : String(error);
-        reportAttachmentError('read-failed', source, file, `${file.name} could not be read: ${detail}`);
-        return null;
+        const wasCancelled = controller.signal.aborted || isAbortError(error);
+        if (!wasCancelled) {
+          const detail = error instanceof Error ? error.message : String(error);
+          const reason = uploadAttachment ? 'upload-failed' : 'read-failed';
+          const verb = uploadAttachment ? 'uploaded' : 'read';
+          reportAttachmentError(reason, source, file, `${file.name} could not be ${verb}: ${detail}`);
+        }
+        setAttachments(prev => prev.filter(att => getPendingAttachmentId(att) !== pendingId));
+      } finally {
+        pendingControllersRef.current.delete(pendingId);
       }
     }));
-
-    const nextAttachments = converted.filter((att): att is Attachment => att !== null);
-    if (nextAttachments.length > 0) {
-      setAttachments(prev => [...prev, ...nextAttachments]);
-    }
-  }, [accept, convertFile, maxAttachmentBytes, maxAttachments, reportAttachmentError, showAttachBtn, uploadAttachment]);
+  }, [accept, canIngestFiles, convertFile, maxAttachmentBytes, maxAttachments, reportAttachmentError, uploadAttachment]);
 
   const onFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!canIngestFiles) {
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
     void handleFiles(e.target.files, 'picker');
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
@@ -340,12 +463,18 @@ export const ChatInput = React.forwardRef<HTMLDivElement, ChatInputProps>(functi
   const handlePaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
     if (!showAttachBtn) return;
     const files = filesFromTransfer(e.clipboardData);
-    if (files.length > 0) void handleFiles(files, 'paste');
+    if (files.length === 0) return;
+    if (!canIngestFiles) {
+      e.preventDefault();
+      return;
+    }
+    void handleFiles(files, 'paste');
   };
 
   const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
     if (!showAttachBtn || !transferHasFiles(e.dataTransfer)) return;
     e.preventDefault();
+    if (!canIngestFiles) return;
     dragDepthRef.current += 1;
     setDraggingFiles(true);
   };
@@ -353,6 +482,7 @@ export const ChatInput = React.forwardRef<HTMLDivElement, ChatInputProps>(functi
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     if (!showAttachBtn || !transferHasFiles(e.dataTransfer)) return;
     e.preventDefault();
+    if (!canIngestFiles) return;
     e.dataTransfer.dropEffect = 'copy';
     setDraggingFiles(true);
   };
@@ -360,6 +490,7 @@ export const ChatInput = React.forwardRef<HTMLDivElement, ChatInputProps>(functi
   const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
     if (!showAttachBtn || !transferHasFiles(e.dataTransfer)) return;
     e.preventDefault();
+    if (!canIngestFiles) return;
     dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
     if (dragDepthRef.current === 0) setDraggingFiles(false);
   };
@@ -369,10 +500,17 @@ export const ChatInput = React.forwardRef<HTMLDivElement, ChatInputProps>(functi
     e.preventDefault();
     dragDepthRef.current = 0;
     setDraggingFiles(false);
+    if (!canIngestFiles) return;
     void handleFiles(filesFromTransfer(e.dataTransfer), 'drop');
   };
 
-  const removeAttachment = (idx: number) => setAttachments(prev => prev.filter((_, i) => i !== idx));
+  const removeAttachment = (idx: number) => {
+    if (composerInactive) return;
+    const attachment = attachmentsRef.current[idx];
+    const pendingId = attachment ? getPendingAttachmentId(attachment) : undefined;
+    if (pendingId) abortPendingAttachment(pendingId);
+    setAttachments(prev => prev.filter((_, i) => i !== idx));
+  };
 
   const handleRootPaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
     onPasteProp?.(e);
@@ -399,23 +537,35 @@ export const ChatInput = React.forwardRef<HTMLDivElement, ChatInputProps>(functi
     if (!e.defaultPrevented) handleDrop(e);
   };
 
+  const rootClassName = [
+    `chorus-input${draggingFiles ? ' chorus-input--dragging' : ''}`,
+    disabled && 'chorus-input--disabled',
+    readOnly && 'chorus-input--readonly',
+    className,
+  ].filter(Boolean).join(' ');
+
   return (
     <div
       {...rest}
       ref={rootRef}
-      className={[`chorus-input${draggingFiles ? ' chorus-input--dragging' : ''}`, className].filter(Boolean).join(' ')}
+      className={rootClassName}
       style={style}
       onPaste={handleRootPaste}
       onDragEnter={handleRootDragEnter}
       onDragOver={handleRootDragOver}
       onDragLeave={handleRootDragLeave}
       onDrop={handleRootDrop}
+      aria-disabled={composerInactive ? true : rest['aria-disabled']}
+      title={inactiveReason ?? rest.title}
     >
+      {inactiveReason && <span id={reasonId} className="chorus-sr-only">{inactiveReason}</span>}
       {attachments.length > 0 && (
         <div className="chorus-attachments">
           {attachments.map((att, i) => {
             const previewSource = getAttachmentPreviewSource(att);
             const pending = isPendingAttachment(att);
+            const pendingOperation = getPendingAttachmentOperation(att);
+            const pendingLabel = pendingOperation === 'read' ? 'Reading' : 'Uploading';
             return (
               <div key={getPendingAttachmentId(att) ?? `${att.name}-${i}`} className={`chorus-attachment-chip${pending ? ' chorus-attachment-chip--pending' : ''}`}>
                 {pending ? (
@@ -424,8 +574,8 @@ export const ChatInput = React.forwardRef<HTMLDivElement, ChatInputProps>(functi
                   <img src={previewSource} alt={att.name} className="chorus-attachment-thumb" loading="lazy" decoding="async" />
                 )}
                 <span className="chorus-attachment-name">{att.name}</span>
-                {pending && <span className="chorus-sr-only">Uploading {att.name}</span>}
-                <button type="button" className="chorus-attachment-remove" onClick={() => removeAttachment(i)} aria-label={`Remove ${att.name}`}>
+                {pending && <span className="chorus-sr-only">{pendingLabel} {att.name}</span>}
+                <button type="button" className="chorus-attachment-remove" onClick={() => removeAttachment(i)} aria-label={`Remove ${att.name}`} disabled={composerInactive} aria-disabled={composerInactive || undefined}>
                   <X size={12} />
                 </button>
               </div>
@@ -435,10 +585,10 @@ export const ChatInput = React.forwardRef<HTMLDivElement, ChatInputProps>(functi
       )}
       <div className={`chorus-input-row${showAttachBtn ? ' chorus-input-row--has-attach' : ''}`}>
         {showAttachBtn && (
-          <input ref={fileInputRef} type="file" accept={accept} multiple style={{ display: 'none' }} onChange={onFileInputChange} />
+          <input ref={fileInputRef} type="file" accept={accept} multiple style={{ display: 'none' }} onChange={onFileInputChange} disabled={!canIngestFiles} />
         )}
         {showAttachBtn && (
-          <button type="button" className="chorus-attach" onClick={() => fileInputRef.current?.click()} aria-label="Attach file" title="Attach file">
+          <button type="button" className="chorus-attach" onClick={() => { if (canIngestFiles) fileInputRef.current?.click(); }} aria-label="Attach file" title="Attach file" disabled={!canIngestFiles} aria-disabled={!canIngestFiles}>
             <Paperclip size={18} strokeWidth={2} />
           </button>
         )}
@@ -447,10 +597,14 @@ export const ChatInput = React.forwardRef<HTMLDivElement, ChatInputProps>(functi
           value={value}
           onChange={handleChange}
           onKeyDown={onKeyDown}
-          placeholder={placeholder || 'Send a message'}
+          placeholder={placeholderText}
           aria-label={placeholder || 'Send a message'}
+          aria-describedby={inactiveReason ? reasonId : undefined}
+          disabled={disabled}
+          readOnly={readOnly || disabled}
+          aria-readonly={readOnly || disabled ? true : undefined}
         />
-        <button type="button" className="chorus-send" onClick={handleClick} aria-label={sending ? 'Stop' : 'Send'} title={sending ? 'Stop' : 'Send'} disabled={!sending && !canSend}>
+        <button type="button" className="chorus-send" onClick={handleClick} aria-label={sending ? 'Stop' : 'Send'} title={sending ? 'Stop' : 'Send'} disabled={sending ? !stopAvailable : !canSend}>
           {sending ? <span className="chorus-stop-fill" /> : <ArrowUp size={18} strokeWidth={2} />}
         </button>
       </div>

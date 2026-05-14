@@ -49,7 +49,7 @@ export { ToolCallBlock } from './components/ToolCallBlock';
 export { ChorusHeadless as Chorus, type ChorusHeadlessProps as ChorusProps } from './ChorusHeadless';
 export { ChorusHeadless } from './ChorusHeadless';
 export type { ChorusHeadlessProps } from './ChorusHeadless';
-export type { ChorusMessagesChangeContext, ChorusOnSend, ChorusSendHelpers, ChorusRef, ChorusFinishContext, ChorusOnFinish } from './Chorus';
+export type { ChorusMessagesChangeContext, ChorusOnSend, ChorusSendHelpers, ChorusRef, ChorusFinishContext, ChorusOnFinish, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusStreamDoneContext, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolRegistry } from './Chorus';
 
 export { ChorusTheme } from './components/ChorusTheme';
 export type { Palette } from './components/ChorusTheme';
@@ -66,6 +66,7 @@ export type {
   StorageAdapter,
   ToolCall,
   UploadAttachment,
+  UploadAttachmentOptions,
 } from './types';
 export { useChorusStream } from './hooks/useChorusStream';
 export type { SendCallbacks, StreamOptions, Transport } from './hooks/useChorusStream';
@@ -79,7 +80,7 @@ export { createWebSocketTransport } from './streaming/createWebSocketTransport';
 export type { WebSocketTransportOptions } from './streaming/createWebSocketTransport';
 export type { MarkdownProps, MarkdownSanitizer } from './components/Markdown';
 
-export type { Connector, ConnectorResult } from './connectors/connectors';
+export type { Connector, ConnectorResult, ConnectorToolDelta } from './connectors/connectors';
 export { getConnector, autoConnector } from './connectors/connectors';
 export { openaiConnector } from './connectors/openai';
 export { anthropicConnector } from './connectors/anthropic';

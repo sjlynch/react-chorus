@@ -7,7 +7,7 @@ Connectors parse provider-specific SSE `data:` chunks into shared streaming even
 The parsing contract is:
 
 ```ts
-(chunk: string) => {
+(chunk: string, state?: unknown) => {
   text?: string;
   reasoning?: string;
   toolDelta?: { id: string; name?: string; input?: unknown; output?: unknown };
@@ -21,8 +21,14 @@ The parsing contract is:
 The `Connector` type is exported from `openai.ts` and `connectors.ts`:
 
 ```ts
-{ name: string; extract: (data: string) => ConnectorResult | null }
+{
+  name: string;
+  createState?: () => unknown;
+  extract: (data: string, state?: unknown) => ConnectorResult | null;
+}
 ```
+
+`useChorusStream` calls `createState()` once per `send()` and passes that object into every `extract()` call for the stream. Stateless custom connectors can omit `createState` and keep `extract(data)`. Stateful connectors must not store per-stream buffers or tool id maps in module globals, because multiple Chorus instances can stream concurrently.
 
 Known string names use the centralized `ConnectorName` alias in `src/types.ts`.
 
@@ -45,7 +51,7 @@ Known string names use the centralized `ConnectorName` alias in `src/types.ts`.
 
 ## Adding a provider
 
-1. Implement `Connector` in a new file.
+1. Implement `Connector` in a new file. If it needs parser memory, expose `createState()` and thread the state through helper functions.
 2. Export it from `connectors.ts` and register its string name in `getConnector()`.
 3. If exposing a string option, add the name once to centralized `ConnectorName` in `src/types.ts`; `ChorusProps` and `useChorusStream` import that alias.
 4. Add shape detection to `autoConnector` when safe and unambiguous, including error payload handling if needed.

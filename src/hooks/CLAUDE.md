@@ -5,10 +5,11 @@
 Core streaming hook for the simple `transport` path.
 
 - Accepts a `Transport` and optional connector (`auto`, `openai`, `anthropic`, `gemini`, or custom `Connector`).
+- Creates connector parser state once per `send()` when `connector.createState` exists; never share parser buffers across sends.
 - Manages the send lifecycle: sets `sending`, creates/stores an `AbortController`, streams SSE events, and finalizes or reports errors.
 - Uses `isSendingRef` as a guard so overlapping sends are ignored.
 - Supports `minDelayMs` in callbacks by buffering the first streamed text/reasoning/tool events until the first-token delay elapses.
-- Emits connector `reasoning` and accumulated `toolDelta` events through optional callbacks; `<Chorus>` turns those into `Message.reasoning` and `role: 'tool'` messages.
+- Emits connector `reasoning` and accumulated `toolDelta` events through optional callbacks; `<Chorus>` turns those into `Message.reasoning` and `role: 'tool'` messages, then can execute completed tool calls via `tools`/`onToolCall` after stream completion.
 - `readSSEStream` handles line-by-line SSE parsing across chunk boundaries.
 
 ## `useChorusPersistence`

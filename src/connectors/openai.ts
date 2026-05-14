@@ -2,21 +2,41 @@ import { extractErrorMessage } from './error';
 
 export interface ConnectorToolDelta { id: string; name?: string; input?: unknown; output?: unknown }
 export interface ConnectorResult { text?: string; reasoning?: string; toolDelta?: ConnectorToolDelta; done?: boolean; error?: string }
-export interface Connector { name: string; extract: (data: string) => ConnectorResult | null }
+export interface Connector<State = unknown> {
+  name: string;
+  /**
+   * Optional per-send parser state. useChorusStream creates one state object for
+   * every send() call and passes it back into extract() for each SSE payload.
+   * Stateless custom connectors can omit this method and keep the classic
+   * extract(data) shape.
+   */
+  createState?: () => State;
+  extract(data: string, state?: State): ConnectorResult | null;
+}
 
 const DEFAULT_CHOICE_INDEX = 0;
 const THINK_START = '<think>';
 const THINK_END = '</think>';
 
-const chatToolCallIds = new Map<string, string>();
-const responseToolCallIds = new Map<string, string>();
-const thinkState = { inThink: false, buffer: '' };
+export interface OpenAIConnectorState {
+  chatToolCallIds: Map<string, string>;
+  responseToolCallIds: Map<string, string>;
+  thinkState: { inThink: boolean; buffer: string };
+}
 
-function resetOpenAIState() {
-  chatToolCallIds.clear();
-  responseToolCallIds.clear();
-  thinkState.inThink = false;
-  thinkState.buffer = '';
+export function createOpenAIConnectorState(): OpenAIConnectorState {
+  return {
+    chatToolCallIds: new Map<string, string>(),
+    responseToolCallIds: new Map<string, string>(),
+    thinkState: { inThink: false, buffer: '' },
+  };
+}
+
+function resetOpenAIState(state: OpenAIConnectorState) {
+  state.chatToolCallIds.clear();
+  state.responseToolCallIds.clear();
+  state.thinkState.inThink = false;
+  state.thinkState.buffer = '';
 }
 
 function hasOwn(value: object, key: PropertyKey) {
@@ -36,7 +56,8 @@ function trailingPartialTagLength(value: string, tag: string) {
   return 0;
 }
 
-function splitThinkTaggedContent(chunk: string) {
+function splitThinkTaggedContent(chunk: string, state: OpenAIConnectorState) {
+  const thinkState = state.thinkState;
   let source = thinkState.buffer + chunk;
   thinkState.buffer = '';
   const result: Pick<ConnectorResult, 'text' | 'reasoning'> = {};
@@ -74,8 +95,9 @@ function splitThinkTaggedContent(chunk: string) {
   return result;
 }
 
-function flushThinkBuffer() {
+function flushThinkBuffer(state: OpenAIConnectorState) {
   const result: Pick<ConnectorResult, 'text' | 'reasoning'> = {};
+  const thinkState = state.thinkState;
   if (thinkState.buffer) {
     appendField(result, thinkState.inThink ? 'reasoning' : 'text', thinkState.buffer);
   }
@@ -140,14 +162,14 @@ function extractReasoningFromDelta(delta: Record<string, unknown>) {
   ].map(collectTextFragments).join('');
 }
 
-function extractChatToolDelta(choiceKey: string, rawToolCall: unknown): ConnectorToolDelta | null {
+function extractChatToolDelta(choiceKey: string, rawToolCall: unknown, state: OpenAIConnectorState): ConnectorToolDelta | null {
   if (!rawToolCall || typeof rawToolCall !== 'object') return null;
   const toolCall = rawToolCall as Record<string, unknown>;
   const rawIndex = typeof toolCall.index === 'number' || typeof toolCall.index === 'string' ? String(toolCall.index) : '0';
   const key = `${choiceKey}:${rawIndex}`;
   const explicitId = typeof toolCall.id === 'string' && toolCall.id ? toolCall.id : undefined;
-  if (explicitId) chatToolCallIds.set(key, explicitId);
-  const id = explicitId ?? chatToolCallIds.get(key) ?? `openai-${choiceKey}-tool-${rawIndex}`;
+  if (explicitId) state.chatToolCallIds.set(key, explicitId);
+  const id = explicitId ?? state.chatToolCallIds.get(key) ?? `openai-${choiceKey}-tool-${rawIndex}`;
 
   const fn = toolCall.function && typeof toolCall.function === 'object'
     ? toolCall.function as Record<string, unknown>
@@ -160,7 +182,7 @@ function extractChatToolDelta(choiceKey: string, rawToolCall: unknown): Connecto
   return result.name || hasOwn(result, 'input') || hasOwn(result, 'output') ? result : null;
 }
 
-function extractChatCompletionEvent(obj: Record<string, unknown>): ConnectorResult | null {
+function extractChatCompletionEvent(obj: Record<string, unknown>, state: OpenAIConnectorState): ConnectorResult | null {
   const choices = obj.choices;
   if (!Array.isArray(choices) || choices.length === 0) return null;
 
@@ -177,13 +199,13 @@ function extractChatCompletionEvent(obj: Record<string, unknown>): ConnectorResu
   if (reasoning) appendField(result, 'reasoning', reasoning);
 
   const content = typeof delta.content === 'string' ? delta.content : '';
-  if (content) mergeResult(result, splitThinkTaggedContent(content));
+  if (content) mergeResult(result, splitThinkTaggedContent(content, state));
 
   const toolCalls = delta.tool_calls;
   if (Array.isArray(toolCalls)) {
     const choiceKey = getChoiceKey(choice, arrayIndex);
     for (const toolCall of toolCalls) {
-      const toolDelta = extractChatToolDelta(choiceKey, toolCall);
+      const toolDelta = extractChatToolDelta(choiceKey, toolCall, state);
       if (toolDelta) {
         result.toolDelta = toolDelta;
         break;
@@ -201,13 +223,13 @@ function extractResponseToolId(obj: Record<string, unknown>) {
   return outputIndex ? `openai-response-output-${outputIndex}` : '';
 }
 
-function extractOpenAIResponseEvent(obj: Record<string, unknown>): ConnectorResult | null {
+function extractOpenAIResponseEvent(obj: Record<string, unknown>, state: OpenAIConnectorState): ConnectorResult | null {
   const type = typeof obj.type === 'string' ? obj.type : '';
   const result: ConnectorResult = {};
 
   if (type === 'response.completed') {
-    mergeResult(result, flushThinkBuffer());
-    resetOpenAIState();
+    mergeResult(result, flushThinkBuffer(state));
+    resetOpenAIState(state);
     result.done = true;
     return result;
   }
@@ -219,7 +241,7 @@ function extractOpenAIResponseEvent(obj: Record<string, unknown>): ConnectorResu
 
   if (type === 'response.output_text.delta') {
     const text = stringFromUnknown(obj.delta);
-    if (text) mergeResult(result, splitThinkTaggedContent(text));
+    if (text) mergeResult(result, splitThinkTaggedContent(text, state));
   }
 
   if (
@@ -236,7 +258,7 @@ function extractOpenAIResponseEvent(obj: Record<string, unknown>): ConnectorResu
     if (item?.type === 'function_call') {
       const id = stringFromUnknown(item.call_id) || stringFromUnknown(item.id) || `openai-response-output-${stringFromUnknown(obj.output_index) || '0'}`;
       const name = stringFromUnknown(item.name);
-      if (stringFromUnknown(item.id)) responseToolCallIds.set(stringFromUnknown(item.id), id);
+      if (stringFromUnknown(item.id)) state.responseToolCallIds.set(stringFromUnknown(item.id), id);
       const toolDelta: ConnectorToolDelta = { id };
       if (name) toolDelta.name = name;
       if (hasOwn(item, 'arguments')) toolDelta.input = item.arguments;
@@ -246,7 +268,7 @@ function extractOpenAIResponseEvent(obj: Record<string, unknown>): ConnectorResu
 
   if (type === 'response.function_call_arguments.delta') {
     const rawId = extractResponseToolId(obj);
-    const id = responseToolCallIds.get(rawId) ?? rawId;
+    const id = state.responseToolCallIds.get(rawId) ?? rawId;
     if (id) result.toolDelta = { id, input: obj.delta };
   }
 
@@ -261,12 +283,13 @@ function extractOpenAIResponseEvent(obj: Record<string, unknown>): ConnectorResu
  * When multiple alternatives are present, only the selected alternative
  * (choice index 0) is emitted; alternatives are not concatenated.
  */
-export const openaiConnector: Connector = {
+export const openaiConnector: Connector<OpenAIConnectorState> = {
   name: 'openai',
-  extract(data: string): ConnectorResult | null {
+  createState: createOpenAIConnectorState,
+  extract(data: string, state = createOpenAIConnectorState()): ConnectorResult | null {
     if (data === '[DONE]') {
-      const result: ConnectorResult = { ...flushThinkBuffer(), done: true };
-      resetOpenAIState();
+      const result: ConnectorResult = { ...flushThinkBuffer(state), done: true };
+      resetOpenAIState(state);
       return result.text || result.reasoning ? result : { done: true };
     }
 
@@ -278,16 +301,16 @@ export const openaiConnector: Connector = {
 
       const event = obj as Record<string, unknown>;
       if (typeof event.type === 'string' && event.type.startsWith('response.')) {
-        return extractOpenAIResponseEvent(event);
+        return extractOpenAIResponseEvent(event, state);
       }
 
-      if (Array.isArray(event.choices)) return extractChatCompletionEvent(event);
+      if (Array.isArray(event.choices)) return extractChatCompletionEvent(event, state);
       return null;
     } catch {
       // If provider sends plain text lines for some reason, treat them as text,
       // while still splitting DeepSeek-style <think>...</think> traces.
       if (!data) return null;
-      const result = splitThinkTaggedContent(data);
+      const result = splitThinkTaggedContent(data, state);
       return result.text || result.reasoning ? result : null;
     }
   }

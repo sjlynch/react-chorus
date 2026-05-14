@@ -1,6 +1,6 @@
 import { createRef, useState } from 'react';
 import { describe, it, expect, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ChatInput } from '../components/ChatInput';
 import type { ChatInputProps } from '../components/ChatInput';
@@ -27,6 +27,18 @@ function fileTransfer(...files: File[]) {
   };
 }
 
+async function dropFiles(target: Element, ...files: File[]) {
+  await act(async () => {
+    fireEvent.drop(target, { dataTransfer: fileTransfer(...files) });
+  });
+}
+
+async function pasteFiles(target: Element, ...files: File[]) {
+  await act(async () => {
+    fireEvent.paste(target, { clipboardData: fileTransfer(...files) });
+  });
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason?: unknown) => void;
@@ -35,6 +47,68 @@ function deferred<T>() {
     reject = rej;
   });
   return { promise, resolve, reject };
+}
+
+type FileReaderHandler = ((this: FileReader, ev: ProgressEvent<FileReader>) => unknown) | null;
+
+function installDeferredFileReader() {
+  const OriginalFileReader = globalThis.FileReader;
+  const readers: DeferredFileReader[] = [];
+
+  class DeferredFileReader {
+    static EMPTY = 0;
+    static LOADING = 1;
+    static DONE = 2;
+
+    readyState = DeferredFileReader.EMPTY;
+    result: string | ArrayBuffer | null = null;
+    error: DOMException | null = null;
+    onload: FileReaderHandler = null;
+    onerror: FileReaderHandler = null;
+    onabort: FileReaderHandler = null;
+
+    constructor() {
+      readers.push(this);
+    }
+
+    readAsDataURL() {
+      this.readyState = DeferredFileReader.LOADING;
+    }
+
+    abort() {
+      this.readyState = DeferredFileReader.DONE;
+      this.onabort?.call(this as unknown as FileReader, new ProgressEvent('abort') as ProgressEvent<FileReader>);
+    }
+
+    resolve(dataUrl: string) {
+      this.result = dataUrl;
+      this.readyState = DeferredFileReader.DONE;
+      this.onload?.call(this as unknown as FileReader, new ProgressEvent('load') as ProgressEvent<FileReader>);
+    }
+
+    reject(error = new DOMException('read failed', 'NotReadableError')) {
+      this.error = error;
+      this.readyState = DeferredFileReader.DONE;
+      this.onerror?.call(this as unknown as FileReader, new ProgressEvent('error') as ProgressEvent<FileReader>);
+    }
+  }
+
+  Object.defineProperty(globalThis, 'FileReader', {
+    configurable: true,
+    writable: true,
+    value: DeferredFileReader as unknown as typeof FileReader,
+  });
+
+  return {
+    readers,
+    restore() {
+      Object.defineProperty(globalThis, 'FileReader', {
+        configurable: true,
+        writable: true,
+        value: OriginalFileReader,
+      });
+    },
+  };
 }
 
 describe('ChatInput', () => {
@@ -111,6 +185,68 @@ describe('ChatInput', () => {
     expect(screen.getByRole('button', { name: /send/i })).toBeEnabled();
   });
 
+  it('blocks sends and attachment ingestion while disabled', async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn();
+    const uploadAttachment = vi.fn();
+    const file = new File(['image'], 'disabled.png', { type: 'image/png' });
+    const { container } = render(
+      <ControlledChatInput value="Blocked" onSend={onSend} accept="image/*" uploadAttachment={uploadAttachment} disabled disabledReason="Choose a conversation first" />,
+    );
+
+    const textbox = screen.getByRole('textbox');
+    expect(textbox).toBeDisabled();
+    expect(textbox).toHaveAttribute('placeholder', 'Choose a conversation first');
+    expect(screen.getByRole('button', { name: /send/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /attach file/i })).toBeDisabled();
+    expect(container.firstElementChild).toHaveAttribute('aria-disabled', 'true');
+
+    await user.type(textbox, '{Enter}');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+    await pasteFiles(textbox, file);
+    await dropFiles(textbox, file);
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(uploadAttachment).not.toHaveBeenCalled();
+    expect(screen.queryByText('disabled.png')).not.toBeInTheDocument();
+  });
+
+  it('keeps the stop button available while disabled and sending', async () => {
+    const user = userEvent.setup();
+    const onStop = vi.fn();
+    render(<ChatInput value="" onChange={vi.fn()} onSend={vi.fn()} onStop={onStop} sending disabled />);
+
+    const stop = screen.getByRole('button', { name: /stop/i });
+    expect(stop).toBeEnabled();
+
+    await user.click(stop);
+
+    expect(onStop).toHaveBeenCalledOnce();
+  });
+
+  it('prevents composing, sending, and file ingestion while read-only', async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn();
+    const uploadAttachment = vi.fn();
+    const file = new File(['image'], 'readonly.png', { type: 'image/png' });
+    render(<ControlledChatInput value="Archived" onSend={onSend} accept="image/*" uploadAttachment={uploadAttachment} readOnly />);
+
+    const textbox = screen.getByRole('textbox');
+    expect(textbox).not.toBeDisabled();
+    expect(textbox).toHaveAttribute('readonly');
+    expect(screen.getByRole('button', { name: /send/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /attach file/i })).toBeDisabled();
+
+    await user.type(textbox, '{Enter}');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+    await pasteFiles(textbox, file);
+    await dropFiles(textbox, file);
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(uploadAttachment).not.toHaveBeenCalled();
+    expect(screen.queryByText('readonly.png')).not.toBeInTheDocument();
+  });
+
   it('calls onSend and clears attachments when the send button is clicked', async () => {
     const user = userEvent.setup();
     const onSend = vi.fn();
@@ -120,6 +256,7 @@ describe('ChatInput', () => {
     const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
     await user.upload(fileInput, file);
     await screen.findByText('notes.txt');
+    await waitFor(() => expect(screen.getByRole('button', { name: /send/i })).toBeEnabled());
 
     await user.click(screen.getByRole('button', { name: /send/i }));
 
@@ -164,14 +301,23 @@ describe('ChatInput', () => {
   });
 
   it('treats an empty accept string as allowing any file while still showing attachments', async () => {
+    const user = userEvent.setup();
     const file = new File(['notes'], 'notes.txt', { type: 'text/plain' });
-    const { container } = render(<ControlledChatInput accept="" />);
+    const uploadAttachment = vi.fn(async (incoming: File) => ({
+      name: incoming.name,
+      type: incoming.type,
+      size: incoming.size,
+      data: 'uploaded-notes',
+    }));
+    const { container } = render(<ControlledChatInput accept="" uploadAttachment={uploadAttachment} />);
+    const local = within(container);
 
-    expect(screen.getByRole('button', { name: /attach file/i })).toBeInTheDocument();
+    expect(local.getByRole('button', { name: /attach file/i })).toBeInTheDocument();
     const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
-    await userEvent.upload(fileInput, file);
+    await user.upload(fileInput, file);
 
-    expect(await screen.findByText('notes.txt')).toBeInTheDocument();
+    expect(await local.findByText('notes.txt')).toBeInTheDocument();
+    expect(uploadAttachment).toHaveBeenCalledWith(file, { signal: expect.any(AbortSignal) });
   });
 
   it('renders attachments as chips and removes them with the X button', async () => {
@@ -194,37 +340,54 @@ describe('ChatInput', () => {
     const user = userEvent.setup();
     const onSend = vi.fn();
     const file = new File(['image-bytes'], 'pasted.png', { type: 'image/png' });
-    render(<ControlledChatInput onSend={onSend} accept="image/*" />);
+    const uploadAttachment = vi.fn(async (incoming: File) => ({
+      name: incoming.name,
+      type: incoming.type,
+      size: incoming.size,
+      data: 'data:image/png;base64,cGFzdGVk',
+    }));
+    const { container } = render(<ControlledChatInput onSend={onSend} accept="image/*" uploadAttachment={uploadAttachment} />);
+    const local = within(container);
 
-    fireEvent.paste(screen.getByRole('textbox'), { clipboardData: fileTransfer(file) });
+    await pasteFiles(local.getByRole('textbox'), file);
 
-    expect(await screen.findByText('pasted.png')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /send/i }));
+    expect(await local.findByText('pasted.png')).toBeInTheDocument();
+    await waitFor(() => expect(local.getByRole('button', { name: /send/i })).toBeEnabled());
+    await user.click(local.getByRole('button', { name: /send/i }));
 
     expect(onSend).toHaveBeenCalledWith([
       expect.objectContaining({
         name: 'pasted.png',
         type: 'image/png',
-        data: expect.stringMatching(/^data:image\/png;base64,/),
+        data: 'data:image/png;base64,cGFzdGVk',
       }),
     ]);
   });
 
   it('attaches accepted files dropped onto the composer', async () => {
     const file = new File(['drop-bytes'], 'dropped.png', { type: 'image/png' });
-    render(<ControlledChatInput accept="image/*" />);
+    const uploadAttachment = vi.fn(async (incoming: File) => ({
+      name: incoming.name,
+      type: incoming.type,
+      size: incoming.size,
+      data: 'data:image/png;base64,ZHJvcA==',
+    }));
+    const { container } = render(<ControlledChatInput accept="image/*" uploadAttachment={uploadAttachment} />);
+    const local = within(container);
 
-    fireEvent.drop(screen.getByRole('textbox'), { dataTransfer: fileTransfer(file) });
+    await dropFiles(local.getByRole('textbox'), file);
 
-    expect(await screen.findByText('dropped.png')).toBeInTheDocument();
+    expect(await local.findByText('dropped.png')).toBeInTheDocument();
+    expect(uploadAttachment).toHaveBeenCalledWith(file, { signal: expect.any(AbortSignal) });
   });
 
   it('rejects oversized files and calls onAttachmentError with a useful reason', async () => {
     const onAttachmentError = vi.fn();
     const file = new File(['too large'], 'large.txt', { type: 'text/plain' });
-    render(<ControlledChatInput accept="text/plain" maxAttachmentBytes={3} onAttachmentError={onAttachmentError} />);
+    const { container } = render(<ControlledChatInput accept="text/plain" maxAttachmentBytes={3} onAttachmentError={onAttachmentError} />);
+    const local = within(container);
 
-    fireEvent.drop(screen.getByRole('textbox'), { dataTransfer: fileTransfer(file) });
+    await dropFiles(local.getByRole('textbox'), file);
 
     await waitFor(() => expect(onAttachmentError).toHaveBeenCalledWith(expect.objectContaining({
       reason: 'too-large',
@@ -232,15 +395,16 @@ describe('ChatInput', () => {
       file,
       maxAttachmentBytes: 3,
     })));
-    expect(screen.queryByText('large.txt')).not.toBeInTheDocument();
+    expect(local.queryByText('large.txt')).not.toBeInTheDocument();
   });
 
   it('rejects pasted files that do not match accept', async () => {
     const onAttachmentError = vi.fn();
     const file = new File(['notes'], 'notes.txt', { type: 'text/plain' });
-    render(<ControlledChatInput accept="image/*" onAttachmentError={onAttachmentError} />);
+    const { container } = render(<ControlledChatInput accept="image/*" onAttachmentError={onAttachmentError} />);
+    const local = within(container);
 
-    fireEvent.paste(screen.getByRole('textbox'), { clipboardData: fileTransfer(file) });
+    await pasteFiles(local.getByRole('textbox'), file);
 
     await waitFor(() => expect(onAttachmentError).toHaveBeenCalledWith(expect.objectContaining({
       reason: 'unsupported-type',
@@ -248,19 +412,26 @@ describe('ChatInput', () => {
       file,
       accept: 'image/*',
     })));
-    expect(screen.queryByText('notes.txt')).not.toBeInTheDocument();
+    expect(local.queryByText('notes.txt')).not.toBeInTheDocument();
   });
 
   it('enforces maxAttachments while keeping accepted files', async () => {
     const onAttachmentError = vi.fn();
     const first = new File(['one'], 'one.png', { type: 'image/png' });
     const second = new File(['two'], 'two.png', { type: 'image/png' });
-    render(<ControlledChatInput accept="image/*" maxAttachments={1} onAttachmentError={onAttachmentError} />);
+    const uploadAttachment = vi.fn(async (incoming: File) => ({
+      name: incoming.name,
+      type: incoming.type,
+      size: incoming.size,
+      data: 'uploaded-image',
+    }));
+    const { container } = render(<ControlledChatInput accept="image/*" maxAttachments={1} onAttachmentError={onAttachmentError} uploadAttachment={uploadAttachment} />);
+    const local = within(container);
 
-    fireEvent.drop(screen.getByRole('textbox'), { dataTransfer: fileTransfer(first, second) });
+    await dropFiles(local.getByRole('textbox'), first, second);
 
-    expect(await screen.findByText('one.png')).toBeInTheDocument();
-    expect(screen.queryByText('two.png')).not.toBeInTheDocument();
+    expect(await local.findByText('one.png')).toBeInTheDocument();
+    expect(local.queryByText('two.png')).not.toBeInTheDocument();
     await waitFor(() => expect(onAttachmentError).toHaveBeenCalledWith(expect.objectContaining({
       reason: 'too-many',
       source: 'drop',
@@ -269,18 +440,107 @@ describe('ChatInput', () => {
     })));
   });
 
+  it('shows a pending read chip, blocks Enter/send, and sends after the default FileReader resolves', async () => {
+    const mockReader = installDeferredFileReader();
+    try {
+      const user = userEvent.setup();
+      const onSend = vi.fn();
+      const file = new File(['image-bytes'], 'slow-read.png', { type: 'image/png' });
+      const { container } = render(<ControlledChatInput value="Describe this" onSend={onSend} accept="image/*" />);
+      const local = within(container);
+
+      await dropFiles(local.getByRole('textbox'), file);
+
+      expect(await local.findByText('slow-read.png')).toBeInTheDocument();
+      expect(container.querySelector('.chorus-attachment-chip--pending')).toBeInTheDocument();
+      expect(local.getByText('Reading slow-read.png', { selector: '.chorus-sr-only' })).toBeInTheDocument();
+      expect(local.getByRole('button', { name: /send/i })).toBeDisabled();
+
+      await user.type(local.getByRole('textbox'), '{Enter}');
+      expect(onSend).not.toHaveBeenCalled();
+
+      mockReader.readers[0].resolve('data:image/png;base64,c2xvdw==');
+
+      await waitFor(() => expect(container.querySelector('.chorus-attachment-chip--pending')).not.toBeInTheDocument());
+      expect(local.getByRole('button', { name: /send/i })).toBeEnabled();
+
+      await user.click(local.getByRole('button', { name: /send/i }));
+
+      expect(onSend).toHaveBeenCalledWith([
+        expect.objectContaining({
+          name: 'slow-read.png',
+          type: 'image/png',
+          data: 'data:image/png;base64,c2xvdw==',
+        }),
+      ]);
+    } finally {
+      mockReader.restore();
+    }
+  });
+
+  it('cancels a pending default read when its chip is removed and ignores late completion', async () => {
+    const mockReader = installDeferredFileReader();
+    try {
+      const user = userEvent.setup();
+      const onSend = vi.fn();
+      const file = new File(['image-bytes'], 'removed-read.png', { type: 'image/png' });
+      const { container } = render(<ControlledChatInput value="Just text" onSend={onSend} accept="image/*" />);
+      const local = within(container);
+
+      await dropFiles(local.getByRole('textbox'), file);
+      expect(await local.findByText('removed-read.png')).toBeInTheDocument();
+
+      await user.click(local.getByRole('button', { name: /remove removed-read\.png/i }));
+      expect(local.queryByText('removed-read.png')).not.toBeInTheDocument();
+
+      mockReader.readers[0].resolve('data:image/png;base64,bGF0ZQ==');
+
+      await waitFor(() => expect(local.queryByText('removed-read.png')).not.toBeInTheDocument());
+      await user.click(local.getByRole('button', { name: /send/i }));
+
+      expect(onSend).toHaveBeenCalledWith([]);
+    } finally {
+      mockReader.restore();
+    }
+  });
+
+  it('reports read-failed and removes the pending chip when the default FileReader fails', async () => {
+    const mockReader = installDeferredFileReader();
+    try {
+      const onAttachmentError = vi.fn();
+      const file = new File(['image-bytes'], 'broken-read.png', { type: 'image/png' });
+      const { container } = render(<ControlledChatInput accept="image/*" onAttachmentError={onAttachmentError} />);
+      const local = within(container);
+
+      await dropFiles(local.getByRole('textbox'), file);
+      expect(await local.findByText('broken-read.png')).toBeInTheDocument();
+
+      mockReader.readers[0].reject(new DOMException('disk unavailable', 'NotReadableError'));
+
+      await waitFor(() => expect(onAttachmentError).toHaveBeenCalledWith(expect.objectContaining({
+        reason: 'read-failed',
+        source: 'drop',
+        file,
+      })));
+      await waitFor(() => expect(local.queryByText('broken-read.png')).not.toBeInTheDocument());
+    } finally {
+      mockReader.restore();
+    }
+  });
+
   it('shows a pending upload chip and disables send until uploadAttachment resolves', async () => {
     const upload = deferred<AttachmentUploadResult>();
     const uploadAttachment = vi.fn(() => upload.promise);
     const file = new File(['image-bytes'], 'slow.png', { type: 'image/png' });
     const { container } = render(<ControlledChatInput accept="image/*" uploadAttachment={uploadAttachment} />);
+    const local = within(container);
 
-    fireEvent.drop(screen.getByRole('textbox'), { dataTransfer: fileTransfer(file) });
+    await dropFiles(local.getByRole('textbox'), file);
 
-    expect(await screen.findByText('slow.png')).toBeInTheDocument();
+    expect(await local.findByText('slow.png')).toBeInTheDocument();
     expect(container.querySelector('.chorus-attachment-chip--pending')).toBeInTheDocument();
     expect(container.querySelector('.chorus-attachment-spinner')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /send/i })).toBeDisabled();
+    expect(local.getByRole('button', { name: /send/i })).toBeDisabled();
 
     upload.resolve({
       name: 'slow.png',
@@ -290,7 +550,7 @@ describe('ChatInput', () => {
     });
 
     await waitFor(() => expect(container.querySelector('.chorus-attachment-chip--pending')).not.toBeInTheDocument());
-    expect(screen.getByRole('button', { name: /send/i })).toBeEnabled();
+    expect(local.getByRole('button', { name: /send/i })).toBeEnabled();
   });
 
   it('removes a pending upload chip and reports upload-failed when uploadAttachment rejects', async () => {
@@ -299,9 +559,10 @@ describe('ChatInput', () => {
     const onAttachmentError = vi.fn();
     const file = new File(['image'], 'broken.png', { type: 'image/png' });
     const { container } = render(<ControlledChatInput accept="image/*" uploadAttachment={uploadAttachment} onAttachmentError={onAttachmentError} />);
+    const local = within(container);
 
-    fireEvent.drop(screen.getByRole('textbox'), { dataTransfer: fileTransfer(file) });
-    expect(await screen.findByText('broken.png')).toBeInTheDocument();
+    await dropFiles(local.getByRole('textbox'), file);
+    expect(await local.findByText('broken.png')).toBeInTheDocument();
     expect(container.querySelector('.chorus-attachment-chip--pending')).toBeInTheDocument();
 
     upload.reject(new Error('network down'));
@@ -311,8 +572,61 @@ describe('ChatInput', () => {
       source: 'drop',
       file,
     })));
-    await waitFor(() => expect(screen.queryByText('broken.png')).not.toBeInTheDocument());
-    expect(screen.getByRole('button', { name: /send/i })).toBeDisabled();
+    await waitFor(() => expect(local.queryByText('broken.png')).not.toBeInTheDocument());
+    expect(local.getByRole('button', { name: /send/i })).toBeDisabled();
+  });
+
+  it('aborts a pending upload when its chip is removed and ignores a late upload resolution', async () => {
+    const user = userEvent.setup();
+    const upload = deferred<AttachmentUploadResult>();
+    let uploadSignal: AbortSignal | undefined;
+    const uploadAttachment = vi.fn((_file: File, options?: { signal: AbortSignal }) => {
+      uploadSignal = options?.signal;
+      return upload.promise;
+    });
+    const onAttachmentError = vi.fn();
+    const file = new File(['image'], 'cancel-me.png', { type: 'image/png' });
+    const { container } = render(<ControlledChatInput value="Keep text" accept="image/*" uploadAttachment={uploadAttachment} onAttachmentError={onAttachmentError} />);
+    const local = within(container);
+
+    await dropFiles(local.getByRole('textbox'), file);
+    expect(await local.findByText('cancel-me.png')).toBeInTheDocument();
+    expect(container.querySelector('.chorus-attachment-chip--pending')).toBeInTheDocument();
+    expect(uploadSignal).toBeDefined();
+
+    await user.click(local.getByRole('button', { name: /remove cancel-me\.png/i }));
+
+    expect(uploadSignal?.aborted).toBe(true);
+    expect(local.queryByText('cancel-me.png')).not.toBeInTheDocument();
+
+    upload.resolve({
+      name: 'cancel-me.png',
+      type: 'image/png',
+      size: file.size,
+      url: 'https://cdn.example.com/cancel-me.png',
+    });
+
+    await waitFor(() => expect(local.queryByText('cancel-me.png')).not.toBeInTheDocument());
+    expect(onAttachmentError).not.toHaveBeenCalled();
+  });
+
+  it('aborts pending attachment work on unmount', async () => {
+    const upload = deferred<AttachmentUploadResult>();
+    let uploadSignal: AbortSignal | undefined;
+    const uploadAttachment = vi.fn((_file: File, options?: { signal: AbortSignal }) => {
+      uploadSignal = options?.signal;
+      return upload.promise;
+    });
+    const file = new File(['image'], 'unmount.png', { type: 'image/png' });
+    const { container, unmount } = render(<ControlledChatInput accept="image/*" uploadAttachment={uploadAttachment} />);
+    const local = within(container);
+
+    await dropFiles(local.getByRole('textbox'), file);
+    expect(await local.findByText('unmount.png')).toBeInTheDocument();
+
+    unmount();
+
+    expect(uploadSignal?.aborted).toBe(true);
   });
 
   it('uses uploadAttachment results instead of forcing data URLs', async () => {
@@ -326,15 +640,16 @@ describe('ChatInput', () => {
       id: 'file_123',
     }));
     const file = new File(['image-bytes'], 'uploaded.png', { type: 'image/png' });
-    render(<ControlledChatInput accept="image/*" uploadAttachment={uploadAttachment} onSend={onSend} />);
+    const { container } = render(<ControlledChatInput accept="image/*" uploadAttachment={uploadAttachment} onSend={onSend} />);
+    const local = within(container);
 
-    fireEvent.drop(screen.getByRole('textbox'), { dataTransfer: fileTransfer(file) });
-    await waitFor(() => expect(screen.getByText('uploaded.png')).toBeInTheDocument());
+    await dropFiles(local.getByRole('textbox'), file);
+    await waitFor(() => expect(local.getByText('uploaded.png')).toBeInTheDocument());
 
-    await waitFor(() => expect(screen.getByRole('button', { name: /send/i })).toBeEnabled());
-    await user.click(screen.getByRole('button', { name: /send/i }));
+    await waitFor(() => expect(local.getByRole('button', { name: /send/i })).toBeEnabled());
+    await user.click(local.getByRole('button', { name: /send/i }));
 
-    expect(uploadAttachment).toHaveBeenCalledWith(file);
+    expect(uploadAttachment).toHaveBeenCalledWith(file, { signal: expect.any(AbortSignal) });
     expect(onSend).toHaveBeenCalledWith([
       expect.objectContaining({
         name: 'uploaded.png',
