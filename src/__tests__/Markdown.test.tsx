@@ -1,7 +1,8 @@
 import { renderToString } from 'react-dom/server';
 import DOMPurify from 'dompurify';
+import type { MarkedExtension } from 'marked';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { Markdown, normalizeStreamingMarkdown } from '../components/Markdown';
 import { scopeHljsThemeCss } from '../utils/hljsLoader';
 
@@ -28,6 +29,17 @@ vi.mock('highlight.js', () => {
   return { default: mocks.hljsMock };
 });
 
+const originalNavigatorClipboard = typeof navigator === 'undefined' ? undefined : Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+
+function mockClipboardWriteText() {
+  const writeText = vi.fn((_text: string) => Promise.resolve());
+  Object.defineProperty(navigator, 'clipboard', {
+    configurable: true,
+    value: { writeText },
+  });
+  return writeText;
+}
+
 beforeEach(() => {
   mocks.sanitizeMock.mockClear();
   mocks.sanitizeMock.mockImplementation((html: string) => html);
@@ -39,6 +51,9 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
+  if (originalNavigatorClipboard) Object.defineProperty(navigator, 'clipboard', originalNavigatorClipboard);
+  else delete (navigator as Navigator & { clipboard?: Clipboard }).clipboard;
   document.getElementById('chorus-md-styles')?.remove();
 });
 
@@ -115,6 +130,31 @@ describe('Markdown', () => {
     expect(screen.getByText('bold')).toBeInTheDocument();
     expect(mocks.sanitizeMock).toHaveBeenCalledWith(expect.stringContaining('<strong>bold</strong>'));
     expect(mocks.highlightModuleLoads.value).toBe(0);
+  });
+
+  it('respects markedOptions by allowing breaks=false to disable single-newline <br> tags', () => {
+    const { container } = render(<Markdown text={'first\nsecond'} headless markedOptions={{ breaks: false }} />);
+
+    expect(container.querySelector('br')).not.toBeInTheDocument();
+    expect(container.querySelector('p')?.textContent).toBe('first\nsecond');
+  });
+
+  it('registers markedExtensions on an isolated parser instance', () => {
+    const extension: MarkedExtension = {
+      hooks: {
+        postprocess(html) {
+          return html.replace('Hello', '<span data-marked-extension="fired">Hello</span>');
+        },
+      },
+    };
+
+    const { container, rerender } = render(<Markdown text="Hello" headless markedExtensions={[extension]} />);
+
+    expect(container.querySelector('[data-marked-extension="fired"]')).toHaveTextContent('Hello');
+
+    rerender(<Markdown text="Hello" headless />);
+
+    expect(container.querySelector('[data-marked-extension="fired"]')).not.toBeInTheDocument();
   });
 
   it.each([
@@ -245,5 +285,34 @@ describe('Markdown', () => {
     expect(container.querySelector('.chorus-codeblock-dark')).toBeInTheDocument();
     expect(container.querySelector('.chorus-codeblock-light')).not.toBeInTheDocument();
     await waitFor(() => expect(mocks.hljsMock.getLanguage).toHaveBeenCalledWith('ts'));
+  });
+
+  it('injects copy chrome for pre/code HTML with whitespace between tags', () => {
+    const { container } = render(<Markdown text={'<pre>\n<code class="hljs">x</code>\n</pre>'} />);
+
+    expect(screen.getByRole('button', { name: 'Copy code' })).toHaveTextContent('Copy');
+    expect(container.querySelector('.chorus-codeblock .chorus-copy-btn + pre > code.hljs')).toHaveTextContent('x');
+  });
+
+  it.each([
+    ['Enter', 'Enter'],
+    ['Space', ' '],
+  ])('copies fenced code from the keyboard with %s and resets the button label', async (_label, key) => {
+    vi.useFakeTimers();
+    const writeText = mockClipboardWriteText();
+    render(<Markdown text={'```ts\nconst x = 1;\n```'} />);
+    const button = screen.getByRole('button', { name: 'Copy code' });
+
+    button.focus();
+    expect(button).toHaveFocus();
+    expect(fireEvent.keyDown(button, { key, cancelable: true })).toBe(false);
+    await act(async () => { await Promise.resolve(); });
+
+    expect(writeText).toHaveBeenCalledWith('const x = 1;');
+    expect(button).toHaveTextContent('Copied!');
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1200); });
+
+    expect(button).toHaveTextContent('Copy');
   });
 });
