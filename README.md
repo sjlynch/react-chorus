@@ -275,7 +275,7 @@ export default function App() {
 }
 ```
 
-Each incoming WebSocket message is treated as one SSE payload, so the same connector/extraction pipeline applies unchanged.
+Each incoming WebSocket message is treated as one SSE payload, so the same connector/extraction pipeline applies unchanged. By default a WebSocket transport opens a fresh socket for each send. For backends where the auth/subscribe handshake is expensive, pass `{ persistent: true }` to reuse one socket across sends and call `transport.close()` when your component/app no longer needs it.
 
 If you only need the non-React transport factories, import them from the transport-only subpath to avoid pulling UI or Markdown code into that bundle:
 
@@ -1086,12 +1086,16 @@ Returns a `Transport` that connects over a native WebSocket. Each incoming messa
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `protocols` | `string \| string[]` | – | WebSocket sub-protocols passed to the constructor |
-| `onOpen` | `() => void` | – | Called when the WebSocket connection opens |
-| `onClose` | `(code: number, reason: string) => void` | – | Called when the WebSocket closes, with the close code and reason |
+| `persistent` | `boolean` | `false` | Reuse one socket across sends instead of opening one socket per send |
+| `onOpen` | `() => void` | – | Called once for each real WebSocket open transition |
+| `onClose` | `(code: number, reason: string) => void` | – | Called once for each real WebSocket close transition, with the close code and reason |
 | `onError` | `(event: Event) => void` | – | Called when the WebSocket reports an error |
+| `onMessage` | `(data: string, event: MessageEvent) => void` | – | Observes every decoded WebSocket message; useful for persistent server-pushed updates when no send stream is active |
 | `formatMessage` | `(text, history: Message<TMeta>[]) => string` | `JSON.stringify({ prompt, history })` | Serialise the outgoing request |
 
-Supports `AbortSignal` cancellation — closing the socket when the user hits Stop. Serializer (`formatMessage`) and `ws.send()` failures reject the transport promise and close the socket, so they surface through `onError` like HTTP/SSE failures. Incoming string, `Blob`, `ArrayBuffer`, and typed-array messages are decoded as text; other message types error the response body instead of silently emitting an empty chunk.
+Default mode opens a fresh socket per send, then closes it when the response stream ends, the connector reports a done sentinel, or the `AbortSignal` fires. Serializer (`formatMessage`) and `ws.send()` failures reject the transport promise and close that socket, so they surface through `onError` like HTTP/SSE failures. Incoming string, `Blob`, `ArrayBuffer`, and typed-array messages are decoded as text; other message types error the response body instead of silently emitting an empty chunk.
+
+Persistent mode opens a single socket on the first send and keeps it open across sends. The returned transport is still callable as a normal `Transport`, and also exposes `transport.close(code?, reason?)` for explicit cleanup; runtimes with `FinalizationRegistry` also attempt to close the persistent socket when the transport is garbage-collected, but UI code should call `close()` during unmount/dispose rather than relying on GC timing. `onOpen` and `onClose` fire for real socket transitions, not once per send. Because the socket stays open, application/server protocol code is responsible for reconnect/backoff and request/response correlation. If multiple requests or pushed messages can overlap, include request IDs (or similar) in your protocol and filter in a custom connector/`onMessage`. Make sure each response emits a connector-specific done sentinel (or cancel the response body) so `useChorusStream` can finish the current send while the socket remains open.
 
 ### Custom connector
 

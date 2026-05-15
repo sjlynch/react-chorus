@@ -34,7 +34,7 @@ export type { ConversationStorageError, ConversationStorageOperation, Conversati
 export { createFetchSSETransport } from './streaming/createFetchSSETransport';
 export type { FetchSSETransportOptions } from './streaming/createFetchSSETransport';
 export { createWebSocketTransport } from './streaming/createWebSocketTransport';
-export type { WebSocketTransportOptions } from './streaming/createWebSocketTransport';
+export type { WebSocketTransport, WebSocketTransportOptions } from './streaming/createWebSocketTransport';
 export {
   formatAnthropicMessagesBody,
   formatGeminiGenerateContentBody,

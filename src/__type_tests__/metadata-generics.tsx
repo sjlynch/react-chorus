@@ -58,8 +58,11 @@ const fetchTransport = createFetchSSETransport<MyMeta>('/api/chat', {
 });
 
 const webSocketTransport = createWebSocketTransport<MyMeta>('wss://api.example.com/chat', {
+  persistent: true,
+  onMessage: (_data, _event) => undefined,
   formatMessage: (_text, history) => JSON.stringify({ latency: history[0].metadata?.latencyMs }),
 });
+webSocketTransport.close();
 
 const typedRef = { current: null } as RefObject<ChorusRef<MyMeta> | null>;
 const typedRefMessages: Message<MyMeta>[] | undefined = typedRef.current?.getMessages();
