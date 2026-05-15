@@ -39,6 +39,8 @@ export default function App() {
             if (conversations.activeId) conversations.renameFromFirstMessage(conversations.activeId, messages);
           }}
           placeholder="Type in the selected conversation…"
+          disabled={!conversations.loaded || !conversations.activeId}
+          disabledReason={!conversations.loaded ? 'Loading conversations…' : !conversations.activeId ? 'Create or select a conversation first.' : undefined}
           showClearButton
         />
       </main>

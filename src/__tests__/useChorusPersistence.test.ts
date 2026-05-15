@@ -243,7 +243,31 @@ describe('useChorusPersistence', () => {
     expect(onError).toHaveBeenCalledWith(readError);
   });
 
-  it('ignores stale async reads after onChange writes newer messages', async () => {
+  it('lets pending async reads win over pre-load changes so existing storage is not clobbered', async () => {
+    const pendingRead = deferred<string | null>();
+    const asyncStorage: StorageAdapter = {
+      getItem: vi.fn(() => pendingRead.promise),
+      setItem: vi.fn(),
+    };
+
+    const { result } = renderHook(() => useChorusPersistence('key', { storage: asyncStorage }));
+
+    expect(result.current.loaded).toBe(false);
+    act(() => result.current.onChange([MSG]));
+
+    expect(result.current.value).toEqual([]);
+    expect(asyncStorage.setItem).not.toHaveBeenCalled();
+
+    await act(async () => {
+      pendingRead.resolve(JSON.stringify(MSGS));
+      await pendingRead.promise;
+    });
+
+    expect(result.current.value).toEqual(MSGS);
+    expect(asyncStorage.setItem).not.toHaveBeenCalled();
+  });
+
+  it('replays the latest pre-load change after an async read confirms storage is empty', async () => {
     const pendingRead = deferred<string | null>();
     const asyncStorage: StorageAdapter = {
       getItem: vi.fn(() => pendingRead.promise),
@@ -253,14 +277,16 @@ describe('useChorusPersistence', () => {
     const { result } = renderHook(() => useChorusPersistence('key', { storage: asyncStorage }));
 
     act(() => result.current.onChange([MSG]));
-    expect(result.current.value).toEqual([MSG]);
+    act(() => result.current.onChange(MSGS));
+    expect(asyncStorage.setItem).not.toHaveBeenCalled();
 
     await act(async () => {
-      pendingRead.resolve(JSON.stringify(MSGS));
+      pendingRead.resolve(null);
       await pendingRead.promise;
     });
 
-    expect(result.current.value).toEqual([MSG]);
+    expect(result.current.value).toEqual(MSGS);
+    expect(asyncStorage.setItem).toHaveBeenCalledWith('key', JSON.stringify(MSGS));
   });
 
   it('surfaces throwing custom deserializers through error and onError', async () => {

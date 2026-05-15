@@ -100,11 +100,17 @@ export interface RenderErrorContext {
   dismiss: () => void;
 }
 
+export interface RenderMessageRootProps {
+  'data-chorus-message-id': string;
+}
+
 export interface RenderMessageContext<TMeta = Record<string, unknown>> {
   isStreaming: boolean;
   defaultRender: (slots?: MessageBubbleSlots) => React.ReactNode;
   actions: MessageRenderActions;
   message: Message<TMeta>;
+  /** Spread on a custom row root so ChorusRef.scrollToMessage can target it. */
+  messageProps: RenderMessageRootProps;
 }
 
 export interface ChatWindowProps<TMeta = Record<string, unknown>> extends Omit<React.HTMLAttributes<HTMLDivElement>, 'onCopy'> {
@@ -169,6 +175,18 @@ function DefaultEmptyState({ prompts, onSuggestedPrompt, disabled = false, disab
         ))}
       </div>
     </div>
+  );
+}
+
+function attachMessageRootProps(node: React.ReactNode, messageProps: RenderMessageRootProps) {
+  if (!React.isValidElement(node) || typeof node.type !== 'string') return node;
+
+  const props = node.props as Partial<RenderMessageRootProps>;
+  if (props['data-chorus-message-id'] != null) return node;
+
+  return React.cloneElement(
+    node as React.ReactElement<Record<string, unknown>>,
+    messageProps as unknown as Partial<Record<string, unknown>>,
   );
 }
 
@@ -337,12 +355,13 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
           feedback: onFeedback ? (variant) => onFeedback(m, variant) : undefined,
           defaultRender: () => <MessageActionControls message={m} actions={actions} />,
         };
-        const context: RenderMessageContext<TMeta> = { isStreaming, defaultRender, actions, message: m };
+        const messageProps: RenderMessageRootProps = { 'data-chorus-message-id': m.id };
+        const context: RenderMessageContext<TMeta> = { isStreaming, defaultRender, actions, message: m, messageProps };
         const custom = renderMessage?.(m, context);
 
         return (
           <MessageRenderStateProvider key={m.id} messageId={m.id}>
-            {custom != null ? custom : defaultRender()}
+            {custom != null ? attachMessageRootProps(custom, messageProps) : defaultRender()}
           </MessageRenderStateProvider>
         );
       })}

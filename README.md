@@ -602,11 +602,11 @@ Message source modes are mutually exclusive:
 
 - Controlled: pass `value` + `onChange` and keep the canonical message list in your state.
 - Uncontrolled with a seed: pass `initialMessages` (or legacy `messages`) and let Chorus manage subsequent updates internally.
-- Uncontrolled with persistence: pass `persistenceKey` without `value`; passing both makes `value` win, so built-in persistence is bypassed.
+- Uncontrolled with persistence: pass `persistenceKey` without `value`; passing both makes `value` win, so built-in persistence is bypassed without reading the ignored key.
 
-When `persistenceKey` is combined with `initialMessages` (or legacy `messages`), stored history is checked first. If the key has no stored value, Chorus renders and saves the seed so welcome messages still appear with persistence enabled. If the key already exists, the stored value wins. Async storage adapters may show the seed while loading; once the read resolves, stored history replaces it, and stale reads are ignored after local changes.
+When `persistenceKey` is combined with `initialMessages` (or legacy `messages`), stored history is checked first. If the key has no stored value, Chorus renders and saves the seed so welcome messages still appear with persistence enabled. If the key already exists, the stored value wins. Promise-based storage adapters keep the built-in composer and write actions disabled while the initial read is pending; the seed/empty-state prompts stay hidden until the read resolves so a pre-load Send cannot overwrite an existing transcript.
 
-Persistence writes are debounced while assistant tokens stream, flushed when a message finalizes and on explicit edits/deletes/clears, and serialized for async adapters so older saves cannot overwrite newer transcripts. Pending debounced writes are also flushed on `pagehide` and `visibilitychange` → `hidden`; synchronous adapters such as `localStorage` can complete that final write during tab close, while Promise-based adapters cannot block navigation. For remote/IndexedDB persistence, prefer a synchronous localStorage fallback plus an async backup when data loss on close is unacceptable.
+Persistence writes are debounced while assistant tokens stream, flushed when a message finalizes and on explicit edits/deletes/clears, and serialized for async adapters so older saves cannot overwrite newer transcripts. Pending debounced writes are also flushed on `pagehide` and `visibilitychange` → `hidden`; synchronous adapters such as `localStorage` can complete that final write during tab close, while Promise-based adapters cannot block navigation. If you wire `useChorusPersistence()` into your own controlled state, gate your custom composer on `persist.loaded` (or intentionally queue your own edits) before calling `persist.onChange`. For remote/IndexedDB persistence, prefer a synchronous localStorage fallback plus an async backup when data loss on close is unacceptable.
 
 Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message data must be JSON-serializable: Dates are restored as strings, classes are not revived, and values such as `BigInt` fail serialization and surface through `onPersistenceError` / `useChorusPersistence().error`. Read, deserialization, write, and remove failures are reported with `error.key` and `error.operation` (`'read' | 'deserialize' | 'write' | 'remove'`) while Chorus keeps rendering a safe empty fallback when needed. Pass `serializeMessages` and/or `deserializeMessages` to customize validation, compression, or Date revival.
 
@@ -659,7 +659,7 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `resetToInitialMessages` | `boolean` | `false` | When clearing, restore the initial `messages`/`initialMessages` seed instead of saving an empty transcript. |
 | `showJumpToBottomButton` | `boolean` | `true` (`false` in headless exports) | Shows a floating “Jump to latest” button when auto-scroll is paused and new activity arrives. |
 | `headless` | `boolean` | `false` | Strip all default styles and inline style injection. |
-| `renderMessage` | `(message: Message<TMeta>, ctx: RenderMessageContext<TMeta>) => ReactNode` | — | Custom per-message renderer. Return `null` to fall back to default rendering. `ctx` includes `isStreaming`, `defaultRender(slots?)`, and action callbacks/default action controls. Existing one-argument renderers continue to work. |
+| `renderMessage` | `(message: Message<TMeta>, ctx: RenderMessageContext<TMeta>) => ReactNode` | — | Custom per-message renderer. Return `null` to fall back to default rendering. `ctx` includes `isStreaming`, `messageProps` for scroll targets, `defaultRender(slots?)`, and action callbacks/default action controls. Existing one-argument renderers continue to work. |
 | `markdownProps` | `Omit<MarkdownProps, 'text' \| 'codeTheme' \| 'headless' \| 'streaming'>` | — | Props forwarded to the built-in Markdown renderer for every message, including `sanitizer`, `markedOptions`, and `markedExtensions`. |
 | `markdownSanitizer` | `MarkdownSanitizer` | — | Convenience alias for `markdownProps.sanitizer`; takes precedence when both are provided. |
 | `hiddenRoles` | `Role[]` | `['system']` | Message roles hidden from the transcript. Tool calls are visible by default in `<Chorus>`; pass `['system', 'tool']` to hide them, or `[]` to show all roles. `<Chorus>` accepts `hiddenRoles` only — `showSystemMessages` exists on `<ChatWindow>` for backwards compatibility. |
@@ -715,7 +715,7 @@ export function SupportChat() {
 }
 ```
 
-The ref exposes `send(text, attachments?)`, `stop()`, `clear()`, `focus()`, `getMessages()`, and `scrollToMessage(id)`. `send()` and `clear()` are no-ops while `<Chorus disabled>` or `<Chorus readOnly>` is set; `stop()` remains available for active responses.
+The ref exposes `send(text, attachments?)`, `stop()`, `clear()`, `focus()`, `getMessages()`, and `scrollToMessage(id)`. `send()` and `clear()` are no-ops while `<Chorus disabled>`, `<Chorus readOnly>`, or an async built-in persistence load is pending; `stop()` remains available for active responses.
 
 ### Disabled and read-only states
 
@@ -762,7 +762,7 @@ interface StorageAdapter {
 }
 ```
 
-For multiple saved chats, use `useConversations` with `ConversationList` and pass the active persistence key/storage into Chorus. The list renders pinned conversations first, formats timestamps for display while keeping ISO `dateTime` attributes, and exposes pin/rename/delete affordances when you pass the corresponding hook actions:
+For multiple saved chats, use `useConversations` with `ConversationList` and pass the active persistence key/storage into Chorus. The list renders pinned conversations first, formats timestamps for display while keeping ISO `dateTime` attributes, disables conversation mutations while `conversations.loaded === false`, and exposes pin/rename/delete affordances when you pass the corresponding hook actions:
 
 ```tsx
 const conversations = useConversations({ defaultTitle: 'New chat' });
@@ -772,13 +772,15 @@ const conversations = useConversations({ defaultTitle: 'New chat' });
   key={conversations.activeId ?? 'none'}
   persistenceKey={conversations.activePersistenceKey}
   persistenceStorage={conversations.storage ?? undefined}
+  disabled={!conversations.loaded || !conversations.activeId}
+  disabledReason={!conversations.loaded ? 'Loading conversations…' : !conversations.activeId ? 'Create or select a conversation first.' : undefined}
   onMessagesChange={(messages) => {
     if (conversations.activeId) conversations.renameFromFirstMessage(conversations.activeId, messages);
   }}
 />
 ```
 
-`useConversations({ indexKey, messageKeyPrefix, storage, onError })` stores a JSON index of `{ id, title, createdAt, updatedAt, pinned }` records under `indexKey` (default `chorus-conversations-index`) and stores each transcript under `${messageKeyPrefix}${id}`. `deleteConversation(id)` removes the transcript key via `removeItem` when available (or writes `[]` without it). Index read/write and transcript delete failures surface through `result.error` and `onError(error)` with `error.key`, `error.operation` (`'read' | 'write' | 'delete'`), and `error.conversationId` for transcript deletes.
+`useConversations({ indexKey, messageKeyPrefix, storage, onError })` stores a JSON index of `{ id, title, createdAt, updatedAt, pinned }` records under `indexKey` (default `chorus-conversations-index`) and stores each transcript under `${messageKeyPrefix}${id}`. `deleteConversation(id)` removes the transcript key via `removeItem` when available (or writes `[]` without it). Index read/write and transcript delete failures surface through `result.error` and `onError(error)` with `error.key`, `error.operation` (`'read' | 'write' | 'delete'`), and `error.conversationId` for transcript deletes. With async storage, `createConversation()` calls made before `loaded` resolves are queued and merged into the loaded index; custom sidebars should still disable New/Rename/Delete controls while `loaded` is false to avoid surprising delayed mutations.
 
 ### Persistence examples
 
@@ -808,6 +810,8 @@ const asyncStorage = {
   transport="/api/chat"
 />
 ```
+
+The built-in `<Chorus persistenceKey>` path disables its composer with the placeholder “Loading saved conversation…” until an async `getItem()` finishes. If you build a custom shell around the exported hooks, use each hook's `loaded` boolean the same way (for example `disabled={!persist.loaded}` or `disabled={!conversations.loaded}`) unless you explicitly merge queued edits yourself.
 
 ### Observing streamed tokens with `onChunk`
 
@@ -1224,7 +1228,9 @@ The block shows the tool name in a header. Clicking expands it to reveal the inp
 
 ### Custom renderer via `renderMessage`
 
-Supply a `renderMessage` render-prop to take full control of how any message is displayed. Return `null` to fall back to the default renderer for that message. The second argument exposes rendering context: `ctx.isStreaming`, `ctx.defaultRender(slots?)`, and `ctx.actions` (`edit(newText)`, `regenerate()`, `delete()`, `copy()`, `feedback('up' | 'down')`, plus `ctx.actions.defaultRender()` for the built-in action controls).
+Supply a `renderMessage` render-prop to take full control of how any message is displayed. Return `null` to fall back to the default renderer for that message. The second argument exposes rendering context: `ctx.isStreaming`, `ctx.messageProps`, `ctx.defaultRender(slots?)`, and `ctx.actions` (`edit(newText)`, `regenerate()`, `delete()`, `copy()`, `feedback('up' | 'down')`, plus `ctx.actions.defaultRender()` for the built-in action controls).
+
+For fully custom DOM rows, spread `ctx.messageProps` on the outer element you want `ChorusRef.scrollToMessage(id)` to target. Chorus automatically adds those props to a single DOM element returned directly from `renderMessage`, but spread them yourself when returning a fragment or custom component. Built-in `ctx.defaultRender()` and `<MessageBubble>` already include a scroll target.
 
 ```tsx
 <Chorus
@@ -1233,7 +1239,7 @@ Supply a `renderMessage` render-prop to take full control of how any message is 
   renderMessage={(msg, ctx) => {
     if (msg.role === 'tool' && msg.toolCall) {
       return (
-        <div key={msg.id} className="my-tool-step">
+        <div key={msg.id} {...ctx.messageProps} className="my-tool-step">
           <strong>{msg.toolCall.name}</strong>
           <pre>{JSON.stringify(msg.toolCall.output, null, 2)}</pre>
         </div>
@@ -1314,7 +1320,7 @@ When you only need slots around the built-in renderer from `renderMessage`, call
 When neither `renderMessage` nor a custom `MessageBubble` is used, each message renders as:
 
 ```html
-<div class="chorus-msg chorus-{role}">
+<div class="chorus-msg chorus-{role}" data-chorus-message-id="...">
   <span class="chorus-sr-only">User message</span>
   <div class="chorus-msg-content">
     <details class="chorus-reasoning"><!-- optional reasoning trace --></details>
