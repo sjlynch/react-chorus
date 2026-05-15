@@ -3,11 +3,13 @@ import { Marked, type MarkedExtension, type MarkedOptions } from 'marked';
 import { markedHighlight } from 'marked-highlight';
 import DOMPurify from 'dompurify';
 import { getHljs, highlightCode, isHljsLoaded, loadHljsTheme, type CodeTheme } from '../utils/hljsLoader';
+import { COPY_FAILED_LABEL, COPY_FEEDBACK_DURATION_MS, toClipboardError } from '../utils/messageCopy';
 import { normalizeStreamingMarkdown } from '../utils/markdownNormalizer';
 
 export { normalizeStreamingMarkdown };
 
-const COPY_FEEDBACK_DURATION_MS = 1200;
+const COPY_LABEL = 'Copy';
+const COPY_SUCCESS_LABEL = 'Copied!';
 const DEFAULT_MARKED_OPTIONS: MarkedOptions = { gfm: true, breaks: true };
 
 function createHighlightExtension() {
@@ -48,6 +50,8 @@ export interface MarkdownProps {
   markedOptions?: MarkedOptions;
   /** Optional marked extensions registered on an isolated Marked instance for this render. */
   markedExtensions?: MarkedExtension[];
+  /** Called when a code-block copy button cannot write to the Clipboard API. */
+  onCopyError?: (error: Error) => void;
 }
 
 function escapeHtml(value: string) {
@@ -254,7 +258,7 @@ interface HtmlTagMatch {
 }
 
 function copyButtonHtml() {
-  return '<span class="chorus-copy-btn" role="button" aria-label="Copy code" tabindex="0">Copy</span>';
+  return `<span class="chorus-copy-btn" role="button" aria-label="Copy code" tabindex="0">${COPY_LABEL}</span>`;
 }
 
 function codeBlockWrapperStart(themeClass: string) {
@@ -279,7 +283,7 @@ function addCodeBlockChromeWithDOM(html: string, themeClass: string) {
       copyButton.setAttribute('role', 'button');
       copyButton.setAttribute('aria-label', 'Copy code');
       copyButton.setAttribute('tabindex', '0');
-      copyButton.textContent = 'Copy';
+      copyButton.textContent = COPY_LABEL;
 
       pre.parentNode?.insertBefore(wrapper, pre);
       wrapper.append(copyButton, pre);
@@ -441,7 +445,7 @@ function getCodeCopyText(codeEl: HTMLElement | null) {
   return raw.replace(/\r?\n$/, '');
 }
 
-export function Markdown({ text, codeTheme = 'dark', headless = false, streaming = false, sanitizer, markedOptions, markedExtensions }: MarkdownProps) {
+export function Markdown({ text, codeTheme = 'dark', headless = false, streaming = false, sanitizer, markedOptions, markedExtensions, onCopyError }: MarkdownProps) {
   const containerRef = React.useRef<HTMLDivElement>(null);
   const [hljsReady, setHljsReady] = React.useState(isHljsLoaded());
 
@@ -468,7 +472,8 @@ export function Markdown({ text, codeTheme = 'dark', headless = false, streaming
        .chorus-md .chorus-copy-btn{position:absolute;top:8px;right:8px;font-size:12px;padding:4px 8px;border-radius:6px;cursor:pointer;user-select:none}
        .chorus-md .chorus-codeblock-dark .chorus-copy-btn{background:rgba(240,246,252,0.08);border:1px solid rgba(240,246,252,0.1);color:#e6edf3}
        .chorus-md .chorus-codeblock-light .chorus-copy-btn{background:#fff;border:1px solid rgba(31,35,40,0.15);color:#24292f}
-       .chorus-md .chorus-copy-btn.copied{opacity:.85}`;
+       .chorus-md .chorus-copy-btn.copied{opacity:.85}
+       .chorus-md .chorus-copy-btn.copy-failed{opacity:.95;color:var(--chorus-error-text,#fca5a5);border-color:var(--chorus-error-border,rgba(220,38,38,0.4));background:var(--chorus-error-bg,rgba(220,38,38,0.15))}`;
     document.head.appendChild(style);
   }, [headless]);
 
@@ -484,19 +489,39 @@ export function Markdown({ text, codeTheme = 'dark', headless = false, streaming
 
   React.useEffect(() => {
     const el = containerRef.current;
-    if (!el || typeof window === 'undefined' || typeof document === 'undefined' || typeof navigator === 'undefined' || !navigator?.clipboard) return;
+    if (!el || typeof window === 'undefined' || typeof document === 'undefined' || typeof navigator === 'undefined') return;
+
+    const feedbackTimers = new Map<HTMLElement, ReturnType<typeof setTimeout>>();
+
+    const showCopyFeedback = (btn: HTMLElement, label: string, className: 'copied' | 'copy-failed') => {
+      const existingTimer = feedbackTimers.get(btn);
+      if (existingTimer) clearTimeout(existingTimer);
+
+      btn.textContent = label;
+      btn.classList.remove('copied', 'copy-failed');
+      btn.classList.add(className);
+
+      const timer = setTimeout(() => {
+        btn.textContent = COPY_LABEL;
+        btn.classList.remove(className);
+        feedbackTimers.delete(btn);
+      }, COPY_FEEDBACK_DURATION_MS);
+      feedbackTimers.set(btn, timer);
+    };
 
     const handleCopy = async (btn: HTMLElement) => {
       const wrapper = btn.closest('.chorus-codeblock') as HTMLElement | null;
       const codeEl = wrapper?.querySelector('pre > code') as HTMLElement | null;
       const raw = getCodeCopyText(codeEl);
       try {
+        if (typeof navigator.clipboard?.writeText !== 'function') throw new Error('Clipboard API is unavailable');
         await navigator.clipboard.writeText(raw);
-        const prev = btn.textContent;
-        btn.textContent = 'Copied!';
-        btn.classList.add('copied');
-        setTimeout(() => { btn.textContent = prev || 'Copy'; btn.classList.remove('copied'); }, COPY_FEEDBACK_DURATION_MS);
-      } catch {}
+        showCopyFeedback(btn, COPY_SUCCESS_LABEL, 'copied');
+      } catch (error) {
+        const clipboardError = toClipboardError(error);
+        showCopyFeedback(btn, COPY_FAILED_LABEL, 'copy-failed');
+        onCopyError?.(clipboardError);
+      }
     };
 
     const onClick = (e: MouseEvent) => {
@@ -512,8 +537,13 @@ export function Markdown({ text, codeTheme = 'dark', headless = false, streaming
 
     el.addEventListener('click', onClick);
     el.addEventListener('keydown', onKeyDown);
-    return () => { el.removeEventListener('click', onClick); el.removeEventListener('keydown', onKeyDown); };
-  }, []);
+    return () => {
+      el.removeEventListener('click', onClick);
+      el.removeEventListener('keydown', onKeyDown);
+      for (const timer of feedbackTimers.values()) clearTimeout(timer);
+      feedbackTimers.clear();
+    };
+  }, [onCopyError]);
 
   const className = streaming ? 'chorus-md chorus-md-streaming' : 'chorus-md';
   if (streaming) return <div ref={containerRef} className={className}>{text}</div>;

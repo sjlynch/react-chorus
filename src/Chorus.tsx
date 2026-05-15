@@ -1,6 +1,6 @@
 import React from 'react';
 import './Chorus.css';
-import { ChatWindow, type MessageFeedback, type MessageMarkdownProps, type RenderErrorContext, type RenderMessageContext } from './components/ChatWindow';
+import { ChatWindow, type GetMessageFeedback, type MessageFeedback, type MessageMarkdownProps, type RenderErrorContext, type RenderMessageContext } from './components/ChatWindow';
 import { ChatInput } from './components/ChatInput';
 import { styleVarsFromPalette, type Palette } from './components/ChorusTheme';
 import type { Attachment, AttachmentError, ConnectorName, Message, Role, StorageAdapter, UploadAttachment } from './types';
@@ -52,6 +52,8 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
   errorMessage?: string;
   headless?: boolean;
   hiddenRoles?: Role[];
+  /** Return a persisted feedback selection for a message. If omitted or undefined, message.metadata.feedback seeds built-in thumbs when it is 'up' or 'down'. */
+  getMessageFeedback?: GetMessageFeedback<TMeta>;
   /** Initial messages for uncontrolled mode. Useful for welcome messages. */
   initialMessages?: Message<TMeta>[];
   /** Props forwarded to the built-in Markdown renderer for message text. */
@@ -71,6 +73,7 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
   onClear?: (messages: Message<TMeta>[]) => void;
   onCopy?: (message: Message<TMeta>) => void;
   onError?: (error: Error) => void;
+  /** Built-in controls call this only when the chosen variant differs from the current selection; clicks do not toggle feedback off. */
   onFeedback?: (message: Message<TMeta>, feedback: MessageFeedback) => void;
   /** Called exactly once when an assistant message completes normally. */
   onFinish?: ChorusOnFinish<TMeta>;
@@ -128,6 +131,7 @@ function ChorusInner<TMeta = Record<string, unknown>>({
   errorMessage,
   headless = false,
   hiddenRoles,
+  getMessageFeedback,
   initialMessages,
   markdownProps,
   markdownSanitizer,
@@ -346,6 +350,7 @@ function ChorusInner<TMeta = Record<string, unknown>>({
         markdownProps={markdownProps}
         markdownSanitizer={markdownSanitizer}
         maxRenderedMessages={maxRenderedMessages}
+        getMessageFeedback={getMessageFeedback}
         onCopy={onCopy}
         onDelete={writesDisabled ? undefined : session.handleDelete}
         onDismissError={session.dismissError}
