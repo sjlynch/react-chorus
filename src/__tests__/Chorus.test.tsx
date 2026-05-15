@@ -101,6 +101,25 @@ describe('Chorus', () => {
     expect(root.style.getPropertyValue('--chorus-tool-header-bg')).toBe('#777');
   });
 
+  it('seeds feedback through getMessageFeedback', () => {
+    const message: Message<{ storedFeedback: 'down' | null }> = {
+      id: 'stored-feedback',
+      role: 'assistant',
+      text: 'Persisted reply',
+      metadata: { storedFeedback: 'down' },
+    };
+
+    render(
+      <Chorus
+        initialMessages={[message]}
+        onFeedback={vi.fn()}
+        getMessageFeedback={(m) => m.metadata?.storedFeedback === 'down' ? 'down' : null}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: 'Thumbs down' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
   it('exposes an imperative ChorusRef for send, focus, clear, stop, and scrollToMessage', async () => {
     const ref = React.createRef<ChorusRef>();
     const scrollIntoView = vi.fn();
@@ -120,7 +139,9 @@ describe('Chorus', () => {
       expect.objectContaining({ id: 'a1', role: 'assistant', text: 'ref reply' }),
     ]);
 
-    act(() => ref.current?.scrollToMessage('a1'));
+    let scrolled: boolean | undefined;
+    act(() => { scrolled = ref.current?.scrollToMessage('a1'); });
+    expect(scrolled).toBe(true);
     expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
 
     act(() => ref.current?.stop());
@@ -147,10 +168,39 @@ describe('Chorus', () => {
     );
 
     const customMessage = screen.getByTestId('custom-message');
-    act(() => ref.current?.scrollToMessage('a1'));
+    let scrolled: boolean | undefined;
+    act(() => { scrolled = ref.current?.scrollToMessage('a1'); });
 
+    expect(scrolled).toBe(true);
     expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
     expect(scrollIntoView.mock.contexts[0]).toBe(customMessage);
+  });
+
+  it('scrollToMessage returns false when the id is not among rendered messages', () => {
+    const ref = React.createRef<ChorusRef>();
+    const scrollIntoView = vi.fn();
+    window.HTMLElement.prototype.scrollIntoView = scrollIntoView;
+
+    render(
+      <Chorus
+        ref={ref}
+        messages={[
+          { id: 's1', role: 'system', text: 'Hidden system prompt' },
+          { id: 'u1', role: 'user', text: 'Visible user message' },
+        ]}
+      />
+    );
+
+    expect(screen.queryByText('Hidden system prompt')).not.toBeInTheDocument();
+
+    let hiddenResult: boolean | undefined;
+    act(() => { hiddenResult = ref.current?.scrollToMessage('s1'); });
+    let missingResult: boolean | undefined;
+    act(() => { missingResult = ref.current?.scrollToMessage('missing-id'); });
+
+    expect(hiddenResult).toBe(false);
+    expect(missingResult).toBe(false);
+    expect(scrollIntoView).not.toHaveBeenCalled();
   });
 
   it('transport path send() fires transport and streams tokens into the message list', async () => {

@@ -2,9 +2,9 @@ import { createRef } from 'react';
 import type React from 'react';
 import { readFileSync } from 'node:fs';
 import { describe, it, expect, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { ChatWindow, MessageBubble, type RenderMessageContext } from '../components/ChatWindow';
+import { ChatWindow, MessageBubble, stringActivityKey, type MessageFeedback, type RenderMessageContext } from '../components/ChatWindow';
 import type { Message } from '../types';
 
 // Mock Markdown to avoid DOMPurify/highlight.js complexity in unit tests
@@ -33,6 +33,20 @@ function readmeMessageRenderer(msg: Message, ctx: RenderMessageContext) {
   );
 }
 
+function containsLoneSurrogate(value: string) {
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.charCodeAt(i);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(i + 1);
+      if (i + 1 >= value.length || next < 0xdc00 || next > 0xdfff) return true;
+      i += 1;
+      continue;
+    }
+    if (code >= 0xdc00 && code <= 0xdfff) return true;
+  }
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 
 describe('ChatWindow', () => {
@@ -49,6 +63,14 @@ describe('ChatWindow', () => {
     const transcript = screen.getByTestId('chat-window');
     expect(ref.current).toBe(transcript);
     expect(transcript).toHaveAttribute('id', 'transcript');
+  });
+
+  it('builds activity keys for trailing emoji without lone surrogates', () => {
+    const value = `${'x'.repeat(23)}\u{1F44B}`;
+    const key = stringActivityKey(value);
+
+    expect(key).toContain('\u{1F44B}');
+    expect(containsLoneSurrogate(key)).toBe(false);
   });
 
   it('exposes the transcript as a polite live log region', () => {
@@ -362,12 +384,32 @@ describe('ChatWindow', () => {
     await user.click(screen.getByRole('button', { name: 'Copy' }));
     await user.click(screen.getByRole('button', { name: 'Thumbs up' }));
     expect(screen.getByRole('button', { name: 'Thumbs up' })).toHaveAttribute('aria-pressed', 'true');
+    await user.click(screen.getByRole('button', { name: 'Thumbs up' }));
     await user.click(screen.getByRole('button', { name: 'Thumbs down' }));
 
     expect(onCopy).toHaveBeenCalledWith(ASST_MSG);
     expect(onFeedback).toHaveBeenNthCalledWith(1, ASST_MSG, 'up');
     expect(onFeedback).toHaveBeenNthCalledWith(2, ASST_MSG, 'down');
+    expect(onFeedback).toHaveBeenCalledTimes(2);
     expect(screen.getByRole('button', { name: 'Thumbs down' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('seeds feedback from message metadata when action controls remount', () => {
+    type FeedbackMeta = { feedback?: MessageFeedback | null };
+    const onFeedback = vi.fn();
+    const seeded: Message<FeedbackMeta> = { id: 'seeded', role: 'assistant', text: 'Seeded reply', metadata: { feedback: 'up' } };
+    const later: Message<FeedbackMeta> = { id: 'later', role: 'assistant', text: 'Later reply' };
+    const { rerender } = render(<ChatWindow messages={[seeded]} maxRenderedMessages={1} onFeedback={onFeedback} />);
+
+    expect(screen.getByRole('button', { name: 'Thumbs up' })).toHaveAttribute('aria-pressed', 'true');
+
+    rerender(<ChatWindow messages={[seeded, later]} maxRenderedMessages={1} onFeedback={onFeedback} />);
+    expect(screen.queryByText('Seeded reply')).not.toBeInTheDocument();
+
+    rerender(<ChatWindow messages={[seeded]} maxRenderedMessages={1} onFeedback={onFeedback} />);
+    expect(screen.getByText('Seeded reply')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Thumbs up' })).toHaveAttribute('aria-pressed', 'true');
+    expect(onFeedback).not.toHaveBeenCalled();
   });
 
   it('copies with navigator.clipboard by default when available', async () => {
@@ -381,6 +423,35 @@ describe('ChatWindow', () => {
       await user.click(screen.getByRole('button', { name: 'Copy' }));
       expect(writeText).toHaveBeenCalledWith('Hi there');
     } finally {
+      if (originalClipboard) Object.defineProperty(navigator, 'clipboard', originalClipboard);
+      else Reflect.deleteProperty(navigator, 'clipboard');
+    }
+  });
+
+  it('shows failed feedback when the default message copy action rejects', async () => {
+    vi.useFakeTimers();
+    const writeText = vi.fn().mockRejectedValue(new Error('Permission denied'));
+    const originalClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+
+    try {
+      render(<ChatWindow messages={[ASST_MSG]} />);
+      const copyButton = screen.getByRole('button', { name: 'Copy' });
+
+      fireEvent.click(copyButton);
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(writeText).toHaveBeenCalledWith('Hi there');
+      expect(screen.getByRole('button', { name: 'Copy failed' })).toHaveTextContent('Copy failed');
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(1200); });
+
+      expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
       if (originalClipboard) Object.defineProperty(navigator, 'clipboard', originalClipboard);
       else Reflect.deleteProperty(navigator, 'clipboard');
     }
@@ -406,9 +477,11 @@ describe('ChatWindow', () => {
 
     await user.click(screen.getByRole('button', { name: 'Custom copy' }));
     await user.click(screen.getByRole('button', { name: 'Custom down' }));
+    await user.click(screen.getByRole('button', { name: 'Custom down' }));
 
     expect(onCopy).toHaveBeenCalledWith(ASST_MSG);
     expect(onFeedback).toHaveBeenCalledWith(ASST_MSG, 'down');
+    expect(onFeedback).toHaveBeenCalledTimes(1);
   });
 
   it('preserves local edit state when messages stream in', async () => {

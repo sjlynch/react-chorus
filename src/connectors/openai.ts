@@ -181,12 +181,16 @@ function collectTextFragments(value: unknown): string {
 }
 
 function extractReasoningFromDelta(delta: Record<string, unknown>) {
+  // Chat Completions-compatible deltas should prefer reasoning_content. Some
+  // proxies populate multiple reasoning fields in one chunk for cross-API
+  // compatibility, so choose the first populated source instead of joining
+  // unrelated fields together.
   return [
-    delta.reasoning,
     delta.reasoning_content,
-    delta.reasoning_summary,
     delta.reasoning_summary_text,
-  ].map(collectTextFragments).join('');
+    delta.reasoning,
+    delta.reasoning_summary,
+  ].map(collectTextFragments).find(Boolean) ?? '';
 }
 
 function extractChatToolDelta(choiceKey: string, rawToolCall: unknown, state: OpenAIConnectorState): ConnectorToolDelta | null {
