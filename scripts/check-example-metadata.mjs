@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 const scriptPath = fileURLToPath(import.meta.url);
 const rootDir = path.resolve(path.dirname(scriptPath), '..');
 const REQUIRED_NODE_RANGE = '>=20';
-const SKIPPED_DIRECTORIES = new Set(['node_modules', 'dist', '.vite']);
+const SKIPPED_DIRECTORIES = new Set(['node_modules', 'dist', '.next', '.vite']);
 const npmBin = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const viteLargeChunkWarningPattern = /Some chunks are larger than \d+(?:\.\d+)? kB after minification/i;
 

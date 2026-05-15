@@ -78,7 +78,7 @@ export default function App() {
 }
 ```
 
-`transport` requires an endpoint that returns Server-Sent Events. Chorus POSTs `{ prompt: string, history: Message[] }` to the URL and streams the SSE response into the assistant message automatically. `history` already includes the current user turn; `prompt` is a convenience copy of that latest user text. See the [Minimal Express + OpenAI backend](#minimal-express--openai-backend) or the runnable [`examples/with-openai`](./examples/with-openai) app for a server-safe proxy.
+`transport` requires an endpoint that returns Server-Sent Events. Chorus POSTs `{ prompt: string, history: Message[] }` to the URL and streams the SSE response into the assistant message automatically. `history` already includes the current user turn; `prompt` is a convenience copy of that latest user text. See the [Next.js App Router route handler](#nextjs-app-router-route-handler), the [Minimal Express + OpenAI backend](#minimal-express--openai-backend), or the runnable [`examples/with-next`](./examples/with-next) and [`examples/with-openai`](./examples/with-openai) apps for server-safe proxies.
 
 ## Two usage paths
 
@@ -182,6 +182,80 @@ For a non-streaming client, `onSend` may return a complete assistant `Message`. 
 />
 ```
 
+### Next.js App Router route handler
+
+For a production Next.js app, keep `OPENAI_API_KEY` on the server and expose an App Router route handler that speaks SSE to Chorus. Install `openai` in your app for this variant. A runnable version lives in [`examples/with-next`](./examples/with-next).
+
+```ts
+// app/api/chat/route.ts
+import OpenAI from 'openai';
+import type { ChatCompletionCreateParamsStreaming } from 'openai/resources/chat/completions';
+import { toOpenAIChatCompletionsBody } from 'react-chorus/provider-requests';
+import type { Message } from 'react-chorus';
+
+export const runtime = 'nodejs'; // required when using the official OpenAI Node client
+export const maxDuration = 60; // optional on Vercel; choose a value your plan allows
+
+const encoder = new TextEncoder();
+
+const sseHeaders = {
+  'Content-Type': 'text/event-stream; charset=utf-8',
+  'Cache-Control': 'no-cache, no-transform',
+  'X-Accel-Buffering': 'no',
+};
+
+function encodeSSE(data: unknown) {
+  return encoder.encode(`data: ${typeof data === 'string' ? data : JSON.stringify(data)}\n\n`);
+}
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+export async function POST(request: Request) {
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      try {
+        const body = (await request.json()) as { history?: unknown };
+        const history = Array.isArray(body.history) ? (body.history as Message[]) : [];
+        const apiKey = process.env.OPENAI_API_KEY;
+        if (!apiKey) throw new Error('Missing OPENAI_API_KEY');
+
+        const openai = new OpenAI({ apiKey });
+        const completionBody = {
+          ...toOpenAIChatCompletionsBody(history, { model: 'gpt-4o-mini' }),
+          stream: true,
+        } as ChatCompletionCreateParamsStreaming;
+
+        const upstream = await openai.chat.completions.create(completionBody, { signal: request.signal });
+
+        for await (const chunk of upstream) {
+          controller.enqueue(encodeSSE(chunk));
+        }
+
+        controller.enqueue(encodeSSE('[DONE]'));
+      } catch (error) {
+        if (!request.signal.aborted) {
+          controller.enqueue(encodeSSE({ error: getErrorMessage(error) }));
+        }
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, { headers: sseHeaders });
+}
+```
+
+The route maps Chorus `history` with `toOpenAIChatCompletionsBody`, re-emits every OpenAI chunk as `data: <json>\n\n`, explicitly forwards `data: [DONE]\n\n`, and sends thrown failures as `data: {"error":"..."}\n\n` so `connector="openai"` can surface them through `onError` / `errorMessage`.
+
+Runtime and serverless notes:
+
+- Use `export const runtime = 'nodejs'` with the official `openai` package. If you need the Edge runtime, call OpenAI's REST endpoint with `fetch` instead and pipe `upstream.body` through the same SSE headers and `{ error }` envelope.
+- Vercel Route Handlers stream Web `Response` bodies, but buffering can still be introduced by middleware, reverse proxies, or CDNs. Keep `Content-Type: text/event-stream`, `Cache-Control: no-cache, no-transform`, and `X-Accel-Buffering: no`; do not read the whole provider stream before returning.
+- Image attachments are sent as data URLs in the JSON `history` unless you provide a custom upload flow. Vercel/serverless request body limits (commonly around 4.5 MB) can be hit quickly, and App Router route handlers do not have Express-style `json({ limit })`. Keep `maxAttachmentBytes` below your host limit, compress images, or upload large files to object storage and send URLs instead.
+
 ### Minimal Express + OpenAI backend
 
 ```js
@@ -275,7 +349,7 @@ export default function App() {
 }
 ```
 
-Each incoming WebSocket message is treated as one SSE payload, so the same connector/extraction pipeline applies unchanged.
+Each incoming WebSocket message is treated as one SSE payload, so the same connector/extraction pipeline applies unchanged. By default a WebSocket transport opens a fresh socket for each send. For backends where the auth/subscribe handshake is expensive, pass `{ persistent: true }` to reuse one socket across sends and call `transport.close()` when your component/app no longer needs it.
 
 If you only need the non-React transport factories, import them from the transport-only subpath to avoid pulling UI or Markdown code into that bundle:
 
@@ -506,12 +580,13 @@ app.post('/api/chat', async (req, res) => {
 
 ## Examples
 
-Runnable examples live in the [`/examples`](./examples) directory. They declare the same Node.js 20+ floor as the root package and consume the local build after `npm run build`. `npm run verify:examples` recursively checks example `package.json` metadata (including nested packages such as `examples/with-openai/server`) and build-smokes every example with a `build` script.
+Runnable examples live in the [`/examples`](./examples) directory. They declare the same Node.js 20+ floor as the root package and consume the local build after `npm run build`. `npm run verify:examples` recursively checks example `package.json` metadata (including nested packages such as `examples/with-openai/server`) and build-smokes every example with a `build` script, including the Next.js App Router example.
 
 | Example | Description |
 |---------|-------------|
 | [`examples/basic`](./examples/basic) | Zero-backend demo using a simulated streaming response, local persistence, clear/reset, and a custom error banner — great for local development |
 | [`examples/multi-conversation`](./examples/multi-conversation) | Sidebar-driven local conversations with pinned chats, per-chat persistence, and first-message auto-titles |
+| [`examples/with-next`](./examples/with-next) | Next.js App Router example with a serverless `/api/chat` SSE route handler proxying to OpenAI |
 | [`examples/with-openai`](./examples/with-openai) | Full-stack example: Vite frontend + Express backend proxying to OpenAI |
 
 ### Running the basic example
@@ -538,7 +613,37 @@ npm install
 npm run dev
 ```
 
-### Running the OpenAI example
+### Running the Next.js App Router example
+
+Build the library first:
+
+```bash
+npm run build
+```
+
+Install and run the app:
+
+```bash
+cd examples/with-next
+npm install
+```
+
+Set your API key with the command for your shell, then start Next.js:
+
+```bash
+# macOS/Linux/POSIX shells
+OPENAI_API_KEY=sk-... npm run dev
+
+# Windows PowerShell
+$env:OPENAI_API_KEY="sk-..."; npm run dev
+
+# Windows cmd.exe
+set OPENAI_API_KEY=sk-... && npm run dev
+```
+
+The example uses `app/api/chat/route.ts` with `runtime = 'nodejs'`, SSE headers that discourage buffering, and a 2 MB client-side attachment cap so image data URLs stay below common serverless request limits.
+
+### Running the Vite + Express OpenAI example
 
 Build the library first:
 
@@ -608,6 +713,8 @@ To refresh the published size claims after dependency or feature changes, run `n
 
 If your SSR app wants to allow sanitized raw HTML, create an isomorphic DOMPurify instance (for example with your framework's DOM/window or jsdom on the server) and pass it to the standalone renderer: `<Markdown sanitizer={purify} />` or `<Markdown sanitizer={(html) => purify.sanitize(html)} />`. The built-in chat renderer accepts the same customization via `<Chorus markdownSanitizer={purify} />` / `<ChatWindow markdownSanitizer={purify} />`, or through `markdownProps={{ sanitizer: purify }}`. You can also pass `markedOptions` and `markedExtensions` directly to `<Markdown>` or via `markdownProps` to adjust parsing and register marked extensions without mutating marked's global singleton.
 
+Code-block copy buttons flash `Copied!` on success and `Copy failed` when the Clipboard API rejects. Pass `<Markdown onCopyError={(error) => ...} />` — or `markdownProps={{ onCopyError }}` on `<Chorus>` / `<ChatWindow>` — to show your own toast or fallback alert.
+
 ## API
 
 ### `<Chorus>`
@@ -650,11 +757,12 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `onAttachmentError` | `(error: AttachmentError) => void` | — | Called when a picker, paste, or drop file is rejected or cannot be read/uploaded. Reasons include `unsupported-type`, `too-large`, `too-many`, `read-failed`, and `upload-failed`. |
 | `uploadAttachment` | `(file: File, options?: { signal: AbortSignal }) => AttachmentUploadResult \| Promise<AttachmentUploadResult>` | data URL reader | Optional transform/upload hook. Return a custom attachment (for example a CDN URL or provider file id) instead of the default data URL payload. The signal aborts when pending work is cancelled. |
 | `sending` | `boolean` | — | Visual sending-state override for fully custom `onSend`/`useChorusStream` integrations. On the `transport` path, Chorus still owns the internal concurrency guard even if this is overridden. |
-| `palette` | `Palette` | dark theme | Custom color palette for theming, including `actionText`, `actionHoverBg`, `actionHoverText`, `errorBg`, `errorBorder`, and `errorText`. |
+| `palette` | `Palette` | dark theme | Custom color palette for theming chat chrome, actions, errors, and built-in tool call blocks. |
 | `codeBlockTheme` | `'dark' \| 'light'` | `'dark'` | Code block syntax-highlight theme. |
 | `minAssistantDelayMs` | `number` | `300` | Minimum ms before showing the first assistant token. |
 | `errorMessage` | `string` | `'Something went wrong. Please try again.'` | Friendly message shown in the error banner. Raw transport errors are never surfaced in the default UI. |
 | `onError` | `(error: Error) => void` | — | Called for any non-abort error from a send or stream. The raw `Error` goes here; the UI shows `errorMessage`. |
+| `onAbort` | `({ message, messages, reason, source, path }) => void` | — | Called when an active assistant generation is cancelled by Stop, `ref.stop()`, clear-while-sending, or a superseding session. `message` is the finalized partial assistant message or `null` before the first token; `path` is `'transport'` or `'onSend'`; `reason` is `'stop'`, `'clear'`, or `'superseded'`; `source` is `'user'` for built-in UI actions and `'programmatic'` for imperative/internal cancellation. |
 | `renderError` | `({ error, rawError, retry, dismiss }) => ReactNode` | — | Replace the built-in error banner. `error` is the friendly UI string, `rawError` is the last raw `Error` when available, `retry()` resubmits the last turn, and `dismiss()` clears the banner. |
 | `onChunk` | `(chunk: string, messageId: string) => void` | — | Observation hook called for each streamed token. Receives the assistant `messageId` so callers can correlate chunks with a specific message. Does **not** affect streaming behaviour. |
 | `onToolDelta` | `({ delta, message, messages }) => void` | — | Observation hook called for every accumulated streamed tool-call delta on the `transport` path. Does **not** affect execution. |
@@ -665,8 +773,9 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `shouldContinueToolLoop` | `(context) => boolean \| Promise<boolean>` | — | Optional gate before each automatic continuation. Return `false` to stop after rendering/executing the current tool batch. |
 | `onStreamDone` | `({ assistantMessage, toolMessages, messages, response }) => void` | — | Called after each `transport` stream completes normally and tool handlers (if any) finish. Fires for tool-only turns where `onFinish` has no assistant message. |
 | `onCopy` | `(message: Message<TMeta>) => void` | Clipboard copy when available | Overrides the built-in per-message Copy action. If omitted, Chorus copies `message.text` with `navigator.clipboard.writeText` when the Clipboard API is available. |
-| `onFeedback` | `(message: Message<TMeta>, feedback: 'up' \| 'down') => void` | — | Enables built-in thumbs-up / thumbs-down per-message feedback actions and reports the selected variant. |
-| `onFinish` | `({ message, messages, reason, response }) => void` | — | Called once when an assistant message completes normally. Use it for telemetry, persistence handoff, moderation, or post-response UI. Not called for tool-only turns, aborts, Stop, or errors; use `onStreamDone`/`onToolCall` for tool-only streams. |
+| `getMessageFeedback` | `(message: Message<TMeta>) => 'up' \| 'down' \| null \| undefined` | `message.metadata.feedback` | Seeds the pressed thumb state from persisted feedback. Return `null` for no selection; return `undefined` to fall back to `message.metadata.feedback` when it is `'up'` or `'down'`. |
+| `onFeedback` | `(message: Message<TMeta>, feedback: 'up' \| 'down') => void` | — | Enables built-in thumbs-up / thumbs-down per-message feedback actions and reports changes. Clicking the already-selected thumb is ignored (no toggle-off callback). |
+| `onFinish` | `({ message, messages, reason, response }) => void` | — | Called once when an assistant message completes normally. Use it for telemetry, persistence handoff, moderation, or post-response UI. Not called for tool-only turns, aborts, Stop, or errors; use `onAbort` for cancellation telemetry and `onStreamDone`/`onToolCall` for tool-only streams. |
 | `persistenceKey` | `string` | — | Uncontrolled-mode persistence key. When set without `value`, Chorus saves/restores messages using this key (defaults to localStorage). If `value` is provided, controlled state wins and built-in persistence is not used. |
 | `persistenceStorage` | `StorageAdapter` | `localStorage` | Custom storage adapter for persistenceKey. The default `localStorage` is resolved lazily; if browser storage is blocked or unavailable, Chorus keeps working without persistence. Implement optional `removeItem(key)` to delete unseeded empty transcripts and deleted conversation keys; seeded clears persist `[]` so the clear survives reloads. |
 | `onPersistenceError` | `(error: Error & { key?: string; operation?: string }) => void` | — | Called when a persistence read, deserialization, write, or remove operation throws/rejects. The hook also exposes the latest error as `useChorusPersistence().error`. |
@@ -679,7 +788,7 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `showJumpToBottomButton` | `boolean` | `true` (`false` in headless exports) | Shows a floating “Jump to latest” button when auto-scroll is paused and new activity arrives. |
 | `headless` | `boolean` | `false` | Strip all default styles and inline style injection. |
 | `renderMessage` | `(message: Message<TMeta>, ctx: RenderMessageContext<TMeta>) => ReactNode` | — | Custom per-message renderer. Return `null` to fall back to default rendering. `ctx` includes `isStreaming`, `messageProps` for scroll targets, `defaultRender(slots?)`, and action callbacks/default action controls. Existing one-argument renderers continue to work. |
-| `markdownProps` | `Omit<MarkdownProps, 'text' \| 'codeTheme' \| 'headless' \| 'streaming'>` | — | Props forwarded to the built-in Markdown renderer for every message, including `sanitizer`, `markedOptions`, and `markedExtensions`. |
+| `markdownProps` | `Omit<MarkdownProps, 'text' \| 'codeTheme' \| 'headless' \| 'streaming'>` | — | Props forwarded to the built-in Markdown renderer for every message, including `sanitizer`, `markedOptions`, `markedExtensions`, and `onCopyError`. |
 | `markdownSanitizer` | `MarkdownSanitizer` | — | Convenience alias for `markdownProps.sanitizer`; takes precedence when both are provided. |
 | `hiddenRoles` | `Role[]` | `['system']` | Message roles hidden from the transcript. Tool calls are visible by default in `<Chorus>`; pass `['system', 'tool']` to hide them, or `[]` to show all roles. `<Chorus>` accepts `hiddenRoles` only — `showSystemMessages` exists on `<ChatWindow>` for backwards compatibility. |
 
@@ -692,7 +801,7 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `appendToolDelta(delta)` | Create/update a `role: 'tool'` message from an accumulated connector tool delta. |
 | `streamCallbacks()` | Convenience helper returning `{ onChunk, onReasoning, onToolDelta, onDone }` for `useChorusStream(...).send()`. It is present at runtime; optional chaining keeps older hand-written helper mocks type-compatible. |
 | `finalizeAssistant()` | Mark the assistant message complete. If first-token chunks are still buffered, completion waits until they flush. |
-| `signal` | `AbortSignal` — aborted when the user hits Stop. |
+| `signal` | `AbortSignal` — aborted when Stop, clear-while-sending, or a superseding session cancels the active send. |
 | `systemPrompt` | The optional `systemPrompt` prop. Use it when serializing custom `onSend` requests; Chorus does not insert it into the `messages` argument on this path. |
 
 Call `finalizeAssistant()` when your custom stream is done. In development, Chorus warns if `onSend` appended chunks and then resolved without finalizing; it will still flush those chunks and reset the sending state so the UI cannot get stuck in Stop mode.
@@ -737,7 +846,7 @@ export function SupportChat() {
 }
 ```
 
-The ref exposes `send(text, attachments?)`, `stop()`, `clear()`, `focus()`, `getMessages()`, and `scrollToMessage(id)`. `send()` and `clear()` are no-ops while `<Chorus disabled>`, `<Chorus readOnly>`, or an async built-in persistence load is pending; `stop()` remains available for active responses.
+The ref exposes `send(text, attachments?)`, `stop()`, `clear()`, `focus()`, `getMessages()`, and `scrollToMessage(id)`. `scrollToMessage(id)` returns `true` when it finds a rendered message row and `false` when the id is not currently mounted; check `hiddenRoles`, `maxRenderedMessages`, and custom `renderMessage` implementations that return a fragment/custom component without spreading `ctx.messageProps`. `send()` and `clear()` are no-ops while `<Chorus disabled>`, `<Chorus readOnly>`, or an async built-in persistence load is pending; `stop()` remains available for active responses.
 
 ### Disabled and read-only states
 
@@ -802,7 +911,7 @@ const conversations = useConversations({ defaultTitle: 'New chat' });
 />
 ```
 
-`useConversations({ indexKey, messageKeyPrefix, storage, onError })` stores a JSON index of `{ id, title, createdAt, updatedAt, pinned }` records under `indexKey` (default `chorus-conversations-index`) and stores each transcript under `${messageKeyPrefix}${id}`. `deleteConversation(id)` removes the transcript key via `removeItem` when available (or writes `[]` without it). Index read/write and transcript delete failures surface through `result.error` and `onError(error)` with `error.key`, `error.operation` (`'read' | 'write' | 'delete'`), and `error.conversationId` for transcript deletes. With async storage, `createConversation()` calls made before `loaded` resolves are queued and merged into the loaded index; custom sidebars should still disable New/Rename/Delete controls while `loaded` is false to avoid surprising delayed mutations.
+`useConversations({ indexKey, messageKeyPrefix, storage, onError })` stores a JSON index of `{ id, title, createdAt, updatedAt, pinned, pristine }` records under `indexKey` (default `chorus-conversations-index`) and stores each transcript under `${messageKeyPrefix}${id}`. `pristine` tracks whether `renameFromFirstMessage()` may still auto-title the conversation; explicit renames and successful auto-renames clear it. Selecting a conversation bumps `updatedAt` so recency-sorted lists promote recently visited chats. `deleteConversation(id)` removes the transcript key via `removeItem` when available (or writes `[]` without it). Index read/write and transcript delete failures surface through `result.error` and `onError(error)` with `error.key`, `error.operation` (`'read' | 'write' | 'delete'`), and `error.conversationId` for transcript deletes. With async storage, `createConversation()` calls made before `loaded` resolves are queued and merged into the loaded index; custom sidebars should still disable New/Rename/Delete controls while `loaded` is false to avoid surprising delayed mutations.
 
 ### Persistence examples
 
@@ -871,7 +980,29 @@ Use `onFinish` when you need the final assistant message rather than token-by-to
 />
 ```
 
-`onFinish` is not called for Stop/abort, transport errors, provider error payloads, tool-only streams, or other sends that produce no assistant message. Use `onStreamDone` or `onToolCall` when you need completion telemetry for tool-only turns.
+`onFinish` is not called for Stop/abort, transport errors, provider error payloads, tool-only streams, or other sends that produce no assistant message. Use `onAbort` for cancellation telemetry, and `onStreamDone` or `onToolCall` when you need completion telemetry for tool-only turns.
+
+### Abort telemetry with `onAbort`
+
+Use `onAbort` when you need to persist or measure cancelled generations:
+
+```tsx
+<Chorus
+  transport="/api/chat"
+  onAbort={({ message, messages, reason, source, path }) => {
+    analytics.track('assistant_aborted', {
+      assistantMessageId: message?.id,
+      partialCharacters: message?.text.length ?? 0,
+      turns: messages.filter((m) => m.role === 'user').length,
+      reason, // 'stop' | 'clear' | 'superseded'
+      source, // 'user' | 'programmatic'
+      path, // 'transport' | 'onSend'
+    });
+  }}
+/>
+```
+
+Built-in Stop reports `reason: 'stop'` and `source: 'user'`; `ref.stop()` reports `reason: 'stop'` and `source: 'programmatic'`. Clearing while sending reports `reason: 'clear'` before the transcript is reset, so `messages` can still include the partial assistant. Built-in send/edit/regenerate/retry actions do not start a second generation while one is active; if an integration supersedes an active session, Chorus reports `reason: 'superseded'` and `source: 'programmatic'`.
 
 ### Transcript observer and export
 
@@ -1030,6 +1161,7 @@ const { send, abort, sending } = useChorusStream<MyMeta>(transport, { connector:
 - `send(..., { minDelayMs })` buffers the first streamed chunks until that many milliseconds have elapsed from send start, then flushes them before continuing normally.
 - `send(..., { onReasoning, onToolDelta })` receives connector-emitted reasoning chunks and accumulated tool deltas when you use the hook directly. `<Chorus>` wires these into `Message.reasoning` and `role: 'tool'` messages automatically; advanced `onSend` bridges can pass `helpers.streamCallbacks?.()` to preserve the same behavior.
 - Non-abort transport, HTTP, connector, and in-band provider errors call `onError` when supplied and reject the returned `send()` promise. This lets README-style `await send(...)` bridges surface the friendly Chorus error banner through the surrounding `onSend` catch path.
+- If `onError` itself throws while handling a stream error, Chorus warns in development and still rejects `send()` with the original stream error. If `onDone` throws after a successful stream, `send()` rejects with that completion callback error and does not call `onError`.
 - `onError` receives raw transport details (including bounded HTTP response body snippets); the built-in UI continues to show only `errorMessage`.
 - `opts.connector` — `'openai'` | `'anthropic'` | `'gemini'` | `'auto'` | custom `Connector`. Defaults to `'auto'` which handles OpenAI, Gemini, Anthropic JSON, plain-text SSE, reasoning/tool deltas, and in-band `{ error }` payloads.
 - If a connector exposes `createState()`, the hook creates one state object per `send()` and passes it to every `extract(data, state)` call for that stream. Do not store per-stream parser buffers in module globals; use connector state instead.
@@ -1091,12 +1223,16 @@ Returns a `Transport` that connects over a native WebSocket. Each incoming messa
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `protocols` | `string \| string[]` | – | WebSocket sub-protocols passed to the constructor |
-| `onOpen` | `() => void` | – | Called when the WebSocket connection opens |
-| `onClose` | `(code: number, reason: string) => void` | – | Called when the WebSocket closes, with the close code and reason |
+| `persistent` | `boolean` | `false` | Reuse one socket across sends instead of opening one socket per send |
+| `onOpen` | `() => void` | – | Called once for each real WebSocket open transition |
+| `onClose` | `(code: number, reason: string) => void` | – | Called once for each real WebSocket close transition, with the close code and reason |
 | `onError` | `(event: Event) => void` | – | Called when the WebSocket reports an error |
+| `onMessage` | `(data: string, event: MessageEvent) => void` | – | Observes every decoded WebSocket message; useful for persistent server-pushed updates when no send stream is active |
 | `formatMessage` | `(text, history: Message<TMeta>[]) => string` | `JSON.stringify({ prompt, history })` | Serialise the outgoing request |
 
-Supports `AbortSignal` cancellation — closing the socket when the user hits Stop. Serializer (`formatMessage`) and `ws.send()` failures reject the transport promise and close the socket, so they surface through `onError` like HTTP/SSE failures. Incoming string, `Blob`, `ArrayBuffer`, and typed-array messages are decoded as text; other message types error the response body instead of silently emitting an empty chunk.
+Default mode opens a fresh socket per send, then closes it when the response stream ends, the connector reports a done sentinel, or the `AbortSignal` fires. Serializer (`formatMessage`) and `ws.send()` failures reject the transport promise and close that socket, so they surface through `onError` like HTTP/SSE failures. Incoming string, `Blob`, `ArrayBuffer`, and typed-array messages are decoded as text; other message types error the response body instead of silently emitting an empty chunk.
+
+Persistent mode opens a single socket on the first send and keeps it open across sends. The returned transport is still callable as a normal `Transport`, and also exposes `transport.close(code?, reason?)` for explicit cleanup; runtimes with `FinalizationRegistry` also attempt to close the persistent socket when the transport is garbage-collected, but UI code should call `close()` during unmount/dispose rather than relying on GC timing. `onOpen` and `onClose` fire for real socket transitions, not once per send. Because the socket stays open, application/server protocol code is responsible for reconnect/backoff and request/response correlation. If multiple requests or pushed messages can overlap, include request IDs (or similar) in your protocol and filter in a custom connector/`onMessage`. Make sure each response emits a connector-specific done sentinel (or cancel the response body) so `useChorusStream` can finish the current send while the socket remains open.
 
 ### Custom connector
 
@@ -1161,7 +1297,7 @@ const body = toOpenAIChatCompletionsBody(history, { model: 'gpt-4o-mini' });
 const stream = await openai.chat.completions.create(body);
 ```
 
-The runnable [`examples/with-openai`](./examples/with-openai) app uses this helper and sets `express.json({ limit: '10mb' })` so data URL images are accepted by the proxy.
+The runnable [`examples/with-next`](./examples/with-next) and [`examples/with-openai`](./examples/with-openai) apps use this helper. The Express app sets `express.json({ limit: '10mb' })`; on Next.js/serverless hosts, keep `maxAttachmentBytes` under the platform request limit or upload large files separately.
 
 ### Tool-call history recipe
 
@@ -1196,7 +1332,7 @@ To observe deltas without executing tools:
   transport="/api/chat"
   connector="openai"
   onToolDelta={({ delta, message }) => {
-    console.log('tool update', delta.id, message.toolCall?.input);
+    console.log('tool update', delta.id, message.toolCall.input);
   }}
   onStreamDone={({ toolMessages }) => {
     console.log('completed tool calls', toolMessages);
@@ -1255,7 +1391,7 @@ The block shows the tool name in a header. Clicking expands it to reveal the inp
 
 ### Custom renderer via `renderMessage`
 
-Supply a `renderMessage` render-prop to take full control of how any message is displayed. Return `null` to fall back to the default renderer for that message. The second argument exposes rendering context: `ctx.isStreaming`, `ctx.messageProps`, `ctx.defaultRender(slots?)`, and `ctx.actions` (`edit(newText)`, `regenerate()`, `delete()`, `copy()`, `feedback('up' | 'down')`, plus `ctx.actions.defaultRender()` for the built-in action controls).
+Supply a `renderMessage` render-prop to take full control of how any message is displayed. Return `null` to fall back to the default renderer for that message. The second argument exposes rendering context: `ctx.isStreaming`, `ctx.messageProps`, `ctx.defaultRender(slots?)`, and `ctx.actions` (`edit(newText)`, `regenerate()`, `delete()`, `copy()`, `feedback('up' | 'down')`, `initialFeedback`, plus `ctx.actions.defaultRender()` for the built-in action controls). Repeating the current `initialFeedback` variant is a no-op.
 
 For fully custom DOM rows, spread `ctx.messageProps` on the outer element you want `ChorusRef.scrollToMessage(id)` to target. Chorus automatically adds those props to a single DOM element returned directly from `renderMessage`, but spread them yourself when returning a fragment or custom component. Built-in `ctx.defaultRender()` and `<MessageBubble>` already include a scroll target.
 
@@ -1264,7 +1400,7 @@ For fully custom DOM rows, spread `ctx.messageProps` on the outer element you wa
   messages={messages}
   hiddenRoles={['system']} // show tool calls while still hiding system prompts
   renderMessage={(msg, ctx) => {
-    if (msg.role === 'tool' && msg.toolCall) {
+    if (msg.role === 'tool') {
       return (
         <div key={msg.id} {...ctx.messageProps} className="my-tool-step">
           <strong>{msg.toolCall.name}</strong>
@@ -1372,7 +1508,7 @@ Reasoning blocks reuse existing palette variables (`--chorus-chat-bg`, `--chorus
 
 ### CSS custom properties for tool blocks
 
-Override the look of built-in tool call blocks via CSS variables:
+Built-in tool call blocks can be themed through palette keys (`toolBorder`, `toolHeaderBg`, `toolHeaderText`, `toolHeaderHover`, `toolNameText`, `toolBodyBg`, `toolLabelText`, and `toolCodeText`). For advanced CSS-only overrides, use the underlying CSS variables directly:
 
 ```css
 :root {
@@ -1398,12 +1534,14 @@ Pass a `palette` prop to `<Chorus>` (or wrap components in `<ChorusTheme palette
     assistantBubbleBg: '#6366f1',
     assistantText: '#ffffff',
     userBubbleBg: '#e5e7eb',
+    toolHeaderBg: '#18181b',
+    toolNameText: '#f4f4f5',
   }}
   onSend={…}
 />
 ```
 
-Available palette keys: `chatBg`, `chatText`, `border`, `assistantBubbleBg`, `assistantText`, `assistantBorder`, `userBubbleBg`, `userText`, `userBorder`, `inputAreaBg`, `inputBg`, `inputText`, `inputBorder`, `sendButtonBg`, `sendButtonText`, `focusRing`, `actionText`, `actionHoverBg`, `actionHoverText`, `errorBg`, `errorBorder`, `errorText`.
+Available palette keys: `chatBg`, `chatText`, `border`, `assistantBubbleBg`, `assistantText`, `assistantBorder`, `userBubbleBg`, `userText`, `userBorder`, `inputAreaBg`, `inputBg`, `inputText`, `inputBorder`, `sendButtonBg`, `sendButtonText`, `focusRing`, `actionText`, `actionHoverBg`, `actionHoverText`, `errorBg`, `errorBorder`, `errorText`, `toolBorder`, `toolHeaderBg`, `toolHeaderText`, `toolHeaderHover`, `toolNameText`, `toolBodyBg`, `toolLabelText`, `toolCodeText`.
 
 ## Individual Components
 
@@ -1416,7 +1554,7 @@ import { ChatWindow, ChatInput, ChorusTheme, Markdown } from 'react-chorus';
 - **`<ChatWindow messages={…} typing={…} />`** — renders the scrollable message list with empty-state prompts, a typing indicator, errors, optional jump-to-latest button, and optional `maxRenderedMessages` windowing. It accepts `hiddenRoles?: Role[]` (default `['system', 'tool']`); `showSystemMessages` is deprecated but remains supported as an alias for showing all roles. Pass `markdownSanitizer`, `markdownProps`, `renderError`, or `renderMessage` to customize built-in rendering.
 - **`<ChatInput value onSend onStop placeholder sending />`** — the text input, send/stop button, disabled/read-only states, and optional attachment composer (`accept`, paste/drop, limits, cancellable `uploadAttachment`).
 - **`<ChorusTheme palette={…}>`** — applies theme CSS variables to any subtree.
-- **`<Markdown text={…} codeTheme="dark" />`** — standalone markdown renderer with syntax highlighting and copy buttons. It supports `streaming` to render escaped plain text until finalization, `sanitizer` to provide a custom DOMPurify-compatible sanitizer when SSR needs sanitized raw HTML instead of the built-in no-raw-HTML safe mode, and `markedOptions`/`markedExtensions` for per-instance parser customization.
+- **`<Markdown text={…} codeTheme="dark" />`** — standalone markdown renderer with syntax highlighting and copy buttons. It supports `streaming` to render escaped plain text until finalization, `sanitizer` to provide a custom DOMPurify-compatible sanitizer when SSR needs sanitized raw HTML instead of the built-in no-raw-HTML safe mode, `markedOptions`/`markedExtensions` for per-instance parser customization, and `onCopyError` for clipboard-copy failures.
 - **`<MessageBubble message={…} />`** — renders the default bubble for one message, including attachments and screen-reader speaker labels. Accepts `className`, `style`, `codeTheme`, `headless`, `streaming`, `markdownProps`, `markdownSanitizer`, and decoration slots (`before`, `headerSlot`, `footerSlot`, `after`) without replacing the full renderer.
 
 ### Headless subpath
@@ -1454,18 +1592,53 @@ interface Attachment {
   metadata?: Record<string, unknown>;
 }
 
-interface Message<TMeta = Record<string, unknown>> {
+interface MessageBase<TMeta = Record<string, unknown>> {
   id: string;
-  role: Role;
-  text: string; // supports CommonMark + GFM
-  reasoning?: string; // optional thinking/reasoning trace rendered in a collapsed details block
-  attachments?: Attachment[]; // populated by <ChatInput accept="..." />
-  toolCall?: ToolCall; // populated when role === 'tool'
   metadata?: TMeta; // optional typed data (timestamps, model, latency, etc.)
 }
+
+interface UserMessage<TMeta = Record<string, unknown>> extends MessageBase<TMeta> {
+  role: 'user';
+  text: string; // supports CommonMark + GFM
+  reasoning?: string;
+  attachments?: Attachment[]; // populated by <ChatInput accept="..." />
+  toolCall?: never;
+}
+
+interface AssistantMessage<TMeta = Record<string, unknown>> extends MessageBase<TMeta> {
+  role: 'assistant';
+  text: string;
+  reasoning?: string; // optional thinking/reasoning trace rendered in a collapsed details block
+  attachments?: Attachment[];
+  toolCall?: never;
+}
+
+interface SystemMessage<TMeta = Record<string, unknown>> extends MessageBase<TMeta> {
+  role: 'system';
+  text: string;
+  reasoning?: string;
+  attachments?: never;
+  toolCall?: never;
+}
+
+interface ToolMessage<TMeta = Record<string, unknown>> extends MessageBase<TMeta> {
+  role: 'tool';
+  text?: string; // optional for pure tool calls/results
+  reasoning?: string;
+  attachments?: never;
+  toolCall: ToolCall;
+}
+
+type AnyChorusMessage<TMeta = Record<string, unknown>> =
+  | UserMessage<TMeta>
+  | AssistantMessage<TMeta>
+  | SystemMessage<TMeta>
+  | ToolMessage<TMeta>;
+
+type Message<TMeta = Record<string, unknown>> = AnyChorusMessage<TMeta>;
 ```
 
-`Message` defaults to arbitrary metadata for backwards compatibility. Pass a type argument when your app stores structured metadata:
+`Message` defaults to arbitrary metadata for backwards compatibility. It is a discriminated union, so `message.role === 'tool'` narrows `message.toolCall` to a required `ToolCall`. Pass a type argument when your app stores structured metadata:
 
 ```ts
 type MyMeta = {

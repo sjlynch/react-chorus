@@ -1,6 +1,6 @@
 {
   "name": "react-chorus",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Composable chat UI components for React.",
   "type": "module",
   "main": "./dist/react-chorus.cjs",

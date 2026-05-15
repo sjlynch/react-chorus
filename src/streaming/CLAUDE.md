@@ -24,8 +24,10 @@ The type is exported from `src/hooks/useChorusStream.ts` and re-exported from `C
 
 `createWebSocketTransport(url, opts?)` wraps a WebSocket URL:
 
-- Opens a fresh socket per send and sends `formatMessage(text, history)`.
-- Wraps each incoming WS message as `data: <message>\n\n` in a `ReadableStream`.
-- Resolves a `Response` once the socket opens and closes/errors/aborts with the stream.
+- Opens a fresh socket per send by default and sends `formatMessage(text, history)`.
+- With `{ persistent: true }`, opens one socket on first send, reuses it across sends, and exposes `transport.close(code?, reason?)` for explicit cleanup; runtimes with `FinalizationRegistry` also attempt cleanup when the transport is GC'd.
+- Persistent mode keeps the socket open when an individual response stream ends, so application protocol code is responsible for reconnect/backoff, request/response correlation, and emitting done sentinels (or cancelling response bodies) to finish sends.
+- Wraps each incoming WS message as `data: <message>\n\n` in a `ReadableStream`; `onMessage` can observe decoded pushed messages even when no send stream is active.
+- Resolves a `Response` once the socket opens and the message sends, then closes/errors/aborts with the response stream.
 
 Both transports produce SSE-formatted output so `readSSEStream` and connector parsing work unchanged.

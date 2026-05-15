@@ -31,8 +31,7 @@ vi.mock('highlight.js', () => {
 
 const originalNavigatorClipboard = typeof navigator === 'undefined' ? undefined : Object.getOwnPropertyDescriptor(navigator, 'clipboard');
 
-function mockClipboardWriteText() {
-  const writeText = vi.fn((_text: string) => Promise.resolve());
+function mockClipboardWriteText(writeText = vi.fn((_text: string) => Promise.resolve())) {
   Object.defineProperty(navigator, 'clipboard', {
     configurable: true,
     value: { writeText },
@@ -314,5 +313,30 @@ describe('Markdown', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(1200); });
 
     expect(button).toHaveTextContent('Copy');
+  });
+
+  it('shows copy failure feedback and calls onCopyError when clipboard write rejects', async () => {
+    vi.useFakeTimers();
+    const clipboardError = new Error('Permission denied');
+    const writeText = mockClipboardWriteText(vi.fn((_text: string) => Promise.reject(clipboardError)));
+    const onCopyError = vi.fn();
+    render(<Markdown text={'```ts\nconst x = 1;\n```'} onCopyError={onCopyError} />);
+    const button = screen.getByRole('button', { name: 'Copy code' });
+
+    fireEvent.click(button);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(writeText).toHaveBeenCalledWith('const x = 1;');
+    expect(onCopyError).toHaveBeenCalledWith(clipboardError);
+    expect(button).toHaveTextContent('Copy failed');
+    expect(button).toHaveClass('copy-failed');
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1200); });
+
+    expect(button).toHaveTextContent('Copy');
+    expect(button).not.toHaveClass('copy-failed');
   });
 });
