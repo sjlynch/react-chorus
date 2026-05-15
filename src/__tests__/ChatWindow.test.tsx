@@ -2,7 +2,7 @@ import { createRef } from 'react';
 import type React from 'react';
 import { readFileSync } from 'node:fs';
 import { describe, it, expect, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ChatWindow, MessageBubble, type MessageFeedback, type RenderMessageContext } from '../components/ChatWindow';
 import type { Message } from '../types';
@@ -401,6 +401,35 @@ describe('ChatWindow', () => {
       await user.click(screen.getByRole('button', { name: 'Copy' }));
       expect(writeText).toHaveBeenCalledWith('Hi there');
     } finally {
+      if (originalClipboard) Object.defineProperty(navigator, 'clipboard', originalClipboard);
+      else Reflect.deleteProperty(navigator, 'clipboard');
+    }
+  });
+
+  it('shows failed feedback when the default message copy action rejects', async () => {
+    vi.useFakeTimers();
+    const writeText = vi.fn().mockRejectedValue(new Error('Permission denied'));
+    const originalClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+
+    try {
+      render(<ChatWindow messages={[ASST_MSG]} />);
+      const copyButton = screen.getByRole('button', { name: 'Copy' });
+
+      fireEvent.click(copyButton);
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(writeText).toHaveBeenCalledWith('Hi there');
+      expect(screen.getByRole('button', { name: 'Copy failed' })).toHaveTextContent('Copy failed');
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(1200); });
+
+      expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
       if (originalClipboard) Object.defineProperty(navigator, 'clipboard', originalClipboard);
       else Reflect.deleteProperty(navigator, 'clipboard');
     }

@@ -245,10 +245,10 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
   const copyMessage = React.useCallback((message: Message<TMeta>) => {
     if (onCopy) {
       onCopy(message);
-      return;
+      return true;
     }
 
-    writeTextToClipboard(message.text);
+    return writeTextToClipboard(message.text);
   }, [onCopy]);
   const [feedbackOverrides, setFeedbackOverrides] = React.useState<Record<string, MessageFeedback>>({});
   const feedbackOverridesRef = React.useRef(feedbackOverrides);
