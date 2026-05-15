@@ -43,6 +43,12 @@ export const typedChorusElement = (
       void latency;
       void source;
     }}
+    getMessageFeedback={(message) => {
+      const model: string | undefined = message.metadata?.model;
+      // @ts-expect-error MyMeta does not include reviewState
+      void message.metadata?.reviewState;
+      return model ? 'up' : null;
+    }}
     renderMessage={(message, ctx) => {
       const model: string | undefined = message.metadata?.model;
       // @ts-expect-error MyMeta does not include traceId
@@ -66,7 +72,9 @@ webSocketTransport.close();
 
 const typedRef = { current: null } as RefObject<ChorusRef<MyMeta> | null>;
 const typedRefMessages: Message<MyMeta>[] | undefined = typedRef.current?.getMessages();
+const typedRefScrolled: boolean | undefined = typedRef.current?.scrollToMessage('1');
 void typedRefMessages;
+void typedRefScrolled;
 
 const typedHelpers: ChorusSendHelpers = {
   appendAssistant: (_chunk) => undefined,
