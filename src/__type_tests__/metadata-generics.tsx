@@ -1,11 +1,12 @@
 import type { RefObject } from 'react';
 import { ChatWindow, Chorus, MessageBubble, createFetchSSETransport, createWebSocketTransport, useChorusPersistence, useChorusStream } from '../index';
-import type { ChorusOnSend, ChorusRef, ChorusSendHelpers, Message, Transport } from '../index';
+import type { ChorusOnAbort, ChorusOnSend, ChorusRef, ChorusSendHelpers, Message, Transport } from '../index';
 import type {
   AttachmentError as HeadlessAttachmentError,
   AttachmentErrorReason as HeadlessAttachmentErrorReason,
   AttachmentSource as HeadlessAttachmentSource,
   AttachmentUploadResult as HeadlessAttachmentUploadResult,
+  ChorusOnAbort as HeadlessChorusOnAbort,
   ChorusOnSend as HeadlessChorusOnSend,
   ChorusSendHelpers as HeadlessChorusSendHelpers,
   UploadAttachment as HeadlessUploadAttachment,
@@ -43,6 +44,20 @@ export const typedChorusElement = (
       void latency;
       void source;
     }}
+    onAbort={(context) => {
+      const latency: number | undefined = context.message?.metadata?.latencyMs;
+      const path: 'transport' | 'onSend' = context.path;
+      void latency;
+      void path;
+      // @ts-expect-error MyMeta does not include abortTraceId
+      void context.message?.metadata?.abortTraceId;
+    }}
+    getMessageFeedback={(message) => {
+      const model: string | undefined = message.metadata?.model;
+      // @ts-expect-error MyMeta does not include reviewState
+      void message.metadata?.reviewState;
+      return model ? 'up' : null;
+    }}
     renderMessage={(message, ctx) => {
       const model: string | undefined = message.metadata?.model;
       // @ts-expect-error MyMeta does not include traceId
@@ -58,12 +73,17 @@ const fetchTransport = createFetchSSETransport<MyMeta>('/api/chat', {
 });
 
 const webSocketTransport = createWebSocketTransport<MyMeta>('wss://api.example.com/chat', {
+  persistent: true,
+  onMessage: (_data, _event) => undefined,
   formatMessage: (_text, history) => JSON.stringify({ latency: history[0].metadata?.latencyMs }),
 });
+webSocketTransport.close();
 
 const typedRef = { current: null } as RefObject<ChorusRef<MyMeta> | null>;
 const typedRefMessages: Message<MyMeta>[] | undefined = typedRef.current?.getMessages();
+const typedRefScrolled: boolean | undefined = typedRef.current?.scrollToMessage('1');
 void typedRefMessages;
+void typedRefScrolled;
 
 const typedHelpers: ChorusSendHelpers = {
   appendAssistant: (_chunk) => undefined,
@@ -78,6 +98,11 @@ const typedOnSend: ChorusOnSend<MyMeta> = async (_text, history, helpers) => {
   helpers.appendAssistant(String(latency ?? 0));
 };
 
+const typedOnAbort: ChorusOnAbort<MyMeta> = (context) => {
+  const model: string | undefined = context.message?.metadata?.model;
+  void model;
+};
+const headlessOnAbort: HeadlessChorusOnAbort<MyMeta> = typedOnAbort;
 const headlessOnSend: HeadlessChorusOnSend<MyMeta> = typedOnSend;
 const headlessHelpers: HeadlessChorusSendHelpers = typedHelpers;
 const headlessUpload: HeadlessUploadAttachment = async (file) => ({ name: file.name, type: file.type, size: file.size, data: 'data:' });
@@ -89,6 +114,7 @@ const headlessAttachmentError: HeadlessAttachmentError = {
   source: headlessAttachmentSource,
   message: 'failed',
 };
+void headlessOnAbort;
 void headlessOnSend;
 void headlessHelpers;
 void headlessUpload;

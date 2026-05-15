@@ -80,6 +80,7 @@ describe('Chorus', () => {
           errorBg: '#444',
           errorBorder: '#555',
           errorText: '#666',
+          toolHeaderBg: '#777',
         }}
       />
     );
@@ -97,6 +98,26 @@ describe('Chorus', () => {
     expect(root.style.getPropertyValue('--chorus-error-bg')).toBe('#444');
     expect(root.style.getPropertyValue('--chorus-error-border')).toBe('#555');
     expect(root.style.getPropertyValue('--chorus-error-text')).toBe('#666');
+    expect(root.style.getPropertyValue('--chorus-tool-header-bg')).toBe('#777');
+  });
+
+  it('seeds feedback through getMessageFeedback', () => {
+    const message: Message<{ storedFeedback: 'down' | null }> = {
+      id: 'stored-feedback',
+      role: 'assistant',
+      text: 'Persisted reply',
+      metadata: { storedFeedback: 'down' },
+    };
+
+    render(
+      <Chorus
+        initialMessages={[message]}
+        onFeedback={vi.fn()}
+        getMessageFeedback={(m) => m.metadata?.storedFeedback === 'down' ? 'down' : null}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: 'Thumbs down' })).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('exposes an imperative ChorusRef for send, focus, clear, stop, and scrollToMessage', async () => {
@@ -118,7 +139,9 @@ describe('Chorus', () => {
       expect.objectContaining({ id: 'a1', role: 'assistant', text: 'ref reply' }),
     ]);
 
-    act(() => ref.current?.scrollToMessage('a1'));
+    let scrolled: boolean | undefined;
+    act(() => { scrolled = ref.current?.scrollToMessage('a1'); });
+    expect(scrolled).toBe(true);
     expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
 
     act(() => ref.current?.stop());
@@ -145,10 +168,39 @@ describe('Chorus', () => {
     );
 
     const customMessage = screen.getByTestId('custom-message');
-    act(() => ref.current?.scrollToMessage('a1'));
+    let scrolled: boolean | undefined;
+    act(() => { scrolled = ref.current?.scrollToMessage('a1'); });
 
+    expect(scrolled).toBe(true);
     expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
     expect(scrollIntoView.mock.contexts[0]).toBe(customMessage);
+  });
+
+  it('scrollToMessage returns false when the id is not among rendered messages', () => {
+    const ref = React.createRef<ChorusRef>();
+    const scrollIntoView = vi.fn();
+    window.HTMLElement.prototype.scrollIntoView = scrollIntoView;
+
+    render(
+      <Chorus
+        ref={ref}
+        messages={[
+          { id: 's1', role: 'system', text: 'Hidden system prompt' },
+          { id: 'u1', role: 'user', text: 'Visible user message' },
+        ]}
+      />
+    );
+
+    expect(screen.queryByText('Hidden system prompt')).not.toBeInTheDocument();
+
+    let hiddenResult: boolean | undefined;
+    act(() => { hiddenResult = ref.current?.scrollToMessage('s1'); });
+    let missingResult: boolean | undefined;
+    act(() => { missingResult = ref.current?.scrollToMessage('missing-id'); });
+
+    expect(hiddenResult).toBe(false);
+    expect(missingResult).toBe(false);
+    expect(scrollIntoView).not.toHaveBeenCalled();
   });
 
   it('transport path send() fires transport and streams tokens into the message list', async () => {
@@ -1299,6 +1351,76 @@ describe('Chorus', () => {
     await waitFor(() => expect(onSend).toHaveBeenCalledWith('empty', expect.any(Array), expect.any(Object)));
 
     expect(onFinish).not.toHaveBeenCalled();
+  });
+
+  it('calls onAbort with the partial assistant when Stop cancels streamed onSend output', async () => {
+    const user = userEvent.setup();
+    const onAbort = vi.fn();
+    let capturedSignal: AbortSignal | undefined;
+    const onSend = vi.fn<OnSend>((_text, _messages, helpers) => {
+      capturedSignal = helpers.signal;
+      helpers.appendAssistant('partial abort');
+      return new Promise<void>((_resolve, reject) => {
+        helpers.signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+      });
+    });
+
+    render(<Chorus onSend={onSend} minAssistantDelayMs={0} onAbort={onAbort} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'stop after token');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+    expect(await screen.findByText('partial abort')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /stop/i }));
+
+    await waitFor(() => expect(onAbort).toHaveBeenCalledOnce());
+    expect(capturedSignal?.aborted).toBe(true);
+    expect(onAbort.mock.calls[0][0]).toEqual(expect.objectContaining({
+      reason: 'stop',
+      source: 'user',
+      path: 'onSend',
+      message: expect.objectContaining({ role: 'assistant', text: 'partial abort' }),
+    }));
+    expect(onAbort.mock.calls[0][0].messages).toEqual([
+      expect.objectContaining({ role: 'user', text: 'stop after token' }),
+      expect.objectContaining({ role: 'assistant', text: 'partial abort' }),
+    ]);
+  });
+
+  it('calls onAbort with a null assistant when Stop happens before the first transport token', async () => {
+    const user = userEvent.setup();
+    const onAbort = vi.fn();
+    let capturedSignal: AbortSignal | undefined;
+    const transport = vi.fn<Transport>((_text, _history, signal) => {
+      capturedSignal = signal;
+      return new Promise<Response>((_resolve, reject) => {
+        signal.addEventListener('abort', () => {
+          const err = new Error('Aborted');
+          err.name = 'AbortError';
+          reject(err);
+        }, { once: true });
+      });
+    });
+
+    render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} onAbort={onAbort} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'stop before token');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /stop/i })).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: /stop/i }));
+
+    await waitFor(() => expect(onAbort).toHaveBeenCalledOnce());
+    expect(capturedSignal?.aborted).toBe(true);
+    expect(onAbort.mock.calls[0][0]).toEqual(expect.objectContaining({
+      reason: 'stop',
+      source: 'user',
+      path: 'transport',
+      message: null,
+    }));
+    expect(onAbort.mock.calls[0][0].messages).toEqual([
+      expect.objectContaining({ role: 'user', text: 'stop before token' }),
+    ]);
   });
 
   it('onSend path calls onSend with text, messages, and helpers', async () => {

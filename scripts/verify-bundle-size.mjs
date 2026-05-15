@@ -107,9 +107,34 @@ async function verifyReadmeLibraryMeasurements(measurements) {
       pattern: /\| `react-chorus\/headless` \| ([\d.]+ kB) \| ([\d.]+ kB) \|/,
     },
     {
+      key: 'rootUseChorusStream',
+      label: 'react-chorus (`useChorusStream`)',
+      pattern: /\| `react-chorus` \(`useChorusStream`\) \| ([\d.]+ kB) \| ([\d.]+ kB) \|/,
+    },
+    {
+      key: 'rootMarkdown',
+      label: 'react-chorus (`Markdown`)',
+      pattern: /\| `react-chorus` \(`Markdown`\) \| ([\d.]+ kB) \| ([\d.]+ kB) \|/,
+    },
+    {
+      key: 'rootChatWindow',
+      label: 'react-chorus (`ChatWindow`)',
+      pattern: /\| `react-chorus` \(`ChatWindow`\) \| ([\d.]+ kB) \| ([\d.]+ kB) \|/,
+    },
+    {
+      key: 'rootConversationList',
+      label: 'react-chorus (`ConversationList`)',
+      pattern: /\| `react-chorus` \(`ConversationList`\) \| ([\d.]+ kB) \| ([\d.]+ kB) \|/,
+    },
+    {
       key: 'transport',
       label: 'react-chorus/transport',
       pattern: /\| `react-chorus\/transport` \| ([\d.]+ kB) \| ([\d.]+ kB) \|/,
+    },
+    {
+      key: 'providerRequests',
+      label: 'react-chorus/provider-requests',
+      pattern: /\| `react-chorus\/provider-requests` \| ([\d.]+ kB) \| ([\d.]+ kB) \|/,
     },
     {
       key: 'highlight',
@@ -178,6 +203,11 @@ const externalizedRuntimeModulePatterns = [
 ];
 
 const highlightRuntimePattern = /(^|\/)node_modules\/highlight\.js\/(?!styles\/)/;
+const distDirPattern = normalizeModuleId(distDir).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const distUiComponentPattern = new RegExp(`${distDirPattern}/(?:ChatWindow|chat-input|conversation-list|Chorus|react-chorus-(?:headless|chat-window|conversation-list))[A-Za-z0-9_.-]*(?:\\.js|\\.cjs)$`);
+const distMarkdownPattern = new RegExp(`${distDirPattern}/(?:markdown|react-chorus-markdown)[A-Za-z0-9_.-]*(?:\\.js|\\.cjs)$`);
+const distWidgetPattern = new RegExp(`${distDirPattern}/(?:Chorus|react-chorus-headless)[A-Za-z0-9_.-]*(?:\\.js|\\.cjs)$`);
+
 const transportOnlyForbiddenPatterns = [
   { label: 'React runtime', pattern: /(^|\/)node_modules\/react\// },
   { label: 'DOMPurify', pattern: /(^|\/)node_modules\/dompurify\// },
@@ -185,7 +215,43 @@ const transportOnlyForbiddenPatterns = [
   { label: 'Marked', pattern: /(^|\/)node_modules\/marked\// },
   { label: 'Marked highlight', pattern: /(^|\/)node_modules\/marked-highlight\// },
   { label: 'UI components', pattern: /\/src\/components\// },
+  { label: 'published UI chunks', pattern: distUiComponentPattern },
+  { label: 'published Markdown chunks', pattern: distMarkdownPattern },
   { label: 'Chorus widget', pattern: /\/src\/Chorus(?:Headless)?\.tsx$/ },
+  { label: 'published Chorus widget chunks', pattern: distWidgetPattern },
+];
+
+const hookOnlyForbiddenPatterns = [
+  { label: 'DOMPurify', pattern: /(^|\/)node_modules\/dompurify\// },
+  { label: 'Lucide icons', pattern: /(^|\/)node_modules\/lucide-react\// },
+  { label: 'Marked', pattern: /(^|\/)node_modules\/marked\// },
+  { label: 'Marked highlight', pattern: /(^|\/)node_modules\/marked-highlight\// },
+  { label: 'highlight.js runtime', pattern: highlightRuntimePattern },
+  { label: 'UI components', pattern: /\/src\/components\// },
+  { label: 'published UI chunks', pattern: distUiComponentPattern },
+  { label: 'published Markdown chunks', pattern: distMarkdownPattern },
+  { label: 'Chorus widget', pattern: /\/src\/Chorus(?:Headless)?\.tsx$/ },
+  { label: 'published Chorus widget chunks', pattern: distWidgetPattern },
+];
+
+const markdownOnlyForbiddenPatterns = [
+  { label: 'Lucide icons', pattern: /(^|\/)node_modules\/lucide-react\// },
+  { label: 'ChatWindow components', pattern: /\/src\/components\/(?:ChatWindow|MessageRow|ChatInput|ConversationList|ToolCallBlock)\.tsx$/ },
+  { label: 'published UI chunks', pattern: distUiComponentPattern },
+  { label: 'Chorus widget', pattern: /\/src\/Chorus(?:Headless)?\.tsx$/ },
+  { label: 'published Chorus widget chunks', pattern: distWidgetPattern },
+];
+
+const conversationListForbiddenPatterns = [
+  { label: 'DOMPurify', pattern: /(^|\/)node_modules\/dompurify\// },
+  { label: 'Lucide icons', pattern: /(^|\/)node_modules\/lucide-react\// },
+  { label: 'Marked', pattern: /(^|\/)node_modules\/marked\// },
+  { label: 'Marked highlight', pattern: /(^|\/)node_modules\/marked-highlight\// },
+  { label: 'highlight.js runtime', pattern: highlightRuntimePattern },
+  { label: 'Markdown components', pattern: /\/src\/components\/Markdown\.tsx$/ },
+  { label: 'published Markdown chunks', pattern: distMarkdownPattern },
+  { label: 'ChatWindow components', pattern: /\/src\/components\/(?:ChatWindow|MessageRow|ChatInput|ToolCallBlock)\.tsx$/ },
+  { label: 'published widget chunks', pattern: new RegExp(`${distDirPattern}/(?:ChatWindow|chat-input|Chorus|react-chorus-(?:headless|chat-window))[A-Za-z0-9_.-]*(?:\\.js|\\.cjs)$`) },
 ];
 
 async function verifyPublishedDistExternalization() {
@@ -218,6 +284,8 @@ async function verifyEntrypointSmoke() {
     { label: 'headless CJS', file: 'react-chorus-headless.cjs', kind: 'cjs' },
     { label: 'transport ESM', file: 'react-chorus-transport.es.js', kind: 'esm' },
     { label: 'transport CJS', file: 'react-chorus-transport.cjs', kind: 'cjs' },
+    { label: 'provider-requests ESM', file: 'provider-requests.es.js', kind: 'esm' },
+    { label: 'provider-requests CJS', file: 'provider-requests.cjs', kind: 'cjs' },
   ];
 
   for (const { label, file, kind } of entrypoints) {
@@ -243,7 +311,12 @@ async function writeConsumerEntries(entryDir) {
   await mkdir(entryDir, { recursive: true });
   await writeFile(path.join(entryDir, 'root.js'), "import { Chorus } from 'react-chorus';\nconsole.log(Chorus);\n");
   await writeFile(path.join(entryDir, 'headless.js'), "import { ChorusHeadless } from 'react-chorus/headless';\nconsole.log(ChorusHeadless);\n");
+  await writeFile(path.join(entryDir, 'root-use-chorus-stream.js'), "import { useChorusStream } from 'react-chorus';\nconsole.log(useChorusStream);\n");
+  await writeFile(path.join(entryDir, 'root-markdown.js'), "import { Markdown } from 'react-chorus';\nconsole.log(Markdown);\n");
+  await writeFile(path.join(entryDir, 'root-chat-window.js'), "import { ChatWindow } from 'react-chorus';\nconsole.log(ChatWindow);\n");
+  await writeFile(path.join(entryDir, 'root-conversation-list.js'), "import { ConversationList } from 'react-chorus';\nconsole.log(ConversationList);\n");
   await writeFile(path.join(entryDir, 'transport.js'), "import { createFetchSSETransport, createWebSocketTransport } from 'react-chorus/transport';\nconsole.log(createFetchSSETransport, createWebSocketTransport);\n");
+  await writeFile(path.join(entryDir, 'provider-requests.js'), "import { toOpenAIChatCompletionsBody, toAnthropicMessagesBody, toGeminiGenerateContentBody } from 'react-chorus/provider-requests';\nconsole.log(toOpenAIChatCompletionsBody, toAnthropicMessagesBody, toGeminiGenerateContentBody);\n");
 }
 
 function normalizeRollupOutput(result) {
@@ -307,6 +380,12 @@ function collectDynamicChunkGraph(seedChunks, chunksByFileName) {
   return [...visited];
 }
 
+function hasPublishedDistSideEffects(id, external) {
+  if (external) return true;
+  const normalizedId = normalizeModuleId(id.split('?')[0]);
+  return !normalizedId.startsWith(`${normalizeModuleId(distDir)}/`);
+}
+
 async function buildConsumerBundle() {
   const cacheDir = path.join(rootDir, 'node_modules', '.cache', 'react-chorus-bundle-size');
   const entryDir = path.join(cacheDir, 'entries');
@@ -326,10 +405,21 @@ async function buildConsumerBundle() {
       cssCodeSplit: true,
       chunkSizeWarningLimit: 1500,
       rollupOptions: {
+        treeshake: {
+          // package.json declares only CSS as side-effectful. The verification
+          // bundle runs from this repository instead of an installed package, so
+          // mirror that published sideEffects contract for dist chunks here.
+          moduleSideEffects: hasPublishedDistSideEffects,
+        },
         input: {
           root: path.join(entryDir, 'root.js'),
           headless: path.join(entryDir, 'headless.js'),
+          rootUseChorusStream: path.join(entryDir, 'root-use-chorus-stream.js'),
+          rootMarkdown: path.join(entryDir, 'root-markdown.js'),
+          rootChatWindow: path.join(entryDir, 'root-chat-window.js'),
+          rootConversationList: path.join(entryDir, 'root-conversation-list.js'),
           transport: path.join(entryDir, 'transport.js'),
+          providerRequests: path.join(entryDir, 'provider-requests.js'),
         },
         external: isReactPeerDependency,
         output: {
@@ -351,7 +441,12 @@ async function verifyConsumerBundleBudgets() {
   const entryBudgets = [
     { label: 'root entry initial JS', entry: 'root', maxSize: 160 * KiB, maxGzip: 55 * KiB },
     { label: 'headless entry initial JS', entry: 'headless', maxSize: 165 * KiB, maxGzip: 56 * KiB },
+    { label: 'root useChorusStream import initial JS', entry: 'rootUseChorusStream', maxSize: 40 * KiB, maxGzip: 14 * KiB },
+    { label: 'root Markdown import initial JS', entry: 'rootMarkdown', maxSize: 85 * KiB, maxGzip: 30 * KiB },
+    { label: 'root ChatWindow import initial JS', entry: 'rootChatWindow', maxSize: 115 * KiB, maxGzip: 40 * KiB },
+    { label: 'root ConversationList import initial JS', entry: 'rootConversationList', maxSize: 12 * KiB, maxGzip: 5 * KiB },
     { label: 'transport subpath initial JS', entry: 'transport', maxSize: 8 * KiB, maxGzip: 3 * KiB },
+    { label: 'provider-requests subpath initial JS', entry: 'providerRequests', maxSize: 16 * KiB, maxGzip: 6 * KiB },
   ];
 
   const initialGraphs = new Map();
@@ -371,7 +466,7 @@ async function verifyConsumerBundleBudgets() {
     overBudget(budget.label, size, gzip, budget.maxSize, budget.maxGzip);
   }
 
-  for (const entry of ['root', 'headless']) {
+  for (const entry of ['root', 'headless', 'rootMarkdown', 'rootChatWindow']) {
     const graph = initialGraphs.get(entry) ?? [];
     const highlightInInitial = graph
       .map(fileName => chunksByFileName.get(fileName))
@@ -382,16 +477,48 @@ async function verifyConsumerBundleBudgets() {
     }
   }
 
-  const transportGraph = initialGraphs.get('transport') ?? [];
-  for (const fileName of transportGraph) {
-    const chunk = chunksByFileName.get(fileName);
-    if (!chunk) continue;
-    for (const { label, pattern } of transportOnlyForbiddenPatterns) {
-      if (chunkHasModule(chunk, pattern)) {
-        fail(`transport subpath pulled ${label} into ${chunk.fileName}; keep transport-only imports free of UI/Markdown dependencies.`);
+  function verifyGraphExcludes(entry, graph, patterns, guidance) {
+    for (const fileName of graph) {
+      const chunk = chunksByFileName.get(fileName);
+      if (!chunk) continue;
+      for (const { label, pattern } of patterns) {
+        if (chunkHasModule(chunk, pattern)) {
+          fail(`${entry} pulled ${label} into ${chunk.fileName}; ${guidance}`);
+        }
       }
     }
   }
+
+  verifyGraphExcludes(
+    'root useChorusStream import',
+    initialGraphs.get('rootUseChorusStream') ?? [],
+    hookOnlyForbiddenPatterns,
+    'keep hook-only root imports free of UI/Markdown/icon dependencies.',
+  );
+  verifyGraphExcludes(
+    'root Markdown import',
+    initialGraphs.get('rootMarkdown') ?? [],
+    markdownOnlyForbiddenPatterns,
+    'keep standalone Markdown free of chat-window and icon dependencies.',
+  );
+  verifyGraphExcludes(
+    'root ConversationList import',
+    initialGraphs.get('rootConversationList') ?? [],
+    conversationListForbiddenPatterns,
+    'keep conversation-list imports free of Markdown/widget dependencies.',
+  );
+  verifyGraphExcludes(
+    'transport subpath',
+    initialGraphs.get('transport') ?? [],
+    transportOnlyForbiddenPatterns,
+    'keep transport-only imports free of React/UI/Markdown dependencies.',
+  );
+  verifyGraphExcludes(
+    'provider-requests subpath',
+    initialGraphs.get('providerRequests') ?? [],
+    transportOnlyForbiddenPatterns,
+    'keep server-safe provider request helpers free of React/UI/Markdown dependencies.',
+  );
 
   const highlightChunks = chunks.filter(chunk => chunkHasModule(chunk, highlightRuntimePattern));
   if (highlightChunks.length === 0) {
