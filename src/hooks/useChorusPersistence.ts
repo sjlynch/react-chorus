@@ -75,6 +75,13 @@ interface PendingWrite {
   remove: boolean;
 }
 
+interface PendingPreloadChange<TMeta = Record<string, unknown>> {
+  key: string;
+  storage: StorageAdapter;
+  messages: Message<TMeta>[];
+  options?: PersistenceWriteOptions;
+}
+
 interface ParsedStoredMessages<TMeta = Record<string, unknown>> {
   messages: Message<TMeta>[];
   error: ChorusPersistenceError | null;
@@ -184,6 +191,9 @@ function writeToStorage(write: PendingWrite): void | Promise<void> {
  * Writes are serialized so async adapters cannot let an older save overwrite a
  * newer one. Pass writeDebounceMs to coalesce rapid updates (for example token
  * streams), and call flush() or pass { flush: true } for lifecycle boundaries.
+ * When getItem() is Promise-based, loaded is false until the initial read
+ * resolves; gate custom composers on loaded. Pre-load onChange calls are held
+ * and only replayed after the read confirms the key was empty.
  *
  * Message data is serialized with JSON by default. Pass serializeMessages and
  * deserializeMessages when you need custom validation or Date/class revival.
@@ -207,6 +217,7 @@ export function useChorusPersistence<TMeta = Record<string, unknown>>(
   const writeVersionRef = React.useRef(0);
   const initialAsyncReadRef = React.useRef<PendingRead | null>(null);
   const initialSyncReadRef = React.useRef<InitialSyncRead | null>(null);
+  const pendingPreloadChangeRef = React.useRef<PendingPreloadChange<TMeta> | null>(null);
   const initialErrorRef = React.useRef<ChorusPersistenceError | null>(null);
   const pendingWriteRef = React.useRef<PendingWrite | null>(null);
   const writeTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -248,6 +259,8 @@ export function useChorusPersistence<TMeta = Record<string, unknown>>(
     }
   });
   const [error, setError] = React.useState<ChorusPersistenceError | null>(() => initialErrorRef.current);
+  const stateRef = React.useRef(state);
+  stateRef.current = state;
 
   // Stable refs so the onChange callback never needs to change
   const storageRef = React.useRef(storage);
@@ -428,10 +441,36 @@ export function useChorusPersistence<TMeta = Record<string, unknown>>(
 
   React.useEffect(() => {
     let cancelled = false;
+    const pendingPreloadChange = pendingPreloadChangeRef.current;
+    if (pendingPreloadChange && (pendingPreloadChange.key !== key || pendingPreloadChange.storage !== storage)) {
+      pendingPreloadChangeRef.current = null;
+    }
 
     const applyRead = (raw: string | null, writeVersion: number) => {
       if (!cancelled && writeVersionRef.current === writeVersion) {
         const parsed = stateFromRaw<TMeta>(key, storage, raw, deserializeMessagesRef.current);
+        const pendingPreloadChange = pendingPreloadChangeRef.current;
+
+        if (pendingPreloadChange?.key === key && pendingPreloadChange.storage === storage) {
+          pendingPreloadChangeRef.current = null;
+          if (!parsed.error && raw === null) {
+            const nextVersion = writeVersionRef.current + 1;
+            writeVersionRef.current = nextVersion;
+            const nextState = { key, storage, value: pendingPreloadChange.messages, loaded: true, hasStoredValue: true };
+            stateRef.current = nextState;
+            setState(nextState);
+            setError(null);
+            queueWrite(
+              pendingPreloadChange.messages,
+              nextVersion,
+              Boolean(pendingPreloadChange.options?.flush),
+              Boolean(pendingPreloadChange.options?.removeIfEmpty),
+            );
+            return;
+          }
+        }
+
+        stateRef.current = parsed.state;
         setState(parsed.state);
         if (parsed.error) reportPersistenceError(parsed.error, 'deserialize', key);
         else setError(null);
@@ -440,13 +479,19 @@ export function useChorusPersistence<TMeta = Record<string, unknown>>(
 
     const applyReadError = (readError: unknown, writeVersion: number) => {
       if (!cancelled && writeVersionRef.current === writeVersion) {
-        setState(emptyState<TMeta>(key, storage, true));
+        const pendingPreloadChange = pendingPreloadChangeRef.current;
+        if (pendingPreloadChange?.key === key && pendingPreloadChange.storage === storage) pendingPreloadChangeRef.current = null;
+        const nextState = emptyState<TMeta>(key, storage, true);
+        stateRef.current = nextState;
+        setState(nextState);
         reportPersistenceError(readError, 'read', key);
       }
     };
 
     if (!key || !storage) {
-      setState(emptyState<TMeta>(key, storage, true));
+      const nextState = emptyState<TMeta>(key, storage, true);
+      stateRef.current = nextState;
+      setState(nextState);
       return () => { cancelled = true; };
     }
 
@@ -459,11 +504,12 @@ export function useChorusPersistence<TMeta = Record<string, unknown>>(
     const pendingInitialRead = initialAsyncReadRef.current;
     if (pendingInitialRead?.key === key && pendingInitialRead.storage === storage) {
       initialAsyncReadRef.current = null;
-      setState(prev => (
-        writeVersionRef.current === pendingInitialRead.writeVersion
-          ? emptyState<TMeta>(key, storage, false)
-          : prev
-      ));
+      setState(prev => {
+        if (writeVersionRef.current !== pendingInitialRead.writeVersion) return prev;
+        const nextState = emptyState<TMeta>(key, storage, false);
+        stateRef.current = nextState;
+        return nextState;
+      });
       pendingInitialRead.promise
         .then(raw => applyRead(raw, pendingInitialRead.writeVersion))
         .catch(readError => applyReadError(readError, pendingInitialRead.writeVersion));
@@ -476,11 +522,12 @@ export function useChorusPersistence<TMeta = Record<string, unknown>>(
       if (isPromiseLike<string | null>(raw)) {
         const promise = Promise.resolve(raw);
         promise.catch(() => {});
-        setState(prev => (
-          writeVersionRef.current === writeVersion
-            ? emptyState<TMeta>(key, storage, false)
-            : prev
-        ));
+        setState(prev => {
+          if (writeVersionRef.current !== writeVersion) return prev;
+          const nextState = emptyState<TMeta>(key, storage, false);
+          stateRef.current = nextState;
+          return nextState;
+        });
         promise
           .then(str => applyRead(str, writeVersion))
           .catch(readError => applyReadError(readError, writeVersion));
@@ -492,15 +539,24 @@ export function useChorusPersistence<TMeta = Record<string, unknown>>(
     }
 
     return () => { cancelled = true; };
-  }, [key, storage, deserializeMessagesRef, reportPersistenceError]);
+  }, [key, storage, deserializeMessagesRef, queueWrite, reportPersistenceError]);
 
   const onChange = React.useCallback((messages: Message<TMeta>[], writeOptions?: PersistenceWriteOptions) => {
-    writeVersionRef.current += 1;
-    const version = writeVersionRef.current;
-
     const k = keyRef.current;
     const s = storageRef.current;
-    setState({ key: k, storage: s, value: messages, loaded: true, hasStoredValue: true });
+    const currentState = stateRef.current;
+    const stateMatchesSource = currentState.key === k && currentState.storage === s;
+
+    if (k && s && (!stateMatchesSource || !currentState.loaded)) {
+      pendingPreloadChangeRef.current = { key: k, storage: s, messages, options: writeOptions };
+      return;
+    }
+
+    writeVersionRef.current += 1;
+    const version = writeVersionRef.current;
+    const nextState = { key: k, storage: s, value: messages, loaded: true, hasStoredValue: true };
+    stateRef.current = nextState;
+    setState(nextState);
 
     if (!k || !s) return;
     queueWrite(messages, version, Boolean(writeOptions?.flush), Boolean(writeOptions?.removeIfEmpty));

@@ -10,6 +10,8 @@ export interface ConversationListProps {
   renameConversation?: (id: string, title: string) => void;
   deleteConversation?: (id: string) => void;
   pinConversation?: (id: string, pinned?: boolean) => void;
+  /** Disable conversation mutations while async conversation storage is loading. */
+  loaded?: boolean;
   formatTimestamp?: (timestamp: string, conversation: ConversationSummary) => React.ReactNode;
   palette?: Palette;
   headless?: boolean;
@@ -66,6 +68,7 @@ export function ConversationList({
   renameConversation,
   deleteConversation,
   pinConversation,
+  loaded = true,
   formatTimestamp = defaultFormatTimestamp,
   palette,
   headless = false,
@@ -78,9 +81,11 @@ export function ConversationList({
   const [draftTitle, setDraftTitle] = React.useState('');
   const paletteVars = React.useMemo(() => (headless ? {} : styleVarsFromPalette(palette)), [headless, palette]);
   const orderedConversations = React.useMemo(() => sortedConversations(conversations), [conversations]);
+  const interactionsDisabled = !loaded;
   const rootClassName = [
     'chorus-conversation-list',
     headless ? 'chorus-conversation-list--headless' : undefined,
+    interactionsDisabled ? 'chorus-conversation-list--loading' : undefined,
     className,
   ].filter(Boolean).join(' ');
 
@@ -103,7 +108,7 @@ export function ConversationList({
   return (
     <nav className={rootClassName} style={{ ...paletteVars, ...style }} aria-label="Conversations">
       {createConversation && (
-        <button type="button" className="chorus-conversation-new" onClick={() => createConversation()}>
+        <button type="button" className="chorus-conversation-new" onClick={() => createConversation()} disabled={interactionsDisabled} aria-disabled={interactionsDisabled || undefined}>
           {newConversationLabel}
         </button>
       )}
@@ -143,7 +148,9 @@ export function ConversationList({
                     type="button"
                     className="chorus-conversation-select"
                     aria-current={active ? 'true' : undefined}
-                    onClick={() => selectConversation?.(conversation.id)}
+                    onClick={() => { if (!interactionsDisabled) selectConversation?.(conversation.id); }}
+                    disabled={interactionsDisabled}
+                    aria-disabled={interactionsDisabled || undefined}
                   >
                     <span className="chorus-conversation-title">
                       {pinned && <span className="chorus-conversation-pin-indicator" aria-hidden="true">★</span>}
@@ -159,17 +166,19 @@ export function ConversationList({
                         onClick={() => pinConversation(conversation.id, !pinned)}
                         aria-label={`${pinned ? 'Unpin' : 'Pin'} ${conversation.title}`}
                         aria-pressed={pinned}
+                        disabled={interactionsDisabled}
+                        aria-disabled={interactionsDisabled || undefined}
                       >
                         {pinned ? 'Unpin' : 'Pin'}
                       </button>
                     )}
                     {renameConversation && (
-                      <button type="button" className="chorus-conversation-action" onClick={() => startRename(conversation)} aria-label={`Rename ${conversation.title}`}>
+                      <button type="button" className="chorus-conversation-action" onClick={() => startRename(conversation)} aria-label={`Rename ${conversation.title}`} disabled={interactionsDisabled} aria-disabled={interactionsDisabled || undefined}>
                         Rename
                       </button>
                     )}
                     {deleteConversation && (
-                      <button type="button" className="chorus-conversation-action" onClick={() => deleteConversation(conversation.id)} aria-label={`Delete ${conversation.title}`}>
+                      <button type="button" className="chorus-conversation-action" onClick={() => deleteConversation(conversation.id)} aria-label={`Delete ${conversation.title}`} disabled={interactionsDisabled} aria-disabled={interactionsDisabled || undefined}>
                         Delete
                       </button>
                     )}

@@ -13,6 +13,16 @@ function makeSyncStorage(initial: Record<string, string> = {}): StorageAdapter &
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 describe('useConversations', () => {
   it('creates, selects, renames, and deletes conversations', () => {
     const storage = makeSyncStorage();
@@ -90,6 +100,58 @@ describe('useConversations', () => {
 
     expect(result.current.conversations.map(conversation => conversation.id)).toEqual(['a', 'b']);
     expect(result.current.activeId).toBe('b');
+  });
+
+  it('queues pre-load createConversation until the async index read resolves', async () => {
+    const pendingRead = deferred<string | null>();
+    const storedConversation = {
+      id: 'existing',
+      title: 'Existing chat',
+      createdAt: '2026-05-14T00:00:00.000Z',
+      updatedAt: '2026-05-14T00:00:00.000Z',
+    };
+    const store: Record<string, string> = {};
+    const storage: StorageAdapter = {
+      getItem: vi.fn(() => pendingRead.promise),
+      setItem: vi.fn((key, value) => { store[key] = value; }),
+      removeItem: vi.fn(),
+    };
+
+    const { result } = renderHook(() => useConversations({
+      storage,
+      createId: () => 'queued',
+      now: () => '2026-05-14T00:01:00.000Z',
+    }));
+
+    expect(result.current.loaded).toBe(false);
+    let createdId = '';
+    act(() => { createdId = result.current.createConversation('Queued chat'); });
+
+    expect(createdId).toBe('queued');
+    expect(result.current.conversations).toEqual([]);
+    expect(storage.setItem).not.toHaveBeenCalled();
+
+    await act(async () => {
+      pendingRead.resolve(JSON.stringify({ activeId: 'existing', conversations: [storedConversation] }));
+      await pendingRead.promise;
+    });
+
+    expect(result.current.loaded).toBe(true);
+    expect(result.current.activeId).toBe('queued');
+    expect(result.current.conversations.map(conversation => conversation.id)).toEqual(['queued', 'existing']);
+    expect(storage.setItem).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(store['chorus-conversations-index'])).toEqual({
+      activeId: 'queued',
+      conversations: [
+        {
+          id: 'queued',
+          title: 'Queued chat',
+          createdAt: '2026-05-14T00:01:00.000Z',
+          updatedAt: '2026-05-14T00:01:00.000Z',
+        },
+        storedConversation,
+      ],
+    });
   });
 
   it('returns a storage wrapper that touches updatedAt when conversation messages are written', () => {

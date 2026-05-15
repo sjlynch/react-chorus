@@ -83,6 +83,7 @@ export function useChorusMessages<TMeta = Record<string, unknown>>({
   const persistedStoreHasValue = hasPersistedValue ?? persistedMessages.length > 0;
   const shouldUsePersistenceSeed = Boolean(
     persistenceKey
+      && persistenceLoaded
       && !persistedStoreHasValue
       && persistedMessages.length === 0
       && seedMessages.length > 0,

@@ -75,6 +75,40 @@ describe('ConversationList', () => {
     expect(deleteConversation).toHaveBeenCalledWith('b');
   });
 
+  it('disables conversation actions while async storage is loading', async () => {
+    const user = userEvent.setup();
+    const createConversation = vi.fn();
+    const selectConversation = vi.fn();
+    const renameConversation = vi.fn();
+    const deleteConversation = vi.fn();
+    const pinConversation = vi.fn();
+
+    render(
+      <ConversationList
+        conversations={CONVERSATIONS}
+        loaded={false}
+        createConversation={createConversation}
+        selectConversation={selectConversation}
+        renameConversation={renameConversation}
+        deleteConversation={deleteConversation}
+        pinConversation={pinConversation}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: /new conversation/i })).toBeDisabled();
+    expect(screen.getByText('Support chat').closest('button')).toBeDisabled();
+    expect(screen.getByRole('button', { name: /rename support chat/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /pin support chat/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /delete support chat/i })).toBeDisabled();
+
+    await user.click(screen.getByRole('button', { name: /new conversation/i }));
+    expect(createConversation).not.toHaveBeenCalled();
+    expect(selectConversation).not.toHaveBeenCalled();
+    expect(renameConversation).not.toHaveBeenCalled();
+    expect(deleteConversation).not.toHaveBeenCalled();
+    expect(pinConversation).not.toHaveBeenCalled();
+  });
+
   it('renders pinned conversations first, toggles pinning, and formats timestamps', async () => {
     const user = userEvent.setup();
     const pinConversation = vi.fn();
