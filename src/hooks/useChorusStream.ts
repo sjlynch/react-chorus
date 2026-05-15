@@ -162,10 +162,18 @@ function createDelayedChunkEmitter(cb: SendCallbacks, startedAt: number, signal:
   let cancelled = false;
   let bufferedEvents: DelayedStreamEvent[] = [];
   let releasePromise: Promise<void> | null = null;
+  let deliveryPromise: Promise<void> | null = null;
+  let callbackError: Error | null = null;
+  let rejectCallbackError!: (err: Error) => void;
   let resolveRelease: (() => void) | null = null;
   let rejectRelease: ((err: Error) => void) | null = null;
   let releaseTimer: ReturnType<typeof setTimeout> | null = null;
   let abortListener: ((event: Event) => void) | null = null;
+
+  const callbackErrorPromise = new Promise<never>((_, reject) => {
+    rejectCallbackError = reject;
+  });
+  callbackErrorPromise.catch(() => undefined);
 
   const cleanupScheduledRelease = () => {
     if (releaseTimer !== null) {
@@ -196,6 +204,34 @@ function createDelayedChunkEmitter(cb: SendCallbacks, startedAt: number, signal:
     reject?.(err);
   };
 
+  const failDelivery = (err: unknown) => {
+    const error = toError(err);
+    if (!callbackError) {
+      callbackError = error;
+      cancelled = true;
+      bufferedEvents = [];
+      rejectScheduledRelease(error);
+      rejectCallbackError(error);
+    }
+    return callbackError;
+  };
+
+  const throwIfDeliveryFailed = () => {
+    if (callbackError) throw callbackError;
+  };
+
+  const throwIfCancelled = () => {
+    if (cancelled) throw createAbortError();
+  };
+
+  const deliverSafely = (deliver: () => void) => {
+    try {
+      deliver();
+    } catch (err) {
+      throw failDelivery(err);
+    }
+  };
+
   const deliverEvent = (event: DelayedStreamEvent) => {
     if (cancelled) return;
 
@@ -217,12 +253,13 @@ function createDelayedChunkEmitter(cb: SendCallbacks, startedAt: number, signal:
   };
 
   const flushBufferedEvents = () => {
+    throwIfDeliveryFailed();
     if (cancelled || released) return;
     released = true;
     const events = bufferedEvents;
     bufferedEvents = [];
-    settleScheduledRelease();
     for (const event of events) deliverEvent(event);
+    settleScheduledRelease();
   };
 
   const cancel = () => {
@@ -235,10 +272,7 @@ function createDelayedChunkEmitter(cb: SendCallbacks, startedAt: number, signal:
     if (released || cancelled) return Promise.resolve();
 
     const wait = Math.max(0, minDelayMs - (Date.now() - startedAt));
-    if (wait <= 0) {
-      flushBufferedEvents();
-      return Promise.resolve();
-    }
+    if (wait <= 0) return Promise.resolve();
 
     if (signal.aborted) {
       cancel();
@@ -255,29 +289,50 @@ function createDelayedChunkEmitter(cb: SendCallbacks, startedAt: number, signal:
           rejectScheduledRelease(createAbortError());
         };
         signal.addEventListener('abort', abortListener, { once: true });
-        releaseTimer = setTimeout(flushBufferedEvents, wait);
+        releaseTimer = setTimeout(settleScheduledRelease, wait);
       });
     }
 
     return releasePromise;
   };
 
+  const scheduleBufferedDelivery = () => {
+    if (deliveryPromise) return deliveryPromise;
+
+    deliveryPromise = scheduleRelease()
+      .then(() => deliverSafely(flushBufferedEvents))
+      .catch((err: unknown) => {
+        if (!isAbortError(err)) failDelivery(err);
+      })
+      .finally(() => {
+        deliveryPromise = null;
+      });
+
+    return deliveryPromise;
+  };
+
   const handleEvent = (event: DelayedStreamEvent) => {
+    throwIfDeliveryFailed();
     if (cancelled) return;
     if ((event.type === 'text' || event.type === 'reasoning') && !event.chunk) return;
 
     if (released || Date.now() - startedAt >= minDelayMs) {
-      if (!released) flushBufferedEvents();
-      deliverEvent(event);
+      deliverSafely(() => {
+        if (!released) flushBufferedEvents();
+        deliverEvent(event);
+      });
       return;
     }
 
     bufferedEvents.push(event);
-    void scheduleRelease().catch(() => undefined);
+    void scheduleBufferedDelivery();
   };
 
   const flushBeforeDone = async () => {
-    if (!released && bufferedEvents.length > 0) await scheduleRelease();
+    if (!released && bufferedEvents.length > 0) await scheduleBufferedDelivery();
+    else if (deliveryPromise) await deliveryPromise;
+    throwIfDeliveryFailed();
+    throwIfCancelled();
   };
 
   return {
@@ -286,6 +341,8 @@ function createDelayedChunkEmitter(cb: SendCallbacks, startedAt: number, signal:
     handleToolDelta: (toolDelta: ConnectorToolDelta) => handleEvent({ type: 'toolDelta', toolDelta }),
     flushBeforeDone,
     cancel,
+    callbackErrorPromise,
+    getCallbackError: () => callbackError,
   };
 }
 
@@ -442,6 +499,15 @@ export function useChorusStream<TMeta = Record<string, unknown>>(transport: Tran
       signal = controller.signal;
     }
 
+    const readerController = new AbortController();
+    let forwardAbort: (() => void) | null = null;
+    if (signal.aborted) {
+      readerController.abort();
+    } else {
+      forwardAbort = () => readerController.abort();
+      signal.addEventListener('abort', forwardAbort, { once: true });
+    }
+
     setSending(true);
     const startedAt = Date.now();
     const delayedChunks = createDelayedChunkEmitter(cb, startedAt, signal);
@@ -449,13 +515,14 @@ export function useChorusStream<TMeta = Record<string, unknown>>(transport: Tran
     const activeConnector = connectorRef.current;
     const connectorState = activeConnector.createState?.();
     let errorToThrow: unknown;
+    let streamPromise: Promise<void> | null = null;
 
     try {
       const res = await transportRef.current(text, history, signal);
       if (!res.ok) throw await createHttpResponseError(res);
       if (!res.body) throw new Error(`Response body was missing for HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''}`);
 
-      await readSSEStream(res, (payload) => {
+      streamPromise = readSSEStream(res, (payload) => {
         const out = activeConnector.extract(payload, connectorState);
         if (!out) return;
 
@@ -470,7 +537,9 @@ export function useChorusStream<TMeta = Record<string, unknown>>(transport: Tran
 
         if (out.error) throw new Error(out.error);
         if (out.done) return false;
-      }, signal);
+      }, readerController.signal);
+      await Promise.race([streamPromise, delayedChunks.callbackErrorPromise]);
+      await streamPromise;
 
       await delayedChunks.flushBeforeDone();
       try {
@@ -479,9 +548,12 @@ export function useChorusStream<TMeta = Record<string, unknown>>(transport: Tran
         errorToThrow = callbackError;
       }
     } catch (e: unknown) {
+      readerController.abort();
+      if (streamPromise) await streamPromise.catch(() => undefined);
+      const caughtError = delayedChunks.getCallbackError() ?? e;
       delayedChunks.cancel();
-      if (!isAbortError(e)) {
-        const error = toError(e);
+      if (!isAbortError(caughtError)) {
+        const error = toError(caughtError);
         try {
           cb.onError?.(error);
         } catch (callbackError) {
@@ -490,6 +562,7 @@ export function useChorusStream<TMeta = Record<string, unknown>>(transport: Tran
         if (errorToThrow === undefined) errorToThrow = error;
       }
     } finally {
+      if (forwardAbort) signal.removeEventListener('abort', forwardAbort);
       isSendingRef.current = false;
       setSending(false);
       if (controllerRef.current === controller) controllerRef.current = null;

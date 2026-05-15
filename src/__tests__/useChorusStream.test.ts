@@ -512,6 +512,79 @@ describe('useChorusStream', () => {
     expect(onDone).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    {
+      name: 'onChunk',
+      connector: undefined,
+      tokens: ['token'],
+      callbacks: (error: Error) => ({
+        onChunk: () => { throw error; },
+      }),
+    },
+    {
+      name: 'onStart',
+      connector: undefined,
+      tokens: ['token'],
+      callbacks: (error: Error) => ({
+        onStart: () => { throw error; },
+      }),
+    },
+    {
+      name: 'onReasoning',
+      connector: 'openai' as const,
+      tokens: [JSON.stringify({ choices: [{ index: 0, delta: { reasoning_content: 'plan' } }] }), '[DONE]'],
+      callbacks: (error: Error) => ({
+        onReasoning: () => { throw error; },
+      }),
+    },
+    {
+      name: 'onToolDelta',
+      connector: 'openai' as const,
+      tokens: [JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'search', arguments: '{"q":"test"}' } }] } }] }), '[DONE]'],
+      callbacks: (error: Error) => ({
+        onToolDelta: () => { throw error; },
+      }),
+    },
+  ])('rejects send without an unhandled timer exception when delayed $name throws', async ({ connector, tokens, callbacks, name }) => {
+    vi.useFakeTimers();
+    const callbackError = new Error(`${name} failed`);
+    const transport = vi.fn<Transport>(() => Promise.resolve(makeSseResponse(tokens)));
+    const onDone = vi.fn();
+    const onError = vi.fn();
+    const uncaught = vi.fn();
+    const unhandled = vi.fn();
+    process.on('uncaughtException', uncaught);
+    process.on('unhandledRejection', unhandled);
+
+    try {
+      const { result } = renderHook(() => useChorusStream(transport, connector ? { connector } : undefined));
+      const sendPromise = result.current.send('hello', [], {
+        onChunk: vi.fn(),
+        ...callbacks(callbackError),
+        onDone,
+        onError,
+        minDelayMs: 100,
+      });
+      const rejection = expect(sendPromise).rejects.toThrow(callbackError.message);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+        await rejection;
+      });
+
+      expect(onDone).not.toHaveBeenCalled();
+      expect(onError).toHaveBeenCalledTimes(1);
+      expect(onError).toHaveBeenCalledWith(callbackError);
+      expect(uncaught).not.toHaveBeenCalled();
+      expect(unhandled).not.toHaveBeenCalled();
+      expect(result.current.sending).toBe(false);
+    } finally {
+      process.off('uncaughtException', uncaught);
+      process.off('unhandledRejection', unhandled);
+      vi.useRealTimers();
+    }
+  });
+
   it('does nothing and warns in development when send() is called while already sending', async () => {
     const response = deferred<Response>();
     const transport = vi.fn<Transport>(() => response.promise);
