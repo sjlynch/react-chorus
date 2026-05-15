@@ -3,7 +3,12 @@ import { renderHook, act } from '@testing-library/react';
 import { useConversations } from '../hooks/useConversations';
 import type { StorageAdapter } from '../types';
 
-function makeSyncStorage(initial: Record<string, string> = {}): StorageAdapter & { store: Record<string, string>; removeItem: ReturnType<typeof vi.fn> } {
+function makeSyncStorage(initial: Record<string, string> = {}): StorageAdapter & {
+  store: Record<string, string>;
+  getItem: ReturnType<typeof vi.fn>;
+  setItem: ReturnType<typeof vi.fn>;
+  removeItem: ReturnType<typeof vi.fn>;
+} {
   const store = { ...initial };
   return {
     store,
@@ -21,6 +26,10 @@ function deferred<T>() {
     reject = rej;
   });
   return { promise, resolve, reject };
+}
+
+function indexWriteCalls(storage: ReturnType<typeof makeSyncStorage>, key = 'chorus-conversations-index') {
+  return storage.setItem.mock.calls.filter(([writtenKey]) => writtenKey === key);
 }
 
 describe('useConversations', () => {
@@ -61,6 +70,35 @@ describe('useConversations', () => {
     expect(result.current.activeId).toBe('two');
   });
 
+  it('bumps updatedAt when selecting an older conversation so recency sorting can promote it', () => {
+    const storage = makeSyncStorage();
+    const ids = ['old', 'new'];
+    const times = [
+      '2026-05-14T00:00:00.000Z',
+      '2026-05-14T00:01:00.000Z',
+      '2026-05-14T00:02:00.000Z',
+    ];
+    const now = () => times.shift() ?? '2026-05-14T00:03:00.000Z';
+    const { result } = renderHook(() => useConversations({
+      storage,
+      createId: () => ids.shift() ?? 'fallback',
+      now,
+    }));
+
+    act(() => { result.current.createConversation('Older'); });
+    act(() => { result.current.createConversation('Newer'); });
+    act(() => result.current.selectConversation('old'));
+
+    expect(result.current.conversations.find(conversation => conversation.id === 'old')?.updatedAt)
+      .toBe('2026-05-14T00:02:00.000Z');
+
+    const sortedIds = result.current.conversations
+      .slice()
+      .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+      .map(conversation => conversation.id);
+    expect(sortedIds).toEqual(['old', 'new']);
+  });
+
   it('persists the conversation index under a configurable key', () => {
     const storage = makeSyncStorage();
     const { result } = renderHook(() => useConversations({
@@ -81,6 +119,7 @@ describe('useConversations', () => {
         title: 'Project chat',
         createdAt: '2026-05-14T00:00:00.000Z',
         updatedAt: '2026-05-14T00:00:00.000Z',
+        pristine: false,
       }],
     });
   });
@@ -100,6 +139,32 @@ describe('useConversations', () => {
 
     expect(result.current.conversations.map(conversation => conversation.id)).toEqual(['a', 'b']);
     expect(result.current.activeId).toBe('b');
+  });
+
+  it('preserves legacy index entries that are missing timestamps', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const storage = makeSyncStorage({
+      'chorus-conversations-index': JSON.stringify([{ id: 'a', title: 'old' }]),
+    });
+
+    try {
+      const { result } = renderHook(() => useConversations({
+        storage,
+        now: () => '2026-05-14T00:00:00.000Z',
+      }));
+
+      expect(result.current.conversations).toEqual([{
+        id: 'a',
+        title: 'old',
+        createdAt: '2026-05-14T00:00:00.000Z',
+        updatedAt: '2026-05-14T00:00:00.000Z',
+        pristine: false,
+      }]);
+      expect(result.current.activeId).toBe('a');
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('backfilling missing createdAt and updatedAt'));
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('queues pre-load createConversation until the async index read resolves', async () => {
@@ -148,8 +213,9 @@ describe('useConversations', () => {
           title: 'Queued chat',
           createdAt: '2026-05-14T00:01:00.000Z',
           updatedAt: '2026-05-14T00:01:00.000Z',
+          pristine: false,
         },
-        storedConversation,
+        { ...storedConversation, pristine: false },
       ],
     });
   });
@@ -171,6 +237,42 @@ describe('useConversations', () => {
     expect(result.current.conversations[0].updatedAt).toBe('2026-05-14T00:00:05.000Z');
   });
 
+  it('debounces index writes caused by rapid transcript writes', async () => {
+    vi.useFakeTimers();
+    const storage = makeSyncStorage();
+    let tick = 0;
+    const { result, unmount } = renderHook(() => useConversations({
+      storage,
+      createId: () => 'abc',
+      now: () => `2026-05-14T00:00:${String(tick++).padStart(2, '0')}.000Z`,
+    }));
+
+    try {
+      act(() => { result.current.createConversation('Touched'); });
+      await act(async () => { await Promise.resolve(); });
+      storage.setItem.mockClear();
+
+      act(() => {
+        for (let i = 0; i < 10; i += 1) {
+          result.current.storage?.setItem('chorus-conversation:abc', `[{"id":"${i}"}]`);
+        }
+      });
+
+      expect(indexWriteCalls(storage)).toHaveLength(0);
+
+      await act(async () => {
+        vi.advanceTimersByTime(300);
+        await Promise.resolve();
+      });
+
+      expect(indexWriteCalls(storage).length).toBeGreaterThan(0);
+      expect(indexWriteCalls(storage).length).toBeLessThanOrEqual(2);
+    } finally {
+      unmount();
+      vi.useRealTimers();
+    }
+  });
+
   it('renames a default-titled conversation from the first user message', () => {
     const storage = makeSyncStorage();
     const { result } = renderHook(() => useConversations({
@@ -190,6 +292,30 @@ describe('useConversations', () => {
 
     act(() => result.current.renameFromFirstMessage('abc', [{ role: 'user', text: 'Do not overwrite' }]));
     expect(result.current.conversations[0].title).toBe('Please summarize this…');
+  });
+
+  it('auto-renames an unmodified pristine conversation after defaultTitle changes', () => {
+    const storage = makeSyncStorage();
+    const { result, rerender } = renderHook(
+      ({ defaultTitle }) => useConversations({
+        storage,
+        createId: () => 'abc',
+        now: () => '2026-05-14T00:00:00.000Z',
+        defaultTitle,
+      }),
+      { initialProps: { defaultTitle: 'New chat' } },
+    );
+
+    act(() => { result.current.createConversation(); });
+    expect(result.current.conversations[0]).toEqual(expect.objectContaining({ title: 'New chat', pristine: true }));
+
+    rerender({ defaultTitle: 'Untitled' });
+    act(() => result.current.renameFromFirstMessage('abc', [{ role: 'user', text: 'Workspace question' }]));
+
+    expect(result.current.conversations[0]).toEqual(expect.objectContaining({
+      title: 'Workspace question',
+      pristine: false,
+    }));
   });
 
   it('surfaces invalid index JSON through error and onError while falling back to empty state', async () => {
