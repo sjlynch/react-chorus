@@ -645,7 +645,7 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `onAttachmentError` | `(error: AttachmentError) => void` | — | Called when a picker, paste, or drop file is rejected or cannot be read/uploaded. Reasons include `unsupported-type`, `too-large`, `too-many`, `read-failed`, and `upload-failed`. |
 | `uploadAttachment` | `(file: File, options?: { signal: AbortSignal }) => AttachmentUploadResult \| Promise<AttachmentUploadResult>` | data URL reader | Optional transform/upload hook. Return a custom attachment (for example a CDN URL or provider file id) instead of the default data URL payload. The signal aborts when pending work is cancelled. |
 | `sending` | `boolean` | — | Visual sending-state override for fully custom `onSend`/`useChorusStream` integrations. On the `transport` path, Chorus still owns the internal concurrency guard even if this is overridden. |
-| `palette` | `Palette` | dark theme | Custom color palette for theming, including `actionText`, `actionHoverBg`, `actionHoverText`, `errorBg`, `errorBorder`, and `errorText`. |
+| `palette` | `Palette` | dark theme | Custom color palette for theming chat chrome, actions, errors, and built-in tool call blocks. |
 | `codeBlockTheme` | `'dark' \| 'light'` | `'dark'` | Code block syntax-highlight theme. |
 | `minAssistantDelayMs` | `number` | `300` | Minimum ms before showing the first assistant token. |
 | `errorMessage` | `string` | `'Something went wrong. Please try again.'` | Friendly message shown in the error banner. Raw transport errors are never surfaced in the default UI. |
@@ -1367,7 +1367,7 @@ Reasoning blocks reuse existing palette variables (`--chorus-chat-bg`, `--chorus
 
 ### CSS custom properties for tool blocks
 
-Override the look of built-in tool call blocks via CSS variables:
+Built-in tool call blocks can be themed through palette keys (`toolBorder`, `toolHeaderBg`, `toolHeaderText`, `toolHeaderHover`, `toolNameText`, `toolBodyBg`, `toolLabelText`, and `toolCodeText`). For advanced CSS-only overrides, use the underlying CSS variables directly:
 
 ```css
 :root {
@@ -1393,12 +1393,14 @@ Pass a `palette` prop to `<Chorus>` (or wrap components in `<ChorusTheme palette
     assistantBubbleBg: '#6366f1',
     assistantText: '#ffffff',
     userBubbleBg: '#e5e7eb',
+    toolHeaderBg: '#18181b',
+    toolNameText: '#f4f4f5',
   }}
   onSend={…}
 />
 ```
 
-Available palette keys: `chatBg`, `chatText`, `border`, `assistantBubbleBg`, `assistantText`, `assistantBorder`, `userBubbleBg`, `userText`, `userBorder`, `inputAreaBg`, `inputBg`, `inputText`, `inputBorder`, `sendButtonBg`, `sendButtonText`, `focusRing`, `actionText`, `actionHoverBg`, `actionHoverText`, `errorBg`, `errorBorder`, `errorText`.
+Available palette keys: `chatBg`, `chatText`, `border`, `assistantBubbleBg`, `assistantText`, `assistantBorder`, `userBubbleBg`, `userText`, `userBorder`, `inputAreaBg`, `inputBg`, `inputText`, `inputBorder`, `sendButtonBg`, `sendButtonText`, `focusRing`, `actionText`, `actionHoverBg`, `actionHoverText`, `errorBg`, `errorBorder`, `errorText`, `toolBorder`, `toolHeaderBg`, `toolHeaderText`, `toolHeaderHover`, `toolNameText`, `toolBodyBg`, `toolLabelText`, `toolCodeText`.
 
 ## Individual Components
 

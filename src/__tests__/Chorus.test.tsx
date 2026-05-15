@@ -80,6 +80,7 @@ describe('Chorus', () => {
           errorBg: '#444',
           errorBorder: '#555',
           errorText: '#666',
+          toolHeaderBg: '#777',
         }}
       />
     );
@@ -97,6 +98,7 @@ describe('Chorus', () => {
     expect(root.style.getPropertyValue('--chorus-error-bg')).toBe('#444');
     expect(root.style.getPropertyValue('--chorus-error-border')).toBe('#555');
     expect(root.style.getPropertyValue('--chorus-error-text')).toBe('#666');
+    expect(root.style.getPropertyValue('--chorus-tool-header-bg')).toBe('#777');
   });
 
   it('exposes an imperative ChorusRef for send, focus, clear, stop, and scrollToMessage', async () => {
