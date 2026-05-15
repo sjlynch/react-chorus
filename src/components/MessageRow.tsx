@@ -2,7 +2,7 @@ import React from 'react';
 import { Check, Copy, Pencil, RefreshCw, ThumbsDown, ThumbsUp, Trash2, X } from 'lucide-react';
 import type { Attachment, Message, Role } from '../types';
 import { getAttachmentPreviewSource } from '../utils/attachmentPreview';
-import { canWriteTextToClipboard, writeTextToClipboard } from '../utils/messageCopy';
+import { COPY_FAILED_LABEL, COPY_FEEDBACK_DURATION_MS, canWriteTextToClipboard, writeTextToClipboard } from '../utils/messageCopy';
 import { Markdown, type MarkdownProps, type MarkdownSanitizer } from './Markdown';
 
 export type MessageMarkdownProps = Omit<MarkdownProps, 'text' | 'codeTheme' | 'headless' | 'streaming'>;
@@ -22,7 +22,7 @@ export interface MessageRenderActions {
   edit?: (newText: string) => void;
   regenerate?: () => void;
   delete?: () => void;
-  copy?: () => void;
+  copy?: () => boolean | void | Promise<boolean | void>;
   feedback?: (variant: MessageFeedback) => void;
   defaultRender: () => React.ReactNode;
 }
@@ -233,15 +233,39 @@ export interface MessageRowProps<TMeta = Record<string, unknown>> extends Messag
   markdownSanitizer?: MarkdownSanitizer;
 }
 
-function actionButtonClass(active?: boolean) {
-  return ['chorus-action-btn', active && 'chorus-action-btn--active'].filter(Boolean).join(' ');
+function actionButtonClass(active?: boolean, extraClass?: string) {
+  return ['chorus-action-btn', active && 'chorus-action-btn--active', extraClass].filter(Boolean).join(' ');
 }
 
 function MessageActions({ actions, onEditRequested }: { actions: MessageRenderActions; onEditRequested: () => void }) {
   const [selectedFeedback, setSelectedFeedback] = React.useState<MessageFeedback | null>(null);
+  const [copyFailed, setCopyFailed] = React.useState(false);
+  const copyFailureTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasActions = actions.canEdit || actions.canRegenerate || actions.canDelete || Boolean(actions.copy) || Boolean(actions.feedback);
 
+  React.useEffect(() => () => {
+    if (copyFailureTimerRef.current) clearTimeout(copyFailureTimerRef.current);
+  }, []);
+
   if (!hasActions) return null;
+
+  const showCopyFailed = () => {
+    if (copyFailureTimerRef.current) clearTimeout(copyFailureTimerRef.current);
+    setCopyFailed(true);
+    copyFailureTimerRef.current = setTimeout(() => {
+      setCopyFailed(false);
+      copyFailureTimerRef.current = null;
+    }, COPY_FEEDBACK_DURATION_MS);
+  };
+
+  const handleCopy = async () => {
+    try {
+      const copied = await actions.copy?.();
+      if (copied === false) showCopyFailed();
+    } catch {
+      showCopyFailed();
+    }
+  };
 
   const handleFeedback = (variant: MessageFeedback) => {
     setSelectedFeedback(variant);
@@ -257,7 +281,7 @@ function MessageActions({ actions, onEditRequested }: { actions: MessageRenderAc
         <button type="button" className="chorus-action-btn" onClick={actions.regenerate} title="Regenerate" aria-label="Regenerate"><RefreshCw size={13} /></button>
       )}
       {actions.copy && (
-        <button type="button" className="chorus-action-btn" onClick={actions.copy} title="Copy" aria-label="Copy"><Copy size={13} /></button>
+        <button type="button" className={actionButtonClass(copyFailed, copyFailed ? 'chorus-action-btn--copy-failed' : undefined)} onClick={handleCopy} title={copyFailed ? COPY_FAILED_LABEL : 'Copy'} aria-label={copyFailed ? COPY_FAILED_LABEL : 'Copy'}>{copyFailed ? COPY_FAILED_LABEL : <Copy size={13} />}</button>
       )}
       {actions.feedback && (
         <>

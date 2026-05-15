@@ -603,6 +603,8 @@ To refresh the published size claims after dependency or feature changes, run `n
 
 If your SSR app wants to allow sanitized raw HTML, create an isomorphic DOMPurify instance (for example with your framework's DOM/window or jsdom on the server) and pass it to the standalone renderer: `<Markdown sanitizer={purify} />` or `<Markdown sanitizer={(html) => purify.sanitize(html)} />`. The built-in chat renderer accepts the same customization via `<Chorus markdownSanitizer={purify} />` / `<ChatWindow markdownSanitizer={purify} />`, or through `markdownProps={{ sanitizer: purify }}`. You can also pass `markedOptions` and `markedExtensions` directly to `<Markdown>` or via `markdownProps` to adjust parsing and register marked extensions without mutating marked's global singleton.
 
+Code-block copy buttons flash `Copied!` on success and `Copy failed` when the Clipboard API rejects. Pass `<Markdown onCopyError={(error) => ...} />` — or `markdownProps={{ onCopyError }}` on `<Chorus>` / `<ChatWindow>` — to show your own toast or fallback alert.
+
 ## API
 
 ### `<Chorus>`
@@ -674,7 +676,7 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `showJumpToBottomButton` | `boolean` | `true` (`false` in headless exports) | Shows a floating “Jump to latest” button when auto-scroll is paused and new activity arrives. |
 | `headless` | `boolean` | `false` | Strip all default styles and inline style injection. |
 | `renderMessage` | `(message: Message<TMeta>, ctx: RenderMessageContext<TMeta>) => ReactNode` | — | Custom per-message renderer. Return `null` to fall back to default rendering. `ctx` includes `isStreaming`, `messageProps` for scroll targets, `defaultRender(slots?)`, and action callbacks/default action controls. Existing one-argument renderers continue to work. |
-| `markdownProps` | `Omit<MarkdownProps, 'text' \| 'codeTheme' \| 'headless' \| 'streaming'>` | — | Props forwarded to the built-in Markdown renderer for every message, including `sanitizer`, `markedOptions`, and `markedExtensions`. |
+| `markdownProps` | `Omit<MarkdownProps, 'text' \| 'codeTheme' \| 'headless' \| 'streaming'>` | — | Props forwarded to the built-in Markdown renderer for every message, including `sanitizer`, `markedOptions`, `markedExtensions`, and `onCopyError`. |
 | `markdownSanitizer` | `MarkdownSanitizer` | — | Convenience alias for `markdownProps.sanitizer`; takes precedence when both are provided. |
 | `hiddenRoles` | `Role[]` | `['system']` | Message roles hidden from the transcript. Tool calls are visible by default in `<Chorus>`; pass `['system', 'tool']` to hide them, or `[]` to show all roles. `<Chorus>` accepts `hiddenRoles` only — `showSystemMessages` exists on `<ChatWindow>` for backwards compatibility. |
 
@@ -1411,7 +1413,7 @@ import { ChatWindow, ChatInput, ChorusTheme, Markdown } from 'react-chorus';
 - **`<ChatWindow messages={…} typing={…} />`** — renders the scrollable message list with empty-state prompts, a typing indicator, errors, optional jump-to-latest button, and optional `maxRenderedMessages` windowing. It accepts `hiddenRoles?: Role[]` (default `['system', 'tool']`); `showSystemMessages` is deprecated but remains supported as an alias for showing all roles. Pass `markdownSanitizer`, `markdownProps`, `renderError`, or `renderMessage` to customize built-in rendering.
 - **`<ChatInput value onSend onStop placeholder sending />`** — the text input, send/stop button, disabled/read-only states, and optional attachment composer (`accept`, paste/drop, limits, cancellable `uploadAttachment`).
 - **`<ChorusTheme palette={…}>`** — applies theme CSS variables to any subtree.
-- **`<Markdown text={…} codeTheme="dark" />`** — standalone markdown renderer with syntax highlighting and copy buttons. It supports `streaming` to render escaped plain text until finalization, `sanitizer` to provide a custom DOMPurify-compatible sanitizer when SSR needs sanitized raw HTML instead of the built-in no-raw-HTML safe mode, and `markedOptions`/`markedExtensions` for per-instance parser customization.
+- **`<Markdown text={…} codeTheme="dark" />`** — standalone markdown renderer with syntax highlighting and copy buttons. It supports `streaming` to render escaped plain text until finalization, `sanitizer` to provide a custom DOMPurify-compatible sanitizer when SSR needs sanitized raw HTML instead of the built-in no-raw-HTML safe mode, `markedOptions`/`markedExtensions` for per-instance parser customization, and `onCopyError` for clipboard-copy failures.
 - **`<MessageBubble message={…} />`** — renders the default bubble for one message, including attachments and screen-reader speaker labels. Accepts `className`, `style`, `codeTheme`, `headless`, `streaming`, `markdownProps`, `markdownSanitizer`, and decoration slots (`before`, `headerSlot`, `footerSlot`, `after`) without replacing the full renderer.
 
 ### Headless subpath
