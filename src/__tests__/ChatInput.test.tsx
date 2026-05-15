@@ -381,6 +381,23 @@ describe('ChatInput', () => {
     expect(uploadAttachment).toHaveBeenCalledWith(file, { signal: expect.any(AbortSignal) });
   });
 
+  it('clears the drag overlay when the window drag ends without a drop', async () => {
+    const file = new File(['drop-bytes'], 'dragged.png', { type: 'image/png' });
+    const { container } = render(<ControlledChatInput accept="image/*" />);
+    const root = container.firstElementChild as HTMLElement;
+
+    await act(async () => {
+      fireEvent.dragEnter(root, { dataTransfer: fileTransfer(file) });
+    });
+    expect(root).toHaveClass('chorus-input--dragging');
+
+    await act(async () => {
+      fireEvent.dragEnd(window);
+    });
+
+    expect(root).not.toHaveClass('chorus-input--dragging');
+  });
+
   it('rejects oversized files and calls onAttachmentError with a useful reason', async () => {
     const onAttachmentError = vi.fn();
     const file = new File(['too large'], 'large.txt', { type: 'text/plain' });

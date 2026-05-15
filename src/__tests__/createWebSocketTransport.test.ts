@@ -8,6 +8,7 @@ class MockWebSocket {
   url: string;
   protocols?: string | string[];
   sent: string[] = [];
+  closedWith: Array<{ code?: number; reason?: string }> = [];
   onopen: ((event: Event) => void) | null = null;
   onmessage: ((event: MessageEvent) => void) | null = null;
   onclose: ((event: CloseEvent) => void) | null = null;
@@ -23,7 +24,9 @@ class MockWebSocket {
     this.sent.push(data);
   }
 
-  close() {}
+  close(code?: number, reason?: string) {
+    this.closedWith.push({ code, reason });
+  }
 
   emitOpen() {
     this.onopen?.(new Event('open'));
@@ -212,5 +215,80 @@ describe('createWebSocketTransport', () => {
 
     expect(closeSpy).toHaveBeenCalled();
     await expect(reader.read()).rejects.toThrow('Aborted');
+  });
+
+  it('opens a fresh socket for each send by default', async () => {
+    const transport = createWebSocketTransport('wss://api.example.com/chat');
+
+    const firstPromise = transport('one', [], new AbortController().signal);
+    const first = MockWebSocket.instances[0];
+    first.emitOpen();
+    await firstPromise;
+    first.emitClose(1000, 'done');
+
+    const secondPromise = transport('two', [], new AbortController().signal);
+    const second = MockWebSocket.instances[1];
+    second.emitOpen();
+    await secondPromise;
+
+    expect(MockWebSocket.instances).toHaveLength(2);
+    expect(first.sent).toEqual(['{"prompt":"one","history":[]}']);
+    expect(second.sent).toEqual(['{"prompt":"two","history":[]}']);
+  });
+
+  it('reuses one socket across sends in persistent mode and closes it explicitly', async () => {
+    const events: string[] = [];
+    const transport = createWebSocketTransport('wss://api.example.com/chat', {
+      persistent: true,
+      onOpen: () => events.push('open'),
+      onClose: (code, reason) => events.push(`close:${code}:${reason}`),
+    });
+
+    const firstPromise = transport('one', [], new AbortController().signal);
+    const ws = MockWebSocket.instances[0];
+    ws.emitOpen();
+    const firstResponse = await firstPromise;
+    const firstReader = firstResponse.body!.getReader();
+
+    ws.onmessage?.({ data: '{"chunk":"first"}' } as MessageEvent);
+    const firstChunk = await firstReader.read();
+    expect(new TextDecoder().decode(firstChunk.value)).toBe('data: {"chunk":"first"}\n\n');
+    await firstReader.cancel();
+
+    const secondResponse = await transport('two', [], new AbortController().signal);
+    const secondReader = secondResponse.body!.getReader();
+
+    ws.onmessage?.({ data: '{"chunk":"second"}' } as MessageEvent);
+    const secondChunk = await secondReader.read();
+
+    expect(MockWebSocket.instances).toHaveLength(1);
+    expect(ws.sent).toEqual(['{"prompt":"one","history":[]}', '{"prompt":"two","history":[]}']);
+    expect(new TextDecoder().decode(secondChunk.value)).toBe('data: {"chunk":"second"}\n\n');
+    expect(events).toEqual(['open']);
+
+    transport.close(1000, 'client done');
+    expect(ws.closedWith).toEqual([{ code: 1000, reason: 'client done' }]);
+
+    ws.emitClose(1000, 'client done');
+    expect(events).toEqual(['open', 'close:1000:client done']);
+  });
+
+  it('observes persistent server-pushed messages when no send stream is active', async () => {
+    const pushed: string[] = [];
+    const transport = createWebSocketTransport('wss://api.example.com/chat', {
+      persistent: true,
+      onMessage: (data) => pushed.push(data),
+    });
+
+    const responsePromise = transport('hello', [], new AbortController().signal);
+    const ws = MockWebSocket.instances[0];
+    ws.emitOpen();
+    const response = await responsePromise;
+    await response.body!.cancel();
+
+    ws.onmessage?.({ data: 'volunteer update' } as MessageEvent);
+    await Promise.resolve();
+
+    expect(pushed).toEqual(['volunteer update']);
   });
 });
