@@ -34,6 +34,21 @@ describe('openaiConnector', () => {
     expect(openaiConnector.extract(data)).toEqual({ reasoning: 'thinking' });
   });
 
+  it('uses one reasoning delta source instead of concatenating multiple fields', () => {
+    const data = JSON.stringify({
+      choices: [{
+        index: 0,
+        delta: {
+          reasoning: 'generic',
+          reasoning_content: 'chat reasoning',
+          reasoning_summary: 'summary',
+          reasoning_summary_text: 'response summary',
+        },
+      }],
+    });
+    expect(openaiConnector.extract(data)).toEqual({ reasoning: 'chat reasoning' });
+  });
+
   it('splits DeepSeek-style think tags out of text content', () => {
     const data = JSON.stringify({ choices: [{ index: 0, delta: { content: '<think>plan</think>answer' } }] });
     expect(openaiConnector.extract(data)).toEqual({ reasoning: 'plan', text: 'answer' });
@@ -293,6 +308,16 @@ describe('geminiConnector', () => {
       candidates: [{ finishReason: 'MAX_TOKENS', content: { parts: [{ text: 'truncated' }] } }],
     });
     expect(geminiConnector.extract(data)).toEqual({ text: 'truncated', done: true });
+  });
+
+  it.each(['FINISH_REASON_UNSPECIFIED', 'UNSPECIFIED'])('returns an error for Gemini %s finish reason', finishReason => {
+    const data = JSON.stringify({
+      candidates: [{ finishReason, content: { parts: [{ text: 'Hello' }] } }],
+    });
+    expect(geminiConnector.extract(data)).toEqual({
+      text: 'Hello',
+      error: 'Gemini response ended with an unspecified finish reason',
+    });
   });
 
   it('returns an error for blocked SAFETY with no text', () => {
