@@ -34,6 +34,25 @@ export interface ChorusFinishContext<TMeta = Record<string, unknown>> {
 
 export type ChorusOnFinish<TMeta = Record<string, unknown>> = (context: ChorusFinishContext<TMeta>) => void;
 
+export type ChorusAbortReason = 'stop' | 'clear' | 'superseded';
+export type ChorusAbortSource = 'user' | 'programmatic';
+export type ChorusSendPath = 'transport' | 'onSend';
+
+export interface ChorusAbortContext<TMeta = Record<string, unknown>> {
+  /** Partial assistant message finalized by the abort, or null when no assistant token had rendered yet. */
+  message: Message<TMeta> | null;
+  /** Message list at the moment the abort was reported. Clear/reset happens after this callback for clear-triggered aborts. */
+  messages: Message<TMeta>[];
+  /** Why the active generation was cancelled. */
+  reason: ChorusAbortReason;
+  /** Whether the cancellation came from built-in user UI or imperative/internal control flow. */
+  source: ChorusAbortSource;
+  /** Active send implementation that was cancelled. */
+  path: ChorusSendPath;
+}
+
+export type ChorusOnAbort<TMeta = Record<string, unknown>> = (context: ChorusAbortContext<TMeta>) => void;
+
 export interface ChorusToolDeltaContext<TMeta = Record<string, unknown>> {
   delta: ConnectorToolDelta;
   message: Message<TMeta>;
@@ -98,6 +117,7 @@ export interface UseAssistantSessionOptions<TMeta = Record<string, unknown>> {
   onError?: (error: Error) => void;
   onChunkRef: React.MutableRefObject<((chunk: string, messageId: string) => void) | undefined>;
   onFinish?: ChorusOnFinish<TMeta>;
+  onAbort?: ChorusOnAbort<TMeta>;
   onStreamDone?: ChorusOnStreamDone<TMeta>;
   onToolCall?: ChorusOnToolCall<TMeta>;
   onToolDelta?: ChorusOnToolDelta<TMeta>;
@@ -113,8 +133,8 @@ export interface UseAssistantSessionOptions<TMeta = Record<string, unknown>> {
 export interface UseAssistantSessionResult {
   send: (text: string, attachments?: Attachment[]) => boolean;
   retry: () => void;
-  stop: () => void;
-  clear: () => void;
+  stop: (source?: ChorusAbortSource) => void;
+  clear: (source?: ChorusAbortSource) => void;
   dismissError: () => void;
   handleEdit: (id: string, newText: string) => void;
   handleRegenerate: (id: string) => void;
@@ -221,6 +241,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
   onError,
   onChunkRef,
   onFinish,
+  onAbort,
   onStreamDone,
   onToolCall,
   onToolDelta,
@@ -237,6 +258,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
   const onSendRef = useLatestRef(onSend);
   const onErrorRef = useLatestRef(onError);
   const onFinishRef = useLatestRef(onFinish);
+  const onAbortRef = useLatestRef(onAbort);
   const onStreamDoneRef = useLatestRef(onStreamDone);
   const onToolCallRef = useLatestRef(onToolCall);
   const onToolDeltaRef = useLatestRef(onToolDelta);
@@ -275,6 +297,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
   const pendingToolMessageIdsRef = React.useRef<Set<string>>(new Set());
   const toolMessageIdsByDeltaIdRef = React.useRef<Map<string, string>>(new Map());
   const activeSessionIdRef = React.useRef(0);
+  const activeSendPathRef = React.useRef<ChorusSendPath | null>(null);
   const warnedMissingHandlerRef = React.useRef(false);
   const warnedTransportOnSendRef = React.useRef(false);
 
@@ -310,6 +333,14 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
       warnObserverError('onFinish', error);
     }
   }, [onFinishRef]);
+
+  const safeOnAbort = React.useCallback((context: ChorusAbortContext<TMeta>) => {
+    try {
+      onAbortRef.current?.(context);
+    } catch (error) {
+      warnObserverError('onAbort', error);
+    }
+  }, [onAbortRef]);
 
   const safeOnStreamDone = React.useCallback((context: ChorusStreamDoneContext<TMeta>) => {
     try {
@@ -355,6 +386,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
   const invalidateAssistantSession = React.useCallback((sessionId?: number) => {
     if (sessionId === undefined || activeSessionIdRef.current === sessionId) {
       activeSessionIdRef.current += 1;
+      activeSendPathRef.current = null;
     }
   }, []);
 
@@ -834,7 +866,30 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
 
   finishTransportStreamRef.current = finishTransportStream;
 
+  const abortActiveAssistant = React.useCallback((reason: ChorusAbortReason, source: ChorusAbortSource) => {
+    const path = activeSendPathRef.current ?? (transportRef.current ? 'transport' : 'onSend');
+
+    invalidateAssistantSession();
+    controllerRef.current?.abort();
+    if (path === 'transport') {
+      streamAbort();
+      setTransportBusy(false);
+    }
+    controllerRef.current = null;
+
+    const message = finalizeAssistantNow();
+    safeOnAbort({
+      message,
+      messages: messagesRef.current,
+      reason,
+      source,
+      path,
+    });
+  }, [finalizeAssistantNow, invalidateAssistantSession, messagesRef, safeOnAbort, setTransportBusy, streamAbort, transportRef]);
+
   const triggerAssistant = React.useCallback((text: string, history: Message<TMeta>[] = messagesRef.current) => {
+    if (activeSendPathRef.current) abortActiveAssistant('superseded', 'programmatic');
+
     const sessionId = beginAssistantSession();
     rememberSubmittedTurn(text, history);
     const currentTransport = transportRef.current;
@@ -848,6 +903,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
       controllerRef.current?.abort();
       const controller = new AbortController();
       controllerRef.current = controller;
+      activeSendPathRef.current = 'transport';
       resetStreamState();
       clearStreamError();
       setTransportBusy(true);
@@ -867,6 +923,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     controllerRef.current?.abort();
     const controller = new AbortController();
     controllerRef.current = controller;
+    activeSendPathRef.current = 'onSend';
     setInternalSending(true);
     clearStreamError();
     resetStreamState();
@@ -921,7 +978,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
         if (controllerRef.current === controller && !isAssistantSessionActive(sessionId)) controllerRef.current = null;
       }
     })();
-  }, [beginAssistantSession, clearStreamError, completeActiveSession, createSessionHelpers, invalidateAssistantSession, isAssistantSessionActive, messagesRef, minAssistantDelayMsRef, onSendRef, rememberSubmittedTurn, removePendingAssistant, resetStreamState, safeOnError, setInternalSending, setTransportBusy, showStreamError, startTransportStream, transportRef, updateSessionMessages]);
+  }, [abortActiveAssistant, beginAssistantSession, clearStreamError, completeActiveSession, createSessionHelpers, invalidateAssistantSession, isAssistantSessionActive, messagesRef, minAssistantDelayMsRef, onSendRef, rememberSubmittedTurn, removePendingAssistant, resetStreamState, safeOnError, setInternalSending, setTransportBusy, showStreamError, startTransportStream, transportRef, updateSessionMessages]);
 
   const send = React.useCallback((rawText: string, attachments: Attachment[] = []) => {
     if (isBusy()) return false;
@@ -948,24 +1005,13 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     triggerAssistant(submitted.text, retryHistory);
   }, [isBusy, streamError, triggerAssistant, updateSessionMessages]);
 
-  const stopActiveAssistant = React.useCallback(() => {
-    invalidateAssistantSession();
-    controllerRef.current?.abort();
-    if (transportRef.current) {
-      streamAbort();
-      setTransportBusy(false);
-    }
-    controllerRef.current = null;
-    finalizeAssistantNow();
-  }, [finalizeAssistantNow, invalidateAssistantSession, setTransportBusy, streamAbort, transportRef]);
-
-  const stop = React.useCallback(() => {
+  const stop = React.useCallback((source: ChorusAbortSource = 'programmatic') => {
     if (!isBusy()) return;
-    stopActiveAssistant();
-  }, [isBusy, stopActiveAssistant]);
+    abortActiveAssistant('stop', source);
+  }, [abortActiveAssistant, isBusy]);
 
-  const clear = React.useCallback(() => {
-    if (isBusy()) stopActiveAssistant();
+  const clear = React.useCallback((source: ChorusAbortSource = 'programmatic') => {
+    if (isBusy()) abortActiveAssistant('clear', source);
     clearStreamError();
     lastSubmittedTurnRef.current = null;
     const next = resetToInitialMessages ? seedMessagesRef.current : [];
@@ -975,7 +1021,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
       reason: 'clear',
     });
     onClearRef.current?.(next);
-  }, [clearStreamError, isBusy, onClearRef, resetToInitialMessages, seedMessagesRef, stopActiveAssistant, updateSessionMessages]);
+  }, [abortActiveAssistant, clearStreamError, isBusy, onClearRef, resetToInitialMessages, seedMessagesRef, updateSessionMessages]);
 
   const handleEdit = React.useCallback((id: string, newText: string) => {
     if (isBusy()) return;

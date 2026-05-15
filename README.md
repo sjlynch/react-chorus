@@ -650,6 +650,7 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `minAssistantDelayMs` | `number` | `300` | Minimum ms before showing the first assistant token. |
 | `errorMessage` | `string` | `'Something went wrong. Please try again.'` | Friendly message shown in the error banner. Raw transport errors are never surfaced in the default UI. |
 | `onError` | `(error: Error) => void` | — | Called for any non-abort error from a send or stream. The raw `Error` goes here; the UI shows `errorMessage`. |
+| `onAbort` | `({ message, messages, reason, source, path }) => void` | — | Called when an active assistant generation is cancelled by Stop, `ref.stop()`, clear-while-sending, or a superseding session. `message` is the finalized partial assistant message or `null` before the first token; `path` is `'transport'` or `'onSend'`; `reason` is `'stop'`, `'clear'`, or `'superseded'`; `source` is `'user'` for built-in UI actions and `'programmatic'` for imperative/internal cancellation. |
 | `renderError` | `({ error, rawError, retry, dismiss }) => ReactNode` | — | Replace the built-in error banner. `error` is the friendly UI string, `rawError` is the last raw `Error` when available, `retry()` resubmits the last turn, and `dismiss()` clears the banner. |
 | `onChunk` | `(chunk: string, messageId: string) => void` | — | Observation hook called for each streamed token. Receives the assistant `messageId` so callers can correlate chunks with a specific message. Does **not** affect streaming behaviour. |
 | `onToolDelta` | `({ delta, message, messages }) => void` | — | Observation hook called for every accumulated streamed tool-call delta on the `transport` path. Does **not** affect execution. |
@@ -661,7 +662,7 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `onStreamDone` | `({ assistantMessage, toolMessages, messages, response }) => void` | — | Called after each `transport` stream completes normally and tool handlers (if any) finish. Fires for tool-only turns where `onFinish` has no assistant message. |
 | `onCopy` | `(message: Message<TMeta>) => void` | Clipboard copy when available | Overrides the built-in per-message Copy action. If omitted, Chorus copies `message.text` with `navigator.clipboard.writeText` when the Clipboard API is available. |
 | `onFeedback` | `(message: Message<TMeta>, feedback: 'up' \| 'down') => void` | — | Enables built-in thumbs-up / thumbs-down per-message feedback actions and reports the selected variant. |
-| `onFinish` | `({ message, messages, reason, response }) => void` | — | Called once when an assistant message completes normally. Use it for telemetry, persistence handoff, moderation, or post-response UI. Not called for tool-only turns, aborts, Stop, or errors; use `onStreamDone`/`onToolCall` for tool-only streams. |
+| `onFinish` | `({ message, messages, reason, response }) => void` | — | Called once when an assistant message completes normally. Use it for telemetry, persistence handoff, moderation, or post-response UI. Not called for tool-only turns, aborts, Stop, or errors; use `onAbort` for cancellation telemetry and `onStreamDone`/`onToolCall` for tool-only streams. |
 | `persistenceKey` | `string` | — | Uncontrolled-mode persistence key. When set without `value`, Chorus saves/restores messages using this key (defaults to localStorage). If `value` is provided, controlled state wins and built-in persistence is not used. |
 | `persistenceStorage` | `StorageAdapter` | `localStorage` | Custom storage adapter for persistenceKey. The default `localStorage` is resolved lazily; if browser storage is blocked or unavailable, Chorus keeps working without persistence. Implement optional `removeItem(key)` to delete unseeded empty transcripts and deleted conversation keys; seeded clears persist `[]` so the clear survives reloads. |
 | `onPersistenceError` | `(error: Error & { key?: string; operation?: string }) => void` | — | Called when a persistence read, deserialization, write, or remove operation throws/rejects. The hook also exposes the latest error as `useChorusPersistence().error`. |
@@ -687,7 +688,7 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `appendToolDelta(delta)` | Create/update a `role: 'tool'` message from an accumulated connector tool delta. |
 | `streamCallbacks()` | Convenience helper returning `{ onChunk, onReasoning, onToolDelta, onDone }` for `useChorusStream(...).send()`. It is present at runtime; optional chaining keeps older hand-written helper mocks type-compatible. |
 | `finalizeAssistant()` | Mark the assistant message complete. If first-token chunks are still buffered, completion waits until they flush. |
-| `signal` | `AbortSignal` — aborted when the user hits Stop. |
+| `signal` | `AbortSignal` — aborted when Stop, clear-while-sending, or a superseding session cancels the active send. |
 | `systemPrompt` | The optional `systemPrompt` prop. Use it when serializing custom `onSend` requests; Chorus does not insert it into the `messages` argument on this path. |
 
 Call `finalizeAssistant()` when your custom stream is done. In development, Chorus warns if `onSend` appended chunks and then resolved without finalizing; it will still flush those chunks and reset the sending state so the UI cannot get stuck in Stop mode.
@@ -866,7 +867,29 @@ Use `onFinish` when you need the final assistant message rather than token-by-to
 />
 ```
 
-`onFinish` is not called for Stop/abort, transport errors, provider error payloads, tool-only streams, or other sends that produce no assistant message. Use `onStreamDone` or `onToolCall` when you need completion telemetry for tool-only turns.
+`onFinish` is not called for Stop/abort, transport errors, provider error payloads, tool-only streams, or other sends that produce no assistant message. Use `onAbort` for cancellation telemetry, and `onStreamDone` or `onToolCall` when you need completion telemetry for tool-only turns.
+
+### Abort telemetry with `onAbort`
+
+Use `onAbort` when you need to persist or measure cancelled generations:
+
+```tsx
+<Chorus
+  transport="/api/chat"
+  onAbort={({ message, messages, reason, source, path }) => {
+    analytics.track('assistant_aborted', {
+      assistantMessageId: message?.id,
+      partialCharacters: message?.text.length ?? 0,
+      turns: messages.filter((m) => m.role === 'user').length,
+      reason, // 'stop' | 'clear' | 'superseded'
+      source, // 'user' | 'programmatic'
+      path, // 'transport' | 'onSend'
+    });
+  }}
+/>
+```
+
+Built-in Stop reports `reason: 'stop'` and `source: 'user'`; `ref.stop()` reports `reason: 'stop'` and `source: 'programmatic'`. Clearing while sending reports `reason: 'clear'` before the transcript is reset, so `messages` can still include the partial assistant. Built-in send/edit/regenerate/retry actions do not start a second generation while one is active; if an integration supersedes an active session, Chorus reports `reason: 'superseded'` and `source: 'programmatic'`.
 
 ### Transcript observer and export
 
