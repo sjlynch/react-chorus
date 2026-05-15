@@ -1,5 +1,6 @@
 export type Role = 'user' | 'assistant' | 'system' | 'tool';
 export type ConnectorName = 'auto' | 'openai' | 'anthropic' | 'gemini';
+export type MessageFeedback = 'up' | 'down';
 
 export interface Attachment {
   name: string;

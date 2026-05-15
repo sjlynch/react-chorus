@@ -1,14 +1,14 @@
 import React from 'react';
 import type { Message, Role } from '../types';
 import { ToolCallBlock } from './ToolCallBlock';
-import { MessageActionControls, MessageRenderStateProvider, MessageRow, MessageSpeakerLabel } from './MessageRow';
-import type { MessageBubbleSlots, MessageFeedback, MessageMarkdownProps, MessageRenderActions } from './MessageRow';
+import { getInitialMessageFeedback, MessageActionControls, MessageRenderStateProvider, MessageRow, MessageSpeakerLabel } from './MessageRow';
+import type { GetMessageFeedback, MessageBubbleSlots, MessageFeedback, MessageMarkdownProps, MessageRenderActions } from './MessageRow';
 import type { MarkdownSanitizer } from './Markdown';
 import { isChorusDevMode } from '../utils/devMode';
 import { canWriteTextToClipboard, writeTextToClipboard } from '../utils/messageCopy';
 
 export { MessageBubble } from './MessageRow';
-export type { MessageBubbleProps, MessageBubbleSlots, MessageFeedback, MessageMarkdownProps, MessageRenderActions } from './MessageRow';
+export type { GetMessageFeedback, MessageBubbleProps, MessageBubbleSlots, MessageFeedback, MessageMarkdownProps, MessageRenderActions } from './MessageRow';
 
 const DEFAULT_HIDDEN_ROLES: Role[] = ['system', 'tool'];
 const NO_HIDDEN_ROLES: Role[] = [];
@@ -127,10 +127,13 @@ export interface ChatWindowProps<TMeta = Record<string, unknown>> extends Omit<R
   /** Render only the latest N visible messages. Typing and error rows still render outside this message window. */
   maxRenderedMessages?: number;
   messages: Message<TMeta>[];
+  /** Return a persisted feedback selection for a message. If omitted or undefined, message.metadata.feedback seeds the built-in thumb state when it is 'up' or 'down'. */
+  getMessageFeedback?: GetMessageFeedback<TMeta>;
   onCopy?: (message: Message<TMeta>) => void;
   onDelete?: (id: string) => void;
   onDismissError?: () => void;
   onEdit?: (id: string, newText: string) => void;
+  /** Built-in controls call this only when the chosen variant differs from the current selection; clicks do not toggle feedback off. */
   onFeedback?: (message: Message<TMeta>, feedback: MessageFeedback) => void;
   onRegenerate?: (id: string) => void;
   onRetry?: () => void;
@@ -201,6 +204,7 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
   markdownProps,
   markdownSanitizer,
   maxRenderedMessages,
+  getMessageFeedback,
   onCopy,
   onDelete,
   onDismissError,
@@ -246,6 +250,43 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
 
     writeTextToClipboard(message.text);
   }, [onCopy]);
+  const [feedbackOverrides, setFeedbackOverrides] = React.useState<Record<string, MessageFeedback>>({});
+  const feedbackOverridesRef = React.useRef(feedbackOverrides);
+
+  React.useEffect(() => {
+    feedbackOverridesRef.current = feedbackOverrides;
+  }, [feedbackOverrides]);
+
+  React.useEffect(() => {
+    const messageIds = new Set(messages.map(message => message.id));
+    const current = feedbackOverridesRef.current;
+    let changed = false;
+    const next: Record<string, MessageFeedback> = {};
+
+    for (const [messageId, feedback] of Object.entries(current)) {
+      if (messageIds.has(messageId)) next[messageId] = feedback;
+      else changed = true;
+    }
+
+    if (changed) {
+      feedbackOverridesRef.current = next;
+      setFeedbackOverrides(next);
+    }
+  }, [messages]);
+
+  const getSelectedFeedback = React.useCallback((message: Message<TMeta>) => {
+    return feedbackOverrides[message.id] ?? getInitialMessageFeedback(message, getMessageFeedback);
+  }, [feedbackOverrides, getMessageFeedback]);
+
+  const handleMessageFeedback = React.useCallback((message: Message<TMeta>, variant: MessageFeedback) => {
+    const current = feedbackOverridesRef.current[message.id] ?? getInitialMessageFeedback(message, getMessageFeedback);
+    if (current === variant) return;
+
+    const next = { ...feedbackOverridesRef.current, [message.id]: variant };
+    feedbackOverridesRef.current = next;
+    setFeedbackOverrides(next);
+    onFeedback?.(message, variant);
+  }, [getMessageFeedback, onFeedback]);
 
   const windowRef = React.useRef<HTMLDivElement>(null);
   const bottomRef = React.useRef<HTMLDivElement>(null);
@@ -312,6 +353,8 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
     >
       {renderedVisible.map(m => {
         const isStreaming = m.id === streamingMessageId;
+        const initialFeedback = getSelectedFeedback(m);
+        const feedback = onFeedback ? (variant: MessageFeedback) => handleMessageFeedback(m, variant) : undefined;
         const defaultRender = (slots?: MessageBubbleSlots) => {
           if (m.role === 'tool' && m.toolCall) {
             return (
@@ -336,7 +379,8 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
               onRegenerate={onRegenerate}
               onDelete={onDelete}
               onCopy={copyAvailable ? copyMessage : undefined}
-              onFeedback={onFeedback}
+              onFeedback={feedback ? (_message, variant) => feedback(variant) : undefined}
+              initialFeedback={initialFeedback}
               {...slots}
             />
           );
@@ -352,7 +396,8 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
           regenerate: m.role === 'assistant' && onRegenerate ? () => onRegenerate(m.id) : undefined,
           delete: onDelete ? () => onDelete(m.id) : undefined,
           copy: copyAvailable ? () => copyMessage(m) : undefined,
-          feedback: onFeedback ? (variant) => onFeedback(m, variant) : undefined,
+          feedback,
+          initialFeedback,
           defaultRender: () => <MessageActionControls message={m} actions={actions} />,
         };
         const messageProps: RenderMessageRootProps = { 'data-chorus-message-id': m.id };

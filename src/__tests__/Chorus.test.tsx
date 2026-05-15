@@ -99,6 +99,25 @@ describe('Chorus', () => {
     expect(root.style.getPropertyValue('--chorus-error-text')).toBe('#666');
   });
 
+  it('seeds feedback through getMessageFeedback', () => {
+    const message: Message<{ storedFeedback: 'down' | null }> = {
+      id: 'stored-feedback',
+      role: 'assistant',
+      text: 'Persisted reply',
+      metadata: { storedFeedback: 'down' },
+    };
+
+    render(
+      <Chorus
+        initialMessages={[message]}
+        onFeedback={vi.fn()}
+        getMessageFeedback={(m) => m.metadata?.storedFeedback === 'down' ? 'down' : null}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: 'Thumbs down' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
   it('exposes an imperative ChorusRef for send, focus, clear, stop, and scrollToMessage', async () => {
     const ref = React.createRef<ChorusRef>();
     const scrollIntoView = vi.fn();

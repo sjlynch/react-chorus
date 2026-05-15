@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { describe, it, expect, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { ChatWindow, MessageBubble, type RenderMessageContext } from '../components/ChatWindow';
+import { ChatWindow, MessageBubble, type MessageFeedback, type RenderMessageContext } from '../components/ChatWindow';
 import type { Message } from '../types';
 
 // Mock Markdown to avoid DOMPurify/highlight.js complexity in unit tests
@@ -362,12 +362,32 @@ describe('ChatWindow', () => {
     await user.click(screen.getByRole('button', { name: 'Copy' }));
     await user.click(screen.getByRole('button', { name: 'Thumbs up' }));
     expect(screen.getByRole('button', { name: 'Thumbs up' })).toHaveAttribute('aria-pressed', 'true');
+    await user.click(screen.getByRole('button', { name: 'Thumbs up' }));
     await user.click(screen.getByRole('button', { name: 'Thumbs down' }));
 
     expect(onCopy).toHaveBeenCalledWith(ASST_MSG);
     expect(onFeedback).toHaveBeenNthCalledWith(1, ASST_MSG, 'up');
     expect(onFeedback).toHaveBeenNthCalledWith(2, ASST_MSG, 'down');
+    expect(onFeedback).toHaveBeenCalledTimes(2);
     expect(screen.getByRole('button', { name: 'Thumbs down' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('seeds feedback from message metadata when action controls remount', () => {
+    type FeedbackMeta = { feedback?: MessageFeedback | null };
+    const onFeedback = vi.fn();
+    const seeded: Message<FeedbackMeta> = { id: 'seeded', role: 'assistant', text: 'Seeded reply', metadata: { feedback: 'up' } };
+    const later: Message<FeedbackMeta> = { id: 'later', role: 'assistant', text: 'Later reply' };
+    const { rerender } = render(<ChatWindow messages={[seeded]} maxRenderedMessages={1} onFeedback={onFeedback} />);
+
+    expect(screen.getByRole('button', { name: 'Thumbs up' })).toHaveAttribute('aria-pressed', 'true');
+
+    rerender(<ChatWindow messages={[seeded, later]} maxRenderedMessages={1} onFeedback={onFeedback} />);
+    expect(screen.queryByText('Seeded reply')).not.toBeInTheDocument();
+
+    rerender(<ChatWindow messages={[seeded]} maxRenderedMessages={1} onFeedback={onFeedback} />);
+    expect(screen.getByText('Seeded reply')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Thumbs up' })).toHaveAttribute('aria-pressed', 'true');
+    expect(onFeedback).not.toHaveBeenCalled();
   });
 
   it('copies with navigator.clipboard by default when available', async () => {
@@ -406,9 +426,11 @@ describe('ChatWindow', () => {
 
     await user.click(screen.getByRole('button', { name: 'Custom copy' }));
     await user.click(screen.getByRole('button', { name: 'Custom down' }));
+    await user.click(screen.getByRole('button', { name: 'Custom down' }));
 
     expect(onCopy).toHaveBeenCalledWith(ASST_MSG);
     expect(onFeedback).toHaveBeenCalledWith(ASST_MSG, 'down');
+    expect(onFeedback).toHaveBeenCalledTimes(1);
   });
 
   it('preserves local edit state when messages stream in', async () => {

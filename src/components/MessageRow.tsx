@@ -1,12 +1,34 @@
 import React from 'react';
 import { Check, Copy, Pencil, RefreshCw, ThumbsDown, ThumbsUp, Trash2, X } from 'lucide-react';
-import type { Attachment, Message, Role } from '../types';
+import type { Attachment, Message, MessageFeedback, Role } from '../types';
 import { getAttachmentPreviewSource } from '../utils/attachmentPreview';
 import { canWriteTextToClipboard, writeTextToClipboard } from '../utils/messageCopy';
 import { Markdown, type MarkdownProps, type MarkdownSanitizer } from './Markdown';
 
 export type MessageMarkdownProps = Omit<MarkdownProps, 'text' | 'codeTheme' | 'headless' | 'streaming'>;
-export type MessageFeedback = 'up' | 'down';
+export type { MessageFeedback } from '../types';
+export type GetMessageFeedback<TMeta = Record<string, unknown>> = (message: Message<TMeta>) => MessageFeedback | null | undefined;
+
+export function isMessageFeedback(value: unknown): value is MessageFeedback {
+  return value === 'up' || value === 'down';
+}
+
+function getMetadataFeedback<TMeta>(message: Message<TMeta>): MessageFeedback | null {
+  const metadata = message.metadata;
+  if (!metadata || typeof metadata !== 'object') return null;
+
+  const feedback = (metadata as { feedback?: unknown }).feedback;
+  return isMessageFeedback(feedback) ? feedback : null;
+}
+
+export function getInitialMessageFeedback<TMeta>(message: Message<TMeta>, getMessageFeedback?: GetMessageFeedback<TMeta>): MessageFeedback | null {
+  if (getMessageFeedback) {
+    const feedback = getMessageFeedback(message);
+    if (feedback !== undefined) return isMessageFeedback(feedback) ? feedback : null;
+  }
+
+  return getMetadataFeedback(message);
+}
 
 export interface MessageBubbleSlots {
   before?: React.ReactNode;
@@ -23,7 +45,10 @@ export interface MessageRenderActions {
   regenerate?: () => void;
   delete?: () => void;
   copy?: () => void;
+  /** Called when the user chooses a different feedback variant. Built-in controls ignore repeat clicks on the selected variant. */
   feedback?: (variant: MessageFeedback) => void;
+  /** Current persisted feedback selection used to seed the built-in thumb state. */
+  initialFeedback?: MessageFeedback | null;
   defaultRender: () => React.ReactNode;
 }
 
@@ -227,7 +252,10 @@ export interface MessageRowProps<TMeta = Record<string, unknown>> extends Messag
   onRegenerate?: (id: string) => void;
   onDelete?: (id: string) => void;
   onCopy?: (message: Message<TMeta>) => void;
+  /** Built-in controls call this only when the chosen variant differs from the current selection. */
   onFeedback?: (message: Message<TMeta>, feedback: MessageFeedback) => void;
+  /** Seeds the pressed thumb state. When omitted, message.metadata.feedback is used if it is 'up' or 'down'. */
+  initialFeedback?: MessageFeedback | null;
   streaming?: boolean;
   markdownProps?: MessageMarkdownProps;
   markdownSanitizer?: MarkdownSanitizer;
@@ -238,12 +266,21 @@ function actionButtonClass(active?: boolean) {
 }
 
 function MessageActions({ actions, onEditRequested }: { actions: MessageRenderActions; onEditRequested: () => void }) {
-  const [selectedFeedback, setSelectedFeedback] = React.useState<MessageFeedback | null>(null);
+  const initialFeedback = actions.initialFeedback ?? null;
+  const [selectedFeedback, setSelectedFeedback] = React.useState<MessageFeedback | null>(initialFeedback);
+  const selectedFeedbackRef = React.useRef<MessageFeedback | null>(initialFeedback);
   const hasActions = actions.canEdit || actions.canRegenerate || actions.canDelete || Boolean(actions.copy) || Boolean(actions.feedback);
+
+  React.useEffect(() => {
+    selectedFeedbackRef.current = initialFeedback;
+    setSelectedFeedback(initialFeedback);
+  }, [initialFeedback]);
 
   if (!hasActions) return null;
 
   const handleFeedback = (variant: MessageFeedback) => {
+    if (selectedFeedbackRef.current === variant) return;
+    selectedFeedbackRef.current = variant;
     setSelectedFeedback(variant);
     actions.feedback?.(variant);
   };
@@ -309,9 +346,10 @@ export function MessageActionControls<TMeta = Record<string, unknown>>({ message
   );
 }
 
-export function MessageRow<TMeta = Record<string, unknown>>({ m, codeTheme, headless, onEdit, onRegenerate, onDelete, onCopy, onFeedback, streaming = false, markdownProps, markdownSanitizer, before, headerSlot, footerSlot, after }: MessageRowProps<TMeta>) {
+export function MessageRow<TMeta = Record<string, unknown>>({ m, codeTheme, headless, onEdit, onRegenerate, onDelete, onCopy, onFeedback, initialFeedback, streaming = false, markdownProps, markdownSanitizer, before, headerSlot, footerSlot, after }: MessageRowProps<TMeta>) {
   const [editing, setEditing] = React.useState(false);
   const copy = createCopyAction(m, onCopy);
+  const resolvedInitialFeedback = initialFeedback === undefined ? getInitialMessageFeedback(m) : initialFeedback;
   const actions: MessageRenderActions = {
     canEdit: Boolean(m.role === 'user' && onEdit),
     canRegenerate: Boolean(m.role === 'assistant' && onRegenerate),
@@ -321,6 +359,7 @@ export function MessageRow<TMeta = Record<string, unknown>>({ m, codeTheme, head
     delete: onDelete ? () => onDelete(m.id) : undefined,
     copy,
     feedback: onFeedback ? (variant) => onFeedback(m, variant) : undefined,
+    initialFeedback: resolvedInitialFeedback,
     defaultRender: () => null,
   };
 
