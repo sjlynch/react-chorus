@@ -62,10 +62,12 @@ export interface UseConversationsResult {
   activePersistenceKey: string;
   /** Storage wrapper suitable for <Chorus persistenceStorage>; message writes update conversation timestamps. */
   storage: StorageAdapter | null;
+  /** False while an async conversation index read is pending; gate custom sidebars on this. */
   loaded: boolean;
   /** Last conversation storage error, if any. */
   error: ConversationStorageError | null;
   getPersistenceKey: (id: string) => string;
+  /** Creates immediately once loaded; pre-load creates are queued and merged after the index read. */
   createConversation: (title?: string) => string;
   selectConversation: (id: string) => void;
   renameConversation: (id: string, title: string) => void;
@@ -90,6 +92,12 @@ interface PendingIndexRead {
   indexKey: string;
   promise: Promise<string | null>;
   version: number;
+}
+
+interface PendingConversationCreate {
+  storage: StorageAdapter;
+  indexKey: string;
+  conversation: ConversationSummary;
 }
 
 interface InitialSyncRead {
@@ -235,6 +243,21 @@ function stateFromRaw(raw: string | null, preferredActiveId: string | null | und
   }
 }
 
+function mergePendingCreates(state: ConversationsState, pendingCreates: PendingConversationCreate[]): ConversationsState {
+  if (pendingCreates.length === 0) return state;
+
+  const pendingConversations = pendingCreates.map(create => create.conversation);
+  const pendingIds = new Set(pendingConversations.map(conversation => conversation.id));
+  return {
+    conversations: [
+      ...pendingConversations.slice().reverse(),
+      ...state.conversations.filter(conversation => !pendingIds.has(conversation.id)),
+    ],
+    activeId: pendingConversations[pendingConversations.length - 1]?.id ?? state.activeId,
+    loaded: true,
+  };
+}
+
 function getConversationIdFromKey(key: string, prefix: string) {
   return key.startsWith(prefix) ? key.slice(prefix.length) : null;
 }
@@ -264,6 +287,7 @@ export function useConversations(options: UseConversationsOptions = {}): UseConv
   const versionRef = React.useRef(0);
   const initialAsyncReadRef = React.useRef<PendingIndexRead | null>(null);
   const initialSyncReadRef = React.useRef<InitialSyncRead | null>(null);
+  const pendingCreatesRef = React.useRef<PendingConversationCreate[]>([]);
   const initialErrorRef = React.useRef<ConversationStorageError | null>(null);
   const storageRef = React.useRef(storage);
   storageRef.current = storage;
@@ -348,7 +372,7 @@ export function useConversations(options: UseConversationsOptions = {}): UseConv
 
   const touchConversation = React.useCallback((id: string) => {
     const current = stateRef.current;
-    if (!current.conversations.some(conversation => conversation.id === id)) return;
+    if (!current.loaded || !current.conversations.some(conversation => conversation.id === id)) return;
 
     const timestamp = getTimestamp(nowRef.current);
     const conversations = current.conversations.map(conversation => (
@@ -405,10 +429,33 @@ export function useConversations(options: UseConversationsOptions = {}): UseConv
 
   React.useEffect(() => {
     let cancelled = false;
+    pendingCreatesRef.current = pendingCreatesRef.current.filter(pendingCreate => (
+      pendingCreate.storage === storage && pendingCreate.indexKey === indexKey
+    ));
+
+    const takePendingCreatesForSource = () => {
+      const matching: PendingConversationCreate[] = [];
+      const remaining: PendingConversationCreate[] = [];
+      for (const pendingCreate of pendingCreatesRef.current) {
+        if (pendingCreate.storage === storage && pendingCreate.indexKey === indexKey) matching.push(pendingCreate);
+        else remaining.push(pendingCreate);
+      }
+      pendingCreatesRef.current = remaining;
+      return matching;
+    };
 
     const applyRead = (raw: string | null, version: number) => {
       if (!cancelled && versionRef.current === version) {
         const parsed = stateFromRaw(raw, options.initialActiveId, indexKey);
+        const pendingCreates = takePendingCreatesForSource();
+
+        if (!parsed.error && pendingCreates.length > 0) {
+          const mergedState = mergePendingCreates(parsed.state, pendingCreates);
+          setError(null);
+          commit(mergedState.conversations, mergedState.activeId);
+          return;
+        }
+
         stateRef.current = parsed.state;
         setState(parsed.state);
         if (parsed.error) reportError(parsed.error, 'read', indexKey);
@@ -418,6 +465,7 @@ export function useConversations(options: UseConversationsOptions = {}): UseConv
 
     const applyReadError = (readError: unknown, version: number) => {
       if (!cancelled && versionRef.current === version) {
+        takePendingCreatesForSource();
         const nextState = emptyState();
         stateRef.current = nextState;
         setState(nextState);
@@ -476,7 +524,7 @@ export function useConversations(options: UseConversationsOptions = {}): UseConv
     }
 
     return () => { cancelled = true; };
-  }, [indexKey, options.initialActiveId, reportError, storage]);
+  }, [commit, indexKey, options.initialActiveId, reportError, storage]);
 
   const createConversation = React.useCallback((title?: string) => {
     const id = createIdRef.current();
@@ -487,9 +535,19 @@ export function useConversations(options: UseConversationsOptions = {}): UseConv
       createdAt: timestamp,
       updatedAt: timestamp,
     };
+
+    const current = stateRef.current;
+    const targetStorage = storageRef.current;
+    if (!current.loaded && targetStorage) {
+      pendingCreatesRef.current = pendingCreatesRef.current
+        .filter(pendingCreate => !(pendingCreate.storage === targetStorage && pendingCreate.indexKey === indexKeyRef.current && pendingCreate.conversation.id === id))
+        .concat({ storage: targetStorage, indexKey: indexKeyRef.current, conversation });
+      return id;
+    }
+
     const conversations = [
       conversation,
-      ...stateRef.current.conversations.filter(existing => existing.id !== id),
+      ...current.conversations.filter(existing => existing.id !== id),
     ];
     commit(conversations, id);
     return id;
@@ -497,14 +555,14 @@ export function useConversations(options: UseConversationsOptions = {}): UseConv
 
   const selectConversation = React.useCallback((id: string) => {
     const current = stateRef.current;
-    if (!current.conversations.some(conversation => conversation.id === id)) return;
+    if (!current.loaded || !current.conversations.some(conversation => conversation.id === id)) return;
     commit(current.conversations, id);
   }, [commit, stateRef]);
 
   const renameConversation = React.useCallback((id: string, title: string) => {
     const current = stateRef.current;
     const trimmed = title.trim();
-    if (!trimmed || !current.conversations.some(conversation => conversation.id === id)) return;
+    if (!current.loaded || !trimmed || !current.conversations.some(conversation => conversation.id === id)) return;
 
     const timestamp = getTimestamp(nowRef.current);
     const conversations = current.conversations.map(conversation => (
@@ -515,6 +573,7 @@ export function useConversations(options: UseConversationsOptions = {}): UseConv
 
   const renameFromFirstMessage = React.useCallback((id: string, messages: Pick<Message, 'role' | 'text'>[], renameOptions: RenameFromFirstMessageOptions = {}) => {
     const current = stateRef.current;
+    if (!current.loaded) return;
     const conversation = current.conversations.find(existing => existing.id === id);
     if (!conversation) return;
     if (!renameOptions.overwrite && conversation.title.trim() !== defaultTitleRef.current.trim()) return;
@@ -531,7 +590,7 @@ export function useConversations(options: UseConversationsOptions = {}): UseConv
 
   const deleteConversation = React.useCallback((id: string) => {
     const current = stateRef.current;
-    if (!current.conversations.some(conversation => conversation.id === id)) return;
+    if (!current.loaded || !current.conversations.some(conversation => conversation.id === id)) return;
 
     removeConversationMessages(id);
     const conversations = current.conversations.filter(conversation => conversation.id !== id);
@@ -541,7 +600,7 @@ export function useConversations(options: UseConversationsOptions = {}): UseConv
 
   const pinConversation = React.useCallback((id: string, pinned = true) => {
     const current = stateRef.current;
-    if (!current.conversations.some(conversation => conversation.id === id)) return;
+    if (!current.loaded || !current.conversations.some(conversation => conversation.id === id)) return;
 
     const timestamp = getTimestamp(nowRef.current);
     const conversations = current.conversations.map(conversation => (

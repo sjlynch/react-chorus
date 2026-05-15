@@ -43,11 +43,11 @@ export const typedChorusElement = (
       void latency;
       void source;
     }}
-    renderMessage={(message) => {
+    renderMessage={(message, ctx) => {
       const model: string | undefined = message.metadata?.model;
       // @ts-expect-error MyMeta does not include traceId
       void message.metadata?.traceId;
-      return <span>{model}</span>;
+      return <span {...ctx.messageProps}>{model}</span>;
     }}
   />
 );

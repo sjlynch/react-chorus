@@ -127,6 +127,33 @@ describe('Chorus', () => {
     expect(screen.queryByText('hi from ref')).not.toBeInTheDocument();
   });
 
+  it('scrollToMessage targets custom renderMessage rows that spread messageProps', () => {
+    const ref = React.createRef<ChorusRef>();
+    let scrolledElement: HTMLElement | null = null;
+    const scrollIntoView = vi.fn(function (this: HTMLElement) {
+      scrolledElement = this;
+    });
+    window.HTMLElement.prototype.scrollIntoView = scrollIntoView;
+
+    render(
+      <Chorus
+        ref={ref}
+        messages={[{ id: 'a1', role: 'assistant', text: 'Custom reply' }]}
+        renderMessage={(message, ctx) => (
+          <article {...ctx.messageProps} data-testid="custom-message">
+            {message.text}
+          </article>
+        )}
+      />
+    );
+
+    const customMessage = screen.getByTestId('custom-message');
+    act(() => ref.current?.scrollToMessage('a1'));
+
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
+    expect(scrolledElement).toBe(customMessage);
+  });
+
   it('transport path send() fires transport and streams tokens into the message list', async () => {
     const user = userEvent.setup();
     const transport = vi.fn<Transport>(async () => sseResponse(['Hel', 'lo']));
@@ -847,24 +874,35 @@ describe('Chorus', () => {
     await waitFor(() => expect(onMessagesChange).toHaveBeenLastCalledWith([], expect.objectContaining({ source: 'persistence', reason: 'clear' })));
   });
 
-  it('keeps the initialMessages seed after an empty async persistence load resolves', async () => {
+  it('waits for an empty async persistence load before rendering and saving the seed', async () => {
+    const pendingRead = deferred<string | null>();
     const welcome: Message[] = [{ id: 'welcome', role: 'assistant', text: 'Async welcome!' }];
     const asyncStorage: StorageAdapter = {
-      getItem: vi.fn().mockResolvedValue(null),
+      getItem: vi.fn(() => pendingRead.promise),
       setItem: vi.fn(),
     };
 
     render(<Chorus persistenceKey="chat" persistenceStorage={asyncStorage} initialMessages={welcome} />);
 
+    expect(screen.queryByText('Async welcome!')).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: /send a message/i })).toBeDisabled();
+    expect(screen.getByPlaceholderText('Loading saved conversation…')).toBeInTheDocument();
+    expect(asyncStorage.setItem).not.toHaveBeenCalled();
+
+    await act(async () => {
+      pendingRead.resolve(null);
+      await pendingRead.promise;
+    });
+
     expect(screen.getByText('Async welcome!')).toBeInTheDocument();
     await waitFor(() => expect(asyncStorage.setItem).toHaveBeenCalledWith('chat', JSON.stringify(welcome)));
-    expect(screen.getByText('Async welcome!')).toBeInTheDocument();
   });
 
-  it('replaces the initialMessages seed when async persistence loads stored history', async () => {
+  it('keeps the initialMessages seed hidden while async persistence loads stored history', async () => {
+    const pendingRead = deferred<string | null>();
     const stored: Message[] = [{ id: 'stored', role: 'assistant', text: 'Async stored history' }];
     const asyncStorage: StorageAdapter = {
-      getItem: vi.fn().mockResolvedValue(JSON.stringify(stored)),
+      getItem: vi.fn(() => pendingRead.promise),
       setItem: vi.fn(),
     };
 
@@ -876,9 +914,43 @@ describe('Chorus', () => {
       />
     );
 
-    expect(screen.getByText('Async welcome!')).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByText('Async stored history')).toBeInTheDocument());
     expect(screen.queryByText('Async welcome!')).not.toBeInTheDocument();
+    await act(async () => {
+      pendingRead.resolve(JSON.stringify(stored));
+      await pendingRead.promise;
+    });
+
+    expect(screen.getByText('Async stored history')).toBeInTheDocument();
+    expect(screen.queryByText('Async welcome!')).not.toBeInTheDocument();
+    expect(asyncStorage.setItem).not.toHaveBeenCalled();
+  });
+
+  it('blocks sends while async persistence is still loading so stored transcripts are not clobbered', async () => {
+    const ref = React.createRef<ChorusRef>();
+    const pendingRead = deferred<string | null>();
+    const stored: Message[] = [{ id: 'stored', role: 'assistant', text: 'Stored before send' }];
+    const onSend = vi.fn<OnSend>(async () => ({ id: 'reply', role: 'assistant', text: 'reply' }));
+    const asyncStorage: StorageAdapter = {
+      getItem: vi.fn(() => pendingRead.promise),
+      setItem: vi.fn(),
+    };
+
+    render(<Chorus ref={ref} persistenceKey="chat" persistenceStorage={asyncStorage} onSend={onSend} minAssistantDelayMs={0} />);
+
+    expect(screen.getByRole('textbox', { name: /send a message/i })).toBeDisabled();
+    act(() => ref.current?.send('pre-load send'));
+    fireEvent.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(asyncStorage.setItem).not.toHaveBeenCalled();
+    expect(screen.queryByText('pre-load send')).not.toBeInTheDocument();
+
+    await act(async () => {
+      pendingRead.resolve(JSON.stringify(stored));
+      await pendingRead.promise;
+    });
+
+    expect(screen.getByText('Stored before send')).toBeInTheDocument();
     expect(asyncStorage.setItem).not.toHaveBeenCalled();
   });
 
@@ -928,6 +1000,29 @@ describe('Chorus', () => {
       operation: 'deserialize',
     })));
     expect(screen.queryByRole('log')).toBeInTheDocument();
+  });
+
+  it('does not read ignored built-in persistence in controlled mode', async () => {
+    const onPersistenceError = vi.fn();
+    const storage: StorageAdapter = {
+      getItem: vi.fn(() => { throw new Error('blocked storage'); }),
+      setItem: vi.fn(),
+    };
+
+    render(
+      <Chorus
+        value={[{ id: 'controlled', role: 'assistant', text: 'Controlled transcript' }]}
+        onChange={vi.fn()}
+        persistenceKey="chat"
+        persistenceStorage={storage}
+        onPersistenceError={onPersistenceError}
+      />,
+    );
+
+    expect(screen.getByText('Controlled transcript')).toBeInTheDocument();
+    await act(async () => { await Promise.resolve(); });
+    expect(storage.getItem).not.toHaveBeenCalled();
+    expect(onPersistenceError).not.toHaveBeenCalled();
   });
 
   it('surfaces persistence write failures through onPersistenceError', async () => {

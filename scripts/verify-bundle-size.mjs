@@ -10,12 +10,15 @@ const KiB = 1024;
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const distDir = path.join(rootDir, 'dist');
 const playgroundDir = path.join(rootDir, 'dist-playground');
+const readmePath = path.join(rootDir, 'README.md');
+const reportDir = path.join(rootDir, '.cache', 'react-chorus');
 const args = new Set(process.argv.slice(2));
 const runPlayground = args.has('--playground');
 const runLibrary = !runPlayground || args.has('--library');
 const require = createRequire(import.meta.url);
 
 const failures = [];
+const reports = new Map();
 
 function formatSize(bytes) {
   return `${(bytes / KiB).toFixed(1)} kB`;
@@ -23,6 +26,22 @@ function formatSize(bytes) {
 
 function gzipSize(source) {
   return zlib.gzipSync(typeof source === 'string' ? Buffer.from(source) : source, { level: 9 }).length;
+}
+
+function createMeasurement(label, size, gzip, maxSize, maxGzip) {
+  return {
+    label,
+    sizeBytes: size,
+    gzipBytes: gzip,
+    size: formatSize(size),
+    gzip: formatSize(gzip),
+    budget: {
+      sizeBytes: maxSize,
+      gzipBytes: maxGzip,
+      size: formatSize(maxSize),
+      gzip: formatSize(maxGzip),
+    },
+  };
 }
 
 function fail(message) {
@@ -45,6 +64,91 @@ function printBudgetLine(label, size, gzip, maxSize, maxGzip) {
 
 async function readText(filePath) {
   return readFile(filePath, 'utf8');
+}
+
+function reportPath(kind) {
+  return path.join(reportDir, `${kind}-bundle-size-report.json`);
+}
+
+function reportCommand(kind) {
+  return kind === 'playground' ? 'npm run build:playground' : 'npm run build && npm run verify:bundle-size';
+}
+
+async function writeReport(kind, report) {
+  await mkdir(reportDir, { recursive: true });
+  const filePath = reportPath(kind);
+  await writeFile(filePath, `${JSON.stringify(report, null, 2)}\n`);
+  console.log(`Wrote ${path.relative(rootDir, filePath).replace(/\\/g, '/')}.`);
+}
+
+function compareReadmeMeasurement({ match, readmeLabel, measured, refreshCommand }) {
+  if (!match) {
+    fail(`README bundle-size documentation for ${readmeLabel} was not found; update README.md or the verification parser.`);
+    return;
+  }
+
+  const [, readmeSize, readmeGzip] = match;
+  if (readmeSize !== measured.size || readmeGzip !== measured.gzip) {
+    fail(`README bundle-size documentation for ${readmeLabel} says ${readmeSize} / gzip ${readmeGzip}, but verification measured ${measured.size} / gzip ${measured.gzip}. Run \`${refreshCommand}\` and update README.md.`);
+  }
+}
+
+async function verifyReadmeLibraryMeasurements(measurements) {
+  const readme = await readText(readmePath);
+  const rows = [
+    {
+      key: 'root',
+      label: 'react-chorus (`<Chorus>`)',
+      pattern: /\| `react-chorus` \(`<Chorus>`\) \| ([\d.]+ kB) \| ([\d.]+ kB) \|/,
+    },
+    {
+      key: 'headless',
+      label: 'react-chorus/headless',
+      pattern: /\| `react-chorus\/headless` \| ([\d.]+ kB) \| ([\d.]+ kB) \|/,
+    },
+    {
+      key: 'transport',
+      label: 'react-chorus/transport',
+      pattern: /\| `react-chorus\/transport` \| ([\d.]+ kB) \| ([\d.]+ kB) \|/,
+    },
+    {
+      key: 'highlight',
+      label: 'lazy highlight.js runtime',
+      pattern: /\| Lazy `highlight\.js` runtime \| ([\d.]+ kB) \| ([\d.]+ kB) \|/,
+    },
+  ];
+
+  for (const row of rows) {
+    const measured = measurements[row.key];
+    if (!measured) continue;
+    compareReadmeMeasurement({
+      match: readme.match(row.pattern),
+      readmeLabel: row.label,
+      measured,
+      refreshCommand: reportCommand('library'),
+    });
+  }
+}
+
+async function verifyReadmePlaygroundMeasurements(measurements) {
+  const readme = await readText(readmePath);
+  const match = readme.match(/current playground initial JS graph is ([\d.]+ kB) \/ ([\d.]+ kB) gzip and its largest lazy chunk \(highlight\.js\) is ([\d.]+ kB) \/ ([\d.]+ kB) gzip/);
+  if (!match) {
+    fail('README playground bundle-size paragraph was not found; update README.md or the verification parser.');
+    return;
+  }
+
+  const initial = measurements.initialJsGraph;
+  const lazy = measurements.largestLazyJsChunk;
+  if (!initial || !lazy) return;
+
+  const [, readmeInitialSize, readmeInitialGzip, readmeLazySize, readmeLazyGzip] = match;
+  if (readmeInitialSize !== initial.size || readmeInitialGzip !== initial.gzip) {
+    fail(`README playground initial JS graph says ${readmeInitialSize} / gzip ${readmeInitialGzip}, but verification measured ${initial.size} / gzip ${initial.gzip}. Run \`${reportCommand('playground')}\` and update README.md.`);
+  }
+  if (readmeLazySize !== lazy.size || readmeLazyGzip !== lazy.gzip) {
+    fail(`README playground lazy chunk says ${readmeLazySize} / gzip ${readmeLazyGzip}, but verification measured ${lazy.size} / gzip ${lazy.gzip}. Run \`${reportCommand('playground')}\` and update README.md.`);
+  }
 }
 
 async function listFiles(dir, predicate = () => true) {
@@ -243,6 +347,7 @@ async function buildConsumerBundle() {
 async function verifyConsumerBundleBudgets() {
   const chunks = await buildConsumerBundle();
   const chunksByFileName = new Map(chunks.map(chunk => [chunk.fileName, chunk]));
+  const measurements = {};
   const entryBudgets = [
     { label: 'root entry initial JS', entry: 'root', maxSize: 160 * KiB, maxGzip: 55 * KiB },
     { label: 'headless entry initial JS', entry: 'headless', maxSize: 165 * KiB, maxGzip: 56 * KiB },
@@ -261,6 +366,7 @@ async function verifyConsumerBundleBudgets() {
     const graph = collectStaticChunkGraph(entryChunk, chunksByFileName);
     initialGraphs.set(budget.entry, graph);
     const { size, gzip } = measureRollupChunks(graph, chunksByFileName);
+    measurements[budget.entry] = createMeasurement(budget.label, size, gzip, budget.maxSize, budget.maxGzip);
     printBudgetLine(budget.label, size, gzip, budget.maxSize, budget.maxGzip);
     overBudget(budget.label, size, gzip, budget.maxSize, budget.maxGzip);
   }
@@ -295,9 +401,19 @@ async function verifyConsumerBundleBudgets() {
     const { size, gzip } = measureRollupChunks(highlightGraph, chunksByFileName);
     const maxSize = 950 * KiB;
     const maxGzip = 330 * KiB;
+    measurements.highlight = createMeasurement('lazy highlight.js runtime', size, gzip, maxSize, maxGzip);
     printBudgetLine('lazy highlight.js runtime', size, gzip, maxSize, maxGzip);
     overBudget('lazy highlight.js runtime', size, gzip, maxSize, maxGzip);
   }
+
+  await verifyReadmeLibraryMeasurements(measurements);
+  reports.set('library', {
+    schemaVersion: 1,
+    command: reportCommand('library'),
+    generatedAt: new Date().toISOString(),
+    reactPeersExcluded: true,
+    measurements,
+  });
 }
 
 function parseStaticImports(code) {
@@ -382,6 +498,9 @@ async function verifyPlaygroundBudgets() {
   const initial = await measureFiles(initialGraph);
   const initialMaxSize = 380 * KiB;
   const initialMaxGzip = 125 * KiB;
+  const measurements = {
+    initialJsGraph: createMeasurement('initial JS graph', initial.size, initial.gzip, initialMaxSize, initialMaxGzip),
+  };
 
   console.log('Playground bundle budgets:');
   printBudgetLine('initial JS graph', initial.size, initial.gzip, initialMaxSize, initialMaxGzip);
@@ -403,9 +522,21 @@ async function verifyPlaygroundBudgets() {
     const lazyMaxSize = 950 * KiB;
     const lazyMaxGzip = 330 * KiB;
     const label = `largest lazy JS chunk (${path.relative(playgroundDir, largestLazy.filePath).replace(/\\/g, '/')})`;
+    measurements.largestLazyJsChunk = {
+      ...createMeasurement(label, largestLazy.size, largestLazy.gzip, lazyMaxSize, lazyMaxGzip),
+      fileName: path.relative(playgroundDir, largestLazy.filePath).replace(/\\/g, '/'),
+    };
     printBudgetLine(label, largestLazy.size, largestLazy.gzip, lazyMaxSize, lazyMaxGzip);
     overBudget('playground largest lazy JS chunk', largestLazy.size, largestLazy.gzip, lazyMaxSize, lazyMaxGzip);
   }
+
+  await verifyReadmePlaygroundMeasurements(measurements);
+  reports.set('playground', {
+    schemaVersion: 1,
+    command: reportCommand('playground'),
+    generatedAt: new Date().toISOString(),
+    measurements,
+  });
 }
 
 async function verifyLibraryBudgets() {
@@ -416,6 +547,10 @@ async function verifyLibraryBudgets() {
 
 if (runLibrary) await verifyLibraryBudgets();
 if (runPlayground) await verifyPlaygroundBudgets();
+
+for (const [kind, report] of reports) {
+  await writeReport(kind, report);
+}
 
 if (failures.length > 0) {
   console.error('\nBundle size verification failed:');

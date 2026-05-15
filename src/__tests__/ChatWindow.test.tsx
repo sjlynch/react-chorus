@@ -265,7 +265,19 @@ describe('ChatWindow', () => {
       isStreaming: false,
       defaultRender: expect.any(Function),
       actions: expect.any(Object),
+      messageProps: { 'data-chorus-message-id': 'u1' },
     }));
+  });
+
+  it('adds scroll target props to a direct custom DOM renderMessage root', () => {
+    render(
+      <ChatWindow
+        messages={[USER_MSG]}
+        renderMessage={(message) => <article data-testid="custom-root">{message.text}</article>}
+      />
+    );
+
+    expect(screen.getByTestId('custom-root')).toHaveAttribute('data-chorus-message-id', 'u1');
   });
 
   it('falls back to default rendering when renderMessage returns null', () => {

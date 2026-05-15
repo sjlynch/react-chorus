@@ -14,7 +14,7 @@ import { Markdown as BaseMarkdown, type MarkdownProps } from './components/Markd
 import { ConversationList as BaseConversationList, type ConversationListProps } from './components/ConversationList';
 
 export type { ChatWindowProps, MessageBubbleProps, MessageBubbleSlots } from './components/ChatWindow';
-export type { MessageFeedback, RenderErrorContext, RenderMessageContext, MessageMarkdownProps, MessageRenderActions } from './components/ChatWindow';
+export type { MessageFeedback, RenderErrorContext, RenderMessageContext, RenderMessageRootProps, MessageMarkdownProps, MessageRenderActions } from './components/ChatWindow';
 
 function ChatWindowInner<TMeta = Record<string, unknown>>(
   { headless = true, ...props }: ChatWindowProps<TMeta>,

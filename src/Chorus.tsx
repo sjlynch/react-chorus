@@ -177,10 +177,11 @@ function ChorusInner<TMeta = Record<string, unknown>>({
   const [composerResetKey, setComposerResetKey] = React.useState(0);
   const fallbackErrorMessage = errorMessage ?? 'Something went wrong. Please try again.';
 
-  const persisted = useChorusPersistence<TMeta>(persistenceKey ?? '', {
-    storage: persistenceStorage,
+  const builtInPersistenceKey = value === undefined ? persistenceKey ?? '' : '';
+  const persisted = useChorusPersistence<TMeta>(builtInPersistenceKey, {
+    storage: builtInPersistenceKey ? persistenceStorage : null,
     writeDebounceMs: DEFAULT_PERSISTENCE_WRITE_DEBOUNCE_MS,
-    onError: onPersistenceError,
+    onError: builtInPersistenceKey ? onPersistenceError : undefined,
     serializeMessages,
     deserializeMessages,
   });
@@ -190,7 +191,7 @@ function ChorusInner<TMeta = Record<string, unknown>>({
     initialMessages,
     onChange,
     onMessagesChange,
-    persistenceKey,
+    persistenceKey: builtInPersistenceKey,
     persistedMessages: persisted.value,
     persistenceLoaded: persisted.loaded,
     hasPersistedValue: persisted.hasStoredValue,
@@ -256,8 +257,11 @@ function ChorusInner<TMeta = Record<string, unknown>>({
   const paletteVars = React.useMemo(() => styleVarsFromPalette(palette), [palette]);
   const canAssistantRespond = Boolean(transport || onSend);
   const resolvedShowJumpToBottomButton = showJumpToBottomButton ?? !headless;
-  const canRenderEmptyAffordance = value !== undefined || !persistenceKey || persisted.loaded;
-  const writesDisabled = disabled || readOnly;
+  const persistenceLoading = Boolean(builtInPersistenceKey) && !persisted.loaded;
+  const canRenderEmptyAffordance = value !== undefined || !builtInPersistenceKey || persisted.loaded;
+  const writesDisabled = disabled || readOnly || persistenceLoading;
+  const composerDisabled = disabled || persistenceLoading;
+  const resolvedDisabledReason = persistenceLoading ? disabledReason ?? 'Loading saved conversation…' : disabledReason;
   const resetComposer = React.useCallback(() => {
     setDraft('');
     setComposerResetKey(key => key + 1);
@@ -355,7 +359,7 @@ function ChorusInner<TMeta = Record<string, unknown>>({
         streamingMessageId={session.streamingMessageId}
         suggestedPrompts={canRenderEmptyAffordance ? suggestedPrompts : undefined}
         suggestedPromptsDisabled={writesDisabled}
-        suggestedPromptsDisabledReason={disabledReason}
+        suggestedPromptsDisabledReason={resolvedDisabledReason}
       />
       {showClearButton && (
         <div className="chorus-clear-row">
@@ -371,9 +375,9 @@ function ChorusInner<TMeta = Record<string, unknown>>({
         onSend={handleInputSend}
         onStop={session.stop}
         sending={visualSending}
-        disabled={disabled}
+        disabled={composerDisabled}
         readOnly={readOnly}
-        disabledReason={disabledReason}
+        disabledReason={resolvedDisabledReason}
         resetKey={composerResetKey}
         placeholder={placeholder}
         accept={accept}
