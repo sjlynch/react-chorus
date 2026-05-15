@@ -1,7 +1,7 @@
 import React from 'react';
 import type { Attachment, ConnectorName, Message } from '../types';
 import type { Connector, ConnectorToolDelta } from '../connectors/connectors';
-import { useChorusStream, type Transport } from './useChorusStream';
+import { useChorusStream, type SendCallbacks, type Transport } from './useChorusStream';
 import { createFetchSSETransport } from '../streaming/createFetchSSETransport';
 import { useRAFQueue } from './useRAFQueue';
 import { useLatestRef } from './useLatestRef';
@@ -9,7 +9,11 @@ import { isChorusDevMode } from '../utils/devMode';
 
 export interface ChorusSendHelpers {
   appendAssistant: (chunk: string) => void;
+  appendReasoning?: (chunk: string) => void;
+  appendToolDelta?: (delta: ConnectorToolDelta) => void;
   finalizeAssistant: () => void;
+  /** Complete callback set for bridging `useChorusStream(...).send()` through `onSend`. */
+  streamCallbacks?: () => SendCallbacks;
   signal: AbortSignal;
   /** The optional `systemPrompt` prop. Use it in custom `onSend` request mapping; it is not prepended to `messages` on the onSend path. */
   systemPrompt?: string;
@@ -61,6 +65,15 @@ export interface ChorusStreamDoneContext<TMeta = Record<string, unknown>> {
 
 export type ChorusOnStreamDone<TMeta = Record<string, unknown>> = (context: ChorusStreamDoneContext<TMeta>) => void;
 
+export interface ChorusToolLoopContext<TMeta = Record<string, unknown>> extends ChorusStreamDoneContext<TMeta> {
+  /** Number of completed tool-execution iterations, starting at 1 for the first continuation. */
+  iteration: number;
+  maxToolIterations: number;
+  signal: AbortSignal;
+}
+
+export type ChorusShouldContinueToolLoop<TMeta = Record<string, unknown>> = (context: ChorusToolLoopContext<TMeta>) => boolean | Promise<boolean>;
+
 interface UpdateMessagesOptions {
   flushPersistence?: boolean;
   removePersistenceIfEmpty?: boolean;
@@ -89,6 +102,9 @@ export interface UseAssistantSessionOptions<TMeta = Record<string, unknown>> {
   onToolCall?: ChorusOnToolCall<TMeta>;
   onToolDelta?: ChorusOnToolDelta<TMeta>;
   tools?: ChorusToolRegistry<TMeta>;
+  autoContinueTools?: boolean;
+  maxToolIterations?: number;
+  shouldContinueToolLoop?: ChorusShouldContinueToolLoop<TMeta>;
   flushPersistence: () => void;
   resetToInitialMessages?: boolean;
   onClear?: (messages: Message<TMeta>[]) => void;
@@ -109,6 +125,8 @@ export interface UseAssistantSessionResult {
   streamingMessageId: string | null;
   hasStartedAssistant: boolean;
 }
+
+const DEFAULT_MAX_TOOL_ITERATIONS = 4;
 
 let fallbackMessageIdCounter = 0;
 
@@ -139,6 +157,32 @@ function toError(error: unknown): Error {
   if (error instanceof Error) return error;
   if (typeof DOMException !== 'undefined' && error instanceof DOMException) return error as Error;
   return new Error(String(error));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function metadataWithToolProvider<TMeta>(existing: TMeta | undefined, delta: ConnectorToolDelta): TMeta | undefined {
+  if (!delta.providerId) return existing;
+
+  const metadata: Record<string, unknown> = isRecord(existing) ? { ...existing } : {};
+  if (delta.provider === 'openai') {
+    const openai = isRecord(metadata.openai) ? { ...metadata.openai } : {};
+    openai.toolCallId = delta.providerId;
+    openai.callId = delta.providerId;
+    metadata.openai = openai;
+  } else if (delta.provider === 'anthropic') {
+    const anthropic = isRecord(metadata.anthropic) ? { ...metadata.anthropic } : {};
+    anthropic.toolUseId = delta.providerId;
+    metadata.anthropic = anthropic;
+  }
+
+  return Object.keys(metadata).length ? metadata as TMeta : existing;
+}
+
+function hasToolOutput<TMeta>(message: Message<TMeta>) {
+  return Boolean(message.toolCall && Object.prototype.hasOwnProperty.call(message.toolCall, 'output'));
 }
 
 function cloneMessageForRetry<TMeta>(message: Message<TMeta>): Message<TMeta> {
@@ -181,6 +225,9 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
   onToolCall,
   onToolDelta,
   tools,
+  autoContinueTools = false,
+  maxToolIterations = DEFAULT_MAX_TOOL_ITERATIONS,
+  shouldContinueToolLoop,
   flushPersistence,
   resetToInitialMessages = false,
   onClear,
@@ -194,6 +241,9 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
   const onToolCallRef = useLatestRef(onToolCall);
   const onToolDeltaRef = useLatestRef(onToolDelta);
   const toolsRef = useLatestRef(tools);
+  const autoContinueToolsRef = useLatestRef(autoContinueTools);
+  const maxToolIterationsRef = useLatestRef(maxToolIterations);
+  const shouldContinueToolLoopRef = useLatestRef(shouldContinueToolLoop);
   const onClearRef = useLatestRef(onClear);
   const fallbackErrorMessageRef = useLatestRef(fallbackErrorMessage);
   const systemPromptRef = useLatestRef(systemPrompt);
@@ -389,9 +439,10 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
       if (Object.prototype.hasOwnProperty.call(delta, 'input')) toolCall.input = delta.input;
       if (Object.prototype.hasOwnProperty.call(delta, 'output')) toolCall.output = delta.output;
 
+      const metadata = metadataWithToolProvider(existing?.metadata, delta);
       const nextMessage: Message<TMeta> = existing
-        ? { ...existing, role: 'tool', text: existing.text ?? '', toolCall }
-        : { id: messageId, role: 'tool', text: '', toolCall };
+        ? { ...existing, role: 'tool', text: existing.text ?? '', toolCall, metadata }
+        : { id: messageId, role: 'tool', text: '', toolCall, metadata };
       updatedMessage = nextMessage;
 
       if (idx >= 0) return prev.map(m => m.id === messageId ? nextMessage : m);
@@ -511,8 +562,13 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
   }, [cancelPending, finalizeAssistantNow, flushPersistence, invalidateAssistantSession, isAssistantSessionActive, messagesRef, safeOnFinish, setInternalSending]);
 
   const createSessionHelpers = React.useCallback((sessionId: number, signal: AbortSignal, startedAt: number) => {
+    type BufferedHelperEvent =
+      | { type: 'text'; chunk: string }
+      | { type: 'reasoning'; chunk: string }
+      | { type: 'toolDelta'; delta: ConnectorToolDelta };
+
     let released = minAssistantDelayMsRef.current <= 0;
-    let bufferedChunks: string[] = [];
+    let bufferedEvents: BufferedHelperEvent[] = [];
     let finalizeRequested = false;
     let finalizeCalled = false;
     let releaseTimer: ReturnType<typeof setTimeout> | null = null;
@@ -526,19 +582,26 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
 
     const isActive = () => isAssistantSessionActive(sessionId) && !signal.aborted;
 
-    const flushBufferedChunks = () => {
+    const deliverEvent = (event: BufferedHelperEvent) => {
+      if (!isActive()) return;
+      if (event.type === 'text') appendAssistantNow(event.chunk);
+      else if (event.type === 'reasoning') appendAssistantReasoningNow(event.chunk);
+      else appendToolDeltaNow(event.delta);
+    };
+
+    const flushBufferedEvents = () => {
       clearReleaseTimer();
       if (released) return;
       if (!isActive()) {
-        bufferedChunks = [];
+        bufferedEvents = [];
         finalizeRequested = false;
         return;
       }
 
       released = true;
-      const chunks = bufferedChunks;
-      bufferedChunks = [];
-      for (const chunk of chunks) appendAssistantNow(chunk);
+      const events = bufferedEvents;
+      bufferedEvents = [];
+      for (const event of events) deliverEvent(event);
       if (finalizeRequested) completeActiveSession(sessionId, { reason: 'done' });
     };
 
@@ -546,31 +609,36 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
       if (released || releaseTimer !== null) return;
       const wait = Math.max(0, minAssistantDelayMsRef.current - (Date.now() - startedAt));
       if (wait <= 0) {
-        flushBufferedChunks();
+        flushBufferedEvents();
         return;
       }
-      releaseTimer = setTimeout(flushBufferedChunks, wait);
+      releaseTimer = setTimeout(flushBufferedEvents, wait);
     };
 
-    const appendAssistant = (chunk: string) => {
-      if (!chunk || !isActive()) return;
+    const appendEvent = (event: BufferedHelperEvent) => {
+      if (!isActive()) return;
+      if ((event.type === 'text' || event.type === 'reasoning') && !event.chunk) return;
 
       if (released || Date.now() - startedAt >= minAssistantDelayMsRef.current) {
-        if (!released) flushBufferedChunks();
-        if (isActive()) appendAssistantNow(chunk);
+        if (!released) flushBufferedEvents();
+        deliverEvent(event);
         return;
       }
 
-      bufferedChunks.push(chunk);
+      bufferedEvents.push(event);
       scheduleRelease();
     };
+
+    const appendAssistant = (chunk: string) => appendEvent({ type: 'text', chunk });
+    const appendReasoning = (chunk: string) => appendEvent({ type: 'reasoning', chunk });
+    const appendToolDelta = (delta: ConnectorToolDelta) => appendEvent({ type: 'toolDelta', delta });
 
     const requestFinalize = (forceFlush: boolean) => {
       if (!isActive()) return;
 
-      if (!released && bufferedChunks.length > 0) {
+      if (!released && bufferedEvents.length > 0) {
         finalizeRequested = true;
-        if (forceFlush) flushBufferedChunks();
+        if (forceFlush) flushBufferedEvents();
         else scheduleRelease();
         return;
       }
@@ -586,14 +654,21 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
 
     const autoFinalizeAssistant = () => requestFinalize(true);
 
+    const streamCallbacks = (): SendCallbacks => ({
+      onChunk: appendAssistant,
+      onReasoning: appendReasoning,
+      onToolDelta: appendToolDelta,
+      onDone: finalizeAssistant,
+    });
+
     return {
-      helpers: { appendAssistant, finalizeAssistant, signal, systemPrompt: systemPromptRef.current },
-      hasPendingAssistant: () => bufferedChunks.length > 0 || finalizeRequested,
-      hasAssistantOutput: () => hasStartedAssistantRef.current || bufferedChunks.length > 0,
+      helpers: { appendAssistant, appendReasoning, appendToolDelta, finalizeAssistant, streamCallbacks, signal, systemPrompt: systemPromptRef.current },
+      hasPendingAssistant: () => bufferedEvents.length > 0 || finalizeRequested,
+      hasAssistantOutput: () => hasStartedAssistantRef.current || bufferedEvents.length > 0,
       wasFinalizeRequested: () => finalizeCalled,
       autoFinalizeAssistant,
     };
-  }, [appendAssistantNow, completeActiveSession, isAssistantSessionActive, minAssistantDelayMsRef, systemPromptRef]);
+  }, [appendAssistantNow, appendAssistantReasoningNow, appendToolDeltaNow, completeActiveSession, isAssistantSessionActive, minAssistantDelayMsRef, systemPromptRef]);
 
   const resolvedTransport = React.useMemo((): Transport<TMeta> => {
     if (typeof transport === 'string') return createFetchSSETransport<TMeta>(transport);
@@ -626,14 +701,95 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
       : history
   ), [systemPromptRef]);
 
-  const finishTransportStream = React.useCallback(async (sessionId: number, response: Response | undefined, signal: AbortSignal) => {
+  type FinishTransportStream = (sessionId: number, response: Response | undefined, controller: AbortController, iteration: number) => Promise<void>;
+  const finishTransportStreamRef = React.useRef<FinishTransportStream | null>(null);
+
+  const startTransportStream = React.useCallback((
+    sessionId: number,
+    text: string,
+    history: Message<TMeta>[],
+    controller: AbortController,
+    iteration: number,
+  ) => {
+    void doStream(text, historyForTransport(history), {
+      onChunk: (chunk) => {
+        if (isAssistantSessionActive(sessionId)) appendAssistantNow(chunk);
+      },
+      onReasoning: (chunk) => {
+        if (isAssistantSessionActive(sessionId)) appendAssistantReasoningNow(chunk);
+      },
+      onToolDelta: (delta) => {
+        if (isAssistantSessionActive(sessionId)) appendToolDeltaNow(delta);
+      },
+      onDone: (response) => {
+        if (!isAssistantSessionActive(sessionId)) return;
+        void finishTransportStreamRef.current?.(sessionId, response, controller, iteration);
+      },
+      onError: (err) => {
+        if (!isAssistantSessionActive(sessionId)) return;
+        removePendingAssistant();
+        invalidateAssistantSession(sessionId);
+        setTransportBusy(false);
+        if (controllerRef.current === controller) controllerRef.current = null;
+        safeOnError(err);
+        showStreamError(err);
+      },
+      minDelayMs: minAssistantDelayMsRef.current,
+    }, controller.signal).catch(() => {
+      setTransportBusy(false);
+      if (controllerRef.current === controller) controllerRef.current = null;
+    });
+  }, [appendAssistantNow, appendAssistantReasoningNow, appendToolDeltaNow, doStream, historyForTransport, invalidateAssistantSession, isAssistantSessionActive, minAssistantDelayMsRef, removePendingAssistant, safeOnError, setTransportBusy, showStreamError]);
+
+  const shouldContinueAfterTools = React.useCallback(async (
+    iteration: number,
+    assistantMessage: Message<TMeta> | null,
+    toolMessages: Message<TMeta>[],
+    response: Response | undefined,
+    signal: AbortSignal,
+  ) => {
+    if (!autoContinueToolsRef.current || !toolMessages.length) return false;
+    if (!toolMessages.every(hasToolOutput)) return false;
+
+    const configuredMax = maxToolIterationsRef.current;
+    const maxToolIterations = Number.isFinite(configuredMax)
+      ? Math.max(0, Math.floor(configuredMax))
+      : DEFAULT_MAX_TOOL_ITERATIONS;
+    const nextIteration = iteration + 1;
+    if (nextIteration > maxToolIterations) return false;
+    if (signal.aborted) throw createAbortError();
+
+    const shouldContinue = await shouldContinueToolLoopRef.current?.({
+      assistantMessage,
+      toolMessages,
+      messages: messagesRef.current,
+      response,
+      iteration: nextIteration,
+      maxToolIterations,
+      signal,
+    });
+    if (signal.aborted) throw createAbortError();
+    return shouldContinue ?? true;
+  }, [autoContinueToolsRef, maxToolIterationsRef, messagesRef, shouldContinueToolLoopRef]);
+
+  const finishTransportStream = React.useCallback<FinishTransportStream>(async (sessionId, response, controller, iteration) => {
     const toolMessageIds = new Set(pendingToolMessageIdsRef.current);
+    let keepTransportBusy = false;
 
     try {
-      await runCompletedToolCalls(sessionId, getToolMessagesByIds(toolMessageIds), signal);
+      await runCompletedToolCalls(sessionId, getToolMessagesByIds(toolMessageIds), controller.signal);
       if (!isAssistantSessionActive(sessionId)) return;
 
-      const assistantMessage = completeActiveSession(sessionId, { reason: 'done', response });
+      const assistantMessage = finalizeAssistantNow();
+      if (assistantMessage) {
+        safeOnFinish({
+          message: assistantMessage,
+          messages: messagesRef.current,
+          reason: 'done',
+          response,
+        });
+      }
+
       const toolMessages = getToolMessagesByIds(toolMessageIds);
       safeOnStreamDone({
         assistantMessage,
@@ -641,6 +797,17 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
         messages: messagesRef.current,
         response,
       });
+
+      const shouldContinue = await shouldContinueAfterTools(iteration, assistantMessage, toolMessages, response, controller.signal);
+      if (!isAssistantSessionActive(sessionId)) return;
+
+      if (shouldContinue) {
+        keepTransportBusy = true;
+        startTransportStream(sessionId, '', messagesRef.current, controller, iteration + 1);
+        return;
+      }
+
+      invalidateAssistantSession(sessionId);
     } catch (error) {
       if (!isAssistantSessionActive(sessionId)) return;
       cancelPending(true);
@@ -658,10 +825,14 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
         showStreamError(normalizedError);
       }
     } finally {
-      setTransportBusy(false);
-      if (controllerRef.current?.signal === signal) controllerRef.current = null;
+      if (!keepTransportBusy) {
+        setTransportBusy(false);
+        if (controllerRef.current === controller) controllerRef.current = null;
+      }
     }
-  }, [cancelPending, completeActiveSession, flushPersistence, getToolMessagesByIds, invalidateAssistantSession, isAssistantSessionActive, messagesRef, runCompletedToolCalls, safeOnError, safeOnStreamDone, setTransportBusy, showStreamError]);
+  }, [cancelPending, finalizeAssistantNow, flushPersistence, getToolMessagesByIds, invalidateAssistantSession, isAssistantSessionActive, messagesRef, runCompletedToolCalls, safeOnError, safeOnFinish, safeOnStreamDone, setTransportBusy, shouldContinueAfterTools, showStreamError, startTransportStream]);
+
+  finishTransportStreamRef.current = finishTransportStream;
 
   const triggerAssistant = React.useCallback((text: string, history: Message<TMeta>[] = messagesRef.current) => {
     const sessionId = beginAssistantSession();
@@ -680,34 +851,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
       resetStreamState();
       clearStreamError();
       setTransportBusy(true);
-      void doStream(text, historyForTransport(history), {
-        onChunk: (chunk) => {
-          if (isAssistantSessionActive(sessionId)) appendAssistantNow(chunk);
-        },
-        onReasoning: (chunk) => {
-          if (isAssistantSessionActive(sessionId)) appendAssistantReasoningNow(chunk);
-        },
-        onToolDelta: (delta) => {
-          if (isAssistantSessionActive(sessionId)) appendToolDeltaNow(delta);
-        },
-        onDone: (response) => {
-          if (!isAssistantSessionActive(sessionId)) return;
-          void finishTransportStream(sessionId, response, controller.signal);
-        },
-        onError: (err) => {
-          if (!isAssistantSessionActive(sessionId)) return;
-          removePendingAssistant();
-          invalidateAssistantSession(sessionId);
-          setTransportBusy(false);
-          if (controllerRef.current === controller) controllerRef.current = null;
-          safeOnError(err);
-          showStreamError(err);
-        },
-        minDelayMs: minAssistantDelayMsRef.current,
-      }, controller.signal).catch(() => {
-        setTransportBusy(false);
-        if (controllerRef.current === controller) controllerRef.current = null;
-      });
+      startTransportStream(sessionId, text, history, controller, 0);
       return;
     }
 
@@ -777,7 +921,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
         if (controllerRef.current === controller && !isAssistantSessionActive(sessionId)) controllerRef.current = null;
       }
     })();
-  }, [appendAssistantNow, appendAssistantReasoningNow, appendToolDeltaNow, beginAssistantSession, clearStreamError, completeActiveSession, createSessionHelpers, doStream, finishTransportStream, historyForTransport, invalidateAssistantSession, isAssistantSessionActive, minAssistantDelayMsRef, messagesRef, onSendRef, rememberSubmittedTurn, removePendingAssistant, resetStreamState, safeOnError, setInternalSending, setTransportBusy, showStreamError, transportRef, updateSessionMessages]);
+  }, [beginAssistantSession, clearStreamError, completeActiveSession, createSessionHelpers, invalidateAssistantSession, isAssistantSessionActive, messagesRef, minAssistantDelayMsRef, onSendRef, rememberSubmittedTurn, removePendingAssistant, resetStreamState, safeOnError, setInternalSending, setTransportBusy, showStreamError, startTransportStream, transportRef, updateSessionMessages]);
 
   const send = React.useCallback((rawText: string, attachments: Attachment[] = []) => {
     if (isBusy()) return false;
@@ -797,11 +941,12 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
   const retry = React.useCallback(() => {
     const submitted = lastSubmittedTurnRef.current;
     if (!submitted || isBusy()) return;
-    if (streamError && messagesRef.current[messagesRef.current.length - 1]?.role === 'assistant') {
-      updateSessionMessages(prev => dropTrailingAssistant(prev), { flushPersistence: true, reason: 'retry' });
+    const retryHistory = cloneHistoryForRetry(submitted.history);
+    if (streamError) {
+      updateSessionMessages(() => retryHistory, { flushPersistence: true, reason: 'retry' });
     }
-    triggerAssistant(submitted.text, cloneHistoryForRetry(submitted.history));
-  }, [isBusy, messagesRef, streamError, triggerAssistant, updateSessionMessages]);
+    triggerAssistant(submitted.text, retryHistory);
+  }, [isBusy, streamError, triggerAssistant, updateSessionMessages]);
 
   const stopActiveAssistant = React.useCallback(() => {
     invalidateAssistantSession();

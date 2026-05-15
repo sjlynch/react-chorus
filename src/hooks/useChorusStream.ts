@@ -79,6 +79,9 @@ function createToolDeltaAccumulator() {
     const next: ConnectorToolDelta = { ...current };
 
     if (delta.name) next.name = delta.name;
+    if (delta.provider) next.provider = delta.provider;
+    if (delta.providerId) next.providerId = delta.providerId;
+    if (delta.generated !== undefined) next.generated = delta.generated;
     if (hasOwn(delta, 'input')) next.input = mergeToolValue(current.input, delta.input);
     if (hasOwn(delta, 'output')) next.output = mergeToolValue(current.output, delta.output);
 
@@ -292,7 +295,8 @@ function createDelayedChunkEmitter(cb: SendCallbacks, startedAt: number, signal:
  * - Collects "data:" lines for an event; dispatches on a blank line
  * - Preserves empty data lines (blank lines inside payloads)
  */
-export function readSSEStream(res: Response, onEvent: (payload: string) => unknown): Promise<void> {
+export function readSSEStream(res: Response, onEvent: (payload: string) => unknown, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(createAbortError());
   if (!res.body) return Promise.resolve();
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
@@ -342,6 +346,40 @@ export function readSSEStream(res: Response, onEvent: (payload: string) => unkno
   };
 
   return new Promise<void>((resolve, reject) => {
+    let settled = false;
+
+    const cleanup = () => {
+      signal?.removeEventListener('abort', onAbort);
+    };
+
+    const settleResolve = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve();
+    };
+
+    const settleReject = (err: unknown) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(err);
+    };
+
+    const cancelReader = async () => {
+      try { await reader.cancel(); } catch {}
+    };
+
+    function onAbort() {
+      stopped = true;
+      dataLines = [];
+      currentLine = '';
+      void cancelReader();
+      settleReject(createAbortError());
+    }
+
+    signal?.addEventListener('abort', onAbort, { once: true });
+
     (async () => {
       try {
         while (!stopped) {
@@ -357,13 +395,11 @@ export function readSSEStream(res: Response, onEvent: (payload: string) => unkno
           }
           flushEvent();
         }
-        if (stopped) {
-          try { await reader.cancel(); } catch {}
-        }
-        resolve();
+        if (stopped) await cancelReader();
+        settleResolve();
       } catch (err) {
-        try { await reader.cancel(); } catch {}
-        reject(err);
+        await cancelReader();
+        settleReject(err);
       }
     })();
   });
@@ -429,11 +465,12 @@ export function useChorusStream<TMeta = Record<string, unknown>>(transport: Tran
         const reasoning = out.reasoning || '';
         if (reasoning) delayedChunks.handleReasoning(reasoning);
 
-        if (out.toolDelta) delayedChunks.handleToolDelta(accumulateToolDelta(out.toolDelta));
+        const toolDeltas = out.toolDeltas?.length ? out.toolDeltas : out.toolDelta ? [out.toolDelta] : [];
+        for (const toolDelta of toolDeltas) delayedChunks.handleToolDelta(accumulateToolDelta(toolDelta));
 
         if (out.error) throw new Error(out.error);
         if (out.done) return false;
-      });
+      }, signal);
 
       await delayedChunks.flushBeforeDone();
       try {

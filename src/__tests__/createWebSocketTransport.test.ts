@@ -98,6 +98,34 @@ describe('createWebSocketTransport', () => {
     expect(events).toEqual(['error']);
   });
 
+  it('rejects and closes the socket when formatMessage throws on open', async () => {
+    const transport = createWebSocketTransport('wss://api.example.com/chat', {
+      formatMessage: () => { throw new Error('serialize failed'); },
+    });
+    const promise = transport('hello', [], new AbortController().signal);
+    const ws = MockWebSocket.instances[0];
+    const closeSpy = vi.spyOn(ws, 'close');
+
+    ws.emitOpen();
+
+    await expect(promise).rejects.toThrow('serialize failed');
+    expect(closeSpy).toHaveBeenCalled();
+  });
+
+  it('rejects and closes the socket when ws.send throws on open', async () => {
+    const transport = createWebSocketTransport('wss://api.example.com/chat');
+    const promise = transport('hello', [], new AbortController().signal);
+    const ws = MockWebSocket.instances[0];
+    const sendError = new Error('send failed');
+    vi.spyOn(ws, 'send').mockImplementation(() => { throw sendError; });
+    const closeSpy = vi.spyOn(ws, 'close');
+
+    ws.emitOpen();
+
+    await expect(promise).rejects.toThrow('send failed');
+    expect(closeSpy).toHaveBeenCalled();
+  });
+
   it('enqueues each WS message as an SSE-formatted chunk on the response body', async () => {
     const transport = createWebSocketTransport('wss://api.example.com/chat');
     const promise = transport('hello', [], new AbortController().signal);
@@ -116,6 +144,22 @@ describe('createWebSocketTransport', () => {
     ws.onmessage?.({ data: '{"chunk":" there"}' } as MessageEvent);
     const second = await reader.read();
     expect(decoder.decode(second.value)).toBe('data: {"chunk":" there"}\n\n');
+  });
+
+  it('decodes ArrayBuffer WS messages as text payloads', async () => {
+    const transport = createWebSocketTransport('wss://api.example.com/chat');
+    const promise = transport('hello', [], new AbortController().signal);
+    const ws = MockWebSocket.instances[0];
+
+    ws.emitOpen();
+    const response = await promise;
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+
+    ws.onmessage?.({ data: new TextEncoder().encode('{"chunk":"binary"}').buffer } as MessageEvent);
+    const first = await reader.read();
+    expect(first.done).toBe(false);
+    expect(decoder.decode(first.value)).toBe('data: {"chunk":"binary"}\n\n');
   });
 
   it('preserves embedded newlines in a WS message as one SSE payload', async () => {

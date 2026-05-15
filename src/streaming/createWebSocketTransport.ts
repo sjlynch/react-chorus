@@ -22,6 +22,23 @@ function encodeSSEDataEvent(data: string) {
   return `${data.split(/\r\n|\r|\n/).map(line => `data: ${line}`).join('\n')}\n\n`;
 }
 
+function toError(error: unknown): Error {
+  if (error instanceof Error) return error;
+  return new Error(String(error));
+}
+
+function isArrayBufferLike(data: unknown): data is ArrayBuffer {
+  return typeof data === 'object' && data !== null && typeof (data as ArrayBuffer).byteLength === 'number' && typeof (data as ArrayBuffer).slice === 'function';
+}
+
+async function webSocketMessageToText(data: unknown): Promise<string> {
+  if (typeof data === 'string') return data;
+  if (isArrayBufferLike(data)) return new TextDecoder().decode(data);
+  if (ArrayBuffer.isView(data)) return new TextDecoder().decode(data);
+  if (typeof Blob !== 'undefined' && data instanceof Blob) return data.text();
+  throw new Error('WebSocket message data must be a string, Blob, ArrayBuffer, or typed array');
+}
+
 /**
  * Creates a Transport backed by a native WebSocket connection.
  *
@@ -57,63 +74,89 @@ export function createWebSocketTransport<TMeta = Record<string, unknown>>(
       const encoder = new TextEncoder();
       let streamController: ReadableStreamDefaultController<Uint8Array>;
       let resolved = false;
+      let settled = false;
+      let streamClosed = false;
+
+      const cleanup = () => signal.removeEventListener('abort', onAbort);
+
+      const safeCloseSocket = () => {
+        try { ws.close(); } catch {}
+      };
+
+      const fail = (error: unknown) => {
+        const err = toError(error);
+        cleanup();
+        safeCloseSocket();
+        if (resolved) {
+          if (!streamClosed) {
+            streamClosed = true;
+            try { streamController.error(err); } catch {}
+          }
+          return;
+        }
+        if (!settled) {
+          settled = true;
+          reject(err);
+        }
+      };
 
       const body = new ReadableStream<Uint8Array>({
         start(c) {
           streamController = c;
         },
         cancel() {
-          ws.close();
+          streamClosed = true;
+          cleanup();
+          safeCloseSocket();
         },
       });
 
-      const cleanup = () => signal.removeEventListener('abort', onAbort);
-
-      const onAbort = () => {
-        cleanup();
-        ws.close();
-        if (resolved) {
-          try { streamController.error(new DOMException('Aborted', 'AbortError')); } catch {}
-        } else {
-          reject(new DOMException('Aborted', 'AbortError'));
-        }
-      };
+      function onAbort() {
+        fail(new DOMException('Aborted', 'AbortError'));
+      }
 
       signal.addEventListener('abort', onAbort, { once: true });
 
       ws.onopen = () => {
-        if (signal.aborted) { ws.close(); return; }
-        ws.send(formatMessage(text, history));
+        if (signal.aborted) { safeCloseSocket(); return; }
+        try {
+          ws.send(formatMessage(text, history));
+        } catch (error) {
+          fail(error);
+          return;
+        }
         resolved = true;
+        settled = true;
         resolve(new Response(body, { status: 200 }));
         opts?.onOpen?.();
       };
 
       ws.onmessage = (event: MessageEvent) => {
-        const data = typeof event.data === 'string' ? event.data : '';
-        // Wrap as one SSE event so readSSEStream can parse it downstream.
-        // Prefix each line to preserve embedded newlines in the WS payload.
-        streamController.enqueue(encoder.encode(encodeSSEDataEvent(data)));
+        void webSocketMessageToText(event.data).then(data => {
+          if (streamClosed) return;
+          // Wrap as one SSE event so readSSEStream can parse it downstream.
+          // Prefix each line to preserve embedded newlines in the WS payload.
+          streamController.enqueue(encoder.encode(encodeSSEDataEvent(data)));
+        }).catch(fail);
       };
 
       ws.onclose = (event: CloseEvent) => {
         cleanup();
-        try { streamController?.close(); } catch {}
+        if (!streamClosed) {
+          streamClosed = true;
+          try { streamController?.close(); } catch {}
+        }
         opts?.onClose?.(event.code, event.reason);
-        if (!resolved) {
+        if (!resolved && !settled) {
+          settled = true;
           const reason = event.reason ? `: ${event.reason}` : '';
           reject(new Error(`WebSocket closed before opening (code ${event.code}${reason})`));
         }
       };
 
       ws.onerror = (event: Event) => {
-        cleanup();
         const err = new Error('WebSocket connection error');
-        if (resolved) {
-          try { streamController.error(err); } catch {}
-        } else {
-          reject(err);
-        }
+        fail(err);
         opts?.onError?.(event);
       };
     });

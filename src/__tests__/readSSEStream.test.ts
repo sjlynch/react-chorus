@@ -129,6 +129,22 @@ describe('readSSEStream', () => {
     expect(events).toEqual(['']);
   });
 
+  it('rejects with AbortError and cancels the body when the signal aborts', async () => {
+    let cancelled = false;
+    const controller = new AbortController();
+    const stream = new ReadableStream<Uint8Array>({
+      cancel() {
+        cancelled = true;
+      },
+    });
+
+    const promise = readSSEStream(new Response(stream), () => undefined, controller.signal);
+    controller.abort();
+
+    await expect(promise).rejects.toThrow('Aborted');
+    expect(cancelled).toBe(true);
+  });
+
   it('stops reading and cancels the body when the callback returns false', async () => {
     const events: string[] = [];
     let cancelled = false;

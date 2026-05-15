@@ -51,7 +51,15 @@ describe('provider request mappers', () => {
             { type: 'text', text: '[Unsupported attachment omitted: notes.pdf (application/pdf)]' },
           ],
         },
-        { role: 'assistant', content: 'I will check.' },
+        {
+          role: 'assistant',
+          content: 'I will check.',
+          tool_calls: [{
+            id: 'call_openai',
+            type: 'function',
+            function: { name: 'lookup', arguments: '{"q":"react-chorus"}' },
+          }],
+        },
         { role: 'tool', tool_call_id: 'call_openai', content: '{\n  "ok": true\n}' },
       ],
     });
@@ -90,6 +98,7 @@ describe('provider request mappers', () => {
           ],
         },
         { role: 'assistant', content: [{ type: 'output_text', text: 'I will check.' }] },
+        { type: 'function_call', call_id: 'call_openai', name: 'lookup', arguments: '{"q":"react-chorus"}' },
         { type: 'function_call_output', call_id: 'call_openai', output: '{\n  "ok": true\n}' },
       ],
     });
@@ -110,7 +119,10 @@ describe('provider request mappers', () => {
             { type: 'text', text: '[Unsupported attachment omitted: notes.pdf (application/pdf)]' },
           ],
         },
-        { role: 'assistant', content: [{ type: 'text', text: 'I will check.' }] },
+        { role: 'assistant', content: [
+          { type: 'text', text: 'I will check.' },
+          { type: 'tool_use', id: 'toolu_1', name: 'lookup', input: { q: 'react-chorus' } },
+        ] },
         { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: '{\n  "ok": true\n}' }] },
       ],
     });

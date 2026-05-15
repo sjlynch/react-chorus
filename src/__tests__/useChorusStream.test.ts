@@ -192,8 +192,32 @@ describe('useChorusStream', () => {
 
     expect(onReasoning).toHaveBeenCalledWith('plan');
     expect(onToolDelta).toHaveBeenCalledTimes(2);
-    expect(onToolDelta).toHaveBeenNthCalledWith(1, { id: 'call_1', name: 'search', input: '{"q":' });
-    expect(onToolDelta).toHaveBeenNthCalledWith(2, { id: 'call_1', name: 'search', input: { q: 'test' } });
+    expect(onToolDelta).toHaveBeenNthCalledWith(1, expect.objectContaining({ id: 'call_1', name: 'search', input: '{"q":', provider: 'openai', providerId: 'call_1' }));
+    expect(onToolDelta).toHaveBeenNthCalledWith(2, expect.objectContaining({ id: 'call_1', name: 'search', input: { q: 'test' }, provider: 'openai', providerId: 'call_1' }));
+  });
+
+  it('emits every tool delta when one connector result contains multiple calls', async () => {
+    const transport = vi.fn<Transport>(() => Promise.resolve(makeSseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { content: 'tools:', tool_calls: [
+        { index: 0, id: 'call_1', function: { name: 'search', arguments: '{"q":"react"}' } },
+        { index: 1, id: 'call_2', function: { name: 'lookup', arguments: '{"id":2}' } },
+      ] } }] }),
+      '[DONE]',
+    ])));
+    const onChunk = vi.fn();
+    const onToolDelta = vi.fn();
+    const onDone = vi.fn();
+    const { result } = renderHook(() => useChorusStream(transport, { connector: 'openai' }));
+
+    await act(async () => {
+      await result.current.send('hello', [], { onChunk, onToolDelta, onDone });
+    });
+
+    expect(onChunk).toHaveBeenCalledWith('tools:');
+    expect(onToolDelta).toHaveBeenCalledTimes(2);
+    expect(onToolDelta).toHaveBeenNthCalledWith(1, expect.objectContaining({ id: 'call_1', name: 'search', input: { q: 'react' } }));
+    expect(onToolDelta).toHaveBeenNthCalledWith(2, expect.objectContaining({ id: 'call_2', name: 'lookup', input: { id: 2 } }));
+    expect(onDone).toHaveBeenCalledTimes(1);
   });
 
   it('isolates OpenAI think-tag parser state between simultaneous streams', async () => {
@@ -252,8 +276,8 @@ describe('useChorusStream', () => {
       streamB.emit(JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: '"two"}' } }] } }] }));
     });
 
-    await waitFor(() => expect(onToolDeltaA).toHaveBeenLastCalledWith({ id: 'call_A', name: 'search', input: { a: 'one' } }));
-    expect(onToolDeltaB).toHaveBeenLastCalledWith({ id: 'call_B', name: 'search', input: { b: 'two' } });
+    await waitFor(() => expect(onToolDeltaA).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'call_A', name: 'search', input: { a: 'one' }, provider: 'openai', providerId: 'call_A' })));
+    expect(onToolDeltaB).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'call_B', name: 'search', input: { b: 'two' }, provider: 'openai', providerId: 'call_B' }));
 
     await act(async () => {
       streamA.emit('[DONE]');
@@ -285,8 +309,8 @@ describe('useChorusStream', () => {
       streamB.emit(JSON.stringify({ type: 'content_block_delta', index: 2, delta: { type: 'input_json_delta', partial_json: '{"b":"two"}' } }));
     });
 
-    await waitFor(() => expect(onToolDeltaA).toHaveBeenLastCalledWith({ id: 'toolu_A', name: 'search', input: { a: 'one' } }));
-    expect(onToolDeltaB).toHaveBeenLastCalledWith({ id: 'toolu_B', name: 'search', input: { b: 'two' } });
+    await waitFor(() => expect(onToolDeltaA).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'toolu_A', name: 'search', input: { a: 'one' }, provider: 'anthropic', providerId: 'toolu_A' })));
+    expect(onToolDeltaB).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'toolu_B', name: 'search', input: { b: 'two' }, provider: 'anthropic', providerId: 'toolu_B' }));
 
     await act(async () => {
       streamA.emit(JSON.stringify({ type: 'message_stop' }));
@@ -428,6 +452,36 @@ describe('useChorusStream', () => {
     });
 
     expect(capturedSignal.aborted).toBe(true);
+    expect(onError).not.toHaveBeenCalled();
+    expect(onDone).not.toHaveBeenCalled();
+    expect(result.current.sending).toBe(false);
+  });
+
+  it('abort() cancels a response reader even when the stream ignores the transport signal', async () => {
+    let cancelled = false;
+    const transport = vi.fn<Transport>(() => Promise.resolve(new Response(new ReadableStream<Uint8Array>({
+      cancel() {
+        cancelled = true;
+      },
+    }))));
+    const onDone = vi.fn();
+    const onError = vi.fn();
+    const { result } = renderHook(() => useChorusStream(transport));
+
+    let sendPromise!: Promise<void>;
+    await act(async () => {
+      sendPromise = result.current.send('hello', [], { onChunk: vi.fn(), onDone, onError });
+      await Promise.resolve();
+    });
+
+    expect(result.current.sending).toBe(true);
+
+    await act(async () => {
+      result.current.abort();
+      await sendPromise;
+    });
+
+    expect(cancelled).toBe(true);
     expect(onError).not.toHaveBeenCalled();
     expect(onDone).not.toHaveBeenCalled();
     expect(result.current.sending).toBe(false);

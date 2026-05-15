@@ -11,16 +11,12 @@ export default function App() {
   const [messages, setMessages] = React.useState<Message[]>([]);
   const { send, sending } = useChorusStream(transport, { connector: 'openai' });
 
-  const handleSend: ChorusOnSend = async (
-    text,
-    msgs,
-    { appendAssistant, finalizeAssistant, signal },
-  ) => {
+  const handleSend: ChorusOnSend = async (text, msgs, helpers) => {
     await send(
       text,
       msgs,
-      { onChunk: appendAssistant, onDone: finalizeAssistant },
-      signal
+      helpers.streamCallbacks?.() ?? { onChunk: helpers.appendAssistant, onDone: helpers.finalizeAssistant },
+      helpers.signal
     );
   };
 

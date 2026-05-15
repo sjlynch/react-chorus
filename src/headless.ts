@@ -49,7 +49,7 @@ export { ToolCallBlock } from './components/ToolCallBlock';
 export { ChorusHeadless as Chorus, type ChorusHeadlessProps as ChorusProps } from './ChorusHeadless';
 export { ChorusHeadless } from './ChorusHeadless';
 export type { ChorusHeadlessProps } from './ChorusHeadless';
-export type { ChorusMessagesChangeContext, ChorusOnSend, ChorusSendHelpers, ChorusRef, ChorusFinishContext, ChorusOnFinish, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusStreamDoneContext, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolRegistry } from './Chorus';
+export type { ChorusMessagesChangeContext, ChorusOnSend, ChorusSendHelpers, ChorusRef, ChorusFinishContext, ChorusOnFinish, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolLoopContext, ChorusToolRegistry } from './Chorus';
 
 export { ChorusTheme } from './components/ChorusTheme';
 export type { Palette } from './components/ChorusTheme';

@@ -63,6 +63,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function hasOwn(value: object, key: PropertyKey) {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+
 function nonEmptyString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value : null;
 }
@@ -200,11 +204,95 @@ function anthropicToolUseId(message: Message<unknown>) {
   ]);
 }
 
+function toolOutputValue<TMeta>(message: Message<TMeta>) {
+  if (message.toolCall && hasOwn(message.toolCall, 'output')) return message.toolCall.output;
+  const text = message.text.trim();
+  return text ? message.text : message.toolCall?.input;
+}
+
 function toolOutputText<TMeta>(message: Message<TMeta>) {
   const text = message.text.trim();
-  const value = message.toolCall?.output ?? (text ? message.text : message.toolCall?.input);
-  const rendered = safeStringify(value);
+  const rendered = safeStringify(toolOutputValue(message));
   return rendered || text;
+}
+
+function compactJSONString(value: unknown) {
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value ?? {}) ?? '{}';
+  } catch {
+    return safeStringify(value ?? {});
+  }
+}
+
+function openAIChatToolCall(message: Message<unknown>) {
+  const id = openAIToolCallId(message);
+  if (!id || !message.toolCall) return null;
+  return {
+    id,
+    type: 'function',
+    function: {
+      name: message.toolCall.name || 'tool',
+      arguments: compactJSONString(message.toolCall.input ?? {}),
+    },
+  };
+}
+
+function appendOpenAIChatToolCalls(target: OpenAIChatCompletionsMessage[], toolCalls: OpenAIChatCompletionsMessage[]) {
+  const last = target[target.length - 1];
+  if (last?.role === 'assistant') {
+    const existing = Array.isArray(last.tool_calls) ? last.tool_calls : [];
+    last.content = hasOwn(last, 'content') ? last.content : null;
+    last.tool_calls = existing.concat(toolCalls);
+    return;
+  }
+
+  target.push({ role: 'assistant', content: null, tool_calls: toolCalls });
+}
+
+function openAIResponsesFunctionCall(message: Message<unknown>) {
+  const callId = openAIToolCallId(message);
+  if (!callId || !message.toolCall) return null;
+  return {
+    type: 'function_call',
+    call_id: callId,
+    name: message.toolCall.name || 'tool',
+    arguments: compactJSONString(message.toolCall.input ?? {}),
+  };
+}
+
+function anthropicToolInput(value: unknown) {
+  if (isRecord(value)) return value;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      if (isRecord(parsed)) return parsed;
+    } catch {}
+    return { input: value };
+  }
+  if (value === undefined) return {};
+  return { input: value };
+}
+
+function anthropicToolUseBlock(message: Message<unknown>) {
+  const id = anthropicToolUseId(message);
+  if (!id || !message.toolCall) return null;
+  return {
+    type: 'tool_use',
+    id,
+    name: message.toolCall.name || 'tool',
+    input: anthropicToolInput(message.toolCall.input),
+  };
+}
+
+function appendAnthropicToolUseBlocks(target: AnthropicMessage[], blocks: AnthropicMessage[]) {
+  const last = target[target.length - 1];
+  if (last?.role === 'assistant' && Array.isArray(last.content)) {
+    last.content = last.content.concat(blocks);
+    return;
+  }
+
+  target.push({ role: 'assistant', content: blocks });
 }
 
 function toolContextText<TMeta>(message: Message<TMeta>) {
@@ -476,9 +564,45 @@ export function toOpenAIChatCompletionsMessages<TMeta = Record<string, unknown>>
   history: Message<TMeta>[],
   options: ProviderMappingOptions<TMeta> = {},
 ): OpenAIChatCompletionsMessage[] {
-  return history
-    .map(message => toOpenAIChatCompletionsMessage(message, options))
-    .filter((message): message is OpenAIChatCompletionsMessage => Boolean(message));
+  const messages: OpenAIChatCompletionsMessage[] = [];
+
+  for (let i = 0; i < history.length; i += 1) {
+    const message = history[i];
+    if (message.role !== 'tool') {
+      const mapped = toOpenAIChatCompletionsMessage(message, options);
+      if (mapped) messages.push(mapped);
+      continue;
+    }
+
+    const group: Message<TMeta>[] = [];
+    while (i < history.length && history[i].role === 'tool') {
+      group.push(history[i]);
+      i += 1;
+    }
+    i -= 1;
+
+    const providerTools: Array<{ message: Message<TMeta>; toolCall: OpenAIChatCompletionsMessage }> = [];
+    for (const toolMessage of group) {
+      const toolCall = openAIChatToolCall(toolMessage as Message<unknown>);
+      if (toolCall) providerTools.push({ message: toolMessage, toolCall });
+    }
+
+    if (providerTools.length) {
+      appendOpenAIChatToolCalls(messages, providerTools.map(entry => entry.toolCall));
+      for (const entry of providerTools) {
+        const toolCallId = openAIToolCallId(entry.message as Message<unknown>);
+        if (toolCallId) messages.push({ role: 'tool', tool_call_id: toolCallId, content: toolOutputText(entry.message) });
+      }
+    }
+
+    for (const toolMessage of group) {
+      if (openAIToolCallId(toolMessage as Message<unknown>)) continue;
+      const mapped = toOpenAIChatCompletionsMessage(toolMessage, options);
+      if (mapped) messages.push(mapped);
+    }
+  }
+
+  return messages;
 }
 
 /** Build an OpenAI Chat Completions request body. Defaults `stream` to true. */
@@ -506,9 +630,38 @@ export function toOpenAIResponsesInput<TMeta = Record<string, unknown>>(
   history: Message<TMeta>[],
   options: ProviderMappingOptions<TMeta> = {},
 ): OpenAIResponsesInputItem[] {
-  return history
-    .map(message => toOpenAIResponsesInputItem(message, options))
-    .filter((item): item is OpenAIResponsesInputItem => Boolean(item));
+  const input: OpenAIResponsesInputItem[] = [];
+
+  for (let i = 0; i < history.length; i += 1) {
+    const message = history[i];
+    if (message.role !== 'tool') {
+      const mapped = toOpenAIResponsesInputItem(message, options);
+      if (mapped) input.push(mapped);
+      continue;
+    }
+
+    const group: Message<TMeta>[] = [];
+    while (i < history.length && history[i].role === 'tool') {
+      group.push(history[i]);
+      i += 1;
+    }
+    i -= 1;
+
+    for (const toolMessage of group) {
+      const functionCall = openAIResponsesFunctionCall(toolMessage as Message<unknown>);
+      if (functionCall) {
+        const callId = openAIToolCallId(toolMessage as Message<unknown>);
+        input.push(functionCall);
+        if (callId) input.push({ type: 'function_call_output', call_id: callId, output: toolOutputText(toolMessage) });
+        continue;
+      }
+
+      const mapped = toOpenAIResponsesInputItem(toolMessage, options);
+      if (mapped) input.push(mapped);
+    }
+  }
+
+  return input;
 }
 
 /** Build an OpenAI Responses API request body. Defaults `stream` to true. */
@@ -536,9 +689,49 @@ export function toAnthropicMessages<TMeta = Record<string, unknown>>(
   history: Message<TMeta>[],
   options: ProviderMappingOptions<TMeta> = {},
 ): AnthropicMessage[] {
-  return history
-    .map(message => toAnthropicMessage(message, options))
-    .filter((message): message is AnthropicMessage => Boolean(message));
+  const messages: AnthropicMessage[] = [];
+
+  for (let i = 0; i < history.length; i += 1) {
+    const message = history[i];
+    if (message.role !== 'tool') {
+      const mapped = toAnthropicMessage(message, options);
+      if (mapped) messages.push(mapped);
+      continue;
+    }
+
+    const group: Message<TMeta>[] = [];
+    while (i < history.length && history[i].role === 'tool') {
+      group.push(history[i]);
+      i += 1;
+    }
+    i -= 1;
+
+    const providerTools: Array<{ message: Message<TMeta>; block: AnthropicMessage }> = [];
+    for (const toolMessage of group) {
+      const block = anthropicToolUseBlock(toolMessage as Message<unknown>);
+      if (block) providerTools.push({ message: toolMessage, block });
+    }
+
+    if (providerTools.length) {
+      appendAnthropicToolUseBlocks(messages, providerTools.map(entry => entry.block));
+      messages.push({
+        role: 'user',
+        content: providerTools.map(entry => ({
+          type: 'tool_result',
+          tool_use_id: anthropicToolUseId(entry.message as Message<unknown>),
+          content: toolOutputText(entry.message),
+        })),
+      });
+    }
+
+    for (const toolMessage of group) {
+      if (anthropicToolUseId(toolMessage as Message<unknown>)) continue;
+      const mapped = toAnthropicMessage(toolMessage, options);
+      if (mapped) messages.push(mapped);
+    }
+  }
+
+  return messages;
 }
 
 /** Build an Anthropic Messages API request body. Defaults `stream` to true. */

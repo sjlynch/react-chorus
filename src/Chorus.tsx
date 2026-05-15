@@ -8,14 +8,14 @@ import type { Transport } from './hooks/useChorusStream';
 import { useChorusPersistence, type DeserializeMessages, type SerializeMessages } from './hooks/useChorusPersistence';
 import { useChorusMessages, type ChorusMessagesChangeContext } from './hooks/useChorusMessages';
 import { useAssistantSession } from './hooks/useAssistantSession';
-import type { ChorusFinishContext, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusSendHelpers, ChorusStreamDoneContext, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolRegistry } from './hooks/useAssistantSession';
+import type { ChorusFinishContext, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusSendHelpers, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolLoopContext, ChorusToolRegistry } from './hooks/useAssistantSession';
 import type { Connector } from './connectors/connectors';
 import type { MarkdownSanitizer } from './components/Markdown';
 import { isChorusDevMode } from './utils/devMode';
 
 export type { Transport };
 export type { Connector };
-export type { ChorusFinishContext, ChorusMessagesChangeContext, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusSendHelpers, ChorusStreamDoneContext, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolRegistry };
+export type { ChorusFinishContext, ChorusMessagesChangeContext, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusSendHelpers, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolLoopContext, ChorusToolRegistry };
 
 const DEFAULT_MIN_ASSISTANT_DELAY_MS = 300;
 const DEFAULT_PERSISTENCE_WRITE_DEBOUNCE_MS = 80;
@@ -36,6 +36,12 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
   clearLabel?: string;
   codeBlockTheme?: 'dark' | 'light';
   connector?: Connector | ConnectorName;
+  /** Opt in to an automatic tool-execution → model-continuation loop on the transport path. */
+  autoContinueTools?: boolean;
+  /** Maximum automatic tool iterations when autoContinueTools is enabled. Defaults to 4. */
+  maxToolIterations?: number;
+  /** Optional gate for each automatic tool continuation. Return false to stop before the next model request. */
+  shouldContinueToolLoop?: ChorusShouldContinueToolLoop<TMeta>;
   /** Disable composer input, attachment ingestion, prompt fills, and write actions. Stop remains available while sending. */
   disabled?: boolean;
   /** Optional explanation used by the composer placeholder/accessible description while disabled or read-only. */
@@ -112,6 +118,9 @@ function ChorusInner<TMeta = Record<string, unknown>>({
   clearLabel = 'Clear conversation',
   codeBlockTheme = 'dark',
   connector,
+  autoContinueTools,
+  maxToolIterations,
+  shouldContinueToolLoop,
   disabled = false,
   disabledReason,
   deserializeMessages,
@@ -235,6 +244,9 @@ function ChorusInner<TMeta = Record<string, unknown>>({
     onToolCall,
     onToolDelta,
     tools,
+    autoContinueTools,
+    maxToolIterations,
+    shouldContinueToolLoop,
     flushPersistence: persisted.flush,
     resetToInitialMessages,
     onClear,

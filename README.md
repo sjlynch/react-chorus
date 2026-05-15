@@ -128,12 +128,17 @@ export default function App() {
   const [messages, setMessages] = React.useState<Message[]>([]);
   const { send, sending } = useChorusStream(transport, { connector: 'openai' });
 
-  const handleSend: ChorusOnSend = (text, msgs, { appendAssistant, finalizeAssistant, signal, systemPrompt }) => {
-    const requestMessages = systemPrompt && !msgs.some((m) => m.role === 'system')
-      ? [{ id: 'system', role: 'system' as const, text: systemPrompt }, ...msgs]
+  const handleSend: ChorusOnSend = (text, msgs, helpers) => {
+    const requestMessages = helpers.systemPrompt && !msgs.some((m) => m.role === 'system')
+      ? [{ id: 'system', role: 'system' as const, text: helpers.systemPrompt }, ...msgs]
       : msgs;
 
-    return send(text, requestMessages, { onChunk: appendAssistant, onDone: finalizeAssistant }, signal);
+    return send(
+      text,
+      requestMessages,
+      helpers.streamCallbacks?.() ?? { onChunk: helpers.appendAssistant, onDone: helpers.finalizeAssistant },
+      helpers.signal,
+    );
   };
 
   return (
@@ -254,9 +259,14 @@ export default function App() {
         value={messages}
         onChange={setMessages}
         sending={sending}
-        onSend={async (text, msgs, { appendAssistant, finalizeAssistant, signal }) => {
+        onSend={async (text, msgs, helpers) => {
           setConnectionStatus('connecting');
-          await send(text, msgs, { onChunk: appendAssistant, onDone: finalizeAssistant }, signal);
+          await send(
+            text,
+            msgs,
+            helpers.streamCallbacks?.() ?? { onChunk: helpers.appendAssistant, onDone: helpers.finalizeAssistant },
+            helpers.signal,
+          );
         }}
         placeholder="Type a message…"
       />
@@ -357,15 +367,15 @@ Connectors tell Chorus how to parse the streaming response from different AI pro
 | `'openai'` | OpenAI Chat Completions / Responses-compatible streams | selected `choices[0].delta.content`, reasoning fields, `tool_calls`, and common Responses API deltas |
 | `'anthropic'` | Anthropic Messages API | `content_block_delta` text/thinking deltas plus `tool_use` / `input_json_delta` |
 | `'gemini'` | Google Gemini (AI / Vertex AI) | selected `candidates[0].content.parts[*].text`, thought parts, and `functionCall` parts |
-| `'auto'` *(default)* | Auto-detect | Tries OpenAI, then Gemini, then Anthropic, then plain text |
+| `'auto'` *(default)* | Auto-detect | Tries OpenAI, then Gemini, known Anthropic events, generic JSON text fields (`text`/`content`/`delta`), then raw plain text |
 
-All built-in connectors also recognise in-band stream errors. If a backend has already started a `200` SSE/WebSocket stream, send `data: {"error":"message"}` (or `{"error":{"message":"message"}}`) to abort the response, call `onError` with an `Error`, and show the configured error banner.
+All built-in connectors also recognise in-band stream errors. If a backend has already started a `200` SSE/WebSocket stream, send `data: {"error":"message"}` (or `{"error":{"message":"message"}}`) to abort the response, call `onError` with an `Error`, and show the configured error banner. Unknown JSON events with a `type` field are no longer assumed to be Anthropic; `{ "type": "delta", "text": "hi" }` renders `hi`, and unknown JSON without a text-like field falls back to the raw payload string.
 
 Built-in connectors emit three additive delta types:
 
 - `text` appends to the active assistant bubble.
 - `reasoning` appends to `message.reasoning` and renders as a collapsed **Reasoning** details block above the assistant bubble.
-- `toolDelta` becomes/updates a `role: 'tool'` message with `message.toolCall`, so the existing `<ToolCallBlock>` renderer shows streaming tool calls automatically in `<Chorus>`.
+- `toolDelta` becomes/updates a `role: 'tool'` message with `message.toolCall`, so the existing `<ToolCallBlock>` renderer shows streaming tool calls automatically in `<Chorus>`. Providers can emit multiple tool calls in one event via `toolDeltas`; the singular `toolDelta` is still populated with the first call for compatibility.
 
 Custom connectors can return the same shape:
 
@@ -373,7 +383,8 @@ Custom connectors can return the same shape:
 type ConnectorResult = {
   text?: string;
   reasoning?: string;
-  toolDelta?: { id: string; name?: string; input?: unknown; output?: unknown };
+  toolDelta?: { id: string; name?: string; input?: unknown; output?: unknown; providerId?: string; generated?: boolean };
+  toolDeltas?: Array<{ id: string; name?: string; input?: unknown; output?: unknown; providerId?: string; generated?: boolean }>;
   done?: boolean;
   error?: string;
 };
@@ -407,7 +418,7 @@ The `openaiConnector` reads the selected Chat Completions alternative (`choices[
 
 - `choices[0].delta.content` → assistant text. DeepSeek-style `<think>...</think>` spans inside content are split into `reasoning` instead of being rendered in the answer.
 - `choices[0].delta.reasoning`, `reasoning_content`, or `reasoning_summary` → assistant `reasoning`.
-- `choices[0].delta.tool_calls[*].id/function.name/function.arguments` → `toolDelta { id, name, input }`. Argument string fragments are accumulated and parsed as JSON when complete before they are written to the tool message.
+- `choices[0].delta.tool_calls[*].id/function.name/function.arguments` → one `toolDelta { id, name, input }` per call (and `toolDeltas` when multiple calls arrive in the same chunk). Argument string fragments are accumulated and parsed as JSON when complete before they are written to the tool message.
 
 ```
 data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"search","arguments":"{\"q\":"}}]}}]}
@@ -452,7 +463,7 @@ Anthropic `tool_use` maps to a Chorus tool message by `content_block.id` (`toolD
 
 ## Gemini SSE format
 
-The Google Gemini streaming API (Google AI and Vertex AI) sends server-sent events where each chunk contains a `candidates` array. The `geminiConnector` reads only candidate index `0`, collects text from `content.parts[*].text`, maps `thought: true` text/thinking fields to reasoning, maps `functionCall` parts to tool messages, and signals completion for normal `STOP` / `MAX_TOKENS` finish reasons:
+The Google Gemini streaming API (Google AI and Vertex AI) sends server-sent events where each chunk contains a `candidates` array. The `geminiConnector` reads only candidate index `0`, collects text from `content.parts[*].text`, maps `thought: true` text/thinking fields to reasoning, maps every `functionCall` part to a tool message, and signals completion for normal `STOP` / `MAX_TOKENS` finish reasons:
 
 ```
 data: {"candidates":[{"index":0,"content":{"parts":[{"text":"Thinking","thought":true}]}}]}
@@ -640,7 +651,10 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `onToolDelta` | `({ delta, message, messages }) => void` | — | Observation hook called for every accumulated streamed tool-call delta on the `transport` path. Does **not** affect execution. |
 | `onToolCall` | `({ id, name, input, output, message, messages, signal }) => unknown \| Promise<unknown>` | — | Called after stream input completes for each streamed tool call. If no matching `tools[name]` handler exists, a non-`undefined` return value is appended as `toolCall.output`. |
 | `tools` | `Record<string, (input, context) => unknown \| Promise<unknown>>` | — | Executable tool registry keyed by tool name. Matching handlers run after the stream completes; their return value is appended to the tool message as output. |
-| `onStreamDone` | `({ assistantMessage, toolMessages, messages, response }) => void` | — | Called after a `transport` stream completes normally and tool handlers (if any) finish. Fires for tool-only turns where `onFinish` has no assistant message. |
+| `autoContinueTools` | `boolean` | `false` | Opt in to an automatic tool-execution → model-continuation loop on the `transport` path after all completed tool calls have outputs. |
+| `maxToolIterations` | `number` | `4` | Maximum automatic tool iterations when `autoContinueTools` is enabled. Prevents infinite loops. |
+| `shouldContinueToolLoop` | `(context) => boolean \| Promise<boolean>` | — | Optional gate before each automatic continuation. Return `false` to stop after rendering/executing the current tool batch. |
+| `onStreamDone` | `({ assistantMessage, toolMessages, messages, response }) => void` | — | Called after each `transport` stream completes normally and tool handlers (if any) finish. Fires for tool-only turns where `onFinish` has no assistant message. |
 | `onCopy` | `(message: Message<TMeta>) => void` | Clipboard copy when available | Overrides the built-in per-message Copy action. If omitted, Chorus copies `message.text` with `navigator.clipboard.writeText` when the Clipboard API is available. |
 | `onFeedback` | `(message: Message<TMeta>, feedback: 'up' \| 'down') => void` | — | Enables built-in thumbs-up / thumbs-down per-message feedback actions and reports the selected variant. |
 | `onFinish` | `({ message, messages, reason, response }) => void` | — | Called once when an assistant message completes normally. Use it for telemetry, persistence handoff, moderation, or post-response UI. Not called for tool-only turns, aborts, Stop, or errors; use `onStreamDone`/`onToolCall` for tool-only streams. |
@@ -665,6 +679,9 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | Helper | Description |
 |--------|-------------|
 | `appendAssistant(chunk)` | Append a text chunk to the current assistant message. Chunks are buffered until `minAssistantDelayMs` has elapsed before the first token is shown. |
+| `appendReasoning(chunk)` | Append a reasoning/thinking chunk to the current assistant message. |
+| `appendToolDelta(delta)` | Create/update a `role: 'tool'` message from an accumulated connector tool delta. |
+| `streamCallbacks()` | Convenience helper returning `{ onChunk, onReasoning, onToolDelta, onDone }` for `useChorusStream(...).send()`. It is present at runtime; optional chaining keeps older hand-written helper mocks type-compatible. |
 | `finalizeAssistant()` | Mark the assistant message complete. If first-token chunks are still buffered, completion waits until they flush. |
 | `signal` | `AbortSignal` — aborted when the user hits Stop. |
 | `systemPrompt` | The optional `systemPrompt` prop. Use it when serializing custom `onSend` requests; Chorus does not insert it into the `messages` argument on this path. |
@@ -998,7 +1015,7 @@ const { send, abort, sending } = useChorusStream<MyMeta>(transport, { connector:
 
 - `transport` — async function `(text, history: Message<TMeta>[], signal) => Promise<Response>`. Use `createFetchSSETransport<TMeta>(url)` or write your own.
 - `send(..., { minDelayMs })` buffers the first streamed chunks until that many milliseconds have elapsed from send start, then flushes them before continuing normally.
-- `send(..., { onReasoning, onToolDelta })` receives connector-emitted reasoning chunks and accumulated tool deltas when you use the hook directly. `<Chorus>` wires these into `Message.reasoning` and `role: 'tool'` messages automatically.
+- `send(..., { onReasoning, onToolDelta })` receives connector-emitted reasoning chunks and accumulated tool deltas when you use the hook directly. `<Chorus>` wires these into `Message.reasoning` and `role: 'tool'` messages automatically; advanced `onSend` bridges can pass `helpers.streamCallbacks?.()` to preserve the same behavior.
 - Non-abort transport, HTTP, connector, and in-band provider errors call `onError` when supplied and reject the returned `send()` promise. This lets README-style `await send(...)` bridges surface the friendly Chorus error banner through the surrounding `onSend` catch path.
 - `onError` receives raw transport details (including bounded HTTP response body snippets); the built-in UI continues to show only `errorMessage`.
 - `opts.connector` — `'openai'` | `'anthropic'` | `'gemini'` | `'auto'` | custom `Connector`. Defaults to `'auto'` which handles OpenAI, Gemini, Anthropic JSON, plain-text SSE, reasoning/tool deltas, and in-band `{ error }` payloads.
@@ -1066,7 +1083,7 @@ Returns a `Transport` that connects over a native WebSocket. Each incoming messa
 | `onError` | `(event: Event) => void` | – | Called when the WebSocket reports an error |
 | `formatMessage` | `(text, history: Message<TMeta>[]) => string` | `JSON.stringify({ prompt, history })` | Serialise the outgoing request |
 
-Supports `AbortSignal` cancellation — closing the socket when the user hits Stop.
+Supports `AbortSignal` cancellation — closing the socket when the user hits Stop. Serializer (`formatMessage`) and `ws.send()` failures reject the transport promise and close the socket, so they surface through `onError` like HTTP/SSE failures. Incoming string, `Blob`, `ArrayBuffer`, and typed-array messages are decoded as text; other message types error the response body instead of silently emitting an empty chunk.
 
 ### Custom connector
 
@@ -1135,7 +1152,7 @@ The runnable [`examples/with-openai`](./examples/with-openai) app uses this help
 
 ### Tool-call history recipe
 
-Chorus displays tool steps as `role: 'tool'` with `message.toolCall`, but those messages are not a provider-neutral wire format. Connectors store the streamed provider id on `message.toolCall.id` when available; if your provider also requires paired assistant tool-call records, serialize those ids explicitly in `formatBody` or on your server. Store provider-specific IDs in `message.metadata` so the request helpers can replay tool results exactly:
+Chorus displays tool steps as `role: 'tool'` with `message.toolCall`, but those messages are not a provider-neutral wire format. Connectors store the streamed provider id on `message.toolCall.id` when available. For OpenAI and Anthropic streams, Chorus also writes provider-aware metadata when the id came from the provider (not a generated fallback), so the request helpers can replay tool results exactly. For manually-created tool messages, store the same metadata yourself:
 
 ```ts
 {
@@ -1149,7 +1166,7 @@ Chorus displays tool steps as `role: 'tool'` with `message.toolCall`, but those 
 }
 ```
 
-The request helpers use those IDs for OpenAI `tool_call_id` / Responses `call_id` and Anthropic `tool_result.tool_use_id`. When an ID is missing, they convert the tool result to safe text context instead of emitting an invalid provider-specific tool message. Gemini function responses use `toolCall.name` and the output payload.
+The request helpers use those IDs for OpenAI `tool_call_id` / Responses `call_id` and Anthropic `tool_result.tool_use_id`. They also synthesize the provider-required assistant tool-call records (`assistant.tool_calls`, Responses `function_call`, Anthropic `tool_use`) before the tool result. When an ID is missing, they convert the tool result to safe text context instead of emitting an invalid provider-specific tool message. Gemini function responses use `toolCall.name` and the output payload.
 
 ## Tool calls and agent steps
 
@@ -1174,7 +1191,9 @@ To observe deltas without executing tools:
 />
 ```
 
-To execute tools in the simple path, pass a `tools` registry. Handlers run after streaming input completes, receive the final parsed `input` plus an abortable context, and their return value is appended as `toolCall.output`. If the user clicks Stop while a handler is running, `context.signal` is aborted and late outputs are ignored. If a handler throws a non-abort error, Chorus keeps the tool row, writes `{ error: message }` to its output, calls `onError`, and shows the friendly error banner. Chorus does not automatically make a second model request after tool execution; use `onToolCall`/`onStreamDone` or your backend to continue the agent loop when needed.
+To execute tools in the simple path, pass a `tools` registry. Handlers run after streaming input completes, receive the final parsed `input` plus an abortable context, and their return value is appended as `toolCall.output`. If the user clicks Stop while a handler is running, `context.signal` is aborted and late outputs are ignored. If a handler throws a non-abort error, Chorus keeps the tool row inspectable, writes `{ error: message }` to its output, calls `onError`, and shows the friendly error banner; clicking Retry removes the failed assistant/tool attempt before rendering the fresh response.
+
+By default this remains display/manual mode: Chorus does not make a second model request after tool execution, so use `onToolCall`/`onStreamDone` or your backend to continue the agent loop when needed. To opt in to a built-in loop, set `autoContinueTools`. Chorus will run the handlers, append outputs, then send a continuation request with the updated history. `maxToolIterations` (default `4`) prevents runaway loops, `shouldContinueToolLoop(context)` can stop a specific continuation, and Stop aborts both tool execution and continuation streams.
 
 ```tsx
 <Chorus
@@ -1187,6 +1206,9 @@ To execute tools in the simple path, pass a `tools` registry. Handlers run after
       return res.json();
     },
   }}
+  // Optional: after search returns, send updated history back to the model.
+  autoContinueTools
+  maxToolIterations={2}
   onToolCall={({ name, input, output }) => {
     // When a matching tools[name] handler exists, this is an observer; its
     // return value is ignored. Without a tools handler, returning a value here

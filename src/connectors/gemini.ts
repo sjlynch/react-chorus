@@ -14,6 +14,20 @@ function appendField(target: ConnectorResult, key: 'text' | 'reasoning', value: 
   target[key] = `${target[key] ?? ''}${value}`;
 }
 
+function appendToolDelta(target: ConnectorResult, toolDelta: ConnectorToolDelta) {
+  if (!target.toolDelta) {
+    target.toolDelta = toolDelta;
+    return;
+  }
+
+  if (!target.toolDeltas) target.toolDeltas = [target.toolDelta];
+  target.toolDeltas.push(toolDelta);
+}
+
+function hasToolDelta(result: ConnectorResult) {
+  return Boolean(result.toolDelta || result.toolDeltas?.length);
+}
+
 function selectedCandidate(candidates: unknown[]) {
   const explicitIndex = candidates.findIndex(candidate => (candidate as { index?: unknown } | null)?.index === DEFAULT_CANDIDATE_INDEX);
   const index = explicitIndex >= 0 ? explicitIndex : 0;
@@ -47,10 +61,11 @@ function extractFunctionCallToolDelta(part: Record<string, unknown>, candidateKe
   if (!functionCall || typeof functionCall !== 'object') return null;
   const call = functionCall as Record<string, unknown>;
   const name = typeof call.name === 'string' && call.name ? call.name : undefined;
-  const id = typeof call.id === 'string' && call.id
-    ? call.id
-    : `gemini-${candidateKey}-function-${partIndex}-${name ?? 'call'}`;
-  const toolDelta: ConnectorToolDelta = { id };
+  const explicitId = typeof call.id === 'string' && call.id ? call.id : undefined;
+  const id = explicitId ?? `gemini-${candidateKey}-function-${partIndex}-${name ?? 'call'}`;
+  const toolDelta: ConnectorToolDelta = { id, provider: 'gemini' };
+  if (explicitId) toolDelta.providerId = explicitId;
+  else toolDelta.generated = true;
   if (name) toolDelta.name = name;
   if (hasOwn(call, 'args')) toolDelta.input = call.args;
   if (hasOwn(call, 'response')) toolDelta.output = call.response;
@@ -95,10 +110,8 @@ export const geminiConnector: Connector = {
           }
           if (typeof partObj.thinking === 'string' && partObj.thinking) appendField(result, 'reasoning', partObj.thinking);
           if (typeof partObj.reasoning === 'string' && partObj.reasoning) appendField(result, 'reasoning', partObj.reasoning);
-          if (!result.toolDelta) {
-            const toolDelta = extractFunctionCallToolDelta(partObj, candidateKey, partIndex);
-            if (toolDelta) result.toolDelta = toolDelta;
-          }
+          const toolDelta = extractFunctionCallToolDelta(partObj, candidateKey, partIndex);
+          if (toolDelta) appendToolDelta(result, toolDelta);
         });
       }
 
@@ -112,7 +125,7 @@ export const geminiConnector: Connector = {
 
       if (isDoneFinishReason(finishReason)) result.done = true;
 
-      if (result.text || result.reasoning || result.toolDelta || result.done || result.error) return result;
+      if (result.text || result.reasoning || hasToolDelta(result) || result.done || result.error) return result;
       return null;
     } catch {
       return null;

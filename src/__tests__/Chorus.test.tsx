@@ -4,6 +4,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event';
 import { Chorus, type ChorusOnSend, type ChorusProps, type ChorusRef, type ChorusSendHelpers, type Transport } from '../Chorus';
 import { useChorusStream } from '../hooks/useChorusStream';
+import { toAnthropicMessagesBody, toOpenAIChatCompletionsBody } from '../providerRequests';
 import type { Message, StorageAdapter } from '../types';
 
 type OnSend = ChorusOnSend;
@@ -257,6 +258,39 @@ describe('Chorus', () => {
     expect(screen.getByText(/first result/)).toBeInTheDocument();
   });
 
+  it('renders and executes every parallel tool call in one provider chunk', async () => {
+    const user = userEvent.setup();
+    const search = vi.fn(async () => ({ ok: 'search' }));
+    const lookup = vi.fn(async () => ({ ok: 'lookup' }));
+    const onToolDelta = vi.fn();
+    const onStreamDone = vi.fn();
+    const transport = vi.fn<Transport>(async () => sseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { content: 'running tools', tool_calls: [
+        { index: 0, id: 'call_1', function: { name: 'search', arguments: '{"q":"react"}' } },
+        { index: 1, id: 'call_2', function: { name: 'lookup', arguments: '{"id":2}' } },
+      ] } }] }),
+      '[DONE]',
+    ]));
+
+    render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} tools={{ search, lookup }} onToolDelta={onToolDelta} onStreamDone={onStreamDone} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'parallel tools');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByText('running tools')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /search/i })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /lookup/i })).toBeInTheDocument();
+    await waitFor(() => expect(search).toHaveBeenCalledTimes(1));
+    expect(lookup).toHaveBeenCalledTimes(1);
+    expect(onToolDelta).toHaveBeenCalledTimes(2);
+    expect(onStreamDone).toHaveBeenCalledWith(expect.objectContaining({
+      toolMessages: expect.arrayContaining([
+        expect.objectContaining({ toolCall: expect.objectContaining({ id: 'call_1' }) }),
+        expect.objectContaining({ toolCall: expect.objectContaining({ id: 'call_2' }) }),
+      ]),
+    }));
+  });
+
   it('surfaces tool execution failures and appends error output', async () => {
     const user = userEvent.setup();
     const onError = vi.fn();
@@ -275,6 +309,37 @@ describe('Chorus', () => {
     const toolButton = screen.getByRole('button', { name: /search/i });
     await user.click(toolButton);
     expect(screen.getByText(/tool failed/)).toBeInTheDocument();
+  });
+
+  it('removes stale failed tool output before retrying', async () => {
+    const user = userEvent.setup();
+    const transport = vi.fn<Transport>(async () => (
+      transport.mock.calls.length === 1
+        ? sseResponse([
+          JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'search', arguments: '{"q":"react"}' } }] } }] }),
+          '[DONE]',
+        ])
+        : sseResponse([
+          JSON.stringify({ choices: [{ index: 0, delta: { content: 'fresh success' } }] }),
+          '[DONE]',
+        ])
+    ));
+
+    render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} tools={{ search: async () => { throw new Error('tool failed'); } }} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'search react');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByText('Something went wrong. Please try again.')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /search/i }));
+    expect(screen.getByText(/tool failed/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /retry/i }));
+
+    expect(await screen.findByText('fresh success')).toBeInTheDocument();
+    expect(screen.queryByText(/tool failed/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /search/i })).not.toBeInTheDocument();
+    expect(transport).toHaveBeenCalledTimes(2);
   });
 
   it('aborts during tool execution without showing an error', async () => {
@@ -305,6 +370,150 @@ describe('Chorus', () => {
     await waitFor(() => expect(capturedSignal.aborted).toBe(true));
     await waitFor(() => expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument());
     expect(onError).not.toHaveBeenCalled();
+    expect(screen.queryByText('Something went wrong. Please try again.')).not.toBeInTheDocument();
+  });
+
+  it('auto-continues OpenAI tool calls with provider ids in continuation history', async () => {
+    const user = userEvent.setup();
+    const search = vi.fn(async () => ({ result: 'found' }));
+    const transport = vi.fn<Transport>(async () => (
+      transport.mock.calls.length === 1
+        ? sseResponse([
+          JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_openai', function: { name: 'search', arguments: '{"q":"react"}' } }] } }] }),
+          '[DONE]',
+        ])
+        : sseResponse([
+          JSON.stringify({ choices: [{ index: 0, delta: { content: 'final answer' } }] }),
+          '[DONE]',
+        ])
+    ));
+
+    render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} autoContinueTools tools={{ search }} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'search react');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByText('final answer')).toBeInTheDocument();
+    await waitFor(() => expect(transport).toHaveBeenCalledTimes(2));
+    expect(search).toHaveBeenCalledWith({ q: 'react' }, expect.objectContaining({ id: 'call_openai' }));
+
+    const continuationBody = toOpenAIChatCompletionsBody(transport.mock.calls[1][1]);
+    expect(continuationBody.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        role: 'assistant',
+        tool_calls: [expect.objectContaining({ id: 'call_openai', function: expect.objectContaining({ name: 'search' }) })],
+      }),
+      expect.objectContaining({ role: 'tool', tool_call_id: 'call_openai', content: expect.stringContaining('found') }),
+    ]));
+  });
+
+  it('auto-continues Anthropic tool calls with tool_use history', async () => {
+    const user = userEvent.setup();
+    const lookup = vi.fn(async () => ({ weather: 'sunny' }));
+    const transport = vi.fn<Transport>(async () => (
+      transport.mock.calls.length === 1
+        ? sseResponse([
+          JSON.stringify({ type: 'content_block_start', index: 1, content_block: { type: 'tool_use', id: 'toolu_1', name: 'lookup', input: {} } }),
+          JSON.stringify({ type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: '{"city":"Paris"}' } }),
+          JSON.stringify({ type: 'message_stop' }),
+        ])
+        : sseResponse([
+          JSON.stringify({ type: 'content_block_delta', delta: { type: 'text_delta', text: 'It is sunny.' } }),
+          JSON.stringify({ type: 'message_stop' }),
+        ])
+    ));
+
+    render(<Chorus transport={transport} connector="anthropic" minAssistantDelayMs={0} autoContinueTools tools={{ lookup }} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'weather');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByText('It is sunny.')).toBeInTheDocument();
+    await waitFor(() => expect(transport).toHaveBeenCalledTimes(2));
+    expect(lookup).toHaveBeenCalledWith({ city: 'Paris' }, expect.objectContaining({ id: 'toolu_1' }));
+
+    const continuationBody = toAnthropicMessagesBody(transport.mock.calls[1][1]);
+    expect(continuationBody.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        role: 'assistant',
+        content: expect.arrayContaining([expect.objectContaining({ type: 'tool_use', id: 'toolu_1', name: 'lookup' })]),
+      }),
+      expect.objectContaining({
+        role: 'user',
+        content: [expect.objectContaining({ type: 'tool_result', tool_use_id: 'toolu_1', content: expect.stringContaining('sunny') })],
+      }),
+    ]));
+  });
+
+  it('stops automatic tool loops at maxToolIterations', async () => {
+    const user = userEvent.setup();
+    const search = vi.fn(async () => ({ ok: true }));
+    const transport = vi.fn<Transport>(async () => sseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: transport.mock.calls.length - 1, id: `call_${transport.mock.calls.length}`, function: { name: 'search', arguments: '{}' } }] } }] }),
+      '[DONE]',
+    ]));
+
+    render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} autoContinueTools maxToolIterations={1} tools={{ search }} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'loop');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    await waitFor(() => expect(transport).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument());
+    expect(search).toHaveBeenCalledTimes(2);
+    expect(transport).toHaveBeenCalledTimes(2);
+  });
+
+  it('lets shouldContinueToolLoop veto automatic continuation', async () => {
+    const user = userEvent.setup();
+    const search = vi.fn(async () => ({ ok: true }));
+    const shouldContinueToolLoop = vi.fn(() => false);
+    const transport = vi.fn<Transport>(async () => sseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'search', arguments: '{}' } }] } }] }),
+      '[DONE]',
+    ]));
+
+    render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} autoContinueTools tools={{ search }} shouldContinueToolLoop={shouldContinueToolLoop} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'veto');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    await waitFor(() => expect(search).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument());
+    expect(shouldContinueToolLoop).toHaveBeenCalledWith(expect.objectContaining({
+      iteration: 1,
+      maxToolIterations: 4,
+      toolMessages: [expect.objectContaining({ toolCall: expect.objectContaining({ id: 'call_1' }) })],
+      signal: expect.any(AbortSignal),
+    }));
+    expect(transport).toHaveBeenCalledTimes(1);
+  });
+
+  it('Stop aborts an active automatic continuation stream', async () => {
+    const user = userEvent.setup();
+    let continuationSignal!: AbortSignal;
+    const search = vi.fn(async () => ({ ok: true }));
+    const transport = vi.fn<Transport>(async (_text, _history, signal) => {
+      if (transport.mock.calls.length === 1) {
+        return sseResponse([
+          JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'search', arguments: '{}' } }] } }] }),
+          '[DONE]',
+        ]);
+      }
+      continuationSignal = signal;
+      return new Response(new ReadableStream<Uint8Array>());
+    });
+
+    render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} autoContinueTools tools={{ search }} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'continue then stop');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    await waitFor(() => expect(transport).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByRole('button', { name: /stop/i })).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: /stop/i }));
+
+    await waitFor(() => expect(continuationSignal.aborted).toBe(true));
     expect(screen.queryByText('Something went wrong. Please try again.')).not.toBeInTheDocument();
   });
 
@@ -1169,6 +1378,83 @@ describe('Chorus', () => {
     expect(onError.mock.calls[0][0].message).toContain('finishReason: SAFETY');
     expect(await screen.findByText('Something went wrong. Please try again.')).toBeInTheDocument();
     expect(screen.queryByText(/finishReason: SAFETY/)).not.toBeInTheDocument();
+  });
+
+  it('renders reasoning and tool deltas from the useChorusStream onSend bridge', async () => {
+    const user = userEvent.setup();
+    const bridgeTransport = vi.fn<Transport>(async () => sseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { reasoning_content: 'bridge plan' } }] }),
+      JSON.stringify({ choices: [{ index: 0, delta: { content: 'bridge answer' } }] }),
+      '[DONE]',
+    ]));
+
+    function Bridge() {
+      const { send } = useChorusStream(bridgeTransport, { connector: 'openai' });
+      return (
+        <Chorus
+          minAssistantDelayMs={0}
+          onSend={(text, messages, helpers) => send(text, messages, helpers.streamCallbacks?.() ?? {
+            onChunk: helpers.appendAssistant,
+            onReasoning: helpers.appendReasoning,
+            onToolDelta: helpers.appendToolDelta,
+            onDone: helpers.finalizeAssistant,
+          }, helpers.signal)}
+        />
+      );
+    }
+
+    render(<Bridge />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'bridge reasoning');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByText('bridge answer')).toBeInTheDocument();
+    expect(screen.getByText('Reasoning')).toBeInTheDocument();
+    expect(screen.getByText('bridge plan')).toBeInTheDocument();
+  });
+
+  it('renders a tool-only stream from the useChorusStream onSend bridge', async () => {
+    const user = userEvent.setup();
+    const bridgeTransport = vi.fn<Transport>(async () => sseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'search', arguments: '{"q":"bridge"}' } }] } }] }),
+      '[DONE]',
+    ]));
+
+    function Bridge() {
+      const { send } = useChorusStream(bridgeTransport, { connector: 'openai' });
+      return <Chorus minAssistantDelayMs={0} onSend={(text, messages, helpers) => send(text, messages, helpers.streamCallbacks?.() ?? { onChunk: helpers.appendAssistant, onDone: helpers.finalizeAssistant }, helpers.signal)} />;
+    }
+
+    render(<Bridge />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'bridge tool');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByRole('button', { name: /search/i })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument());
+    expect(screen.queryByRole('status', { name: /assistant is typing/i })).not.toBeInTheDocument();
+  });
+
+  it('renders a bridged tool call followed by final assistant text', async () => {
+    const user = userEvent.setup();
+    const bridgeTransport = vi.fn<Transport>(async () => sseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'search', arguments: '{"q":"bridge"}' } }] } }] }),
+      JSON.stringify({ choices: [{ index: 0, delta: { content: 'bridge final' } }] }),
+      '[DONE]',
+    ]));
+
+    function Bridge() {
+      const { send } = useChorusStream(bridgeTransport, { connector: 'openai' });
+      return <Chorus minAssistantDelayMs={0} onSend={(text, messages, helpers) => send(text, messages, helpers.streamCallbacks?.() ?? { onChunk: helpers.appendAssistant, onDone: helpers.finalizeAssistant }, helpers.signal)} />;
+    }
+
+    render(<Bridge />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'bridge both');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByRole('button', { name: /search/i })).toBeInTheDocument();
+    expect(await screen.findByText('bridge final')).toBeInTheDocument();
   });
 
   it('surfaces errors from the documented useChorusStream onSend bridge', async () => {

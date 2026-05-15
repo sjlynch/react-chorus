@@ -3,14 +3,16 @@ import type { Connector, ConnectorResult, ConnectorToolDelta } from './openai';
 
 export interface AnthropicConnectorState {
   toolIdsByBlockIndex: Map<string, string>;
+  providerToolIdsByBlockIndex: Map<string, string>;
 }
 
 export function createAnthropicConnectorState(): AnthropicConnectorState {
-  return { toolIdsByBlockIndex: new Map<string, string>() };
+  return { toolIdsByBlockIndex: new Map<string, string>(), providerToolIdsByBlockIndex: new Map<string, string>() };
 }
 
 function resetAnthropicState(state: AnthropicConnectorState) {
   state.toolIdsByBlockIndex.clear();
+  state.providerToolIdsByBlockIndex.clear();
 }
 
 function hasOwn(value: object, key: PropertyKey) {
@@ -60,9 +62,14 @@ export const anthropicConnector: Connector<AnthropicConnectorState> = {
         }
 
         if (block.type === 'tool_use') {
-          const id = typeof block.id === 'string' && block.id ? block.id : fallbackToolId(obj.index);
-          state.toolIdsByBlockIndex.set(blockIndexKey(obj.index), id);
-          const toolDelta: ConnectorToolDelta = { id };
+          const explicitId = typeof block.id === 'string' && block.id ? block.id : undefined;
+          const id = explicitId ?? fallbackToolId(obj.index);
+          const key = blockIndexKey(obj.index);
+          state.toolIdsByBlockIndex.set(key, id);
+          if (explicitId) state.providerToolIdsByBlockIndex.set(key, explicitId);
+          const toolDelta: ConnectorToolDelta = { id, provider: 'anthropic' };
+          if (explicitId) toolDelta.providerId = explicitId;
+          else toolDelta.generated = true;
           if (typeof block.name === 'string' && block.name) toolDelta.name = block.name;
           if (hasOwn(block, 'input')) toolDelta.input = block.input;
           return toolDelta.name || hasOwn(toolDelta, 'input') ? { toolDelta } : null;
@@ -91,7 +98,13 @@ export const anthropicConnector: Connector<AnthropicConnectorState> = {
         if (obj.delta?.type === 'input_json_delta' && typeof obj.delta.partial_json === 'string') {
           const key = blockIndexKey(obj.index);
           const id = state.toolIdsByBlockIndex.get(key) ?? fallbackToolId(obj.index);
-          return { toolDelta: { id, input: obj.delta.partial_json } };
+          const providerId = state.providerToolIdsByBlockIndex.get(key);
+          return { toolDelta: {
+            id,
+            input: obj.delta.partial_json,
+            provider: 'anthropic',
+            ...(providerId ? { providerId } : { generated: true }),
+          } };
         }
       }
 

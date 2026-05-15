@@ -56,9 +56,48 @@ describe('openaiConnector', () => {
     });
 
     expect(state).toBeDefined();
-    expect(openaiConnector.extract(start, state)).toEqual({ toolDelta: { id: 'call_1', name: 'search', input: '{"q":' } });
-    expect(openaiConnector.extract(next, state)).toEqual({ toolDelta: { id: 'call_1', input: '"test"}' } });
+    expect(openaiConnector.extract(start, state)).toEqual({ toolDelta: { id: 'call_1', name: 'search', input: '{"q":', provider: 'openai', providerId: 'call_1' } });
+    expect(openaiConnector.extract(next, state)).toEqual({ toolDelta: { id: 'call_1', input: '"test"}', provider: 'openai', providerId: 'call_1' } });
     expect(openaiConnector.extract('[DONE]', state)).toEqual({ done: true });
+  });
+
+  it('extracts parallel tool call deltas from one chunk', () => {
+    const data = JSON.stringify({
+      choices: [{
+        index: 0,
+        delta: { tool_calls: [
+          { index: 0, id: 'call_1', function: { name: 'search', arguments: '{"q":"react"}' } },
+          { index: 1, id: 'call_2', function: { name: 'lookup', arguments: '{"id":1}' } },
+        ] },
+      }],
+    });
+
+    expect(openaiConnector.extract(data)).toEqual({
+      toolDelta: { id: 'call_1', name: 'search', input: '{"q":"react"}', provider: 'openai', providerId: 'call_1' },
+      toolDeltas: [
+        { id: 'call_1', name: 'search', input: '{"q":"react"}', provider: 'openai', providerId: 'call_1' },
+        { id: 'call_2', name: 'lookup', input: '{"id":1}', provider: 'openai', providerId: 'call_2' },
+      ],
+    });
+  });
+
+  it('extracts mixed text and multiple tool deltas', () => {
+    const data = JSON.stringify({
+      choices: [{
+        index: 0,
+        delta: {
+          content: 'checking',
+          tool_calls: [
+            { index: 0, id: 'call_1', function: { name: 'search', arguments: '{}' } },
+            { index: 1, id: 'call_2', function: { name: 'lookup', arguments: '{}' } },
+          ],
+        },
+      }],
+    });
+
+    const result = openaiConnector.extract(data);
+    expect(result?.text).toBe('checking');
+    expect(result?.toolDeltas).toHaveLength(2);
   });
 
   it('returns null for role-only delta (no content)', () => {
@@ -161,8 +200,8 @@ describe('anthropicConnector', () => {
     });
 
     expect(state).toBeDefined();
-    expect(anthropicConnector.extract(start, state)).toEqual({ toolDelta: { id: 'toolu_1', name: 'search', input: {} } });
-    expect(anthropicConnector.extract(delta, state)).toEqual({ toolDelta: { id: 'toolu_1', input: '{"q":"test"}' } });
+    expect(anthropicConnector.extract(start, state)).toEqual({ toolDelta: { id: 'toolu_1', name: 'search', input: {}, provider: 'anthropic', providerId: 'toolu_1' } });
+    expect(anthropicConnector.extract(delta, state)).toEqual({ toolDelta: { id: 'toolu_1', input: '{"q":"test"}', provider: 'anthropic', providerId: 'toolu_1' } });
     expect(anthropicConnector.extract(JSON.stringify({ type: 'message_stop' }), state)).toEqual({ done: true });
   });
 
@@ -212,7 +251,26 @@ describe('geminiConnector', () => {
       candidates: [{ index: 0, content: { parts: [{ functionCall: { name: 'lookup', args: { q: 'test' } } }] } }],
     });
     expect(geminiConnector.extract(data)).toEqual({
-      toolDelta: { id: 'gemini-0-function-0-lookup', name: 'lookup', input: { q: 'test' } },
+      toolDelta: { id: 'gemini-0-function-0-lookup', name: 'lookup', input: { q: 'test' }, provider: 'gemini', generated: true },
+    });
+  });
+
+  it('extracts multiple functionCall parts as tool deltas', () => {
+    const data = JSON.stringify({
+      candidates: [{ index: 0, content: { parts: [
+        { text: 'using tools' },
+        { functionCall: { name: 'lookup', args: { q: 'test' } } },
+        { functionCall: { id: 'gemini-call-2', name: 'weather', args: { city: 'Paris' } } },
+      ] } }],
+    });
+
+    expect(geminiConnector.extract(data)).toEqual({
+      text: 'using tools',
+      toolDelta: { id: 'gemini-0-function-1-lookup', name: 'lookup', input: { q: 'test' }, provider: 'gemini', generated: true },
+      toolDeltas: [
+        { id: 'gemini-0-function-1-lookup', name: 'lookup', input: { q: 'test' }, provider: 'gemini', generated: true },
+        { id: 'gemini-call-2', name: 'weather', input: { city: 'Paris' }, provider: 'gemini', providerId: 'gemini-call-2' },
+      ],
     });
   });
 
@@ -312,9 +370,24 @@ describe('autoConnector', () => {
     expect(autoConnector.extract(data)).toEqual({ text: 'hello' });
   });
 
+  it('falls back to generic text for unknown typed JSON events', () => {
+    expect(autoConnector.extract(JSON.stringify({ type: 'delta', text: 'hello' }))).toEqual({ text: 'hello' });
+    expect(autoConnector.extract(JSON.stringify({ type: 'message', content: 'world' }))).toEqual({ text: 'world' });
+  });
+
+  it('falls back to raw JSON text for unknown typed JSON without text fields', () => {
+    const data = JSON.stringify({ type: 'custom', value: 1 });
+    expect(autoConnector.extract(data)).toEqual({ text: data });
+  });
+
   it('handles message_stop from Anthropic', () => {
     const data = JSON.stringify({ type: 'message_stop' });
     expect(autoConnector.extract(data)).toEqual({ done: true });
+  });
+
+  it('delegates to OpenAI Responses events before generic typed fallback', () => {
+    const data = JSON.stringify({ type: 'response.output_text.delta', delta: 'hi' });
+    expect(autoConnector.extract(data)).toEqual({ text: 'hi' });
   });
 
   it('delegates to geminiConnector for Gemini-shaped JSON', () => {
