@@ -40,6 +40,9 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Test coverage
+        run: npm run test:coverage
+
       - name: Build
         run: npm run build
 
@@ -51,6 +54,9 @@ jobs:
 
       - name: Verify package contents
         run: npm run verify:pack
+
+      - name: Verify runnable examples
+        run: npm run verify:examples
 
   playground-build:
     name: Playground build (Node 22.x)
