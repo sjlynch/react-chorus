@@ -36,6 +36,20 @@ function history(): Message[] {
   ];
 }
 
+function nonOpenAIUriImageHistory(): Message[] {
+  return [
+    {
+      id: 'uri-user',
+      role: 'user',
+      text: 'Review attachments',
+      attachments: [
+        { name: 'gcs.png', type: 'image/png', data: 'gs://bucket/gcs.png', size: 1 },
+        { name: 'local.jpg', type: 'image/jpeg', data: '', url: 'file:///tmp/local.jpg', size: 1 },
+      ],
+    },
+  ];
+}
+
 describe('provider request mappers', () => {
   it('maps Chorus history to an OpenAI Chat Completions body', () => {
     expect(toOpenAIChatCompletionsBody(history(), { model: 'gpt-4o-mini' })).toEqual({
@@ -104,6 +118,30 @@ describe('provider request mappers', () => {
     });
   });
 
+  it('omits non-OpenAI image URI schemes from OpenAI image fields', () => {
+    expect(toOpenAIChatCompletionsBody(nonOpenAIUriImageHistory()).messages).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Review attachments' },
+          { type: 'text', text: '[Unsupported attachment omitted: gcs.png (image/png)]' },
+          { type: 'text', text: '[Unsupported attachment omitted: local.jpg (image/jpeg)]' },
+        ],
+      },
+    ]);
+
+    expect(toOpenAIResponsesBody(nonOpenAIUriImageHistory()).input).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'input_text', text: 'Review attachments' },
+          { type: 'input_text', text: '[Unsupported attachment omitted: gcs.png (image/png)]' },
+          { type: 'input_text', text: '[Unsupported attachment omitted: local.jpg (image/jpeg)]' },
+        ],
+      },
+    ]);
+  });
+
   it('maps Chorus history to an Anthropic Messages body', () => {
     expect(toAnthropicMessagesBody(history(), { model: 'claude-sonnet-4-6', max_tokens: 512 })).toEqual({
       model: 'claude-sonnet-4-6',
@@ -145,6 +183,19 @@ describe('provider request mappers', () => {
         { role: 'user', parts: [{ functionResponse: { name: 'lookup', response: { ok: true } } }] },
       ],
     });
+  });
+
+  it('keeps non-OpenAI image URI schemes as Gemini fileData fileUris', () => {
+    expect(toGeminiGenerateContentBody(nonOpenAIUriImageHistory()).contents).toEqual([
+      {
+        role: 'user',
+        parts: [
+          { text: 'Review attachments' },
+          { fileData: { mimeType: 'image/png', fileUri: 'gs://bucket/gcs.png' } },
+          { fileData: { mimeType: 'image/jpeg', fileUri: 'file:///tmp/local.jpg' } },
+        ],
+      },
+    ]);
   });
 
   it('returns JSON formatBody helpers for createFetchSSETransport', () => {

@@ -101,14 +101,14 @@ function parseDataUrl(value: string): { mimeType: string; base64: string } | nul
   return { mimeType: match[1] || 'application/octet-stream', base64: match[2] || '' };
 }
 
-function isLikelyUrl(value: string) {
-  return /^(data:|https?:\/\/|gs:\/\/|file:\/\/)/i.test(value);
+function isOpenAIImageUrl(value: string) {
+  return /^(data:|https?:\/\/)/i.test(value);
 }
 
-function imageUrlFromAttachment(attachment: Attachment) {
+function openAIImageUrlFromAttachment(attachment: Attachment) {
   const candidates = [attachment.url, attachment.data];
   for (const candidate of candidates) {
-    if (typeof candidate === 'string' && candidate && isLikelyUrl(candidate)) return candidate;
+    if (typeof candidate === 'string' && candidate && isOpenAIImageUrl(candidate)) return candidate;
   }
   return null;
 }
@@ -336,7 +336,7 @@ function openAIChatUserContent<TMeta>(message: Message<TMeta>, options: Provider
   if (message.text.trim()) parts.push({ type: 'text', text: message.text });
 
   for (const attachment of message.attachments ?? []) {
-    const imageUrl = attachment.type.startsWith('image/') ? imageUrlFromAttachment(attachment) : null;
+    const imageUrl = attachment.type.startsWith('image/') ? openAIImageUrlFromAttachment(attachment) : null;
     if (imageUrl) {
       parts.push({ type: 'image_url', image_url: { url: imageUrl } });
     } else {
@@ -391,7 +391,7 @@ function openAIResponsesContent<TMeta>(
 
   if (message.role === 'user') {
     for (const attachment of message.attachments ?? []) {
-      const imageUrl = attachment.type.startsWith('image/') ? imageUrlFromAttachment(attachment) : null;
+      const imageUrl = attachment.type.startsWith('image/') ? openAIImageUrlFromAttachment(attachment) : null;
       if (imageUrl) {
         parts.push({ type: 'input_image', image_url: imageUrl });
       } else {
