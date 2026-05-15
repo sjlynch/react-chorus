@@ -11,6 +11,7 @@ dist/
 dist-playground/
 dist-ssr/
 build/
+.next/
 .vite/
 *.tsbuildinfo
 

@@ -78,7 +78,7 @@ export default function App() {
 }
 ```
 
-`transport` requires an endpoint that returns Server-Sent Events. Chorus POSTs `{ prompt: string, history: Message[] }` to the URL and streams the SSE response into the assistant message automatically. `history` already includes the current user turn; `prompt` is a convenience copy of that latest user text. See the [Minimal Express + OpenAI backend](#minimal-express--openai-backend) or the runnable [`examples/with-openai`](./examples/with-openai) app for a server-safe proxy.
+`transport` requires an endpoint that returns Server-Sent Events. Chorus POSTs `{ prompt: string, history: Message[] }` to the URL and streams the SSE response into the assistant message automatically. `history` already includes the current user turn; `prompt` is a convenience copy of that latest user text. See the [Next.js App Router route handler](#nextjs-app-router-route-handler), the [Minimal Express + OpenAI backend](#minimal-express--openai-backend), or the runnable [`examples/with-next`](./examples/with-next) and [`examples/with-openai`](./examples/with-openai) apps for server-safe proxies.
 
 ## Two usage paths
 
@@ -181,6 +181,80 @@ For a non-streaming client, `onSend` may return a complete assistant `Message`. 
   }}
 />
 ```
+
+### Next.js App Router route handler
+
+For a production Next.js app, keep `OPENAI_API_KEY` on the server and expose an App Router route handler that speaks SSE to Chorus. Install `openai` in your app for this variant. A runnable version lives in [`examples/with-next`](./examples/with-next).
+
+```ts
+// app/api/chat/route.ts
+import OpenAI from 'openai';
+import type { ChatCompletionCreateParamsStreaming } from 'openai/resources/chat/completions';
+import { toOpenAIChatCompletionsBody } from 'react-chorus/provider-requests';
+import type { Message } from 'react-chorus';
+
+export const runtime = 'nodejs'; // required when using the official OpenAI Node client
+export const maxDuration = 60; // optional on Vercel; choose a value your plan allows
+
+const encoder = new TextEncoder();
+
+const sseHeaders = {
+  'Content-Type': 'text/event-stream; charset=utf-8',
+  'Cache-Control': 'no-cache, no-transform',
+  'X-Accel-Buffering': 'no',
+};
+
+function encodeSSE(data: unknown) {
+  return encoder.encode(`data: ${typeof data === 'string' ? data : JSON.stringify(data)}\n\n`);
+}
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+export async function POST(request: Request) {
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      try {
+        const body = (await request.json()) as { history?: unknown };
+        const history = Array.isArray(body.history) ? (body.history as Message[]) : [];
+        const apiKey = process.env.OPENAI_API_KEY;
+        if (!apiKey) throw new Error('Missing OPENAI_API_KEY');
+
+        const openai = new OpenAI({ apiKey });
+        const completionBody = {
+          ...toOpenAIChatCompletionsBody(history, { model: 'gpt-4o-mini' }),
+          stream: true,
+        } as ChatCompletionCreateParamsStreaming;
+
+        const upstream = await openai.chat.completions.create(completionBody, { signal: request.signal });
+
+        for await (const chunk of upstream) {
+          controller.enqueue(encodeSSE(chunk));
+        }
+
+        controller.enqueue(encodeSSE('[DONE]'));
+      } catch (error) {
+        if (!request.signal.aborted) {
+          controller.enqueue(encodeSSE({ error: getErrorMessage(error) }));
+        }
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, { headers: sseHeaders });
+}
+```
+
+The route maps Chorus `history` with `toOpenAIChatCompletionsBody`, re-emits every OpenAI chunk as `data: <json>\n\n`, explicitly forwards `data: [DONE]\n\n`, and sends thrown failures as `data: {"error":"..."}\n\n` so `connector="openai"` can surface them through `onError` / `errorMessage`.
+
+Runtime and serverless notes:
+
+- Use `export const runtime = 'nodejs'` with the official `openai` package. If you need the Edge runtime, call OpenAI's REST endpoint with `fetch` instead and pipe `upstream.body` through the same SSE headers and `{ error }` envelope.
+- Vercel Route Handlers stream Web `Response` bodies, but buffering can still be introduced by middleware, reverse proxies, or CDNs. Keep `Content-Type: text/event-stream`, `Cache-Control: no-cache, no-transform`, and `X-Accel-Buffering: no`; do not read the whole provider stream before returning.
+- Image attachments are sent as data URLs in the JSON `history` unless you provide a custom upload flow. Vercel/serverless request body limits (commonly around 4.5 MB) can be hit quickly, and App Router route handlers do not have Express-style `json({ limit })`. Keep `maxAttachmentBytes` below your host limit, compress images, or upload large files to object storage and send URLs instead.
 
 ### Minimal Express + OpenAI backend
 
@@ -506,12 +580,13 @@ app.post('/api/chat', async (req, res) => {
 
 ## Examples
 
-Runnable examples live in the [`/examples`](./examples) directory. They declare the same Node.js 20+ floor as the root package and consume the local build after `npm run build`. `npm run verify:examples` recursively checks example `package.json` metadata (including nested packages such as `examples/with-openai/server`) and build-smokes every example with a `build` script.
+Runnable examples live in the [`/examples`](./examples) directory. They declare the same Node.js 20+ floor as the root package and consume the local build after `npm run build`. `npm run verify:examples` recursively checks example `package.json` metadata (including nested packages such as `examples/with-openai/server`) and build-smokes every example with a `build` script, including the Next.js App Router example.
 
 | Example | Description |
 |---------|-------------|
 | [`examples/basic`](./examples/basic) | Zero-backend demo using a simulated streaming response, local persistence, clear/reset, and a custom error banner — great for local development |
 | [`examples/multi-conversation`](./examples/multi-conversation) | Sidebar-driven local conversations with pinned chats, per-chat persistence, and first-message auto-titles |
+| [`examples/with-next`](./examples/with-next) | Next.js App Router example with a serverless `/api/chat` SSE route handler proxying to OpenAI |
 | [`examples/with-openai`](./examples/with-openai) | Full-stack example: Vite frontend + Express backend proxying to OpenAI |
 
 ### Running the basic example
@@ -538,7 +613,37 @@ npm install
 npm run dev
 ```
 
-### Running the OpenAI example
+### Running the Next.js App Router example
+
+Build the library first:
+
+```bash
+npm run build
+```
+
+Install and run the app:
+
+```bash
+cd examples/with-next
+npm install
+```
+
+Set your API key with the command for your shell, then start Next.js:
+
+```bash
+# macOS/Linux/POSIX shells
+OPENAI_API_KEY=sk-... npm run dev
+
+# Windows PowerShell
+$env:OPENAI_API_KEY="sk-..."; npm run dev
+
+# Windows cmd.exe
+set OPENAI_API_KEY=sk-... && npm run dev
+```
+
+The example uses `app/api/chat/route.ts` with `runtime = 'nodejs'`, SSE headers that discourage buffering, and a 2 MB client-side attachment cap so image data URLs stay below common serverless request limits.
+
+### Running the Vite + Express OpenAI example
 
 Build the library first:
 
@@ -1156,7 +1261,7 @@ const body = toOpenAIChatCompletionsBody(history, { model: 'gpt-4o-mini' });
 const stream = await openai.chat.completions.create(body);
 ```
 
-The runnable [`examples/with-openai`](./examples/with-openai) app uses this helper and sets `express.json({ limit: '10mb' })` so data URL images are accepted by the proxy.
+The runnable [`examples/with-next`](./examples/with-next) and [`examples/with-openai`](./examples/with-openai) apps use this helper. The Express app sets `express.json({ limit: '10mb' })`; on Next.js/serverless hosts, keep `maxAttachmentBytes` under the platform request limit or upload large files separately.
 
 ### Tool-call history recipe
 
