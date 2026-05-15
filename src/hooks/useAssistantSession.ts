@@ -2,7 +2,6 @@ import React from 'react';
 import type { Attachment, ConnectorName, Message } from '../types';
 import type { Connector, ConnectorToolDelta } from '../connectors/connectors';
 import { useChorusStream, type SendCallbacks, type Transport } from './useChorusStream';
-import { createFetchSSETransport } from '../streaming/createFetchSSETransport';
 import { useRAFQueue } from './useRAFQueue';
 import { useLatestRef } from './useLatestRef';
 import { isChorusDevMode } from '../utils/devMode';
@@ -145,6 +144,17 @@ function dropTrailingAssistant<TMeta>(history: Message<TMeta>[]) {
 
 function isAbortError(error: unknown) {
   return typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError';
+}
+
+// Keep the built-in string transport local to the widget path so the public
+// react-chorus/transport subpath can stay free of hook/session chunks.
+function createDefaultFetchSSETransport<TMeta = Record<string, unknown>>(url: string): Transport<TMeta> {
+  return async (text: string, history: Message<TMeta>[], signal: AbortSignal) => fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt: text, history }),
+    signal,
+  });
 }
 
 function createAbortError() {
@@ -671,7 +681,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
   }, [appendAssistantNow, appendAssistantReasoningNow, appendToolDeltaNow, completeActiveSession, isAssistantSessionActive, minAssistantDelayMsRef, systemPromptRef]);
 
   const resolvedTransport = React.useMemo((): Transport<TMeta> => {
-    if (typeof transport === 'string') return createFetchSSETransport<TMeta>(transport);
+    if (typeof transport === 'string') return createDefaultFetchSSETransport<TMeta>(transport);
     if (typeof transport === 'function') return transport;
     return () => Promise.resolve(new Response(null, { status: 200 }));
   }, [transport]);

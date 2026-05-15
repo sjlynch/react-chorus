@@ -4,7 +4,6 @@ import { ToolCallBlock } from './ToolCallBlock';
 import { MessageActionControls, MessageRenderStateProvider, MessageRow, MessageSpeakerLabel } from './MessageRow';
 import type { MessageBubbleSlots, MessageFeedback, MessageMarkdownProps, MessageRenderActions } from './MessageRow';
 import type { MarkdownSanitizer } from './Markdown';
-import { isChorusDevMode } from '../utils/devMode';
 import { canWriteTextToClipboard, writeTextToClipboard } from '../utils/messageCopy';
 
 export { MessageBubble } from './MessageRow';
@@ -14,6 +13,15 @@ const DEFAULT_HIDDEN_ROLES: Role[] = ['system', 'tool'];
 const NO_HIDDEN_ROLES: Role[] = [];
 const SCROLL_BOTTOM_THRESHOLD_PX = 48;
 let didWarnShowSystemMessages = false;
+
+// Keep this local so hook-only chunks do not share a dev-mode module with ChatWindow.
+function isChorusDevMode() {
+  try {
+    return typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production';
+  } catch {
+    return false;
+  }
+}
 
 function isNearBottom(el: HTMLElement) {
   return el.scrollHeight - el.scrollTop - el.clientHeight <= SCROLL_BOTTOM_THRESHOLD_PX;
