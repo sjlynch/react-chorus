@@ -129,10 +129,7 @@ describe('Chorus', () => {
 
   it('scrollToMessage targets custom renderMessage rows that spread messageProps', () => {
     const ref = React.createRef<ChorusRef>();
-    let scrolledElement: HTMLElement | null = null;
-    const scrollIntoView = vi.fn(function (this: HTMLElement) {
-      scrolledElement = this;
-    });
+    const scrollIntoView = vi.fn();
     window.HTMLElement.prototype.scrollIntoView = scrollIntoView;
 
     render(
@@ -151,7 +148,7 @@ describe('Chorus', () => {
     act(() => ref.current?.scrollToMessage('a1'));
 
     expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
-    expect(scrolledElement).toBe(customMessage);
+    expect(scrollIntoView.mock.contexts[0]).toBe(customMessage);
   });
 
   it('transport path send() fires transport and streams tokens into the message list', async () => {
