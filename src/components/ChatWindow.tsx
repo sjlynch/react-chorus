@@ -40,8 +40,9 @@ function objectActivityKey(value: object) {
   return `o:${id}`;
 }
 
-function stringActivityKey(value: string) {
-  return `s:${value.length}:${value.slice(0, 24)}:${value.slice(-24)}`;
+export function stringActivityKey(value: string) {
+  const codePoints = Array.from(value);
+  return `s:${value.length}:${codePoints.slice(0, 24).join('')}:${codePoints.slice(-24).join('')}`;
 }
 
 function unknownActivityKey(value: unknown): string {

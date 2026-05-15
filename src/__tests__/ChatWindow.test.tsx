@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { describe, it, expect, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { ChatWindow, MessageBubble, type RenderMessageContext } from '../components/ChatWindow';
+import { ChatWindow, MessageBubble, stringActivityKey, type RenderMessageContext } from '../components/ChatWindow';
 import type { Message } from '../types';
 
 // Mock Markdown to avoid DOMPurify/highlight.js complexity in unit tests
@@ -33,6 +33,20 @@ function readmeMessageRenderer(msg: Message, ctx: RenderMessageContext) {
   );
 }
 
+function containsLoneSurrogate(value: string) {
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.charCodeAt(i);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(i + 1);
+      if (i + 1 >= value.length || next < 0xdc00 || next > 0xdfff) return true;
+      i += 1;
+      continue;
+    }
+    if (code >= 0xdc00 && code <= 0xdfff) return true;
+  }
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 
 describe('ChatWindow', () => {
@@ -49,6 +63,14 @@ describe('ChatWindow', () => {
     const transcript = screen.getByTestId('chat-window');
     expect(ref.current).toBe(transcript);
     expect(transcript).toHaveAttribute('id', 'transcript');
+  });
+
+  it('builds activity keys for trailing emoji without lone surrogates', () => {
+    const value = `${'x'.repeat(23)}\u{1F44B}`;
+    const key = stringActivityKey(value);
+
+    expect(key).toContain('\u{1F44B}');
+    expect(containsLoneSurrogate(key)).toBe(false);
   });
 
   it('exposes the transcript as a polite live log region', () => {
