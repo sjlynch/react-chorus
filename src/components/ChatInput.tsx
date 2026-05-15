@@ -252,6 +252,11 @@ export const ChatInput = React.forwardRef<HTMLDivElement, ChatInputProps>(functi
     setAttachments([]);
   }, [abortAllPendingAttachments]);
 
+  const clearDragState = React.useCallback(() => {
+    dragDepthRef.current = 0;
+    setDraggingFiles(false);
+  }, []);
+
   React.useEffect(() => () => abortAllPendingAttachments(), [abortAllPendingAttachments]);
 
   React.useEffect(() => {
@@ -263,10 +268,21 @@ export const ChatInput = React.forwardRef<HTMLDivElement, ChatInputProps>(functi
   React.useEffect(() => {
     if (!disabled && !readOnly) return;
     abortAllPendingAttachments();
-    dragDepthRef.current = 0;
-    setDraggingFiles(false);
+    clearDragState();
     setAttachments(prev => prev.filter(att => !isPendingAttachment(att)));
-  }, [abortAllPendingAttachments, disabled, readOnly]);
+  }, [abortAllPendingAttachments, clearDragState, disabled, readOnly]);
+
+  React.useEffect(() => {
+    if (!draggingFiles) return;
+
+    window.addEventListener('dragend', clearDragState);
+    window.addEventListener('blur', clearDragState);
+
+    return () => {
+      window.removeEventListener('dragend', clearDragState);
+      window.removeEventListener('blur', clearDragState);
+    };
+  }, [clearDragState, draggingFiles]);
 
   React.useEffect(() => {
     const el = textareaRef.current;
@@ -498,8 +514,7 @@ export const ChatInput = React.forwardRef<HTMLDivElement, ChatInputProps>(functi
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     if (!showAttachBtn || !transferHasFiles(e.dataTransfer)) return;
     e.preventDefault();
-    dragDepthRef.current = 0;
-    setDraggingFiles(false);
+    clearDragState();
     if (!canIngestFiles) return;
     void handleFiles(filesFromTransfer(e.dataTransfer), 'drop');
   };
