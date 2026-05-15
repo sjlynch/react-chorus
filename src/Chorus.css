@@ -115,6 +115,7 @@
 .chorus-msg:hover + .chorus-render-actions .chorus-actions, .chorus-render-actions:hover .chorus-actions, .chorus-render-actions:focus-within .chorus-actions { opacity: 1; pointer-events: auto; }
 .chorus-action-btn { display: inline-flex; align-items: center; justify-content: center; padding: 3px 5px; border: none; border-radius: 6px; background: transparent; color: var(--chorus-action-text, #888); cursor: pointer; transition: background 0.15s, color 0.15s; line-height: 0; }
 .chorus-action-btn:hover, .chorus-action-btn--active { background: var(--chorus-action-hover-bg, rgba(255,255,255,0.15)); color: var(--chorus-action-hover-text, #eee); }
+.chorus-action-btn--copy-failed { background: var(--chorus-error-bg, rgba(220, 38, 38, 0.15)); color: var(--chorus-error-text, #fca5a5); line-height: 1; white-space: nowrap; }
 
 /* Inline message editing */
 .chorus-edit-wrap { display: flex; flex-direction: column; gap: 6px; width: min(80%, 520px); }

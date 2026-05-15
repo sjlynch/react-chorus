@@ -81,6 +81,10 @@ function safeStringify(value: unknown): string {
   }
 }
 
+function messageText(message: Message<unknown>): string {
+  return message.text ?? '';
+}
+
 function defaultUnsupportedAttachmentText(attachment: Attachment): string {
   const name = attachment.name || 'attachment';
   const type = attachment.type ? ` (${attachment.type})` : '';
@@ -205,13 +209,14 @@ function anthropicToolUseId(message: Message<unknown>) {
 }
 
 function toolOutputValue<TMeta>(message: Message<TMeta>) {
+  const rawText = messageText(message);
   if (message.toolCall && hasOwn(message.toolCall, 'output')) return message.toolCall.output;
-  const text = message.text.trim();
-  return text ? message.text : message.toolCall?.input;
+  const text = rawText.trim();
+  return text ? rawText : message.toolCall?.input;
 }
 
 function toolOutputText<TMeta>(message: Message<TMeta>) {
-  const text = message.text.trim();
+  const text = messageText(message).trim();
   const rendered = safeStringify(toolOutputValue(message));
   return rendered || text;
 }
@@ -296,14 +301,16 @@ function appendAnthropicToolUseBlocks(target: AnthropicMessage[], blocks: Anthro
 }
 
 function toolContextText<TMeta>(message: Message<TMeta>) {
+  const rawText = messageText(message);
+  const text = rawText.trim();
+
   if (!message.toolCall) {
-    const text = message.text.trim();
     return text ? `Tool result:\n${text}` : null;
   }
 
   const name = message.toolCall.name || 'tool';
   const input = safeStringify(message.toolCall.input ?? null);
-  const output = safeStringify(message.toolCall.output ?? (message.text.trim() ? message.text : null));
+  const output = safeStringify(message.toolCall.output ?? (text ? rawText : null));
   return `Tool call ${name}\nInput:\n${input}\nOutput:\n${output}`;
 }
 
@@ -333,7 +340,8 @@ function stripGeminiOptions<TMeta>(options: GeminiGenerateContentBodyOptions<TMe
 
 function openAIChatUserContent<TMeta>(message: Message<TMeta>, options: ProviderMappingOptions<TMeta>) {
   const parts: Array<Record<string, unknown>> = [];
-  if (message.text.trim()) parts.push({ type: 'text', text: message.text });
+  const text = messageText(message);
+  if (text.trim()) parts.push({ type: 'text', text });
 
   for (const attachment of message.attachments ?? []) {
     const imageUrl = attachment.type.startsWith('image/') ? imageUrlFromAttachment(attachment) : null;
@@ -387,7 +395,8 @@ function openAIResponsesContent<TMeta>(
   options: ProviderMappingOptions<TMeta>,
 ) {
   const parts: Array<Record<string, unknown>> = [];
-  if (message.text.trim()) parts.push({ type: textType, text: message.text });
+  const text = messageText(message);
+  if (text.trim()) parts.push({ type: textType, text });
 
   if (message.role === 'user') {
     for (const attachment of message.attachments ?? []) {
@@ -443,7 +452,8 @@ function anthropicSystem(history: Message<unknown>[]) {
 
 function anthropicContentBlocks<TMeta>(message: Message<TMeta>, options: ProviderMappingOptions<TMeta>) {
   const blocks: Array<Record<string, unknown>> = [];
-  if (message.text.trim()) blocks.push({ type: 'text', text: message.text });
+  const text = messageText(message);
+  if (text.trim()) blocks.push({ type: 'text', text });
 
   if (message.role === 'user') {
     for (const attachment of message.attachments ?? []) {
@@ -498,7 +508,8 @@ function geminiSystemInstruction(history: Message<unknown>[]) {
 
 function geminiParts<TMeta>(message: Message<TMeta>, options: ProviderMappingOptions<TMeta>) {
   const parts: Array<Record<string, unknown>> = [];
-  if (message.text.trim()) parts.push({ text: message.text });
+  const text = messageText(message);
+  if (text.trim()) parts.push({ text });
 
   if (message.role === 'user') {
     for (const attachment of message.attachments ?? []) {
@@ -545,7 +556,8 @@ function toGeminiContent<TMeta>(message: Message<TMeta>, options: ProviderMappin
   if (message.role === 'tool') {
     const name = message.toolCall?.name;
     if (name) {
-      const value = message.toolCall?.output ?? (message.text.trim() ? message.text : message.toolCall?.input);
+      const text = messageText(message);
+      const value = message.toolCall.output ?? (text.trim() ? text : message.toolCall.input);
       return {
         role: 'user',
         parts: [{ functionResponse: { name, response: geminiFunctionResponsePayload(value) } }],

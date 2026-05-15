@@ -175,6 +175,24 @@ describe('useChorusStream', () => {
     expect(calls).toEqual(['chunk:first', 'chunk:last', 'done']);
   });
 
+  it('rejects with onDone callback errors after a successful stream', async () => {
+    const transport = vi.fn<Transport>(() => Promise.resolve(makeSseResponse(['done'])));
+    const callbackError = new Error('done observer failed');
+    const onError = vi.fn();
+    const { result } = renderHook(() => useChorusStream(transport));
+
+    await act(async () => {
+      await expect(result.current.send('hello', [], {
+        onChunk: vi.fn(),
+        onDone: () => { throw callbackError; },
+        onError,
+      })).rejects.toBe(callbackError);
+    });
+
+    expect(onError).not.toHaveBeenCalled();
+    expect(result.current.sending).toBe(false);
+  });
+
   it('emits reasoning chunks and accumulated tool deltas from connectors', async () => {
     const transport = vi.fn<Transport>(() => Promise.resolve(makeSseResponse([
       JSON.stringify({ choices: [{ index: 0, delta: { reasoning_content: 'plan' } }] }),
@@ -709,18 +727,25 @@ describe('useChorusStream', () => {
     expect(result.current.sending).toBe(false);
   });
 
-  it('resets sending before rethrowing an onError callback exception', async () => {
-    const transport = vi.fn<Transport>(() => Promise.reject(new Error('network failed')));
+  it('preserves the original stream error when onError throws while handling it', async () => {
+    const transportError = new Error('network failed');
     const callbackError = new Error('observer failed');
+    const transport = vi.fn<Transport>(() => Promise.reject(transportError));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const { result } = renderHook(() => useChorusStream(transport));
 
-    await act(async () => {
-      await expect(result.current.send('hello', [], {
-        onChunk: vi.fn(),
-        onError: () => { throw callbackError; },
-      })).rejects.toThrow('observer failed');
-    });
+    try {
+      await act(async () => {
+        await expect(result.current.send('hello', [], {
+          onChunk: vi.fn(),
+          onError: () => { throw callbackError; },
+        })).rejects.toBe(transportError);
+      });
 
-    expect(result.current.sending).toBe(false);
+      expect(warn).toHaveBeenCalledWith('[Chorus] `onError` callback threw and was ignored so the original stream error could be re-thrown.', callbackError);
+      expect(result.current.sending).toBe(false);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
