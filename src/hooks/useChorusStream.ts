@@ -16,7 +16,16 @@ export interface SendCallbacks {
   onReasoning?: (chunk: string) => void;
   /** Receives accumulated tool-call deltas when the connector exposes them. */
   onToolDelta?: (toolDelta: ConnectorToolDelta) => void;
+  /**
+   * Called after a successful stream completes. If this callback throws, send() rejects
+   * with that callback error; onError is not invoked because no stream error occurred.
+   */
   onDone?: (response?: Response) => void;
+  /**
+   * Called for non-abort stream errors. If this callback throws while handling an
+   * error, the callback error is warned in development and send() still rejects
+   * with the original stream error.
+   */
   onError?: (err: Error) => void;
   /** Minimum elapsed time from send() start before delivering the first chunk. */
   minDelayMs?: number;
@@ -94,6 +103,11 @@ function toError(error: unknown): Error {
   if (error instanceof Error) return error;
   if (typeof DOMException !== 'undefined' && error instanceof DOMException) return error as Error;
   return new Error(String(error));
+}
+
+function safeOnObserverError(callbackName: string, error: unknown) {
+  if (!isChorusDevMode()) return;
+  console.warn(`[Chorus] \`${callbackName}\` callback threw and was ignored so the original stream error could be re-thrown.`, error);
 }
 
 const MAX_ERROR_BODY_CHARS = 2048;
@@ -476,6 +490,9 @@ export function useChorusStream<TMeta = Record<string, unknown>>(transport: Tran
       try {
         cb.onDone?.(res);
       } catch (callbackError) {
+        // Completion observers run after the stream has succeeded. Preserve the
+        // historical contract that their failures reject send(), but do not route
+        // them through onError because there is no underlying stream error.
         errorToThrow = callbackError;
       }
     } catch (e: unknown) {
@@ -485,9 +502,9 @@ export function useChorusStream<TMeta = Record<string, unknown>>(transport: Tran
         try {
           cb.onError?.(error);
         } catch (callbackError) {
-          errorToThrow = callbackError;
+          safeOnObserverError('onError', callbackError);
         }
-        if (errorToThrow === undefined) errorToThrow = error;
+        errorToThrow = error;
       }
     } finally {
       isSendingRef.current = false;
