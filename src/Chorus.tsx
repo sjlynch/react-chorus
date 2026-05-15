@@ -8,14 +8,14 @@ import type { Transport } from './hooks/useChorusStream';
 import { useChorusPersistence, type DeserializeMessages, type SerializeMessages } from './hooks/useChorusPersistence';
 import { useChorusMessages, type ChorusMessagesChangeContext } from './hooks/useChorusMessages';
 import { useAssistantSession } from './hooks/useAssistantSession';
-import type { ChorusFinishContext, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusSendHelpers, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolLoopContext, ChorusToolRegistry } from './hooks/useAssistantSession';
+import type { ChorusConfirmDeleteMessage, ChorusDeleteMessageContext, ChorusFinishContext, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusSendHelpers, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolLoopContext, ChorusToolRegistry } from './hooks/useAssistantSession';
 import type { Connector } from './connectors/connectors';
 import type { MarkdownSanitizer } from './components/Markdown';
 import { isChorusDevMode } from './utils/devMode';
 
 export type { Transport };
 export type { Connector };
-export type { ChorusFinishContext, ChorusMessagesChangeContext, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusSendHelpers, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolLoopContext, ChorusToolRegistry };
+export type { ChorusConfirmDeleteMessage, ChorusDeleteMessageContext, ChorusFinishContext, ChorusMessagesChangeContext, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusSendHelpers, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolLoopContext, ChorusToolRegistry };
 
 const DEFAULT_MIN_ASSISTANT_DELAY_MS = 300;
 const DEFAULT_PERSISTENCE_WRITE_DEBOUNCE_MS = 80;
@@ -36,6 +36,8 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
   clearLabel?: string;
   codeBlockTheme?: 'dark' | 'light';
   connector?: Connector | ConnectorName;
+  /** Optional gate for built-in message deletes. Return or resolve false to cancel. */
+  confirmDeleteMessage?: ChorusConfirmDeleteMessage<TMeta>;
   /** Opt in to an automatic tool-execution → model-continuation loop on the transport path. */
   autoContinueTools?: boolean;
   /** Maximum automatic tool iterations when autoContinueTools is enabled. Defaults to 4. */
@@ -118,6 +120,7 @@ function ChorusInner<TMeta = Record<string, unknown>>({
   clearLabel = 'Clear conversation',
   codeBlockTheme = 'dark',
   connector,
+  confirmDeleteMessage,
   autoContinueTools,
   maxToolIterations,
   shouldContinueToolLoop,
@@ -248,6 +251,7 @@ function ChorusInner<TMeta = Record<string, unknown>>({
     autoContinueTools,
     maxToolIterations,
     shouldContinueToolLoop,
+    confirmDeleteMessage,
     flushPersistence: persisted.flush,
     resetToInitialMessages,
     onClear,

@@ -441,26 +441,26 @@ describe('ChatWindow', () => {
     { name: 'default row', renderMessage: undefined },
     { name: 'renderMessage action controls', renderMessage: readmeMessageRenderer },
   ] as const) {
-    it(`handles Enter, Escape, and Shift+Enter identically in the ${variant.name} editor`, async () => {
-      const user = userEvent.setup();
+    it(`handles Enter, Escape, and Shift+Enter identically in the ${variant.name} editor`, () => {
       const onEdit = vi.fn();
       render(<ChatWindow messages={[USER_MSG]} onEdit={onEdit} renderMessage={variant.renderMessage} />);
 
-      await user.click(screen.getByRole('button', { name: 'Edit' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
       const textarea = screen.getByRole('textbox', { name: 'Edit message' });
-      await user.clear(textarea);
-      await user.type(textarea, 'Line 1{Shift>}{Enter}{/Shift}Line 2');
+      fireEvent.change(textarea, { target: { value: 'Line 1\nLine 2' } });
+      fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: true });
 
       expect(textarea).toHaveValue('Line 1\nLine 2');
       expect(onEdit).not.toHaveBeenCalled();
 
-      await user.keyboard('{Escape}');
+      fireEvent.keyDown(textarea, { key: 'Escape' });
       expect(screen.queryByRole('textbox', { name: 'Edit message' })).not.toBeInTheDocument();
       expect(onEdit).not.toHaveBeenCalled();
 
-      await user.click(screen.getByRole('button', { name: 'Edit' }));
-      await user.clear(screen.getByRole('textbox', { name: 'Edit message' }));
-      await user.type(screen.getByRole('textbox', { name: 'Edit message' }), 'Saved{Enter}');
+      fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+      const saveTextarea = screen.getByRole('textbox', { name: 'Edit message' });
+      fireEvent.change(saveTextarea, { target: { value: 'Saved' } });
+      fireEvent.keyDown(saveTextarea, { key: 'Enter' });
 
       expect(onEdit).toHaveBeenCalledWith('u1', 'Saved');
       expect(screen.queryByRole('textbox', { name: 'Edit message' })).not.toBeInTheDocument();

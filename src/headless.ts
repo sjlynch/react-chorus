@@ -39,7 +39,7 @@ export function ConversationList({ headless = true, ...props }: ConversationList
   return React.createElement(BaseConversationList, { ...props, headless });
 }
 
-export type { ConversationListProps } from './components/ConversationList';
+export type { ConfirmDeleteConversation, ConfirmDeleteConversationContext, ConversationListProps } from './components/ConversationList';
 
 export { ChatInput } from './components/ChatInput';
 export type { ChatInputProps } from './components/ChatInput';
@@ -49,7 +49,7 @@ export { ToolCallBlock } from './components/ToolCallBlock';
 export { ChorusHeadless as Chorus, type ChorusHeadlessProps as ChorusProps } from './ChorusHeadless';
 export { ChorusHeadless } from './ChorusHeadless';
 export type { ChorusHeadlessProps } from './ChorusHeadless';
-export type { ChorusMessagesChangeContext, ChorusOnSend, ChorusSendHelpers, ChorusRef, ChorusFinishContext, ChorusOnFinish, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolLoopContext, ChorusToolRegistry } from './Chorus';
+export type { ChorusConfirmDeleteMessage, ChorusDeleteMessageContext, ChorusMessagesChangeContext, ChorusOnSend, ChorusSendHelpers, ChorusRef, ChorusFinishContext, ChorusOnFinish, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolLoopContext, ChorusToolRegistry } from './Chorus';
 
 export { ChorusTheme } from './components/ChorusTheme';
 export type { Palette } from './components/ChorusTheme';

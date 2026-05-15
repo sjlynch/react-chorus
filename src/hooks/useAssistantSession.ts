@@ -34,6 +34,13 @@ export interface ChorusFinishContext<TMeta = Record<string, unknown>> {
 
 export type ChorusOnFinish<TMeta = Record<string, unknown>> = (context: ChorusFinishContext<TMeta>) => void;
 
+export interface ChorusDeleteMessageContext<TMeta = Record<string, unknown>> {
+  message: Message<TMeta>;
+  messages: Message<TMeta>[];
+}
+
+export type ChorusConfirmDeleteMessage<TMeta = Record<string, unknown>> = (context: ChorusDeleteMessageContext<TMeta>) => boolean | void | Promise<boolean | void>;
+
 export interface ChorusToolDeltaContext<TMeta = Record<string, unknown>> {
   delta: ConnectorToolDelta;
   message: Message<TMeta>;
@@ -105,6 +112,7 @@ export interface UseAssistantSessionOptions<TMeta = Record<string, unknown>> {
   autoContinueTools?: boolean;
   maxToolIterations?: number;
   shouldContinueToolLoop?: ChorusShouldContinueToolLoop<TMeta>;
+  confirmDeleteMessage?: ChorusConfirmDeleteMessage<TMeta>;
   flushPersistence: () => void;
   resetToInitialMessages?: boolean;
   onClear?: (messages: Message<TMeta>[]) => void;
@@ -145,6 +153,13 @@ function dropTrailingAssistant<TMeta>(history: Message<TMeta>[]) {
 
 function isAbortError(error: unknown) {
   return typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError';
+}
+
+function isPromiseLike<T>(value: unknown): value is PromiseLike<T> {
+  return typeof value === 'object'
+    && value !== null
+    && 'then' in value
+    && typeof (value as { then?: unknown }).then === 'function';
 }
 
 function createAbortError() {
@@ -228,6 +243,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
   autoContinueTools = false,
   maxToolIterations = DEFAULT_MAX_TOOL_ITERATIONS,
   shouldContinueToolLoop,
+  confirmDeleteMessage,
   flushPersistence,
   resetToInitialMessages = false,
   onClear,
@@ -244,11 +260,13 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
   const autoContinueToolsRef = useLatestRef(autoContinueTools);
   const maxToolIterationsRef = useLatestRef(maxToolIterations);
   const shouldContinueToolLoopRef = useLatestRef(shouldContinueToolLoop);
+  const confirmDeleteMessageRef = useLatestRef(confirmDeleteMessage);
   const onClearRef = useLatestRef(onClear);
   const fallbackErrorMessageRef = useLatestRef(fallbackErrorMessage);
   const systemPromptRef = useLatestRef(systemPrompt);
   const minAssistantDelayMsRef = useLatestRef(minAssistantDelayMs);
   const seedMessagesRef = useLatestRef(seedMessages);
+  const pendingDeleteIdsRef = React.useRef(new Set<string>());
 
   const [internalSending, setInternalSendingState] = React.useState(false);
   const [transportBusy, setTransportBusyState] = React.useState(false);
@@ -1004,8 +1022,41 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
   }, [isBusy, messagesRef, streamError, triggerAssistant, updateSessionMessages]);
 
   const handleDelete = React.useCallback((id: string) => {
-    updateSessionMessages(prev => prev.filter(m => m.id !== id), { flushPersistence: true, reason: 'delete' });
-  }, [updateSessionMessages]);
+    if (pendingDeleteIdsRef.current.has(id)) return;
+
+    const currentMessages = messagesRef.current;
+    const message = currentMessages.find(m => m.id === id);
+    if (!message) return;
+
+    const commitDelete = () => {
+      updateSessionMessages(prev => prev.filter(m => m.id !== id), { flushPersistence: true, reason: 'delete' });
+    };
+
+    let confirmation: boolean | void | Promise<boolean | void>;
+    try {
+      confirmation = confirmDeleteMessageRef.current?.({ message, messages: currentMessages.slice() });
+    } catch (error) {
+      warnObserverError('confirmDeleteMessage', error);
+      return;
+    }
+
+    if (isPromiseLike<boolean | void>(confirmation)) {
+      pendingDeleteIdsRef.current.add(id);
+      Promise.resolve(confirmation)
+        .then(confirmed => {
+          if (confirmed === false) return;
+          commitDelete();
+        })
+        .catch(error => warnObserverError('confirmDeleteMessage', error))
+        .finally(() => {
+          pendingDeleteIdsRef.current.delete(id);
+        });
+      return;
+    }
+
+    if (confirmation === false) return;
+    commitDelete();
+  }, [confirmDeleteMessageRef, messagesRef, updateSessionMessages]);
 
   const streamingMessageId = sending && hasStartedAssistantRef.current ? pendingAssistantIdRef.current : null;
 

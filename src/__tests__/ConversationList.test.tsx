@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ConversationList } from '../components/ConversationList';
 import type { ConversationSummary } from '../hooks/useConversations';
@@ -12,6 +12,14 @@ const CONVERSATIONS: ConversationSummary[] = [
 
 function renderedTitles(container: HTMLElement) {
   return Array.from(container.querySelectorAll('.chorus-conversation-title')).map(node => node.textContent?.trim());
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>(res => {
+    resolve = res;
+  });
+  return { promise, resolve };
 }
 
 describe('ConversationList', () => {
@@ -51,8 +59,7 @@ describe('ConversationList', () => {
     expect(support.getByRole('button', { name: /delete support chat/i })).toBeInTheDocument();
   });
 
-  it('supports select, rename, delete, and create affordances', async () => {
-    const user = userEvent.setup();
+  it('supports select, rename, delete, and create affordances', () => {
     const createConversation = vi.fn();
     const selectConversation = vi.fn();
     const renameConversation = vi.fn();
@@ -71,26 +78,56 @@ describe('ConversationList', () => {
       />,
     );
 
-    await user.click(screen.getByRole('button', { name: /new conversation/i }));
+    fireEvent.click(screen.getByRole('button', { name: /new conversation/i }));
     expect(createConversation).toHaveBeenCalledOnce();
 
     const roadmapSelect = screen.getByText('Roadmap ideas').closest('button');
     expect(roadmapSelect).not.toBeNull();
-    await user.click(roadmapSelect!);
+    fireEvent.click(roadmapSelect!);
     expect(selectConversation).toHaveBeenCalledWith('b');
 
-    await user.click(screen.getByRole('button', { name: /rename support chat/i }));
+    fireEvent.click(screen.getByRole('button', { name: /rename support chat/i }));
     const input = screen.getByLabelText(/rename support chat/i);
-    await user.clear(input);
-    await user.type(input, 'Renamed support');
-    await user.click(screen.getByRole('button', { name: /save/i }));
+    fireEvent.change(input, { target: { value: 'Renamed support' } });
+    fireEvent.click(screen.getByRole('button', { name: /save/i }));
     expect(renameConversation).toHaveBeenCalledWith('a', 'Renamed support');
 
-    await user.click(screen.getByRole('button', { name: /pin support chat/i }));
+    fireEvent.click(screen.getByRole('button', { name: /pin support chat/i }));
     expect(pinConversation).toHaveBeenCalledWith('a', true);
 
-    await user.click(screen.getByRole('button', { name: /delete roadmap ideas/i }));
+    fireEvent.click(screen.getByRole('button', { name: /delete roadmap ideas/i }));
     expect(deleteConversation).toHaveBeenCalledWith('b');
+  });
+
+  it('cancels conversation delete when confirmDeleteConversation resolves false', async () => {
+    const user = userEvent.setup();
+    const pendingConfirmation = deferred<boolean>();
+    const deleteConversation = vi.fn();
+    const confirmDeleteConversation = vi.fn(() => pendingConfirmation.promise);
+
+    render(
+      <ConversationList
+        conversations={CONVERSATIONS}
+        activeId="a"
+        deleteConversation={deleteConversation}
+        confirmDeleteConversation={confirmDeleteConversation}
+      />,
+    );
+
+    const deleteButton = screen.getByRole('button', { name: /delete roadmap ideas/i });
+    await user.click(deleteButton);
+
+    expect(confirmDeleteConversation).toHaveBeenCalledWith({
+      conversation: expect.objectContaining({ id: 'b', title: 'Roadmap ideas' }),
+      conversations: CONVERSATIONS,
+      activeId: 'a',
+    });
+    expect(deleteButton).toBeDisabled();
+
+    pendingConfirmation.resolve(false);
+
+    await waitFor(() => expect(deleteButton).not.toBeDisabled());
+    expect(deleteConversation).not.toHaveBeenCalled();
   });
 
   it('disables conversation actions while async storage is loading', async () => {

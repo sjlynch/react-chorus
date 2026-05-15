@@ -1987,6 +1987,31 @@ describe('Chorus', () => {
     expect(screen.getByText('keep me')).toBeInTheDocument();
   });
 
+  it('cancels message delete when confirmDeleteMessage returns false without flushing persistence', async () => {
+    const user = userEvent.setup();
+    const initial: Message[] = [
+      { id: 'u1', role: 'user', text: 'keep me safe' },
+      { id: 'a1', role: 'assistant', text: 'also keep me' },
+    ];
+    const storage = makeSyncStorage({ chat: JSON.stringify(initial) });
+    const setItem = vi.fn(storage.setItem);
+    storage.setItem = setItem;
+    const confirmDeleteMessage = vi.fn(() => false);
+
+    render(<Chorus persistenceKey="chat" persistenceStorage={storage} confirmDeleteMessage={confirmDeleteMessage} />);
+
+    expect(await screen.findByText('keep me safe')).toBeInTheDocument();
+    await user.click(screen.getAllByTitle('Delete')[0]);
+
+    expect(confirmDeleteMessage).toHaveBeenCalledWith({
+      message: expect.objectContaining({ id: 'u1', text: 'keep me safe' }),
+      messages: initial,
+    });
+    expect(screen.getByText('keep me safe')).toBeInTheDocument();
+    expect(screen.getByText('also keep me')).toBeInTheDocument();
+    expect(setItem).not.toHaveBeenCalled();
+  });
+
   it('clears uncontrolled messages from the built-in clear button', async () => {
     const user = userEvent.setup();
 
