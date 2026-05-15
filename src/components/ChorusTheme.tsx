@@ -8,6 +8,8 @@ export interface Palette {
   sendButtonBg?: string; sendButtonText?: string; focusRing?: string;
   actionText?: string; actionHoverBg?: string; actionHoverText?: string;
   errorBg?: string; errorBorder?: string; errorText?: string;
+  toolBorder?: string; toolHeaderBg?: string; toolHeaderText?: string; toolHeaderHover?: string;
+  toolNameText?: string; toolBodyBg?: string; toolLabelText?: string; toolCodeText?: string;
 }
 
 export function styleVarsFromPalette(p?: Palette): React.CSSProperties {
@@ -21,6 +23,8 @@ export function styleVarsFromPalette(p?: Palette): React.CSSProperties {
   set('--chorus-send-bg', p.sendButtonBg); set('--chorus-send-text', p.sendButtonText); set('--chorus-focus-ring', p.focusRing);
   set('--chorus-action-text', p.actionText); set('--chorus-action-hover-bg', p.actionHoverBg); set('--chorus-action-hover-text', p.actionHoverText);
   set('--chorus-error-bg', p.errorBg); set('--chorus-error-border', p.errorBorder); set('--chorus-error-text', p.errorText);
+  set('--chorus-tool-border', p.toolBorder); set('--chorus-tool-header-bg', p.toolHeaderBg); set('--chorus-tool-header-text', p.toolHeaderText); set('--chorus-tool-header-hover', p.toolHeaderHover);
+  set('--chorus-tool-name-text', p.toolNameText); set('--chorus-tool-body-bg', p.toolBodyBg); set('--chorus-tool-label-text', p.toolLabelText); set('--chorus-tool-code-text', p.toolCodeText);
   return v;
 }
 

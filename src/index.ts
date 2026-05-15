@@ -1,5 +1,5 @@
 export { ChatWindow, MessageBubble } from './components/ChatWindow';
-export type { ChatWindowProps, MessageBubbleProps, MessageBubbleSlots, MessageFeedback, RenderErrorContext, RenderMessageContext, RenderMessageRootProps, MessageMarkdownProps, MessageRenderActions } from './components/ChatWindow';
+export type { ChatWindowProps, GetMessageFeedback, MessageBubbleProps, MessageBubbleSlots, MessageFeedback, RenderErrorContext, RenderMessageContext, RenderMessageRootProps, MessageMarkdownProps, MessageRenderActions } from './components/ChatWindow';
 export { ChatInput } from './components/ChatInput';
 export type { ChatInputProps } from './components/ChatInput';
 export { ToolCallBlock } from './components/ToolCallBlock';
@@ -14,6 +14,8 @@ export type { ChorusAbortContext, ChorusAbortReason, ChorusAbortSource, ChorusFi
 export type { Message } from './types';
 export type {
   Role,
+  AnyChorusMessage,
+  AssistantMessage,
   Attachment,
   AttachmentError,
   AttachmentErrorReason,
@@ -21,9 +23,12 @@ export type {
   AttachmentUploadResult,
   ConnectorName,
   StorageAdapter,
+  SystemMessage,
   ToolCall,
+  ToolMessage,
   UploadAttachment,
   UploadAttachmentOptions,
+  UserMessage,
 } from './types';
 export { useChorusStream } from './hooks/useChorusStream';
 export type { SendCallbacks, StreamOptions, Transport } from './hooks/useChorusStream';
@@ -34,7 +39,7 @@ export type { ConversationStorageError, ConversationStorageOperation, Conversati
 export { createFetchSSETransport } from './streaming/createFetchSSETransport';
 export type { FetchSSETransportOptions } from './streaming/createFetchSSETransport';
 export { createWebSocketTransport } from './streaming/createWebSocketTransport';
-export type { WebSocketTransportOptions } from './streaming/createWebSocketTransport';
+export type { WebSocketTransport, WebSocketTransportOptions } from './streaming/createWebSocketTransport';
 export {
   formatAnthropicMessagesBody,
   formatGeminiGenerateContentBody,

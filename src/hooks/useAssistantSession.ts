@@ -1,5 +1,5 @@
 import React from 'react';
-import type { Attachment, ConnectorName, Message } from '../types';
+import type { Attachment, ConnectorName, Message, ToolMessage } from '../types';
 import type { Connector, ConnectorToolDelta } from '../connectors/connectors';
 import { useChorusStream, type SendCallbacks, type Transport } from './useChorusStream';
 import { createFetchSSETransport } from '../streaming/createFetchSSETransport';
@@ -55,7 +55,7 @@ export type ChorusOnAbort<TMeta = Record<string, unknown>> = (context: ChorusAbo
 
 export interface ChorusToolDeltaContext<TMeta = Record<string, unknown>> {
   delta: ConnectorToolDelta;
-  message: Message<TMeta>;
+  message: ToolMessage<TMeta>;
   messages: Message<TMeta>[];
 }
 
@@ -66,7 +66,7 @@ export interface ChorusToolCallContext<TMeta = Record<string, unknown>> {
   name: string;
   input?: unknown;
   output?: unknown;
-  message: Message<TMeta>;
+  message: ToolMessage<TMeta>;
   messages: Message<TMeta>[];
   signal: AbortSignal;
 }
@@ -77,7 +77,7 @@ export type ChorusToolRegistry<TMeta = Record<string, unknown>> = Record<string,
 
 export interface ChorusStreamDoneContext<TMeta = Record<string, unknown>> {
   assistantMessage: Message<TMeta> | null;
-  toolMessages: Message<TMeta>[];
+  toolMessages: ToolMessage<TMeta>[];
   messages: Message<TMeta>[];
   response?: Response;
 }
@@ -202,14 +202,18 @@ function metadataWithToolProvider<TMeta>(existing: TMeta | undefined, delta: Con
 }
 
 function hasToolOutput<TMeta>(message: Message<TMeta>) {
-  return Boolean(message.toolCall && Object.prototype.hasOwnProperty.call(message.toolCall, 'output'));
+  return message.role === 'tool' && Object.prototype.hasOwnProperty.call(message.toolCall, 'output');
 }
 
 function cloneMessageForRetry<TMeta>(message: Message<TMeta>): Message<TMeta> {
-  return {
-    ...message,
-    attachments: message.attachments?.map(attachment => ({ ...attachment })),
-  };
+  if (message.role === 'user' || message.role === 'assistant') {
+    return {
+      ...message,
+      attachments: message.attachments?.map(attachment => ({ ...attachment })),
+    };
+  }
+
+  return { ...message };
 }
 
 function cloneHistoryForRetry<TMeta>(history: Message<TMeta>[]): Message<TMeta>[] {
@@ -221,6 +225,52 @@ function findLastUserMessage<TMeta>(history: Message<TMeta>[]) {
     if (history[i].role === 'user') return history[i];
   }
   return null;
+}
+
+function normalizeReturnedMessage<TMeta>(message: Partial<Message<TMeta>>): Message<TMeta> {
+  const id = message.id || createMessageId();
+  const text = message.text ?? '';
+
+  if (message.role === 'tool') {
+    return {
+      id,
+      role: 'tool',
+      text,
+      metadata: message.metadata,
+      reasoning: message.reasoning,
+      toolCall: message.toolCall ?? { name: 'tool' },
+    };
+  }
+
+  if (message.role === 'user') {
+    return {
+      id,
+      role: 'user',
+      text,
+      metadata: message.metadata,
+      reasoning: message.reasoning,
+      attachments: message.attachments,
+    };
+  }
+
+  if (message.role === 'system') {
+    return {
+      id,
+      role: 'system',
+      text,
+      metadata: message.metadata,
+      reasoning: message.reasoning,
+    };
+  }
+
+  return {
+    id,
+    role: 'assistant',
+    text,
+    metadata: message.metadata,
+    reasoning: message.reasoning,
+    attachments: message.attachments,
+  };
 }
 
 function warnObserverError(callbackName: string, error: unknown) {
@@ -398,7 +448,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
   const { enqueue: enqueueTextChunk, cancelPending: cancelPendingText } = useRAFQueue((add) => {
     const id = pendingAssistantIdRef.current;
     if (!id) return;
-    updateSessionMessages(prev => prev.map(m => m.id === id ? { ...m, text: m.text + add } : m), { reason: 'assistant' });
+    updateSessionMessages(prev => prev.map(m => m.id === id && m.role === 'assistant' ? { ...m, text: m.text + add } : m), { reason: 'assistant' });
   });
 
   const { enqueue: enqueueReasoningChunk, cancelPending: cancelPendingReasoning } = useRAFQueue((add) => {
@@ -459,7 +509,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     const messageId = toolMessageIdForDelta(delta.id);
     pendingToolMessageIdsRef.current.add(messageId);
     hasStartedAssistantRef.current = true;
-    let updatedMessage: Message<TMeta> | null = null;
+    let updatedMessage: ToolMessage<TMeta> | null = null;
     const nextMessages = updateSessionMessages(prev => {
       const idx = prev.findIndex(m => m.id === messageId);
       const existing = idx >= 0 ? prev[idx] : undefined;
@@ -472,9 +522,14 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
       if (Object.prototype.hasOwnProperty.call(delta, 'output')) toolCall.output = delta.output;
 
       const metadata = metadataWithToolProvider(existing?.metadata, delta);
-      const nextMessage: Message<TMeta> = existing
-        ? { ...existing, role: 'tool', text: existing.text ?? '', toolCall, metadata }
-        : { id: messageId, role: 'tool', text: '', toolCall, metadata };
+      const nextMessage: ToolMessage<TMeta> = {
+        id: messageId,
+        role: 'tool',
+        text: existing?.text ?? '',
+        reasoning: existing?.reasoning,
+        metadata,
+        toolCall,
+      };
       updatedMessage = nextMessage;
 
       if (idx >= 0) return prev.map(m => m.id === messageId ? nextMessage : m);
@@ -485,19 +540,19 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
   }, [safeOnToolDelta, toolMessageIdForDelta, updateSessionMessages]);
 
   const getToolMessagesByIds = React.useCallback((ids: Set<string>) => (
-    messagesRef.current.filter(message => ids.has(message.id) && message.role === 'tool' && message.toolCall)
+    messagesRef.current.filter((message): message is ToolMessage<TMeta> => ids.has(message.id) && message.role === 'tool')
   ), [messagesRef]);
 
   const setToolOutput = React.useCallback((messageId: string, output: unknown) => {
     updateSessionMessages(prev => prev.map(message => (
-      message.id === messageId && message.toolCall
+      message.id === messageId && message.role === 'tool'
         ? { ...message, toolCall: { ...message.toolCall, output } }
         : message
     )), { reason: 'assistant' });
   }, [updateSessionMessages]);
 
   const createToolCallContext = React.useCallback((message: Message<TMeta>, signal: AbortSignal): ChorusToolCallContext<TMeta> | null => {
-    if (!message.toolCall) return null;
+    if (message.role !== 'tool') return null;
     const id = message.toolCall.id ?? message.id;
     const name = message.toolCall.name || id;
     const context: ChorusToolCallContext<TMeta> = {
@@ -512,7 +567,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     return context;
   }, [messagesRef]);
 
-  const runCompletedToolCalls = React.useCallback(async (sessionId: number, toolMessages: Message<TMeta>[], signal: AbortSignal) => {
+  const runCompletedToolCalls = React.useCallback(async (sessionId: number, toolMessages: ToolMessage<TMeta>[], signal: AbortSignal) => {
     if (!toolMessages.length) return;
 
     for (const initialMessage of toolMessages) {
@@ -520,6 +575,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
       if (signal.aborted) throw createAbortError();
 
       const currentMessage = messagesRef.current.find(message => message.id === initialMessage.id) ?? initialMessage;
+      if (currentMessage.role !== 'tool') continue;
       const context = createToolCallContext(currentMessage, signal);
       if (!context) continue;
 
@@ -530,7 +586,8 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
           if (!isAssistantSessionActive(sessionId)) return;
           if (signal.aborted) throw createAbortError();
           setToolOutput(currentMessage.id, output);
-          void safeNotifyToolCall({ ...context, output, message: messagesRef.current.find(message => message.id === currentMessage.id) ?? currentMessage, messages: messagesRef.current });
+          const latestMessage = messagesRef.current.find((message): message is ToolMessage<TMeta> => message.id === currentMessage.id && message.role === 'tool') ?? currentMessage;
+          void safeNotifyToolCall({ ...context, output, message: latestMessage, messages: messagesRef.current });
           continue;
         }
 
@@ -776,7 +833,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
   const shouldContinueAfterTools = React.useCallback(async (
     iteration: number,
     assistantMessage: Message<TMeta> | null,
-    toolMessages: Message<TMeta>[],
+    toolMessages: ToolMessage<TMeta>[],
     response: Response | undefined,
     signal: AbortSignal,
   ) => {
@@ -942,12 +999,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
           if (!isAssistantSessionActive(sessionId)) return;
 
           const returnedMessage = res as Partial<Message<TMeta>>;
-          const normalizedMessage: Message<TMeta> = {
-            ...(returnedMessage as Message<TMeta>),
-            id: returnedMessage.id || createMessageId(),
-            role: returnedMessage.role ?? 'assistant',
-            text: returnedMessage.text ?? '',
-          };
+          const normalizedMessage = normalizeReturnedMessage(returnedMessage);
           updateSessionMessages(prev => prev.concat(normalizedMessage), { reason: 'assistant' });
           completeActiveSession(sessionId, { reason: 'returned-message', message: normalizedMessage });
         }
@@ -1028,7 +1080,9 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     const currentMessages = messagesRef.current;
     const idx = currentMessages.findIndex(m => m.id === id);
     if (idx === -1) return;
-    const edited: Message<TMeta> = { ...currentMessages[idx], text: newText };
+    const currentMessage = currentMessages[idx];
+    if (currentMessage.role !== 'user') return;
+    const edited: Message<TMeta> = { ...currentMessage, text: newText };
     const next = updateSessionMessages(prev => [...prev.slice(0, idx), edited], { flushPersistence: true, reason: 'edit' });
     triggerAssistant(newText, next);
   }, [isBusy, messagesRef, triggerAssistant, updateSessionMessages]);
@@ -1042,6 +1096,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     while (userIdx >= 0 && currentMessages[userIdx].role !== 'user') userIdx -= 1;
     if (userIdx < 0) return;
     const userMsg = currentMessages[userIdx];
+    if (userMsg.role !== 'user') return;
     const next = updateSessionMessages(prev => {
       const history = streamError ? dropTrailingAssistant(prev) : prev;
       return history.slice(0, userIdx + 1);

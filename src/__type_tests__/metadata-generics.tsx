@@ -52,6 +52,12 @@ export const typedChorusElement = (
       // @ts-expect-error MyMeta does not include abortTraceId
       void context.message?.metadata?.abortTraceId;
     }}
+    getMessageFeedback={(message) => {
+      const model: string | undefined = message.metadata?.model;
+      // @ts-expect-error MyMeta does not include reviewState
+      void message.metadata?.reviewState;
+      return model ? 'up' : null;
+    }}
     renderMessage={(message, ctx) => {
       const model: string | undefined = message.metadata?.model;
       // @ts-expect-error MyMeta does not include traceId
@@ -67,12 +73,17 @@ const fetchTransport = createFetchSSETransport<MyMeta>('/api/chat', {
 });
 
 const webSocketTransport = createWebSocketTransport<MyMeta>('wss://api.example.com/chat', {
+  persistent: true,
+  onMessage: (_data, _event) => undefined,
   formatMessage: (_text, history) => JSON.stringify({ latency: history[0].metadata?.latencyMs }),
 });
+webSocketTransport.close();
 
 const typedRef = { current: null } as RefObject<ChorusRef<MyMeta> | null>;
 const typedRefMessages: Message<MyMeta>[] | undefined = typedRef.current?.getMessages();
+const typedRefScrolled: boolean | undefined = typedRef.current?.scrollToMessage('1');
 void typedRefMessages;
+void typedRefScrolled;
 
 const typedHelpers: ChorusSendHelpers = {
   appendAssistant: (_chunk) => undefined,
