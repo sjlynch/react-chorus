@@ -3,7 +3,7 @@ import type { Connector, ConnectorResult, ConnectorToolDelta } from './openai';
 
 const DEFAULT_CANDIDATE_INDEX = 0;
 const NORMAL_FINISH_REASONS = new Set(['STOP', 'MAX_TOKENS']);
-const INCOMPLETE_FINISH_REASONS = new Set(['FINISH_REASON_UNSPECIFIED', 'UNSPECIFIED']);
+const UNSPECIFIED_FINISH_REASONS = new Set(['FINISH_REASON_UNSPECIFIED', 'UNSPECIFIED']);
 
 function hasOwn(value: object, key: PropertyKey) {
   return Object.prototype.hasOwnProperty.call(value, key);
@@ -41,9 +41,13 @@ function getCandidateKey(candidate: unknown, arrayIndex: number) {
     : String(arrayIndex);
 }
 
+function isUnspecifiedFinishReason(finishReason: unknown): finishReason is string {
+  return typeof finishReason === 'string' && UNSPECIFIED_FINISH_REASONS.has(finishReason);
+}
+
 function isBlockingFinishReason(finishReason: unknown): finishReason is string {
   if (typeof finishReason !== 'string' || !finishReason) return false;
-  return !NORMAL_FINISH_REASONS.has(finishReason) && !INCOMPLETE_FINISH_REASONS.has(finishReason);
+  return !NORMAL_FINISH_REASONS.has(finishReason) && !UNSPECIFIED_FINISH_REASONS.has(finishReason);
 }
 
 function isDoneFinishReason(finishReason: unknown): finishReason is string {
@@ -79,7 +83,9 @@ function extractFunctionCallToolDelta(part: Record<string, unknown>, candidateKe
  * from thought/thinking parts, and tool-use deltas from functionCall parts.
  * When multiple candidates are present, only candidate index 0 is emitted;
  * alternatives are not concatenated. STOP and MAX_TOKENS finish the stream,
- * while blocked/safety finish reasons surface as connector errors.
+ * while blocked/safety finish reasons surface as connector errors. Gemini's
+ * UNSPECIFIED finish reasons are also surfaced as explicit errors (rather than
+ * ignored) so callers receive a terminal signal instead of hanging.
  *
  * Usage example:
  *   const { send } = useChorusStream(transport, { connector: 'gemini' });
@@ -116,6 +122,13 @@ export const geminiConnector: Connector = {
       }
 
       const finishReason = candidateObj.finishReason;
+      if (isUnspecifiedFinishReason(finishReason)) {
+        return {
+          ...result,
+          error: 'Gemini response ended with an unspecified finish reason',
+        };
+      }
+
       if (isBlockingFinishReason(finishReason)) {
         return {
           ...result,
