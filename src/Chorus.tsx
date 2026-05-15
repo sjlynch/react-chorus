@@ -27,7 +27,7 @@ export interface ChorusRef<TMeta = Record<string, unknown>> {
   clear(): void;
   focus(): void;
   getMessages(): Message<TMeta>[];
-  scrollToMessage(id: string): void;
+  scrollToMessage(id: string): boolean;
 }
 
 export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React.HTMLAttributes<HTMLDivElement>, 'onChange' | 'onError' | 'onCopy'> {
@@ -318,10 +318,12 @@ function ChorusInner<TMeta = Record<string, unknown>>({
     },
     scrollToMessage(id: string) {
       const root = rootRef.current;
-      if (!root) return;
+      if (!root) return false;
       const nodes = root.querySelectorAll<HTMLElement>('[data-chorus-message-id]');
       const target = Array.from(nodes).find(node => node.dataset.chorusMessageId === id);
-      target?.scrollIntoView({ block: 'nearest' });
+      if (!target) return false;
+      target.scrollIntoView({ block: 'nearest' });
+      return true;
     },
   }), [messagesRef, resetComposer, session, writesDisabled]);
 

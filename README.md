@@ -732,7 +732,7 @@ export function SupportChat() {
 }
 ```
 
-The ref exposes `send(text, attachments?)`, `stop()`, `clear()`, `focus()`, `getMessages()`, and `scrollToMessage(id)`. `send()` and `clear()` are no-ops while `<Chorus disabled>`, `<Chorus readOnly>`, or an async built-in persistence load is pending; `stop()` remains available for active responses.
+The ref exposes `send(text, attachments?)`, `stop()`, `clear()`, `focus()`, `getMessages()`, and `scrollToMessage(id)`. `scrollToMessage(id)` returns `true` when it finds a rendered message row and `false` when the id is not currently mounted; check `hiddenRoles`, `maxRenderedMessages`, and custom `renderMessage` implementations that return a fragment/custom component without spreading `ctx.messageProps`. `send()` and `clear()` are no-ops while `<Chorus disabled>`, `<Chorus readOnly>`, or an async built-in persistence load is pending; `stop()` remains available for active responses.
 
 ### Disabled and read-only states
 

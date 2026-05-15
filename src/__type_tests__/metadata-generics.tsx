@@ -63,7 +63,9 @@ const webSocketTransport = createWebSocketTransport<MyMeta>('wss://api.example.c
 
 const typedRef = { current: null } as RefObject<ChorusRef<MyMeta> | null>;
 const typedRefMessages: Message<MyMeta>[] | undefined = typedRef.current?.getMessages();
+const typedRefScrolled: boolean | undefined = typedRef.current?.scrollToMessage('1');
 void typedRefMessages;
+void typedRefScrolled;
 
 const typedHelpers: ChorusSendHelpers = {
   appendAssistant: (_chunk) => undefined,
