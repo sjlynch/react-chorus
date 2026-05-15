@@ -126,6 +126,33 @@ describe('Chorus', () => {
     expect(screen.queryByText('hi from ref')).not.toBeInTheDocument();
   });
 
+  it('scrollToMessage targets custom renderMessage rows that spread messageProps', () => {
+    const ref = React.createRef<ChorusRef>();
+    let scrolledElement: HTMLElement | null = null;
+    const scrollIntoView = vi.fn(function (this: HTMLElement) {
+      scrolledElement = this;
+    });
+    window.HTMLElement.prototype.scrollIntoView = scrollIntoView;
+
+    render(
+      <Chorus
+        ref={ref}
+        messages={[{ id: 'a1', role: 'assistant', text: 'Custom reply' }]}
+        renderMessage={(message, ctx) => (
+          <article {...ctx.messageProps} data-testid="custom-message">
+            {message.text}
+          </article>
+        )}
+      />
+    );
+
+    const customMessage = screen.getByTestId('custom-message');
+    act(() => ref.current?.scrollToMessage('a1'));
+
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
+    expect(scrolledElement).toBe(customMessage);
+  });
+
   it('transport path send() fires transport and streams tokens into the message list', async () => {
     const user = userEvent.setup();
     const transport = vi.fn<Transport>(async () => sseResponse(['Hel', 'lo']));

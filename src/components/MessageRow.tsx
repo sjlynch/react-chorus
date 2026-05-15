@@ -286,7 +286,7 @@ export function MessageActionControls<TMeta = Record<string, unknown>>({ message
 
   if (editing && actions.edit) {
     return (
-      <div className={`chorus-msg chorus-${message.role}`}>
+      <div className={`chorus-msg chorus-${message.role}`} data-chorus-message-id={message.id}>
         <MessageSpeakerLabel role={message.role} />
         <InlineMessageEditor
           initialText={message.text}
