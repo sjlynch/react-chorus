@@ -266,7 +266,7 @@ function titleFromFirstMessage(
   messages: Pick<Message, 'role' | 'text'>[],
   { fallbackTitle, maxLength = DEFAULT_FIRST_MESSAGE_TITLE_MAX_LENGTH }: Pick<RenameFromFirstMessageOptions, 'fallbackTitle' | 'maxLength'> = {},
 ) {
-  const firstUserText = messages.find(message => message.role === 'user' && message.text.trim().length > 0)?.text;
+  const firstUserText = messages.find(message => message.role === 'user' && (message.text ?? '').trim().length > 0)?.text;
   const normalized = (firstUserText ?? fallbackTitle ?? '').replace(/\s+/g, ' ').trim();
   if (!normalized) return '';
 

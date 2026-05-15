@@ -43,15 +43,51 @@ export interface ToolCall {
   output?: unknown;
 }
 
-export interface Message<TMeta = Record<string, unknown>> {
+interface ChorusMessageBase<TMeta = Record<string, unknown>> {
   id: string;
-  role: Role;
+  metadata?: TMeta;
+}
+
+export interface UserMessage<TMeta = Record<string, unknown>> extends ChorusMessageBase<TMeta> {
+  role: 'user';
   text: string;
   reasoning?: string;
   attachments?: Attachment[];
-  metadata?: TMeta;
-  toolCall?: ToolCall;
+  toolCall?: never;
 }
+
+export interface AssistantMessage<TMeta = Record<string, unknown>> extends ChorusMessageBase<TMeta> {
+  role: 'assistant';
+  text: string;
+  reasoning?: string;
+  attachments?: Attachment[];
+  toolCall?: never;
+}
+
+export interface SystemMessage<TMeta = Record<string, unknown>> extends ChorusMessageBase<TMeta> {
+  role: 'system';
+  text: string;
+  reasoning?: string;
+  attachments?: never;
+  toolCall?: never;
+}
+
+export interface ToolMessage<TMeta = Record<string, unknown>> extends ChorusMessageBase<TMeta> {
+  role: 'tool';
+  text?: string;
+  reasoning?: string;
+  attachments?: never;
+  toolCall: ToolCall;
+}
+
+export type AnyChorusMessage<TMeta = Record<string, unknown>> =
+  | UserMessage<TMeta>
+  | AssistantMessage<TMeta>
+  | SystemMessage<TMeta>
+  | ToolMessage<TMeta>;
+
+/** Back-compat alias for the public Chorus message union. Prefer the role-specific message types for narrowing. */
+export type Message<TMeta = Record<string, unknown>> = AnyChorusMessage<TMeta>;
 
 /** Pluggable storage adapter. Mirrors the localStorage API; methods may return Promises for async backends (e.g. IndexedDB). */
 export interface StorageAdapter {

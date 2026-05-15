@@ -70,7 +70,7 @@ function messageActivityKey<TMeta>(message: Message<TMeta>) {
   return [
     message.id,
     message.role,
-    stringActivityKey(message.text),
+    stringActivityKey(message.text ?? ''),
     stringActivityKey(message.reasoning ?? ''),
     message.attachments?.length ?? 0,
     ...(message.attachments?.map(attachmentActivityKey) ?? []),
@@ -244,7 +244,7 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
       return;
     }
 
-    writeTextToClipboard(message.text);
+    writeTextToClipboard(message.text ?? '');
   }, [onCopy]);
 
   const windowRef = React.useRef<HTMLDivElement>(null);
@@ -313,7 +313,7 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
       {renderedVisible.map(m => {
         const isStreaming = m.id === streamingMessageId;
         const defaultRender = (slots?: MessageBubbleSlots) => {
-          if (m.role === 'tool' && m.toolCall) {
+          if (m.role === 'tool') {
             return (
               <div className="chorus-msg chorus-tool" data-chorus-message-id={m.id}>
                 <MessageSpeakerLabel role={m.role} />

@@ -14,6 +14,8 @@ export type { ChorusFinishContext, ChorusMessagesChangeContext, ChorusOnFinish, 
 export type { Message } from './types';
 export type {
   Role,
+  AnyChorusMessage,
+  AssistantMessage,
   Attachment,
   AttachmentError,
   AttachmentErrorReason,
@@ -21,9 +23,12 @@ export type {
   AttachmentUploadResult,
   ConnectorName,
   StorageAdapter,
+  SystemMessage,
   ToolCall,
+  ToolMessage,
   UploadAttachment,
   UploadAttachmentOptions,
+  UserMessage,
 } from './types';
 export { useChorusStream } from './hooks/useChorusStream';
 export type { SendCallbacks, StreamOptions, Transport } from './hooks/useChorusStream';

@@ -126,8 +126,9 @@ function MessageBubbleLayout<TMeta = Record<string, unknown>>({ message, codeThe
   markdownSanitizer?: MarkdownSanitizer;
   children?: React.ReactNode;
 } & MessageBubbleSlots) {
+  const text = message.text ?? '';
   const hasAttachments = Boolean(message.attachments?.length);
-  const hasBubbleText = message.text.trim().length > 0;
+  const hasBubbleText = text.trim().length > 0;
   const shouldRenderBubble = hasBubbleText || hasAttachments;
 
   return (
@@ -139,7 +140,7 @@ function MessageBubbleLayout<TMeta = Record<string, unknown>>({ message, codeThe
         {shouldRenderBubble && (
           <div className="chorus-bubble">
             <MessageAttachments attachments={message.attachments} />
-            {hasBubbleText && <Markdown {...markdownProps} text={message.text} codeTheme={codeTheme} headless={headless} streaming={streaming} sanitizer={markdownSanitizer ?? markdownProps?.sanitizer} />}
+            {hasBubbleText && <Markdown {...markdownProps} text={text} codeTheme={codeTheme} headless={headless} streaming={streaming} sanitizer={markdownSanitizer ?? markdownProps?.sanitizer} />}
           </div>
         )}
         {footerSlot}
@@ -274,7 +275,7 @@ function MessageActions({ actions, onEditRequested }: { actions: MessageRenderAc
 
 function createCopyAction<TMeta>(message: Message<TMeta>, onCopy?: (message: Message<TMeta>) => void) {
   if (onCopy) return () => onCopy(message);
-  if (canWriteTextToClipboard()) return () => writeTextToClipboard(message.text);
+  if (canWriteTextToClipboard()) return () => writeTextToClipboard(message.text ?? '');
   return undefined;
 }
 
@@ -289,7 +290,7 @@ export function MessageActionControls<TMeta = Record<string, unknown>>({ message
       <div className={`chorus-msg chorus-${message.role}`} data-chorus-message-id={message.id}>
         <MessageSpeakerLabel role={message.role} />
         <InlineMessageEditor
-          initialText={message.text}
+          initialText={message.text ?? ''}
           onSubmit={(newText) => {
             actions.edit?.(newText);
             setEditing(false);
@@ -329,7 +330,7 @@ export function MessageRow<TMeta = Record<string, unknown>>({ m, codeTheme, head
       <MessageSpeakerLabel role={m.role} />
       {editing && actions.edit ? (
         <InlineMessageEditor
-          initialText={m.text}
+          initialText={m.text ?? ''}
           onSubmit={(newText) => {
             actions.edit?.(newText);
             setEditing(false);

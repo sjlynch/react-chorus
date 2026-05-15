@@ -1191,7 +1191,7 @@ To observe deltas without executing tools:
   transport="/api/chat"
   connector="openai"
   onToolDelta={({ delta, message }) => {
-    console.log('tool update', delta.id, message.toolCall?.input);
+    console.log('tool update', delta.id, message.toolCall.input);
   }}
   onStreamDone={({ toolMessages }) => {
     console.log('completed tool calls', toolMessages);
@@ -1259,7 +1259,7 @@ For fully custom DOM rows, spread `ctx.messageProps` on the outer element you wa
   messages={messages}
   hiddenRoles={['system']} // show tool calls while still hiding system prompts
   renderMessage={(msg, ctx) => {
-    if (msg.role === 'tool' && msg.toolCall) {
+    if (msg.role === 'tool') {
       return (
         <div key={msg.id} {...ctx.messageProps} className="my-tool-step">
           <strong>{msg.toolCall.name}</strong>
@@ -1449,18 +1449,53 @@ interface Attachment {
   metadata?: Record<string, unknown>;
 }
 
-interface Message<TMeta = Record<string, unknown>> {
+interface MessageBase<TMeta = Record<string, unknown>> {
   id: string;
-  role: Role;
-  text: string; // supports CommonMark + GFM
-  reasoning?: string; // optional thinking/reasoning trace rendered in a collapsed details block
-  attachments?: Attachment[]; // populated by <ChatInput accept="..." />
-  toolCall?: ToolCall; // populated when role === 'tool'
   metadata?: TMeta; // optional typed data (timestamps, model, latency, etc.)
 }
+
+interface UserMessage<TMeta = Record<string, unknown>> extends MessageBase<TMeta> {
+  role: 'user';
+  text: string; // supports CommonMark + GFM
+  reasoning?: string;
+  attachments?: Attachment[]; // populated by <ChatInput accept="..." />
+  toolCall?: never;
+}
+
+interface AssistantMessage<TMeta = Record<string, unknown>> extends MessageBase<TMeta> {
+  role: 'assistant';
+  text: string;
+  reasoning?: string; // optional thinking/reasoning trace rendered in a collapsed details block
+  attachments?: Attachment[];
+  toolCall?: never;
+}
+
+interface SystemMessage<TMeta = Record<string, unknown>> extends MessageBase<TMeta> {
+  role: 'system';
+  text: string;
+  reasoning?: string;
+  attachments?: never;
+  toolCall?: never;
+}
+
+interface ToolMessage<TMeta = Record<string, unknown>> extends MessageBase<TMeta> {
+  role: 'tool';
+  text?: string; // optional for pure tool calls/results
+  reasoning?: string;
+  attachments?: never;
+  toolCall: ToolCall;
+}
+
+type AnyChorusMessage<TMeta = Record<string, unknown>> =
+  | UserMessage<TMeta>
+  | AssistantMessage<TMeta>
+  | SystemMessage<TMeta>
+  | ToolMessage<TMeta>;
+
+type Message<TMeta = Record<string, unknown>> = AnyChorusMessage<TMeta>;
 ```
 
-`Message` defaults to arbitrary metadata for backwards compatibility. Pass a type argument when your app stores structured metadata:
+`Message` defaults to arbitrary metadata for backwards compatibility. It is a discriminated union, so `message.role === 'tool'` narrows `message.toolCall` to a required `ToolCall`. Pass a type argument when your app stores structured metadata:
 
 ```ts
 type MyMeta = {
