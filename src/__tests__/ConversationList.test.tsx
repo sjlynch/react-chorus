@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ConversationList } from '../components/ConversationList';
 import type { ConversationSummary } from '../hooks/useConversations';
@@ -15,7 +15,7 @@ function renderedTitles(container: HTMLElement) {
 }
 
 describe('ConversationList', () => {
-  it('matches the rendered snapshot', () => {
+  it('renders conversations by recency with active state, formatted timestamps, and actions', () => {
     const { container } = render(
       <ConversationList
         conversations={CONVERSATIONS}
@@ -30,7 +30,25 @@ describe('ConversationList', () => {
       />,
     );
 
-    expect(container.firstChild).toMatchSnapshot();
+    const items = screen.getAllByRole('listitem');
+    expect(renderedTitles(container)).toEqual(['Roadmap ideas', 'Support chat']);
+    expect(items).toHaveLength(2);
+    expect(items[0]).not.toHaveAttribute('data-active');
+    expect(items[1]).toHaveClass('chorus-conversation-item--active');
+    expect(items[1]).toHaveAttribute('data-active', 'true');
+    expect(within(items[1]).getByText('Support chat').closest('button')).toHaveAttribute('aria-current', 'true');
+
+    const roadmap = within(items[0]);
+    expect(roadmap.getByText('formatted 2026-05-14T00:03:00.000Z')).toHaveAttribute('dateTime', '2026-05-14T00:03:00.000Z');
+    expect(roadmap.getByRole('button', { name: /pin roadmap ideas/i })).toHaveAttribute('aria-pressed', 'false');
+    expect(roadmap.getByRole('button', { name: /rename roadmap ideas/i })).toBeInTheDocument();
+    expect(roadmap.getByRole('button', { name: /delete roadmap ideas/i })).toBeInTheDocument();
+
+    const support = within(items[1]);
+    expect(support.getByText('formatted 2026-05-14T00:01:00.000Z')).toHaveAttribute('dateTime', '2026-05-14T00:01:00.000Z');
+    expect(support.getByRole('button', { name: /pin support chat/i })).toHaveAttribute('aria-pressed', 'false');
+    expect(support.getByRole('button', { name: /rename support chat/i })).toBeInTheDocument();
+    expect(support.getByRole('button', { name: /delete support chat/i })).toBeInTheDocument();
   });
 
   it('supports select, rename, delete, and create affordances', async () => {
