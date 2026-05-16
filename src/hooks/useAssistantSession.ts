@@ -7,7 +7,7 @@ import { useLatestRef } from './useLatestRef';
 import { isChorusDevMode } from '../utils/devMode';
 import { createAbortError, isAbortError, toError } from '../utils/errors';
 import { isPromiseLike } from '../utils/async';
-import { createDefaultFetchSSETransport } from './assistant-session/transport';
+import { createDefaultFetchSSETransport, type FetchTransportInit } from './assistant-session/transport';
 import { cloneHistoryForRetry, createMessageId, dropTrailingAssistant, findLastUserMessage, hasToolOutput, metadataWithToolProvider, normalizeReturnedMessage } from './assistant-session/messageUtils';
 import { warnObserverError } from './assistant-session/observer';
 import { DEFAULT_MAX_TOOL_ITERATIONS, normalizeMaxToolIterations } from './assistant-session/toolLoop';
@@ -120,7 +120,7 @@ export interface UseAssistantSessionOptions<TMeta = Record<string, unknown>> {
   messages: Message<TMeta>[];
   updateMessages: (updater: (prev: Message<TMeta>[]) => Message<TMeta>[], options?: UpdateMessagesOptions) => Message<TMeta>[];
   seedMessages: Message<TMeta>[];
-  transport?: string | Transport<TMeta>;
+  transport?: string | FetchTransportInit<TMeta> | Transport<TMeta>;
   systemPrompt?: string;
   connector?: Connector | ConnectorName;
   onSend?: ChorusOnSend<TMeta>;
@@ -653,6 +653,9 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
   const resolvedTransport = React.useMemo((): Transport<TMeta> => {
     if (typeof transport === 'string') return createDefaultFetchSSETransport<TMeta>(transport);
     if (typeof transport === 'function') return transport;
+    if (transport && typeof transport === 'object' && typeof transport.url === 'string') {
+      return createDefaultFetchSSETransport<TMeta>(transport);
+    }
     return () => Promise.resolve(new Response(null, { status: 200 }));
   }, [transport]);
 
