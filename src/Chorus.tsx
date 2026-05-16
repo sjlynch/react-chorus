@@ -5,6 +5,8 @@ import { ChatInput } from './components/ChatInput';
 import { styleVarsFromPalette, type Palette } from './components/ChorusTheme';
 import type { Attachment, AttachmentError, ConnectorName, Message, Role, StorageAdapter, UploadAttachment } from './types';
 import type { Transport } from './hooks/useChorusStream';
+import { resolveChorusLabels } from './labels/resolve';
+import type { ChorusLabels } from './labels/types';
 import { useChorusPersistence, type DeserializeMessages, type SerializeMessages } from './hooks/useChorusPersistence';
 import { useChorusMessages, type ChorusMessagesChangeContext } from './hooks/useChorusMessages';
 import { useAssistantSession } from './hooks/useAssistantSession';
@@ -121,12 +123,20 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
   transport?: string | Transport<TMeta>;
   uploadAttachment?: UploadAttachment;
   value?: Message<TMeta>[];
+  /**
+   * Localized labels for every built-in UI string (composer placeholder/aria-labels,
+   * transcript aria-label/typing/retry/jump/empty title, message actions, speakers,
+   * tool call sections, reasoning summary, code-copy button, and the clear button).
+   * Defaults preserve the current English strings; the existing `placeholder`,
+   * `disabledReason`, and `clearLabel` props take precedence when provided.
+   */
+  labels?: ChorusLabels;
 }
 
 function ChorusInner<TMeta = Record<string, unknown>>({
   accept,
   className,
-  clearLabel = 'Clear conversation',
+  clearLabel,
   codeBlockTheme = 'dark',
   connector,
   confirmDeleteMessage,
@@ -183,8 +193,11 @@ function ChorusInner<TMeta = Record<string, unknown>>({
   transport,
   uploadAttachment,
   value,
+  labels,
   ...rest
 }: ChorusProps<TMeta>, ref: React.ForwardedRef<ChorusRef<TMeta>>) {
+  const resolvedLabels = React.useMemo(() => resolveChorusLabels(labels), [labels]);
+  const resolvedClearLabel = clearLabel ?? resolvedLabels.clearConversation;
   const rootRef = React.useRef<HTMLDivElement>(null);
   const inputRef = React.useRef<HTMLDivElement>(null);
   const [draft, setDraft] = React.useState('');
@@ -385,11 +398,12 @@ function ChorusInner<TMeta = Record<string, unknown>>({
         suggestedPrompts={canRenderEmptyAffordance ? suggestedPrompts : undefined}
         suggestedPromptsDisabled={writesDisabled}
         suggestedPromptsDisabledReason={resolvedDisabledReason}
+        labels={labels}
       />
       {showClearButton && (
         <div className="chorus-clear-row">
           <button type="button" className="chorus-clear-btn" onClick={handleClear} disabled={writesDisabled || (!session.sending && msgs.length === 0)}>
-            {clearLabel}
+            {resolvedClearLabel}
           </button>
         </div>
       )}
@@ -405,6 +419,7 @@ function ChorusInner<TMeta = Record<string, unknown>>({
         disabledReason={resolvedDisabledReason}
         resetKey={composerResetKey}
         placeholder={placeholder}
+        labels={resolvedLabels.composer}
         accept={accept}
         maxAttachmentBytes={maxAttachmentBytes}
         maxAttachments={maxAttachments}

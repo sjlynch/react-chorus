@@ -691,19 +691,19 @@ react-chorus keeps React/ReactDOM as peer dependencies and externalizes runtime 
 
 | Entry | Initial JS | gzip | Notes |
 |-------|------------|------|-------|
-| `react-chorus` (`<Chorus>`) | 152.4 kB | 52.0 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
-| `react-chorus/headless` | 152.8 kB | 52.2 kB | Headless defaults, same behavior surface. |
+| `react-chorus` (`<Chorus>`) | 155.4 kB | 53.0 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
+| `react-chorus/headless` | 155.7 kB | 53.1 kB | Headless defaults, same behavior surface. |
 | `react-chorus` (`useChorusStream`) | 34.1 kB | 11.2 kB | Root hook import; CI fails if it pulls UI, Markdown, or icon dependencies. |
-| `react-chorus` (`Markdown`) | 74.7 kB | 25.3 kB | Standalone Markdown renderer; includes Markdown parsing/sanitization, not chat icons. |
-| `react-chorus` (`ChatWindow`) | 101.1 kB | 34.5 kB | Transcript renderer with Markdown and message action icons, without the composer/widget shell. |
-| `react-chorus` (`ConversationList`) | 5.4 kB | 1.9 kB | Conversation sidebar component only; no Markdown/icon graph. |
+| `react-chorus` (`Markdown`) | 75.1 kB | 25.4 kB | Standalone Markdown renderer; includes Markdown parsing/sanitization, not chat icons. |
+| `react-chorus` (`ChatWindow`) | 109.3 kB | 37.2 kB | Transcript renderer with Markdown and message action icons, without the composer/widget shell. |
+| `react-chorus` (`ConversationList`) | 5.7 kB | 2.1 kB | Conversation sidebar component only; no Markdown/icon graph. |
 | `react-chorus/transport` | 4.3 kB | 1.9 kB | Transport factories only; no React/UI/Markdown runtime. |
 | `react-chorus/provider-requests` | 8.2 kB | 2.4 kB | Provider request mappers only; no React/UI/Markdown runtime. |
 | Lazy `highlight.js` runtime | 891.4 kB | 295.9 kB | Async code-fence chunk, never part of initial JS. |
 
 `highlight.js` is only fetched the first time a fenced code block (` ``` ` or `~~~`) appears in rendered text. The matching GitHub dark/light token-color stylesheet is also injected on demand based on `codeBlockTheme`; code renders immediately as plain text and is re-rendered with syntax highlighting once the chunk arrives. While an assistant message is actively streaming, Chorus renders that growing message as React-escaped plain text and switches to full Markdown parsing/sanitization when the stream finalizes.
 
-The playground has a separate budget because it intentionally bundles a complete demo app. `npm run build:playground` also runs `npm run verify:playground-size`, writes `.cache/react-chorus/playground-bundle-size-report.json`, and checks this paragraph. The current playground initial JS graph is 371.5 kB / 118.3 kB gzip and its largest lazy chunk (highlight.js) is 890.9 kB / 295.7 kB gzip. Vite's chunk warning limit is raised to that documented lazy budget so the playground build stays free of Vite chunk warnings while the budget script tracks regressions.
+The playground has a separate budget because it intentionally bundles a complete demo app. `npm run build:playground` also runs `npm run verify:playground-size`, writes `.cache/react-chorus/playground-bundle-size-report.json`, and checks this paragraph. The current playground initial JS graph is 374.3 kB / 119.3 kB gzip and its largest lazy chunk (highlight.js) is 890.9 kB / 295.7 kB gzip. Vite's chunk warning limit is raised to that documented lazy budget so the playground build stays free of Vite chunk warnings while the budget script tracks regressions.
 
 To refresh the published size claims after dependency or feature changes, run `npm run build`, `npm run verify:bundle-size`, and `npm run build:playground`, then copy the updated values from stdout or the `.cache/react-chorus/*-bundle-size-report.json` files into this section. The verification commands may fail until the README values are updated to match their reports.
 
@@ -792,6 +792,75 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `markdownProps` | `Omit<MarkdownProps, 'text' \| 'codeTheme' \| 'headless' \| 'streaming'>` | — | Props forwarded to the built-in Markdown renderer for every message, including `sanitizer`, `markedOptions`, `markedExtensions`, and `onCopyError`. |
 | `markdownSanitizer` | `MarkdownSanitizer` | — | Convenience alias for `markdownProps.sanitizer`; takes precedence when both are provided. |
 | `hiddenRoles` | `Role[]` | `['system']` | Message roles hidden from the transcript. Tool calls are visible by default in `<Chorus>`; pass `['system', 'tool']` to hide them, or `[]` to show all roles. `<Chorus>` accepts `hiddenRoles` only — `showSystemMessages` exists on `<ChatWindow>` for backwards compatibility. |
+| `labels` | `ChorusLabels` | English defaults | Localized strings for every built-in UI surface: composer placeholder/aria-labels/attach/send/stop, transcript aria-label/typing/retry/jump-to-latest/empty-state title, message actions (edit/regenerate/copy/copy-failed/thumbs up/down/delete/save/cancel), per-role speaker SR labels, tool-call section headers, reasoning summary, code-fence copy chrome, conversation-list affordances, and the clear button. See [Localizing built-in strings](#localizing-built-in-strings). |
+
+### Localizing built-in strings
+
+Every built-in label defaults to English; pass `labels` to localize or rebrand without replacing components. The same `ChorusLabels` shape is accepted by `<Chorus>` and `<ChatWindow>`; the relevant slice is accepted by `<ChatInput labels={…}>`, `<ConversationList labels={…}>`, `<ToolCallBlock labels={…}>`, and the standalone `<Markdown codeCopyLabels={…} />`. Existing label-shaped props (`placeholder`, `clearLabel`, `newConversationLabel`, `emptyLabel`, `disabledReason`, `errorMessage`) keep precedence so adding `labels` is non-breaking.
+
+```tsx
+import { Chorus, type ChorusLabels } from 'react-chorus';
+
+const fr: ChorusLabels = {
+  composer: {
+    placeholder: 'Écrivez un message',
+    ariaLabel: 'Champ de message',
+    attachFile: 'Joindre un fichier',
+    send: 'Envoyer',
+    stop: 'Arrêter',
+    disabledReason: 'Composer désactivé.',
+    readOnlyReason: 'Composer en lecture seule.',
+  },
+  transcript: {
+    ariaLabel: 'Historique de chat',
+    typing: "L'assistant écrit",
+    retry: 'Réessayer',
+    jumpToLatest: '↓ Aller au plus récent',
+    suggestedPromptsAriaLabel: 'Suggestions',
+    emptyStateTitle: 'Comment puis-je aider ?',
+  },
+  messageActions: {
+    edit: 'Modifier',
+    regenerate: 'Régénérer',
+    copy: 'Copier',
+    copyFailed: 'Échec de la copie',
+    thumbsUp: "J'aime",
+    thumbsDown: "Je n'aime pas",
+    delete: 'Supprimer',
+    save: 'Enregistrer',
+    cancel: 'Annuler',
+    editTextareaAriaLabel: 'Modifier le message',
+  },
+  speakers: {
+    user: 'Message utilisateur',
+    assistant: "Message de l'assistant",
+    system: 'Message système',
+    tool: 'Message outil',
+  },
+  toolCall: { input: 'Entrée', output: 'Sortie' },
+  reasoning: 'Raisonnement',
+  codeCopy: { copy: 'Copier', copied: 'Copié !', failed: 'Échec', ariaLabel: 'Copier le code' },
+  conversationList: {
+    newConversation: 'Nouvelle conversation',
+    empty: 'Aucune conversation',
+    pin: 'Épingler',
+    unpin: 'Désépingler',
+    rename: 'Renommer',
+    delete: 'Supprimer',
+    save: 'Enregistrer',
+    cancel: 'Annuler',
+    navAriaLabel: 'Conversations',
+    renameAriaLabel: title => `Renommer ${title}`,
+    pinAriaLabel: (title, pinned) => `${pinned ? 'Désépingler' : 'Épingler'} ${title}`,
+    deleteAriaLabel: title => `Supprimer ${title}`,
+  },
+  clearConversation: 'Effacer la conversation',
+};
+
+<Chorus transport="/api/chat" labels={fr} />;
+```
+
+Labels are deep-merged with the defaults, so you only need to override the strings you actually want to change. `resolveChorusLabels(partial)` is exported when you want to compute the resolved set yourself (for storybook fixtures, `<ChatWindow>` outside of `<Chorus>`, or fully custom shells).
 
 ### `helpers` (passed to `onSend`)
 

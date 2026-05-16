@@ -9,6 +9,18 @@ export type { ConfirmDeleteConversation, ConfirmDeleteConversationContext, Conve
 export { Chorus } from './Chorus';
 export { ChorusTheme } from './components/ChorusTheme';
 export type { Palette } from './components/ChorusTheme';
+export { DEFAULT_CHORUS_LABELS, resolveChorusLabels } from './labels';
+export type {
+  ChorusCodeCopyLabels,
+  ChorusComposerLabels,
+  ChorusConversationListLabels,
+  ChorusLabels,
+  ChorusMessageActionLabels,
+  ChorusSpeakerLabels,
+  ChorusToolCallLabels,
+  ChorusTranscriptLabels,
+  ResolvedChorusLabels,
+} from './labels';
 export type { ChorusAbortContext, ChorusAbortReason, ChorusAbortSource, ChorusConfirmDeleteMessage, ChorusDeleteMessageContext, ChorusFinishContext, ChorusMessagesChangeContext, ChorusOnAbort, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusProps, ChorusRef, ChorusSendHelpers, ChorusSendPath, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolLoopContext, ChorusToolRegistry } from './Chorus';
 
 export type { Message } from './types';
