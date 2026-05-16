@@ -584,10 +584,10 @@ Runnable examples live in the [`/examples`](./examples) directory. They declare 
 
 | Example | Description |
 |---------|-------------|
-| [`examples/basic`](./examples/basic) | Zero-backend demo using a simulated streaming response, local persistence, clear/reset, and a custom error banner — great for local development |
-| [`examples/multi-conversation`](./examples/multi-conversation) | Sidebar-driven local conversations with pinned chats, per-chat persistence, and first-message auto-titles |
-| [`examples/with-next`](./examples/with-next) | Next.js App Router example with a serverless `/api/chat` SSE route handler proxying to OpenAI |
-| [`examples/with-openai`](./examples/with-openai) | Full-stack example: Vite frontend + Express backend proxying to OpenAI |
+| [`examples/basic`](./examples/basic/README.md) | Zero-backend demo using a simulated streaming response, local persistence, clear/reset, and a custom error banner — great for local development |
+| [`examples/multi-conversation`](./examples/multi-conversation/README.md) | Sidebar-driven local conversations with pinned chats, per-chat persistence, and first-message auto-titles |
+| [`examples/with-next`](./examples/with-next/README.md) | Next.js App Router example with a serverless `/api/chat` SSE route handler proxying to OpenAI |
+| [`examples/with-openai`](./examples/with-openai/README.md) | Full-stack example: Vite frontend + Express backend proxying to OpenAI |
 
 ### Running the basic example
 
