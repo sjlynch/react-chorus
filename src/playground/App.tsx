@@ -1,25 +1,42 @@
 import React from 'react';
-import { Chorus } from '../Chorus';
-import { ConversationList } from '../components/ConversationList';
-import { useConversations } from '../hooks/useConversations';
-import { MAX_IMAGE_BYTES, SUGGESTED_PROMPTS, WELCOME_MESSAGE } from './demoData';
-import { mockTransport } from './mockTransport';
+import { AttachmentsTab } from './tabs/AttachmentsTab';
+import { MarkdownTab } from './tabs/MarkdownTab';
+import { MultiConversationTab } from './tabs/MultiConversationTab';
+import { StreamingBasicsTab } from './tabs/StreamingBasicsTab';
+import { TabRail } from './tabs/TabRail';
+import { ThemingTab } from './tabs/ThemingTab';
+import { ToolAgentTab } from './tabs/ToolAgentTab';
+import type { PlaygroundTab, TabId } from './tabs/types';
+
+const TABS: PlaygroundTab[] = [
+  { id: 'streaming-basics', label: 'Streaming basics', subtitle: 'SSE, reasoning, retry', render: () => <StreamingBasicsTab /> },
+  { id: 'tool-agent', label: 'Tool agent', subtitle: 'autoContinueTools loop', render: () => <ToolAgentTab /> },
+  { id: 'markdown', label: 'Markdown & code', subtitle: 'tables, fences, copy', render: () => <MarkdownTab /> },
+  { id: 'attachments', label: 'Attachments', subtitle: 'paste, drop, picker', render: () => <AttachmentsTab /> },
+  { id: 'multi-conversation', label: 'Multi-chat', subtitle: 'useConversations + storage', render: () => <MultiConversationTab /> },
+  { id: 'theming', label: 'Theming + render', subtitle: 'palette, renderMessage', render: () => <ThemingTab /> },
+];
+
+const ACTIVE_TAB_KEY = 'react-chorus-pg:active-tab';
+const VALID_TAB_IDS = new Set<TabId>(TABS.map(t => t.id));
+
+function readInitialTabId(): TabId {
+  if (typeof window === 'undefined') return TABS[0].id;
+  try {
+    const stored = window.localStorage.getItem(ACTIVE_TAB_KEY);
+    if (stored && VALID_TAB_IDS.has(stored as TabId)) return stored as TabId;
+  } catch { /* private mode or storage disabled */ }
+  return TABS[0].id;
+}
 
 export function App() {
-  const conversations = useConversations({ defaultTitle: 'New chat' });
-  const [attachmentNotice, setAttachmentNotice] = React.useState<string | null>(null);
-  const autoCreatedRef = React.useRef(false);
+  const [activeId, setActiveId] = React.useState<TabId>(() => readInitialTabId());
 
   React.useEffect(() => {
-    if (autoCreatedRef.current) return;
-    if (conversations.loaded && conversations.conversations.length === 0) {
-      autoCreatedRef.current = true;
-      conversations.createConversation('First chat');
-    }
-  }, [conversations]);
+    try { window.localStorage.setItem(ACTIVE_TAB_KEY, activeId); } catch { /* ignore */ }
+  }, [activeId]);
 
-  const conversationStorage = conversations.storage ?? undefined;
-  const activeKey = conversations.activePersistenceKey || '';
+  const activeTab = TABS.find(t => t.id === activeId) ?? TABS[0];
 
   return (
     <main className="pg-shell">
@@ -33,6 +50,9 @@ export function App() {
             <span className="pg-pill-dot" aria-hidden="true" />
             Mock SSE → real connector
           </span>
+          <span className="pg-pill" title="No live LLM. Replies come from in-browser ReadableStreams.">
+            🧪 No backend required
+          </span>
           <span className="pg-pill" title="Conversations and messages are saved to localStorage.">
             💾 Persists locally
           </span>
@@ -40,74 +60,21 @@ export function App() {
       </header>
 
       <div className="pg-body">
-        <aside className="pg-sidebar" aria-label="Conversations">
-          <ConversationList
-            conversations={conversations.conversations}
-            activeId={conversations.activeId}
-            createConversation={conversations.createConversation}
-            selectConversation={conversations.selectConversation}
-            renameConversation={conversations.renameConversation}
-            deleteConversation={conversations.deleteConversation}
-            pinConversation={conversations.pinConversation}
-            newConversationLabel="+ New chat"
-            emptyLabel="No conversations yet"
-          />
-        </aside>
+        <TabRail tabs={TABS} activeId={activeId} onSelect={setActiveId} />
 
-        <section className="pg-card" aria-label="react-chorus demo chat">
+        <section
+          className="pg-card"
+          aria-labelledby={`pg-tab-${activeTab.id}`}
+          id={`pg-tabpanel-${activeTab.id}`}
+          role="tabpanel"
+        >
           <div className="pg-card-head">
-            <span className="pg-card-head-title">
-              {conversations.activeConversation?.title ?? 'Conversation'}
-            </span>
-            <span className={attachmentNotice ? 'pg-notice' : undefined}>
-              {attachmentNotice ?? `Images ≤ ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)} MB, up to 3`}
-            </span>
+            <span className="pg-card-head-title">{activeTab.label}</span>
+            <span className="pg-card-head-subtitle">{activeTab.subtitle}</span>
           </div>
-
-          {activeKey ? (
-            <div className="pg-chorus-wrap">
-              <Chorus
-                key={conversations.activeId ?? 'none'}
-                transport={mockTransport}
-                persistenceKey={activeKey}
-                persistenceStorage={conversationStorage}
-                initialMessages={[WELCOME_MESSAGE]}
-                suggestedPrompts={SUGGESTED_PROMPTS}
-                placeholder="Ask react-chorus anything, or paste/drop an image…"
-                accept="image/*"
-                maxAttachmentBytes={MAX_IMAGE_BYTES}
-                maxAttachments={3}
-                onMessagesChange={(messages) => {
-                  if (conversations.activeId) conversations.renameFromFirstMessage(conversations.activeId, messages);
-                }}
-                onAttachmentError={(error) => {
-                  setAttachmentNotice(error.message);
-                  window.setTimeout(() => setAttachmentNotice(null), 4000);
-                }}
-                palette={{
-                  chatBg: 'transparent',
-                  chatText: '#e7e7ea',
-                  assistantBubbleBg: 'rgba(255,255,255,0.05)',
-                  assistantBorder: 'rgba(255,255,255,0.08)',
-                  assistantText: '#f4f4f5',
-                  userBubbleBg: '#6366f1',
-                  userBorder: '#4f46e5',
-                  userText: '#ffffff',
-                  inputBg: 'rgba(255,255,255,0.04)',
-                  inputBorder: 'rgba(255,255,255,0.10)',
-                  inputText: '#f4f4f5',
-                  sendButtonBg: '#6366f1',
-                  sendButtonText: '#ffffff',
-                  focusRing: 'rgba(99,102,241,0.35)',
-                  border: 'rgba(255,255,255,0.06)',
-                }}
-              />
-            </div>
-          ) : (
-            <div className="pg-card-empty">
-              Create a conversation in the sidebar to start chatting.
-            </div>
-          )}
+          <div className="pg-tab-content">
+            {activeTab.render()}
+          </div>
         </section>
       </div>
 
@@ -116,7 +83,7 @@ export function App() {
         {' · '}
         <a href="https://www.npmjs.com/package/react-chorus" target="_blank" rel="noreferrer">npm</a>
         {' · '}
-        Reasoning + tool calls in this demo are streamed via a mock OpenAI-format SSE transport through the real <code>autoConnector</code>.
+        Every tab streams through a mock OpenAI-format SSE transport and the real <code>autoConnector</code>. No API keys or backend.
       </p>
     </main>
   );
