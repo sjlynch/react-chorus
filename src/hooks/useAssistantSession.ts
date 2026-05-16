@@ -48,6 +48,17 @@ export type ChorusConfirmDeleteMessage<TMeta = Record<string, unknown>> = (conte
 
 export type ChorusAbortReason = 'stop' | 'clear' | 'superseded';
 export type ChorusAbortSource = 'user' | 'programmatic';
+
+export interface ChorusClearConversationContext<TMeta = Record<string, unknown>> {
+  messages: Message<TMeta>[];
+  resetToInitialMessages: boolean;
+  source: ChorusAbortSource;
+  persistenceKey?: string;
+}
+
+export type ChorusConfirmClearConversation<TMeta = Record<string, unknown>> = (
+  context: ChorusClearConversationContext<TMeta>,
+) => boolean | void | Promise<boolean | void>;
 export type ChorusSendPath = 'transport' | 'onSend';
 
 export interface ChorusAbortContext<TMeta = Record<string, unknown>> {
@@ -138,6 +149,8 @@ export interface UseAssistantSessionOptions<TMeta = Record<string, unknown>> {
   maxToolIterations?: number;
   shouldContinueToolLoop?: ChorusShouldContinueToolLoop<TMeta>;
   confirmDeleteMessage?: ChorusConfirmDeleteMessage<TMeta>;
+  confirmClearConversation?: ChorusConfirmClearConversation<TMeta>;
+  persistenceKey?: string;
   flushPersistence: () => void;
   resetToInitialMessages?: boolean;
   onClear?: (messages: Message<TMeta>[]) => void;
@@ -157,6 +170,7 @@ export interface UseAssistantSessionResult {
   streamRawError: Error | null;
   streamingMessageId: string | null;
   hasStartedAssistant: boolean;
+  clearConfirmationPending: boolean;
 }
 
 export function useAssistantSession<TMeta = Record<string, unknown>>({
@@ -181,6 +195,8 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
   maxToolIterations = DEFAULT_MAX_TOOL_ITERATIONS,
   shouldContinueToolLoop,
   confirmDeleteMessage,
+  confirmClearConversation,
+  persistenceKey,
   flushPersistence,
   resetToInitialMessages = false,
   onClear,
@@ -199,13 +215,18 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
   const maxToolIterationsRef = useLatestRef(maxToolIterations);
   const shouldContinueToolLoopRef = useLatestRef(shouldContinueToolLoop);
   const confirmDeleteMessageRef = useLatestRef(confirmDeleteMessage);
+  const confirmClearConversationRef = useLatestRef(confirmClearConversation);
+  const persistenceKeyRef = useLatestRef(persistenceKey);
+  const resetToInitialMessagesRef = useLatestRef(resetToInitialMessages);
   const onClearRef = useLatestRef(onClear);
   const fallbackErrorMessageRef = useLatestRef(fallbackErrorMessage);
   const systemPromptRef = useLatestRef(systemPrompt);
   const minAssistantDelayMsRef = useLatestRef(minAssistantDelayMs);
   const seedMessagesRef = useLatestRef(seedMessages);
   const pendingDeleteIdsRef = React.useRef(new Set<string>());
+  const clearConfirmationActiveRef = React.useRef(false);
 
+  const [clearConfirmationPending, setClearConfirmationPending] = React.useState(false);
   const [internalSending, setInternalSendingState] = React.useState(false);
   const [transportBusy, setTransportBusyState] = React.useState(false);
   const [streamError, setStreamError] = React.useState<string | null>(null);
@@ -951,18 +972,64 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     abortActiveAssistant('stop', source);
   }, [abortActiveAssistant, isBusy]);
 
-  const clear = React.useCallback((source: ChorusAbortSource = 'programmatic') => {
+  const commitClear = React.useCallback((source: ChorusAbortSource) => {
     if (isBusy()) abortActiveAssistant('clear', source);
     clearStreamError();
     lastSubmittedTurnRef.current = null;
-    const next = resetToInitialMessages ? seedMessagesRef.current : [];
+    const reset = resetToInitialMessagesRef.current;
+    const next = reset ? seedMessagesRef.current : [];
     updateSessionMessages(() => next, {
       flushPersistence: true,
-      removePersistenceIfEmpty: !resetToInitialMessages && seedMessagesRef.current.length === 0,
+      removePersistenceIfEmpty: !reset && seedMessagesRef.current.length === 0,
       reason: 'clear',
     });
     onClearRef.current?.(next);
-  }, [abortActiveAssistant, clearStreamError, isBusy, onClearRef, resetToInitialMessages, seedMessagesRef, updateSessionMessages]);
+  }, [abortActiveAssistant, clearStreamError, isBusy, onClearRef, resetToInitialMessagesRef, seedMessagesRef, updateSessionMessages]);
+
+  const clear = React.useCallback((source: ChorusAbortSource = 'programmatic') => {
+    if (clearConfirmationActiveRef.current) return;
+
+    const confirm = confirmClearConversationRef.current;
+    if (!confirm) {
+      commitClear(source);
+      return;
+    }
+
+    const persistenceKeyForContext = persistenceKeyRef.current;
+    const context: ChorusClearConversationContext<TMeta> = {
+      messages: messagesRef.current.slice(),
+      resetToInitialMessages: resetToInitialMessagesRef.current,
+      source,
+      ...(persistenceKeyForContext ? { persistenceKey: persistenceKeyForContext } : {}),
+    };
+
+    let confirmation: boolean | void | Promise<boolean | void>;
+    try {
+      confirmation = confirm(context);
+    } catch (error) {
+      warnObserverError('confirmClearConversation', error);
+      return;
+    }
+
+    if (isPromiseLike<boolean | void>(confirmation)) {
+      clearConfirmationActiveRef.current = true;
+      setClearConfirmationPending(true);
+      Promise.resolve(confirmation)
+        .then(confirmed => {
+          if (confirmed === false) return;
+          commitClear(source);
+        })
+        .catch(error => warnObserverError('confirmClearConversation', error))
+        .finally(() => {
+          clearConfirmationActiveRef.current = false;
+          setClearConfirmationPending(false);
+        });
+      return;
+    }
+
+    if (confirmation === false) return;
+    commitClear(source);
+  }, [commitClear, confirmClearConversationRef, messagesRef, persistenceKeyRef, resetToInitialMessagesRef]);
 
   const handleEdit = React.useCallback((id: string, newText: string) => {
     if (isBusy()) return;
@@ -1046,5 +1113,6 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     streamRawError,
     streamingMessageId,
     hasStartedAssistant: hasStartedAssistantRef.current,
+    clearConfirmationPending,
   };
 }

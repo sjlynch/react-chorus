@@ -8,14 +8,14 @@ import type { Transport } from './hooks/useChorusStream';
 import { useChorusPersistence, type DeserializeMessages, type SerializeMessages } from './hooks/useChorusPersistence';
 import { useChorusMessages, type ChorusMessagesChangeContext } from './hooks/useChorusMessages';
 import { useAssistantSession } from './hooks/useAssistantSession';
-import type { ChorusAbortContext, ChorusAbortReason, ChorusAbortSource, ChorusConfirmDeleteMessage, ChorusDeleteMessageContext, ChorusFinishContext, ChorusOnAbort, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusSendHelpers, ChorusSendPath, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolLoopContext, ChorusToolRegistry } from './hooks/useAssistantSession';
+import type { ChorusAbortContext, ChorusAbortReason, ChorusAbortSource, ChorusClearConversationContext, ChorusConfirmClearConversation, ChorusConfirmDeleteMessage, ChorusDeleteMessageContext, ChorusFinishContext, ChorusOnAbort, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusSendHelpers, ChorusSendPath, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolLoopContext, ChorusToolRegistry } from './hooks/useAssistantSession';
 import type { Connector } from './connectors/connectors';
 import type { MarkdownSanitizer } from './components/Markdown';
 import { isChorusDevMode } from './utils/devMode';
 
 export type { Transport };
 export type { Connector };
-export type { ChorusAbortContext, ChorusAbortReason, ChorusAbortSource, ChorusConfirmDeleteMessage, ChorusDeleteMessageContext, ChorusFinishContext, ChorusMessagesChangeContext, ChorusOnAbort, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusSendHelpers, ChorusSendPath, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolLoopContext, ChorusToolRegistry };
+export type { ChorusAbortContext, ChorusAbortReason, ChorusAbortSource, ChorusClearConversationContext, ChorusConfirmClearConversation, ChorusConfirmDeleteMessage, ChorusDeleteMessageContext, ChorusFinishContext, ChorusMessagesChangeContext, ChorusOnAbort, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusSendHelpers, ChorusSendPath, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolLoopContext, ChorusToolRegistry };
 
 const DEFAULT_MIN_ASSISTANT_DELAY_MS = 300;
 const DEFAULT_PERSISTENCE_WRITE_DEBOUNCE_MS = 80;
@@ -38,6 +38,8 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
   connector?: Connector | ConnectorName;
   /** Optional gate for built-in message deletes. Return or resolve false to cancel. */
   confirmDeleteMessage?: ChorusConfirmDeleteMessage<TMeta>;
+  /** Optional gate for the built-in clear/reset action. Return or resolve false to cancel before persistence is touched. While an async confirmation is pending, the clear button is disabled and duplicate clears are ignored. */
+  confirmClearConversation?: ChorusConfirmClearConversation<TMeta>;
   /** Opt in to an automatic tool-execution → model-continuation loop on the transport path. */
   autoContinueTools?: boolean;
   /** Maximum automatic tool iterations when autoContinueTools is enabled. Defaults to 4; pass Infinity to explicitly disable the safety cap. */
@@ -130,6 +132,7 @@ function ChorusInner<TMeta = Record<string, unknown>>({
   codeBlockTheme = 'dark',
   connector,
   confirmDeleteMessage,
+  confirmClearConversation,
   autoContinueTools,
   maxToolIterations,
   shouldContinueToolLoop,
@@ -242,6 +245,21 @@ function ChorusInner<TMeta = Record<string, unknown>>({
     }
   }, [messages, initialMessages, onChange, value, persistenceKey, connector, transport, onSend, sendingProp]);
 
+  const resetComposer = React.useCallback(() => {
+    setDraft('');
+    setComposerResetKey(key => key + 1);
+  }, []);
+
+  const onClearRef = React.useRef(onClear);
+  React.useEffect(() => {
+    onClearRef.current = onClear;
+  }, [onClear]);
+
+  const handleClearCommit = React.useCallback((next: Message<TMeta>[]) => {
+    resetComposer();
+    onClearRef.current?.(next);
+  }, [resetComposer]);
+
   const session = useAssistantSession<TMeta>({
     messages: msgs,
     updateMessages: updateMsgs,
@@ -264,9 +282,11 @@ function ChorusInner<TMeta = Record<string, unknown>>({
     maxToolIterations,
     shouldContinueToolLoop,
     confirmDeleteMessage,
+    confirmClearConversation,
+    persistenceKey: builtInPersistenceKey || undefined,
     flushPersistence: persisted.flush,
     resetToInitialMessages,
-    onClear,
+    onClear: handleClearCommit,
   });
 
   const visualSending = sendingProp ?? session.sending;
@@ -278,10 +298,6 @@ function ChorusInner<TMeta = Record<string, unknown>>({
   const writesDisabled = disabled || readOnly || persistenceLoading;
   const composerDisabled = disabled || persistenceLoading;
   const resolvedDisabledReason = persistenceLoading ? disabledReason ?? 'Loading saved conversation…' : disabledReason;
-  const resetComposer = React.useCallback(() => {
-    setDraft('');
-    setComposerResetKey(key => key + 1);
-  }, []);
 
   const handleInputSend = React.useCallback((attachments: Attachment[] = []) => {
     if (writesDisabled) return false;
@@ -295,10 +311,9 @@ function ChorusInner<TMeta = Record<string, unknown>>({
   }, [session]);
 
   const handleClear = React.useCallback(() => {
-    if (writesDisabled) return;
-    resetComposer();
+    if (writesDisabled || session.clearConfirmationPending) return;
     session.clear('user');
-  }, [resetComposer, session, writesDisabled]);
+  }, [session, writesDisabled]);
 
   const handleSuggestedPrompt = React.useCallback((prompt: string) => {
     if (writesDisabled) return;
@@ -328,8 +343,7 @@ function ChorusInner<TMeta = Record<string, unknown>>({
       session.stop('programmatic');
     },
     clear() {
-      if (writesDisabled) return;
-      resetComposer();
+      if (writesDisabled || session.clearConfirmationPending) return;
       session.clear('programmatic');
     },
     focus() {
@@ -347,7 +361,7 @@ function ChorusInner<TMeta = Record<string, unknown>>({
       target.scrollIntoView({ block: 'nearest' });
       return true;
     },
-  }), [messagesRef, resetComposer, session, writesDisabled]);
+  }), [messagesRef, session, writesDisabled]);
 
   return (
     <div
@@ -388,7 +402,7 @@ function ChorusInner<TMeta = Record<string, unknown>>({
       />
       {showClearButton && (
         <div className="chorus-clear-row">
-          <button type="button" className="chorus-clear-btn" onClick={handleClear} disabled={writesDisabled || (!session.sending && msgs.length === 0)}>
+          <button type="button" className="chorus-clear-btn" onClick={handleClear} disabled={writesDisabled || session.clearConfirmationPending || (!session.sending && msgs.length === 0)}>
             {clearLabel}
           </button>
         </div>
