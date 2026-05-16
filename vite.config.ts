@@ -78,6 +78,7 @@ export default defineConfig({
         'react-chorus-headless': path.resolve(__dirname, 'src/headless.ts'),
         'react-chorus-transport': path.resolve(__dirname, 'src/transport.ts'),
         'provider-requests': path.resolve(__dirname, 'src/providerRequests.ts'),
+        'react-chorus-server': path.resolve(__dirname, 'src/server.ts'),
         // Private facades (not listed in package.json exports) keep root named
         // imports measurable and independently tree-shakeable in consumer builds.
         'react-chorus-use-chorus-stream': path.resolve(__dirname, 'src/hooks/useChorusStream.ts'),

@@ -137,6 +137,11 @@ async function verifyReadmeLibraryMeasurements(measurements) {
       pattern: /\| `react-chorus\/provider-requests` \| ([\d.]+ kB) \| ([\d.]+ kB) \|/,
     },
     {
+      key: 'server',
+      label: 'react-chorus/server',
+      pattern: /\| `react-chorus\/server` \| ([\d.]+ kB) \| ([\d.]+ kB) \|/,
+    },
+    {
       key: 'highlight',
       label: 'lazy highlight.js runtime',
       pattern: /\| Lazy `highlight\.js` runtime \| ([\d.]+ kB) \| ([\d.]+ kB) \|/,
@@ -286,6 +291,8 @@ async function verifyEntrypointSmoke() {
     { label: 'transport CJS', file: 'react-chorus-transport.cjs', kind: 'cjs' },
     { label: 'provider-requests ESM', file: 'provider-requests.es.js', kind: 'esm' },
     { label: 'provider-requests CJS', file: 'provider-requests.cjs', kind: 'cjs' },
+    { label: 'server ESM', file: 'react-chorus-server.es.js', kind: 'esm' },
+    { label: 'server CJS', file: 'react-chorus-server.cjs', kind: 'cjs' },
   ];
 
   for (const { label, file, kind } of entrypoints) {
@@ -317,6 +324,7 @@ async function writeConsumerEntries(entryDir) {
   await writeFile(path.join(entryDir, 'root-conversation-list.js'), "import { ConversationList } from 'react-chorus';\nconsole.log(ConversationList);\n");
   await writeFile(path.join(entryDir, 'transport.js'), "import { createFetchSSETransport, createWebSocketTransport } from 'react-chorus/transport';\nconsole.log(createFetchSSETransport, createWebSocketTransport);\n");
   await writeFile(path.join(entryDir, 'provider-requests.js'), "import { toOpenAIChatCompletionsBody, toAnthropicMessagesBody, toGeminiGenerateContentBody } from 'react-chorus/provider-requests';\nconsole.log(toOpenAIChatCompletionsBody, toAnthropicMessagesBody, toGeminiGenerateContentBody);\n");
+  await writeFile(path.join(entryDir, 'server.js'), "import { sseHeaders, encodeSSEEvent, encodeSSEDone, encodeSSEError } from 'react-chorus/server';\nconsole.log(sseHeaders, encodeSSEEvent, encodeSSEDone, encodeSSEError);\n");
 }
 
 function normalizeRollupOutput(result) {
@@ -420,6 +428,7 @@ async function buildConsumerBundle() {
           rootConversationList: path.join(entryDir, 'root-conversation-list.js'),
           transport: path.join(entryDir, 'transport.js'),
           providerRequests: path.join(entryDir, 'provider-requests.js'),
+          server: path.join(entryDir, 'server.js'),
         },
         external: isReactPeerDependency,
         output: {
@@ -447,6 +456,7 @@ async function verifyConsumerBundleBudgets() {
     { label: 'root ConversationList import initial JS', entry: 'rootConversationList', maxSize: 12 * KiB, maxGzip: 5 * KiB },
     { label: 'transport subpath initial JS', entry: 'transport', maxSize: 8 * KiB, maxGzip: 3 * KiB },
     { label: 'provider-requests subpath initial JS', entry: 'providerRequests', maxSize: 16 * KiB, maxGzip: 6 * KiB },
+    { label: 'server subpath initial JS', entry: 'server', maxSize: 4 * KiB, maxGzip: 2 * KiB },
   ];
 
   const initialGraphs = new Map();
@@ -518,6 +528,12 @@ async function verifyConsumerBundleBudgets() {
     initialGraphs.get('providerRequests') ?? [],
     transportOnlyForbiddenPatterns,
     'keep server-safe provider request helpers free of React/UI/Markdown dependencies.',
+  );
+  verifyGraphExcludes(
+    'server subpath',
+    initialGraphs.get('server') ?? [],
+    transportOnlyForbiddenPatterns,
+    'keep server-safe SSE framing helpers free of React/UI/Markdown dependencies.',
   );
 
   const highlightChunks = chunks.filter(chunk => chunkHasModule(chunk, highlightRuntimePattern));

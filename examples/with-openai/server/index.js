@@ -1,6 +1,7 @@
 import express from 'express';
 import OpenAI from 'openai';
 import { toOpenAIChatCompletionsBody } from 'react-chorus/provider-requests';
+import { formatSSEDone, formatSSEError, formatSSEEvent, sseHeaders } from 'react-chorus/server';
 
 const app = express();
 const openai = new OpenAI(); // reads OPENAI_API_KEY from environment; keep it server-side
@@ -12,10 +13,7 @@ app.post('/api/chat', async (req, res) => {
   const controller = new AbortController();
   req.on('close', () => controller.abort());
 
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no');
+  res.writeHead(200, sseHeaders);
 
   try {
     const stream = await openai.chat.completions.create(
@@ -24,16 +22,15 @@ app.post('/api/chat', async (req, res) => {
     );
 
     for await (const chunk of stream) {
-      res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+      res.write(formatSSEEvent(chunk));
     }
 
     if (!controller.signal.aborted) {
-      res.write('data: [DONE]\n\n');
+      res.write(formatSSEDone());
     }
   } catch (err) {
     if (!controller.signal.aborted) {
-      const message = err instanceof Error ? err.message : String(err);
-      res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
+      res.write(formatSSEError(err));
     }
   } finally {
     res.end();

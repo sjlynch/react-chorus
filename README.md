@@ -191,26 +191,11 @@ For a production Next.js app, keep `OPENAI_API_KEY` on the server and expose an 
 import OpenAI from 'openai';
 import type { ChatCompletionCreateParamsStreaming } from 'openai/resources/chat/completions';
 import { toOpenAIChatCompletionsBody } from 'react-chorus/provider-requests';
+import { encodeSSEDone, encodeSSEError, encodeSSEEvent, sseHeaders } from 'react-chorus/server';
 import type { Message } from 'react-chorus';
 
 export const runtime = 'nodejs'; // required when using the official OpenAI Node client
 export const maxDuration = 60; // optional on Vercel; choose a value your plan allows
-
-const encoder = new TextEncoder();
-
-const sseHeaders = {
-  'Content-Type': 'text/event-stream; charset=utf-8',
-  'Cache-Control': 'no-cache, no-transform',
-  'X-Accel-Buffering': 'no',
-};
-
-function encodeSSE(data: unknown) {
-  return encoder.encode(`data: ${typeof data === 'string' ? data : JSON.stringify(data)}\n\n`);
-}
-
-function getErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
-}
 
 export async function POST(request: Request) {
   const stream = new ReadableStream<Uint8Array>({
@@ -230,13 +215,13 @@ export async function POST(request: Request) {
         const upstream = await openai.chat.completions.create(completionBody, { signal: request.signal });
 
         for await (const chunk of upstream) {
-          controller.enqueue(encodeSSE(chunk));
+          controller.enqueue(encodeSSEEvent(chunk));
         }
 
-        controller.enqueue(encodeSSE('[DONE]'));
+        controller.enqueue(encodeSSEDone());
       } catch (error) {
         if (!request.signal.aborted) {
-          controller.enqueue(encodeSSE({ error: getErrorMessage(error) }));
+          controller.enqueue(encodeSSEError(error));
         }
       } finally {
         controller.close();
@@ -248,7 +233,7 @@ export async function POST(request: Request) {
 }
 ```
 
-The route maps Chorus `history` with `toOpenAIChatCompletionsBody`, re-emits every OpenAI chunk as `data: <json>\n\n`, explicitly forwards `data: [DONE]\n\n`, and sends thrown failures as `data: {"error":"..."}\n\n` so `connector="openai"` can surface them through `onError` / `errorMessage`.
+The route maps Chorus `history` with `toOpenAIChatCompletionsBody` and uses `react-chorus/server` helpers to handle the wire format: `sseHeaders` sets the correct `text/event-stream` / `no-transform` / `X-Accel-Buffering: no` headers, `encodeSSEEvent(chunk)` re-emits every OpenAI chunk as `data: <json>\n\n`, `encodeSSEDone()` forwards the `[DONE]` sentinel, and `encodeSSEError(error)` writes the `{ error: "..." }` envelope so `connector="openai"` can surface failures through `onError` / `errorMessage`. The helpers also split multi-line string payloads into one `data:` line per line per the SSE spec, so reasoning traces and other multi-line strings are framed correctly.
 
 Runtime and serverless notes:
 
@@ -263,6 +248,7 @@ Runtime and serverless notes:
 import express from 'express';
 import OpenAI from 'openai';
 import { toOpenAIChatCompletionsBody } from 'react-chorus/provider-requests';
+import { formatSSEDone, formatSSEError, formatSSEEvent, sseHeaders } from 'react-chorus/server';
 
 const app = express();
 const openai = new OpenAI(); // reads OPENAI_API_KEY from env; keep this server-side
@@ -272,9 +258,7 @@ app.use(express.json({ limit: '10mb' })); // data URL image attachments can be l
 app.post('/api/chat', async (req, res) => {
   const history = Array.isArray(req.body?.history) ? req.body.history : [];
 
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('X-Accel-Buffering', 'no'); // avoid proxy buffering for SSE
+  res.writeHead(200, sseHeaders);
 
   try {
     const stream = await openai.chat.completions.create(
@@ -282,13 +266,12 @@ app.post('/api/chat', async (req, res) => {
     );
 
     for await (const chunk of stream) {
-      res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+      res.write(formatSSEEvent(chunk));
     }
 
-    res.write('data: [DONE]\n\n');
+    res.write(formatSSEDone());
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
+    res.write(formatSSEError(err));
   } finally {
     res.end();
   }
@@ -556,6 +539,7 @@ Example backend proxy (Express + `@google/generative-ai`):
 ```js
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { toGeminiGenerateContentBody } from 'react-chorus/provider-requests';
+import { formatSSEError, formatSSEEvent, sseHeaders } from 'react-chorus/server';
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY); // keep this server-side
 
@@ -563,15 +547,14 @@ app.post('/api/chat', async (req, res) => {
   const history = Array.isArray(req.body?.history) ? req.body.history : [];
   const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
-  res.setHeader('Content-Type', 'text/event-stream');
+  res.writeHead(200, sseHeaders);
   try {
     const result = await model.generateContentStream(toGeminiGenerateContentBody(history));
     for await (const chunk of result.stream) {
-      res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+      res.write(formatSSEEvent(chunk));
     }
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
+    res.write(formatSSEError(err));
   } finally {
     res.end();
   }
@@ -699,6 +682,7 @@ react-chorus keeps React/ReactDOM as peer dependencies and externalizes runtime 
 | `react-chorus` (`ConversationList`) | 5.4 kB | 1.9 kB | Conversation sidebar component only; no Markdown/icon graph. |
 | `react-chorus/transport` | 4.3 kB | 1.9 kB | Transport factories only; no React/UI/Markdown runtime. |
 | `react-chorus/provider-requests` | 8.2 kB | 2.4 kB | Provider request mappers only; no React/UI/Markdown runtime. |
+| `react-chorus/server` | 0.6 kB | 0.4 kB | SSE framing helpers for proxy routes (headers, encode/format, [DONE], error envelope); no React/UI runtime. |
 | Lazy `highlight.js` runtime | 891.4 kB | 295.9 kB | Async code-fence chunk, never part of initial JS. |
 
 `highlight.js` is only fetched the first time a fenced code block (` ``` ` or `~~~`) appears in rendered text. The matching GitHub dark/light token-color stylesheet is also injected on demand based on `codeBlockTheme`; code renders immediately as plain text and is re-rendered with syntax highlighting once the chunk arrives. While an assistant message is actively streaming, Chorus renders that growing message as React-escaped plain text and switches to full Markdown parsing/sanitization when the stream finalizes.

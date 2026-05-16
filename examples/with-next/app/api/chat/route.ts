@@ -1,26 +1,11 @@
 import OpenAI from 'openai';
 import type { ChatCompletionCreateParamsStreaming } from 'openai/resources/chat/completions';
 import { toOpenAIChatCompletionsBody } from 'react-chorus/provider-requests';
+import { encodeSSEDone, encodeSSEError, encodeSSEEvent, sseHeaders } from 'react-chorus/server';
 import type { Message } from 'react-chorus';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
-
-const encoder = new TextEncoder();
-
-const sseHeaders = {
-  'Content-Type': 'text/event-stream; charset=utf-8',
-  'Cache-Control': 'no-cache, no-transform',
-  'X-Accel-Buffering': 'no',
-};
-
-function encodeSSE(data: unknown) {
-  return encoder.encode(`data: ${typeof data === 'string' ? data : JSON.stringify(data)}\n\n`);
-}
-
-function getErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
-}
 
 export async function POST(request: Request) {
   const stream = new ReadableStream<Uint8Array>({
@@ -43,13 +28,13 @@ export async function POST(request: Request) {
         const upstream = await openai.chat.completions.create(completionBody, { signal: request.signal });
 
         for await (const chunk of upstream) {
-          controller.enqueue(encodeSSE(chunk));
+          controller.enqueue(encodeSSEEvent(chunk));
         }
 
-        controller.enqueue(encodeSSE('[DONE]'));
+        controller.enqueue(encodeSSEDone());
       } catch (error) {
         if (!request.signal.aborted) {
-          controller.enqueue(encodeSSE({ error: getErrorMessage(error) }));
+          controller.enqueue(encodeSSEError(error));
         }
       } finally {
         controller.close();
