@@ -424,7 +424,7 @@ These helpers are also re-exported from `react-chorus` for browser apps; the `re
 | `toOpenAIChatCompletionsBody(history, opts)` / `formatOpenAIChatCompletionsBody(opts)` | `{ model, messages, stream }` | Maps `system`/`user`/`assistant`, user image attachments to `image_url`, unsupported attachments to text notes, and `tool` messages with `metadata.openai.toolCallId` (or `metadata.tool_call_id`) to OpenAI `role: 'tool'`. Without a provider tool id, tool results become safe system context instead of invalid OpenAI messages. |
 | `toOpenAIResponsesBody(history, opts)` / `formatOpenAIResponsesBody(opts)` | `{ model, input, stream }` | Uses Responses `input_text` / `input_image` / `output_text` items and `function_call_output` when an OpenAI call id is present in metadata. |
 | `toAnthropicMessagesBody(history, opts)` / `formatAnthropicMessagesBody(opts)` | `{ model, max_tokens, system, messages, stream }` | Joins Chorus `system` messages into Anthropic's top-level `system`, maps data-URL images to base64 image blocks, and maps `metadata.anthropic.toolUseId` (or `metadata.tool_use_id`) to `tool_result`. |
-| `toGeminiGenerateContentBody(history, opts)` / `formatGeminiGenerateContentBody(opts)` | `{ systemInstruction, contents, ...opts }` | Maps `system` to `systemInstruction`, `assistant` to Gemini `model`, data-URL images to `inlineData`, uploaded file URLs/ids to `fileData`, and Chorus tool outputs to `functionResponse` parts when `toolCall.name` is available. |
+| `toGeminiGenerateContentBody(history, opts)` / `formatGeminiGenerateContentBody(opts)` | `{ systemInstruction, contents, ...opts }` | Maps `system` to `systemInstruction`, `assistant` to Gemini `model`, data-URL images to `inlineData`, uploaded file URLs/ids to `fileData`, and Chorus tool messages with `toolCall.name` to model `functionCall` parts followed by user `functionResponse` parts. |
 
 All helpers preserve extra provider options you pass (for example `model`, `max_tokens`, `generationConfig`, `tools`) and default OpenAI/Anthropic `stream` to `true`. They insert explicit text fallbacks for unsupported attachments so request mapping failures are visible to the model instead of silently dropping context. Override that text with `unsupportedAttachmentText` when needed.
 
@@ -691,14 +691,14 @@ react-chorus keeps React/ReactDOM as peer dependencies and externalizes runtime 
 
 | Entry | Initial JS | gzip | Notes |
 |-------|------------|------|-------|
-| `react-chorus` (`<Chorus>`) | 142.1 kB | 48.8 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
-| `react-chorus/headless` | 142.4 kB | 49.0 kB | Headless defaults, same behavior surface. |
-| `react-chorus` (`useChorusStream`) | 29.5 kB | 9.9 kB | Root hook import; CI fails if it pulls UI, Markdown, or icon dependencies. |
-| `react-chorus` (`Markdown`) | 73.1 kB | 24.8 kB | Standalone Markdown renderer; includes Markdown parsing/sanitization, not chat icons. |
-| `react-chorus` (`ChatWindow`) | 96.7 kB | 33.1 kB | Transcript renderer with Markdown and message action icons, without the composer/widget shell. |
-| `react-chorus` (`ConversationList`) | 4.5 kB | 1.6 kB | Conversation sidebar component only; no Markdown/icon graph. |
-| `react-chorus/transport` | 2.0 kB | 1.1 kB | Transport factories only; no React/UI/Markdown runtime. |
-| `react-chorus/provider-requests` | 7.4 kB | 2.2 kB | Provider request mappers only; no React/UI/Markdown runtime. |
+| `react-chorus` (`<Chorus>`) | 148.1 kB | 50.7 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
+| `react-chorus/headless` | 148.4 kB | 50.9 kB | Headless defaults, same behavior surface. |
+| `react-chorus` (`useChorusStream`) | 31.9 kB | 10.5 kB | Root hook import; CI fails if it pulls UI, Markdown, or icon dependencies. |
+| `react-chorus` (`Markdown`) | 74.2 kB | 25.1 kB | Standalone Markdown renderer; includes Markdown parsing/sanitization, not chat icons. |
+| `react-chorus` (`ChatWindow`) | 99.1 kB | 33.9 kB | Transcript renderer with Markdown and message action icons, without the composer/widget shell. |
+| `react-chorus` (`ConversationList`) | 5.6 kB | 2.0 kB | Conversation sidebar component only; no Markdown/icon graph. |
+| `react-chorus/transport` | 4.3 kB | 1.8 kB | Transport factories only; no React/UI/Markdown runtime. |
+| `react-chorus/provider-requests` | 8.2 kB | 2.4 kB | Provider request mappers only; no React/UI/Markdown runtime. |
 | Lazy `highlight.js` runtime | 891.4 kB | 295.9 kB | Async code-fence chunk, never part of initial JS. |
 
 `highlight.js` is only fetched the first time a fenced code block (` ``` ` or `~~~`) appears in rendered text. The matching GitHub dark/light token-color stylesheet is also injected on demand based on `codeBlockTheme`; code renders immediately as plain text and is re-rendered with syntax highlighting once the chunk arrives. While an assistant message is actively streaming, Chorus renders that growing message as React-escaped plain text and switches to full Markdown parsing/sanitization when the stream finalizes.
@@ -1316,7 +1316,7 @@ Chorus displays tool steps as `role: 'tool'` with `message.toolCall`, but those 
 }
 ```
 
-The request helpers use those IDs for OpenAI `tool_call_id` / Responses `call_id` and Anthropic `tool_result.tool_use_id`. They also synthesize the provider-required assistant tool-call records (`assistant.tool_calls`, Responses `function_call`, Anthropic `tool_use`) before the tool result. When an ID is missing, they convert the tool result to safe text context instead of emitting an invalid provider-specific tool message. Gemini function responses use `toolCall.name` and the output payload.
+The request helpers use those IDs for OpenAI `tool_call_id` / Responses `call_id` and Anthropic `tool_result.tool_use_id`. They also synthesize the provider-required assistant tool-call records (`assistant.tool_calls`, Responses `function_call`, Anthropic `tool_use`) before the tool result. When an ID is missing, they convert the tool result to safe text context instead of emitting an invalid provider-specific tool message. Gemini uses `toolCall.name`/`input` to reconstruct model `functionCall` parts before the matching `functionResponse` output payload, grouping consecutive tool messages into one tool exchange.
 
 ## Tool calls and agent steps
 
