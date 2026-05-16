@@ -271,6 +271,8 @@ app.use(express.json({ limit: '10mb' })); // data URL image attachments can be l
 
 app.post('/api/chat', async (req, res) => {
   const history = Array.isArray(req.body?.history) ? req.body.history : [];
+  const controller = new AbortController();
+  req.on('close', () => controller.abort());
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -279,16 +281,21 @@ app.post('/api/chat', async (req, res) => {
   try {
     const stream = await openai.chat.completions.create(
       toOpenAIChatCompletionsBody(history, { model: 'gpt-4o-mini' }),
+      { signal: controller.signal },
     );
 
     for await (const chunk of stream) {
       res.write(`data: ${JSON.stringify(chunk)}\n\n`);
     }
 
-    res.write('data: [DONE]\n\n');
+    if (!controller.signal.aborted) {
+      res.write('data: [DONE]\n\n');
+    }
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
+    if (!controller.signal.aborted) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
+    }
   } finally {
     res.end();
   }
@@ -296,6 +303,8 @@ app.post('/api/chat', async (req, res) => {
 
 app.listen(3001);
 ```
+
+Forwarding the Express connection close into the provider request matters: when a user clicks **Stop**, Chorus aborts the browser fetch and closes the SSE connection. Without the `AbortController`, the upstream model stream can keep running, billing tokens and consuming provider quota after the client is gone.
 
 ## Using the WebSocket transport
 
@@ -562,16 +571,22 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY); // keep this s
 app.post('/api/chat', async (req, res) => {
   const history = Array.isArray(req.body?.history) ? req.body.history : [];
   const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+  const controller = new AbortController();
+  req.on('close', () => controller.abort());
 
   res.setHeader('Content-Type', 'text/event-stream');
   try {
-    const result = await model.generateContentStream(toGeminiGenerateContentBody(history));
+    const result = await model.generateContentStream(toGeminiGenerateContentBody(history), {
+      signal: controller.signal,
+    });
     for await (const chunk of result.stream) {
       res.write(`data: ${JSON.stringify(chunk)}\n\n`);
     }
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
+    if (!controller.signal.aborted) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
+    }
   } finally {
     res.end();
   }
