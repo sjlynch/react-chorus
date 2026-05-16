@@ -1,10 +1,35 @@
 type HLJSApi = typeof import('highlight.js').default;
 export type CodeTheme = 'dark' | 'light';
 
+type LazyImport<T> = () => Promise<T>;
+
+export function createRetryableLazyImport<T>(load: LazyImport<T>): LazyImport<T> {
+  let promise: Promise<T> | null = null;
+
+  return () => {
+    if (!promise) {
+      try {
+        promise = load().catch(error => {
+          promise = null;
+          throw error;
+        });
+      } catch (error) {
+        promise = null;
+        return Promise.reject(error);
+      }
+    }
+    return promise;
+  };
+}
+
 // Module-level singletons — loaded once, shared across all Markdown instances.
 let hljsInstance: HLJSApi | null = null;
-let hljsLoadPromise: Promise<HLJSApi> | null = null;
-const hljsThemeLoadPromises: Partial<Record<CodeTheme, Promise<void>>> = {};
+const loadHljs = createRetryableLazyImport(() => import('highlight.js')
+  .then(m => {
+    hljsInstance = m.default;
+    return hljsInstance;
+  }));
+const hljsThemeLoaders: Partial<Record<CodeTheme, LazyImport<void>>> = {};
 
 export function isHljsLoaded() {
   return hljsInstance !== null;
@@ -12,13 +37,7 @@ export function isHljsLoaded() {
 
 export function getHljs(): Promise<HLJSApi> {
   if (hljsInstance) return Promise.resolve(hljsInstance);
-  if (!hljsLoadPromise) {
-    hljsLoadPromise = import('highlight.js').then(m => {
-      hljsInstance = m.default;
-      return hljsInstance;
-    });
-  }
-  return hljsLoadPromise;
+  return loadHljs();
 }
 
 export function highlightCode(code: string, lang?: string) {
@@ -35,8 +54,9 @@ export function loadHljsTheme(theme: CodeTheme): Promise<void> {
   if (typeof document === 'undefined') return Promise.resolve();
   const styleId = `chorus-hljs-theme-${theme}`;
   if (document.getElementById(styleId)) return Promise.resolve();
-  if (!hljsThemeLoadPromises[theme]) {
-    hljsThemeLoadPromises[theme] = (theme === 'light'
+  let loadTheme = hljsThemeLoaders[theme];
+  if (!loadTheme) {
+    loadTheme = createRetryableLazyImport(() => (theme === 'light'
       ? import('highlight.js/styles/github.css?raw')
       : import('highlight.js/styles/github-dark.css?raw'))
       .then((m: { default: string }) => {
@@ -45,9 +65,10 @@ export function loadHljsTheme(theme: CodeTheme): Promise<void> {
         style.id = styleId;
         style.textContent = scopeHljsThemeCss(m.default, theme);
         document.head.appendChild(style);
-      });
+      }));
+    hljsThemeLoaders[theme] = loadTheme;
   }
-  return hljsThemeLoadPromises[theme];
+  return loadTheme();
 }
 
 const NESTING_AT_RULES = new Set(['media', 'supports', 'container', 'layer', 'scope', 'document', 'starting-style']);

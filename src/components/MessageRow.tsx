@@ -1,249 +1,26 @@
 import React from 'react';
-import { Check, Copy, Pencil, RefreshCw, ThumbsDown, ThumbsUp, Trash2, X } from 'lucide-react';
-import type { Attachment, Message, MessageFeedback, Role } from '../types';
-import { getAttachmentPreviewSource } from '../utils/attachmentPreview';
-import { COPY_FAILED_LABEL, COPY_FEEDBACK_DURATION_MS, canWriteTextToClipboard, writeTextToClipboard } from '../utils/messageCopy';
-import { Markdown, type MarkdownProps, type MarkdownSanitizer } from './Markdown';
+import type { Message, MessageFeedback } from '../types';
+import type { MarkdownSanitizer } from './Markdown';
+import { MessageActions, createCopyAction } from './message-row/actions';
+import { MessageBubbleLayout } from './message-row/bubble';
+import { getInitialMessageFeedback } from './message-row/feedback';
+import { InlineMessageEditor } from './message-row/InlineMessageEditor';
+import { MessageSpeakerLabel } from './message-row/speaker';
+import type { MessageBubbleSlots, MessageCopyResult, MessageMarkdownProps, MessageRenderActions } from './message-row/types';
 
-export type MessageMarkdownProps = Omit<MarkdownProps, 'text' | 'codeTheme' | 'headless' | 'streaming'>;
 export type { MessageFeedback } from '../types';
-export type GetMessageFeedback<TMeta = Record<string, unknown>> = (message: Message<TMeta>) => MessageFeedback | null | undefined;
-
-export function isMessageFeedback(value: unknown): value is MessageFeedback {
-  return value === 'up' || value === 'down';
-}
-
-function getMetadataFeedback<TMeta>(message: Message<TMeta>): MessageFeedback | null {
-  const metadata = message.metadata;
-  if (!metadata || typeof metadata !== 'object') return null;
-
-  const feedback = (metadata as { feedback?: unknown }).feedback;
-  return isMessageFeedback(feedback) ? feedback : null;
-}
-
-export function getInitialMessageFeedback<TMeta>(message: Message<TMeta>, getMessageFeedback?: GetMessageFeedback<TMeta>): MessageFeedback | null {
-  if (getMessageFeedback) {
-    const feedback = getMessageFeedback(message);
-    if (feedback !== undefined) return isMessageFeedback(feedback) ? feedback : null;
-  }
-
-  return getMetadataFeedback(message);
-}
-
-export interface MessageBubbleSlots {
-  before?: React.ReactNode;
-  headerSlot?: React.ReactNode;
-  footerSlot?: React.ReactNode;
-  after?: React.ReactNode;
-}
-
-export interface MessageRenderActions {
-  canEdit: boolean;
-  canRegenerate: boolean;
-  canDelete: boolean;
-  edit?: (newText: string) => void;
-  regenerate?: () => void;
-  delete?: () => void;
-  copy?: () => boolean | void | Promise<boolean | void>;
-  /** Called when the user chooses a different feedback variant. Built-in controls ignore repeat clicks on the selected variant. */
-  feedback?: (variant: MessageFeedback) => void;
-  /** Current persisted feedback selection used to seed the built-in thumb state. */
-  initialFeedback?: MessageFeedback | null;
-  defaultRender: () => React.ReactNode;
-}
-
-interface MessageRenderStateValue {
-  messageId: string;
-  isEditing: boolean;
-  setIsEditing: (editing: boolean) => void;
-}
-
-const MessageRenderStateContext = React.createContext<MessageRenderStateValue | null>(null);
-
-export function MessageRenderStateProvider({ messageId, children }: { messageId: string; children: React.ReactNode }) {
-  const [isEditing, setIsEditing] = React.useState(false);
-  const value = React.useMemo(() => ({ messageId, isEditing, setIsEditing }), [messageId, isEditing]);
-
-  return <MessageRenderStateContext.Provider value={value}>{children}</MessageRenderStateContext.Provider>;
-}
-
-function useActionEditing(messageId: string) {
-  const renderState = React.useContext(MessageRenderStateContext);
-  const [localEditing, setLocalEditing] = React.useState(false);
-
-  if (renderState?.messageId === messageId) {
-    return [renderState.isEditing, renderState.setIsEditing] as const;
-  }
-
-  return [localEditing, setLocalEditing] as const;
-}
-
-export function getMessageSpeakerLabel(role: Role) {
-  switch (role) {
-    case 'assistant':
-      return 'Assistant message';
-    case 'system':
-      return 'System message';
-    case 'tool':
-      return 'Tool message';
-    case 'user':
-    default:
-      return 'User message';
-  }
-}
-
-export function MessageSpeakerLabel({ role }: { role: Role }) {
-  return <span className="chorus-sr-only">{getMessageSpeakerLabel(role)}</span>;
-}
-
-function MessageAttachments({ attachments }: { attachments?: Attachment[] }) {
-  if (!attachments || attachments.length === 0) return null;
-
-  return (
-    <div className="chorus-msg-attachments">
-      {attachments.map((att, i) => {
-        const previewSource = getAttachmentPreviewSource(att);
-        return att.type.startsWith('image/') && previewSource
-          ? <img key={i} src={previewSource} alt={att.name} className="chorus-msg-img" loading="lazy" decoding="async" />
-          : <span key={i} className="chorus-msg-file">{att.name}</span>;
-      })}
-    </div>
-  );
-}
-
-export interface MessageBubbleProps<TMeta = Record<string, unknown>> extends MessageBubbleSlots {
-  message: Message<TMeta>;
-  className?: string;
-  style?: React.CSSProperties;
-  codeTheme?: 'dark' | 'light';
-  headless?: boolean;
-  streaming?: boolean;
-  markdownProps?: MessageMarkdownProps;
-  markdownSanitizer?: MarkdownSanitizer;
-}
-
-function MessageReasoning({ reasoning, codeTheme, headless, streaming = false, markdownProps, markdownSanitizer }: {
-  reasoning?: string;
-  codeTheme: 'dark' | 'light';
-  headless?: boolean;
-  streaming?: boolean;
-  markdownProps?: MessageMarkdownProps;
-  markdownSanitizer?: MarkdownSanitizer;
-}) {
-  if (!reasoning) return null;
-
-  return (
-    <details className="chorus-reasoning">
-      <summary className="chorus-reasoning-summary">Reasoning</summary>
-      <div className="chorus-reasoning-body">
-        <Markdown {...markdownProps} text={reasoning} codeTheme={codeTheme} headless={headless} streaming={streaming} sanitizer={markdownSanitizer ?? markdownProps?.sanitizer} />
-      </div>
-    </details>
-  );
-}
-
-function MessageBubbleLayout<TMeta = Record<string, unknown>>({ message, codeTheme, headless, streaming = false, markdownProps, markdownSanitizer, before, headerSlot, footerSlot, after, children }: {
-  message: Message<TMeta>;
-  codeTheme: 'dark' | 'light';
-  headless?: boolean;
-  streaming?: boolean;
-  markdownProps?: MessageMarkdownProps;
-  markdownSanitizer?: MarkdownSanitizer;
-  children?: React.ReactNode;
-} & MessageBubbleSlots) {
-  const text = message.text ?? '';
-  const hasAttachments = Boolean(message.attachments?.length);
-  const hasBubbleText = text.trim().length > 0;
-  const shouldRenderBubble = hasBubbleText || hasAttachments;
-
-  return (
-    <>
-      {before}
-      <div className="chorus-msg-content">
-        {headerSlot}
-        <MessageReasoning reasoning={message.reasoning} codeTheme={codeTheme} headless={headless} streaming={streaming} markdownProps={markdownProps} markdownSanitizer={markdownSanitizer} />
-        {shouldRenderBubble && (
-          <div className="chorus-bubble">
-            <MessageAttachments attachments={message.attachments} />
-            {hasBubbleText && <Markdown {...markdownProps} text={text} codeTheme={codeTheme} headless={headless} streaming={streaming} sanitizer={markdownSanitizer ?? markdownProps?.sanitizer} />}
-          </div>
-        )}
-        {footerSlot}
-        {children}
-      </div>
-      {after}
-    </>
-  );
-}
-
-export function MessageBubble<TMeta = Record<string, unknown>>({ message, className, style, codeTheme = 'dark', headless, streaming = false, markdownProps, markdownSanitizer, before, headerSlot, footerSlot, after }: MessageBubbleProps<TMeta>) {
-  const renderState = React.useContext(MessageRenderStateContext);
-  if (renderState?.messageId === message.id && renderState.isEditing) return null;
-
-  const cls = ['chorus-msg', `chorus-${message.role}`, className].filter(Boolean).join(' ');
-  return (
-    <div className={cls} style={style} data-chorus-message-id={message.id}>
-      <MessageSpeakerLabel role={message.role} />
-      <MessageBubbleLayout
-        message={message}
-        codeTheme={codeTheme}
-        headless={headless ?? false}
-        streaming={streaming}
-        markdownProps={markdownProps}
-        markdownSanitizer={markdownSanitizer}
-        before={before}
-        headerSlot={headerSlot}
-        footerSlot={footerSlot}
-        after={after}
-      />
-    </div>
-  );
-}
-
-export interface InlineMessageEditorProps {
-  initialText: string;
-  onSubmit: (newText: string) => void;
-  onCancel: () => void;
-}
-
-export function InlineMessageEditor({ initialText, onSubmit, onCancel }: InlineMessageEditorProps) {
-  const [editText, setEditText] = React.useState(initialText);
-  const textareaRef = React.useRef<HTMLTextAreaElement>(null);
-
-  React.useEffect(() => {
-    const el = textareaRef.current;
-    if (!el) return;
-
-    el.focus();
-    el.selectionStart = el.value.length;
-  }, []);
-
-  const submitEdit = () => {
-    const trimmed = editText.trim();
-    if (trimmed) onSubmit(trimmed);
-    else onCancel();
-  };
-
-  return (
-    <div className="chorus-edit-wrap">
-      <textarea
-        ref={textareaRef}
-        className="chorus-edit-textarea"
-        aria-label="Edit message"
-        value={editText}
-        onChange={e => setEditText(e.target.value)}
-        onKeyDown={e => {
-          if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitEdit(); }
-          if (e.key === 'Escape') onCancel();
-        }}
-      />
-      <div className="chorus-edit-actions">
-        <button type="button" className="chorus-action-btn" onClick={submitEdit} title="Save" aria-label="Save"><Check size={14} /></button>
-        <button type="button" className="chorus-action-btn" onClick={onCancel} title="Cancel" aria-label="Cancel"><X size={14} /></button>
-      </div>
-    </div>
-  );
-}
+export { MessageActionControls, MessageActions, actionButtonClass, createCopyAction } from './message-row/actions';
+export type { MessageActionsProps } from './message-row/actions';
+export { MessageAttachments, MessageBubble, MessageBubbleLayout, MessageReasoning } from './message-row/bubble';
+export type { MessageBubbleLayoutProps, MessageBubbleProps, MessageReasoningProps } from './message-row/bubble';
+export { getInitialMessageFeedback, getMetadataFeedback, isMessageFeedback } from './message-row/feedback';
+export type { GetMessageFeedback } from './message-row/feedback';
+export { InlineMessageEditor } from './message-row/InlineMessageEditor';
+export type { InlineMessageEditorProps } from './message-row/InlineMessageEditor';
+export { MessageRenderStateContext, MessageRenderStateProvider, useActionEditing } from './message-row/renderState';
+export type { MessageRenderStateValue } from './message-row/renderState';
+export { getMessageSpeakerLabel, MessageSpeakerLabel } from './message-row/speaker';
+export type { MessageBubbleSlots, MessageCopyResult, MessageMarkdownProps, MessageRenderActions } from './message-row/types';
 
 export interface MessageRowProps<TMeta = Record<string, unknown>> extends MessageBubbleSlots {
   m: Message<TMeta>;
@@ -252,7 +29,11 @@ export interface MessageRowProps<TMeta = Record<string, unknown>> extends Messag
   onEdit?: (id: string, newText: string) => void;
   onRegenerate?: (id: string) => void;
   onDelete?: (id: string) => void;
-  onCopy?: (message: Message<TMeta>) => void;
+  /**
+   * Overrides the built-in message copy action. Return false (or Promise<false>)
+   * to show the Copy failed indicator; return void to keep historical assume-success behavior.
+   */
+  onCopy?: (message: Message<TMeta>) => MessageCopyResult;
   /** Built-in controls call this only when the chosen variant differs from the current selection. */
   onFeedback?: (message: Message<TMeta>, feedback: MessageFeedback) => void;
   /** Seeds the pressed thumb state. When omitted, message.metadata.feedback is used if it is 'up' or 'down'. */
@@ -260,115 +41,6 @@ export interface MessageRowProps<TMeta = Record<string, unknown>> extends Messag
   streaming?: boolean;
   markdownProps?: MessageMarkdownProps;
   markdownSanitizer?: MarkdownSanitizer;
-}
-
-function actionButtonClass(active?: boolean, extraClass?: string) {
-  return ['chorus-action-btn', active && 'chorus-action-btn--active', extraClass].filter(Boolean).join(' ');
-}
-
-function MessageActions({ actions, onEditRequested }: { actions: MessageRenderActions; onEditRequested: () => void }) {
-  const initialFeedback = actions.initialFeedback ?? null;
-  const [selectedFeedback, setSelectedFeedback] = React.useState<MessageFeedback | null>(initialFeedback);
-  const selectedFeedbackRef = React.useRef<MessageFeedback | null>(initialFeedback);
-  const [copyFailed, setCopyFailed] = React.useState(false);
-  const copyFailureTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const hasActions = actions.canEdit || actions.canRegenerate || actions.canDelete || Boolean(actions.copy) || Boolean(actions.feedback);
-
-  React.useEffect(() => {
-    selectedFeedbackRef.current = initialFeedback;
-    setSelectedFeedback(initialFeedback);
-  }, [initialFeedback]);
-
-  React.useEffect(() => () => {
-    if (copyFailureTimerRef.current) clearTimeout(copyFailureTimerRef.current);
-  }, []);
-
-  if (!hasActions) return null;
-
-  const showCopyFailed = () => {
-    if (copyFailureTimerRef.current) clearTimeout(copyFailureTimerRef.current);
-    setCopyFailed(true);
-    copyFailureTimerRef.current = setTimeout(() => {
-      setCopyFailed(false);
-      copyFailureTimerRef.current = null;
-    }, COPY_FEEDBACK_DURATION_MS);
-  };
-
-  const handleCopy = async () => {
-    try {
-      const copied = await actions.copy?.();
-      if (copied === false) showCopyFailed();
-    } catch {
-      showCopyFailed();
-    }
-  };
-
-  const handleFeedback = (variant: MessageFeedback) => {
-    if (selectedFeedbackRef.current === variant) return;
-    selectedFeedbackRef.current = variant;
-    setSelectedFeedback(variant);
-    actions.feedback?.(variant);
-  };
-
-  return (
-    <div className="chorus-actions">
-      {actions.canEdit && actions.edit && (
-        <button type="button" className="chorus-action-btn" onClick={onEditRequested} title="Edit" aria-label="Edit"><Pencil size={13} /></button>
-      )}
-      {actions.canRegenerate && actions.regenerate && (
-        <button type="button" className="chorus-action-btn" onClick={actions.regenerate} title="Regenerate" aria-label="Regenerate"><RefreshCw size={13} /></button>
-      )}
-      {actions.copy && (
-        <button type="button" className={actionButtonClass(copyFailed, copyFailed ? 'chorus-action-btn--copy-failed' : undefined)} onClick={handleCopy} title={copyFailed ? COPY_FAILED_LABEL : 'Copy'} aria-label={copyFailed ? COPY_FAILED_LABEL : 'Copy'}>{copyFailed ? COPY_FAILED_LABEL : <Copy size={13} />}</button>
-      )}
-      {actions.feedback && (
-        <>
-          <button type="button" className={actionButtonClass(selectedFeedback === 'up')} onClick={() => handleFeedback('up')} title="Thumbs up" aria-label="Thumbs up" aria-pressed={selectedFeedback === 'up'}><ThumbsUp size={13} /></button>
-          <button type="button" className={actionButtonClass(selectedFeedback === 'down')} onClick={() => handleFeedback('down')} title="Thumbs down" aria-label="Thumbs down" aria-pressed={selectedFeedback === 'down'}><ThumbsDown size={13} /></button>
-        </>
-      )}
-      {actions.canDelete && actions.delete && (
-        <button type="button" className="chorus-action-btn" onClick={actions.delete} title="Delete" aria-label="Delete"><Trash2 size={13} /></button>
-      )}
-    </div>
-  );
-}
-
-function createCopyAction<TMeta>(message: Message<TMeta>, onCopy?: (message: Message<TMeta>) => void) {
-  if (onCopy) return () => onCopy(message);
-  if (canWriteTextToClipboard()) return () => writeTextToClipboard(message.text ?? '');
-  return undefined;
-}
-
-export function MessageActionControls<TMeta = Record<string, unknown>>({ message, actions }: { message: Message<TMeta>; actions: MessageRenderActions }) {
-  const [editing, setEditing] = useActionEditing(message.id);
-  const hasActions = actions.canEdit || actions.canRegenerate || actions.canDelete || Boolean(actions.copy) || Boolean(actions.feedback);
-
-  if (!hasActions) return null;
-
-  if (editing && actions.edit) {
-    return (
-      <div className={`chorus-msg chorus-${message.role}`} data-chorus-message-id={message.id}>
-        <MessageSpeakerLabel role={message.role} />
-        <InlineMessageEditor
-          initialText={message.text ?? ''}
-          onSubmit={(newText) => {
-            actions.edit?.(newText);
-            setEditing(false);
-          }}
-          onCancel={() => setEditing(false)}
-        />
-      </div>
-    );
-  }
-
-  return (
-    <div className={`chorus-render-actions chorus-${message.role}`}>
-      <div className="chorus-msg-content">
-        <MessageActions actions={actions} onEditRequested={() => setEditing(true)} />
-      </div>
-    </div>
-  );
 }
 
 export function MessageRow<TMeta = Record<string, unknown>>({ m, codeTheme, headless, onEdit, onRegenerate, onDelete, onCopy, onFeedback, initialFeedback, streaming = false, markdownProps, markdownSanitizer, before, headerSlot, footerSlot, after }: MessageRowProps<TMeta>) {

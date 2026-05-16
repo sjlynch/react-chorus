@@ -2,7 +2,28 @@
 
 ## `ChatWindow`
 
-Message list and auto-scroll container. It filters roles via `hiddenRoles` (default hides `system` and `tool`), uses a bottom sentinel, and schedules `scrollIntoView` with `requestAnimationFrame` to avoid scroll jank. It also renders edit/regenerate/delete controls, typing state, retry errors, custom `renderMessage`, and `ToolCallBlock` for visible tool messages.
+Message list and auto-scroll container. It filters roles via `hiddenRoles` (default hides `system` and `tool`), windows visible rows with `maxRenderedMessages`, renders edit/regenerate/delete/copy/feedback controls, typing state, retry errors, custom `renderMessage`, and `ToolCallBlock` for visible tool messages.
+
+Helper map:
+
+- `chat-window/activityKey.ts` — `stringActivityKey` plus attachment/message/visible activity fingerprints for auto-scroll and unread detection.
+- `chat-window/useAutoScroll.ts` — scroll container ref, near-bottom tracking, unread/jump-to-bottom state, and imperative scroll-to-bottom behavior.
+- `chat-window/feedback.ts` — per-message feedback override state and cleanup as messages leave the transcript.
+- `chat-window/rendering.tsx` — default empty-state prompt UI and `renderMessage` root-prop attachment.
+
+## `MessageRow`
+
+Default transcript row orchestrator. The facade preserves the public exports used by `ChatWindow`, `index.ts`, `headless.ts`, and direct subpath imports while delegating presentation, edit state, and action behavior to focused modules.
+
+Submodule map:
+
+- `message-row/types.ts` — shared `MessageBubbleSlots`, `MessageMarkdownProps`, `MessageCopyResult`, and `MessageRenderActions` contracts.
+- `message-row/feedback.ts` — `GetMessageFeedback`, metadata feedback extraction, validation, and initial-feedback resolution.
+- `message-row/renderState.tsx` — render-state context/provider and `useActionEditing` for coordinating custom `MessageBubble` + default action controls.
+- `message-row/speaker.tsx` — screen-reader speaker labels and role-to-label helper.
+- `message-row/bubble.tsx` — attachments, reasoning details, bubble layout, and exported `MessageBubble`.
+- `message-row/InlineMessageEditor.tsx` — inline textarea editor and save/cancel controls.
+- `message-row/actions.tsx` — copy/regenerate/edit/delete/feedback buttons, copy-failed timer state, and copy action creation.
 
 ## `ChatInput`
 
@@ -18,7 +39,7 @@ Attachment internals live in `components/chat-input/`:
 
 ## `Markdown`
 
-Uses a private `Marked` instance, not the global singleton, so host app marked configuration is not mutated. Finalized markdown normalizes incomplete fences, parses once per memo, sanitizes with a provided sanitizer, `DOMPurify.sanitize` when available, or a fallback sanitizer for SSR/no-DOMPurify environments, then adds code-block chrome unless `headless`. While `streaming` is true it skips parsing/highlighting and renders React-escaped plain text with pre-wrap until finalization; `highlight.js` and theme CSS lazy-load only for finalized code fences.
+Public facade only. Internals live in `components/markdown/`: `marked.ts` owns private Marked instances and safe renderer setup, `sanitize.ts` owns DOMPurify/custom sanitizer resolution plus SSR URL/entity safety, `codeBlockChrome.ts` wraps `<pre><code>` blocks, `useCodeCopy.ts` handles delegated copy feedback, and `highlight.ts` triggers lazy highlight.js/theme loading. Finalized markdown normalizes incomplete fences, parses with a memoized parser config, sanitizes when possible (or uses the safe renderer when no sanitizer exists), then adds code-block chrome unless `headless`. While `streaming` is true it skips parsing/highlighting and renders React-escaped plain text with pre-wrap until finalization.
 
 ## `ChorusTheme`
 
@@ -26,7 +47,7 @@ Standalone wrapper that applies palette CSS variables via `styleVarsFromPalette`
 
 ## `MessageBubble`
 
-Exported from `ChatWindow.tsx` for use in `renderMessage` render-props. It wraps the default role class and bubble, renders `message.reasoning` as a collapsed details block, renders `message.attachments` (image previews or file names), and passes text through `Markdown`. The built-in `MessageRow` uses the same attachment/reasoning renderer and adds edit/regenerate/delete actions.
+Exported from `ChatWindow.tsx` for use in `renderMessage` render-props and implemented in `message-row/bubble.tsx`. It wraps the default role class and bubble, renders `message.reasoning` as a collapsed details block, renders `message.attachments` (image previews or file names), and passes text through `Markdown`. The built-in `MessageRow` uses the same attachment/reasoning renderer and adds edit/regenerate/delete/copy/feedback actions.
 
 ## `ToolCallBlock`
 

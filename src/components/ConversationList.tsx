@@ -10,6 +10,15 @@ export interface ConfirmDeleteConversationContext {
 
 export type ConfirmDeleteConversation = (context: ConfirmDeleteConversationContext) => boolean | void | Promise<boolean | void>;
 
+// Keep this local so ConversationList-only imports do not share a dev-mode module with the Chorus widget/session chunks.
+function isChorusDevMode() {
+  try {
+    return typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production';
+  } catch {
+    return false;
+  }
+}
+
 export interface ConversationListProps {
   conversations: ConversationSummary[];
   activeId?: string | null;
@@ -29,6 +38,16 @@ export interface ConversationListProps {
   style?: React.CSSProperties;
   newConversationLabel?: string;
   emptyLabel?: string;
+}
+
+// Keep this local so standalone ConversationList imports do not pull shared
+// hook/widget development-warning chunks into consumer bundles.
+function isChorusDevMode() {
+  try {
+    return typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production';
+  } catch {
+    return false;
+  }
 }
 
 function conversationClasses(active: boolean, pinned: boolean) {

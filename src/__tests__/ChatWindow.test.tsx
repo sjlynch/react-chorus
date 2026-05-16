@@ -73,6 +73,18 @@ describe('ChatWindow', () => {
     expect(containsLoneSurrogate(key)).toBe(false);
   });
 
+  it('changes activity keys for same-length middle edits in long strings', () => {
+    const head = 'h'.repeat(24);
+    const tail = 't'.repeat(24);
+    const original = `${head}${'a'.repeat(52)}${tail}`;
+    const edited = `${head}${'b'.repeat(52)}${tail}`;
+
+    expect(edited).toHaveLength(original.length);
+    expect(Array.from(edited).slice(0, 24).join('')).toBe(Array.from(original).slice(0, 24).join(''));
+    expect(Array.from(edited).slice(-24).join('')).toBe(Array.from(original).slice(-24).join(''));
+    expect(stringActivityKey(edited)).not.toBe(stringActivityKey(original));
+  });
+
   it('exposes the transcript as a polite live log region', () => {
     render(<ChatWindow messages={[USER_MSG, ASST_MSG]} />);
     const transcript = screen.getByRole('log', { name: /chat transcript/i });
@@ -454,6 +466,51 @@ describe('ChatWindow', () => {
       vi.useRealTimers();
       if (originalClipboard) Object.defineProperty(navigator, 'clipboard', originalClipboard);
       else Reflect.deleteProperty(navigator, 'clipboard');
+    }
+  });
+
+  it('shows failed feedback when a custom onCopy returns false', async () => {
+    vi.useFakeTimers();
+    const onCopy = vi.fn(() => false);
+
+    try {
+      render(<ChatWindow messages={[ASST_MSG]} onCopy={onCopy} />);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Copy' }));
+      await act(async () => { await Promise.resolve(); });
+
+      expect(onCopy).toHaveBeenCalledWith(ASST_MSG);
+      expect(screen.getByRole('button', { name: 'Copy failed' })).toHaveTextContent('Copy failed');
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(1200); });
+
+      expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('shows failed feedback when a custom onCopy promise rejects', async () => {
+    vi.useFakeTimers();
+    const onCopy = vi.fn().mockRejectedValue(new Error('custom copy failed'));
+
+    try {
+      render(<ChatWindow messages={[ASST_MSG]} onCopy={onCopy} />);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Copy' }));
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(onCopy).toHaveBeenCalledWith(ASST_MSG);
+      expect(screen.getByRole('button', { name: 'Copy failed' })).toHaveTextContent('Copy failed');
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(1200); });
+
+      expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
     }
   });
 
