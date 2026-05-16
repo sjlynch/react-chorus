@@ -1,6 +1,5 @@
 import React from 'react';
 import type { ConversationSummary } from '../hooks/useConversations';
-import { isChorusDevMode } from '../utils/devMode';
 import { styleVarsFromPalette, type Palette } from './ChorusTheme';
 
 export interface ConfirmDeleteConversationContext {
@@ -30,6 +29,16 @@ export interface ConversationListProps {
   style?: React.CSSProperties;
   newConversationLabel?: string;
   emptyLabel?: string;
+}
+
+// Keep this local so standalone ConversationList imports do not pull shared
+// hook/widget development-warning chunks into consumer bundles.
+function isChorusDevMode() {
+  try {
+    return typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production';
+  } catch {
+    return false;
+  }
 }
 
 function conversationClasses(active: boolean, pinned: boolean) {
