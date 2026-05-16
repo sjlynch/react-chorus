@@ -70,8 +70,14 @@ function isPromiseLike<T>(value: unknown): value is PromiseLike<T> {
     && typeof (value as { then?: unknown }).then === 'function';
 }
 
+function isConversationListDevMode() {
+  return typeof process !== 'undefined'
+    && typeof process.env !== 'undefined'
+    && process.env.NODE_ENV !== 'production';
+}
+
 function warnDeleteConfirmationError(callbackName: string, error: unknown) {
-  if (!isChorusDevMode()) return;
+  if (!isConversationListDevMode()) return;
   console.warn(`[Chorus] \`${callbackName}\` callback threw/rejected; delete was cancelled.`, error);
 }
 
