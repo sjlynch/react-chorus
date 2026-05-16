@@ -691,7 +691,7 @@ react-chorus keeps React/ReactDOM as peer dependencies and externalizes runtime 
 
 | Entry | Initial JS | gzip | Notes |
 |-------|------------|------|-------|
-| `react-chorus` (`<Chorus>`) | 152.4 kB | 52.0 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
+| `react-chorus` (`<Chorus>`) | 152.5 kB | 52.0 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
 | `react-chorus/headless` | 152.8 kB | 52.2 kB | Headless defaults, same behavior surface. |
 | `react-chorus` (`useChorusStream`) | 34.1 kB | 11.2 kB | Root hook import; CI fails if it pulls UI, Markdown, or icon dependencies. |
 | `react-chorus` (`Markdown`) | 74.7 kB | 25.3 kB | Standalone Markdown renderer; includes Markdown parsing/sanitization, not chat icons. |
@@ -750,6 +750,7 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `disabled` | `boolean` | `false` | Disables composer text input, attach/paste/drop ingestion, Send, suggested-prompt fills, retry/clear, and message write actions. If an assistant response is active, Stop remains available so work is not stranded. |
 | `readOnly` | `boolean` | `false` | Keeps transcript read actions such as copy and scrolling available, but prevents compose, attachments, send, edit, regenerate, delete, retry, clear, feedback, and suggested-prompt fills. |
 | `disabledReason` | `string` | — | Explanation shown through the composer placeholder/title and accessible description while `disabled` or `readOnly` is active (for example “Select a conversation first”). |
+| `alwaysShowMessageActions` | `boolean` | `false` | Always render the per-message action buttons (edit/regenerate/copy/feedback/delete) instead of revealing them on hover. Coarse-pointer / `@media (hover: none)` devices get the same always-visible behavior automatically so touch users can discover and tap actions; this prop opts pointer devices in too. |
 | `accept` | `string` | — | Enables attachments and is forwarded to the file-picker `<input accept>`. Paste/drop validation uses the same MIME/extension rules. Omitting the prop hides the attach button and disables paste/drop attachments. |
 | `maxAttachmentBytes` | `number` | — | Reject files larger than this byte limit before reading/uploading them. |
 | `maxAttachments` | `number` | — | Maximum attachments queued in the composer at once. Extra files trigger `onAttachmentError`. |
@@ -1497,6 +1498,8 @@ When neither `renderMessage` nor a custom `MessageBubble` is used, each message 
 `<MessageBubble message={message} />` uses the same `.chorus-msg > .chorus-msg-content > .chorus-bubble` structure, so it preserves the default message width and role alignment when used from `renderMessage`.
 
 Each built-in row and `<MessageBubble>` includes a visually hidden `.chorus-sr-only` speaker label (`User message`, `Assistant message`, `System message`, or `Tool message`) so screen readers announce who spoke without changing the visual layout.
+
+`.chorus-actions` is hover-revealed on pointer devices but switches to always-visible under `@media (hover: none), (pointer: coarse)` so touch users can still discover Copy/Edit/Regenerate/Delete/Feedback. Set `alwaysShowMessageActions` on `<Chorus>` (or apply `.chorus--always-show-actions` to the root yourself) to keep actions visible on hover-capable devices too.
 
 Target these classes in your CSS to restyle without a render prop:
 

@@ -371,6 +371,13 @@ describe('ChatWindow', () => {
     expect(css).toContain('.chorus-msg:hover + .chorus-render-actions .chorus-actions');
   });
 
+  it('keeps message actions visible on coarse pointers / no-hover devices and via the alwaysShowMessageActions opt-in', () => {
+    const css = readFileSync('src/Chorus.css', 'utf8');
+    expect(css).toMatch(/@media\s*\(hover:\s*none\),\s*\(pointer:\s*coarse\)\s*\{[^}]*\.chorus-actions\s*\{[^}]*opacity:\s*1[^}]*pointer-events:\s*auto/);
+    expect(css).toMatch(/\.chorus--always-show-actions\s+\.chorus-actions\s*\{[^}]*opacity:\s*1[^}]*pointer-events:\s*auto/);
+    expect(css).toMatch(/\.chorus-action-btn:focus-visible\s*\{[^}]*outline:/);
+  });
+
   it('calls onDelete with message id when delete button is clicked', async () => {
     const user = userEvent.setup();
     const onDelete = vi.fn();

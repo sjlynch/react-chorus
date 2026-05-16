@@ -32,6 +32,12 @@ export interface ChorusRef<TMeta = Record<string, unknown>> {
 
 export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React.HTMLAttributes<HTMLDivElement>, 'onChange' | 'onError' | 'onCopy' | 'onAbort'> {
   accept?: string;
+  /**
+   * Always render the per-message action buttons (edit/regenerate/copy/feedback/delete)
+   * instead of revealing them on hover. Coarse pointers and `(hover: none)` media
+   * already get this behavior automatically; set this to opt in on pointer devices too.
+   */
+  alwaysShowMessageActions?: boolean;
   /** Accessible/button label for the built-in clear action. */
   clearLabel?: string;
   codeBlockTheme?: 'dark' | 'light';
@@ -125,6 +131,7 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
 
 function ChorusInner<TMeta = Record<string, unknown>>({
   accept,
+  alwaysShowMessageActions = false,
   className,
   clearLabel = 'Clear conversation',
   codeBlockTheme = 'dark',
@@ -353,7 +360,7 @@ function ChorusInner<TMeta = Record<string, unknown>>({
     <div
       {...rest}
       ref={rootRef}
-      className={["chorus", disabled && "chorus--disabled", readOnly && "chorus--readonly", className].filter(Boolean).join(" ")}
+      className={["chorus", disabled && "chorus--disabled", readOnly && "chorus--readonly", alwaysShowMessageActions && "chorus--always-show-actions", className].filter(Boolean).join(" ")}
       style={{ ...paletteVars, ...style }}
       aria-disabled={writesDisabled ? true : rest['aria-disabled']}
     >

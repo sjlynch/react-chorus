@@ -101,6 +101,15 @@ describe('Chorus', () => {
     expect(root.style.getPropertyValue('--chorus-tool-header-bg')).toBe('#777');
   });
 
+  it('adds the chorus--always-show-actions root class when alwaysShowMessageActions is enabled', () => {
+    const { container, rerender } = render(<Chorus />);
+    const root = container.firstElementChild as HTMLElement;
+    expect(root).not.toHaveClass('chorus--always-show-actions');
+
+    rerender(<Chorus alwaysShowMessageActions />);
+    expect(root).toHaveClass('chorus', 'chorus--always-show-actions');
+  });
+
   it('seeds feedback through getMessageFeedback', () => {
     const message: Message<{ storedFeedback: 'down' | null }> = {
       id: 'stored-feedback',
