@@ -994,6 +994,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
   }, [isBusy, messagesRef, streamError, triggerAssistant, updateSessionMessages]);
 
   const handleDelete = React.useCallback((id: string) => {
+    if (isBusy()) return;
     if (pendingDeleteIdsRef.current.has(id)) return;
 
     const currentMessages = messagesRef.current;
@@ -1017,6 +1018,9 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
       Promise.resolve(confirmation)
         .then(confirmed => {
           if (confirmed === false) return;
+          // A send may have started while the confirmation was pending; deleting
+          // the active streaming message (or its context) would orphan pending state.
+          if (isBusy()) return;
           commitDelete();
         })
         .catch(error => warnObserverError('confirmDeleteMessage', error))
@@ -1028,7 +1032,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
 
     if (confirmation === false) return;
     commitDelete();
-  }, [confirmDeleteMessageRef, messagesRef, updateSessionMessages]);
+  }, [confirmDeleteMessageRef, isBusy, messagesRef, updateSessionMessages]);
 
   const streamingMessageId = sending && hasStartedAssistantRef.current ? pendingAssistantIdRef.current : null;
 

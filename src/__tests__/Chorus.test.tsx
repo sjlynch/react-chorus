@@ -2159,6 +2159,113 @@ describe('Chorus', () => {
     expect(setItem).not.toHaveBeenCalled();
   });
 
+  it('hides the built-in Delete action on prior messages while a send is streaming', async () => {
+    const user = userEvent.setup();
+    const initial: Message[] = [
+      { id: 'u1', role: 'user', text: 'prior turn' },
+      { id: 'a1', role: 'assistant', text: 'prior reply' },
+    ];
+    const pending = deferred<void>();
+    const onSend = vi.fn<OnSend>((_text, _messages, helpers) => {
+      helpers.appendAssistant('streaming…');
+      return pending.promise;
+    });
+
+    render(<Chorus messages={initial} onSend={onSend} minAssistantDelayMs={0} />);
+
+    // Delete buttons present in the idle state.
+    expect(screen.getAllByTitle('Delete')).toHaveLength(2);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'next');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByText('streaming…')).toBeInTheDocument();
+
+    // No Delete buttons anywhere while sending.
+    expect(screen.queryAllByTitle('Delete')).toHaveLength(0);
+
+    pending.resolve();
+  });
+
+  it('keeps the streaming assistant message intact when delete is suppressed during a send', async () => {
+    const user = userEvent.setup();
+    let helpers!: OnSendHelpers;
+    const pending = deferred<void>();
+    const onFinish = vi.fn();
+    const onSend = vi.fn<OnSend>((_text, _messages, h) => {
+      helpers = h;
+      h.appendAssistant('partial');
+      return pending.promise;
+    });
+
+    render(<Chorus onSend={onSend} minAssistantDelayMs={0} onFinish={onFinish} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'go');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    // First token rendered into a streaming assistant message; Delete is suppressed.
+    expect(await screen.findByText('partial')).toBeInTheDocument();
+    expect(screen.queryAllByTitle('Delete')).toHaveLength(0);
+
+    // Subsequent chunks still land in the streaming message (no orphaned pending state).
+    act(() => { helpers.appendAssistant(' done'); });
+    act(() => { helpers.finalizeAssistant(); });
+    pending.resolve();
+
+    await waitFor(() => expect(onFinish).toHaveBeenCalledOnce());
+    expect(onFinish.mock.calls[0][0]).toEqual(expect.objectContaining({
+      reason: 'done',
+      message: expect.objectContaining({ role: 'assistant', text: 'partial done' }),
+    }));
+    expect(screen.getByText('partial done')).toBeInTheDocument();
+  });
+
+  it('does not commit an async confirmDeleteMessage that resolves after a send has started', async () => {
+    const user = userEvent.setup();
+    const initial: Message[] = [
+      { id: 'u1', role: 'user', text: 'protect me' },
+      { id: 'a1', role: 'assistant', text: 'i stay' },
+    ];
+    const confirmation = deferred<boolean>();
+    const confirmDeleteMessage = vi.fn(() => confirmation.promise);
+    const sendPending = deferred<void>();
+    const onSend = vi.fn<OnSend>((_text, _messages, helpers) => {
+      helpers.appendAssistant('streaming…');
+      return sendPending.promise;
+    });
+
+    render(
+      <Chorus
+        messages={initial}
+        confirmDeleteMessage={confirmDeleteMessage}
+        onSend={onSend}
+        minAssistantDelayMs={0}
+      />
+    );
+
+    // Open the async confirmation while still idle.
+    await user.click(screen.getAllByTitle('Delete')[0]);
+    await waitFor(() => expect(confirmDeleteMessage).toHaveBeenCalledOnce());
+
+    // Start a send while the confirmation is still pending.
+    await user.type(screen.getByPlaceholderText('Send a message'), 'next');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+    expect(await screen.findByText('streaming…')).toBeInTheDocument();
+
+    // Confirmation resolves true — but the delete must NOT commit, because a send
+    // is in flight and removing prior context would diverge the transcript from
+    // the history that produced the active response.
+    await act(async () => {
+      confirmation.resolve(true);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText('protect me')).toBeInTheDocument();
+    expect(screen.getByText('i stay')).toBeInTheDocument();
+
+    sendPending.resolve();
+  });
+
   it('clears uncontrolled messages from the built-in clear button', async () => {
     const user = userEvent.setup();
 
