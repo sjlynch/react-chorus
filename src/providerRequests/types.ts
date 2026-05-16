@@ -33,28 +33,208 @@ export interface GeminiGenerateContentBodyOptions<TMeta = Record<string, unknown
   [key: string]: unknown;
 }
 
-export type OpenAIChatCompletionsMessage = Record<string, unknown>;
-export type OpenAIResponsesInputItem = Record<string, unknown>;
-export type AnthropicMessage = Record<string, unknown>;
-export type GeminiContent = Record<string, unknown>;
+// ───── OpenAI Chat Completions message shapes ─────
 
-export interface OpenAIChatCompletionsBody extends Record<string, unknown> {
+export interface OpenAIChatCompletionsTextPart {
+  type: 'text';
+  text: string;
+}
+
+export interface OpenAIChatCompletionsImagePart {
+  type: 'image_url';
+  image_url: { url: string; detail?: 'auto' | 'low' | 'high' };
+}
+
+export type OpenAIChatCompletionsUserContentPart =
+  | OpenAIChatCompletionsTextPart
+  | OpenAIChatCompletionsImagePart;
+
+export interface OpenAIChatCompletionsToolCall {
+  id: string;
+  type: 'function';
+  function: { name: string; arguments: string };
+}
+
+export interface OpenAIChatCompletionsSystemMessage {
+  role: 'system';
+  content: string;
+}
+
+export interface OpenAIChatCompletionsUserMessage {
+  role: 'user';
+  content: string | OpenAIChatCompletionsUserContentPart[];
+}
+
+export interface OpenAIChatCompletionsAssistantMessage {
+  role: 'assistant';
+  content: string | null;
+  tool_calls?: OpenAIChatCompletionsToolCall[];
+}
+
+export interface OpenAIChatCompletionsToolMessage {
+  role: 'tool';
+  tool_call_id: string;
+  content: string;
+}
+
+export type OpenAIChatCompletionsMessage =
+  | OpenAIChatCompletionsSystemMessage
+  | OpenAIChatCompletionsUserMessage
+  | OpenAIChatCompletionsAssistantMessage
+  | OpenAIChatCompletionsToolMessage;
+
+// ───── OpenAI Responses API input items ─────
+
+export interface OpenAIResponsesInputTextPart {
+  type: 'input_text';
+  text: string;
+}
+
+export interface OpenAIResponsesOutputTextPart {
+  type: 'output_text';
+  text: string;
+}
+
+export interface OpenAIResponsesInputImagePart {
+  type: 'input_image';
+  image_url: string;
+}
+
+export type OpenAIResponsesInputContentPart =
+  | OpenAIResponsesInputTextPart
+  | OpenAIResponsesInputImagePart;
+
+export interface OpenAIResponsesSystemInputItem {
+  role: 'system';
+  content: OpenAIResponsesInputContentPart[];
+}
+
+export interface OpenAIResponsesUserInputItem {
+  role: 'user';
+  content: OpenAIResponsesInputContentPart[];
+}
+
+export interface OpenAIResponsesAssistantInputItem {
+  role: 'assistant';
+  content: OpenAIResponsesOutputTextPart[];
+}
+
+export interface OpenAIResponsesFunctionCallInputItem {
+  type: 'function_call';
+  call_id: string;
+  name: string;
+  arguments: string;
+}
+
+export interface OpenAIResponsesFunctionCallOutputInputItem {
+  type: 'function_call_output';
+  call_id: string;
+  output: string;
+}
+
+export type OpenAIResponsesInputItem =
+  | OpenAIResponsesSystemInputItem
+  | OpenAIResponsesUserInputItem
+  | OpenAIResponsesAssistantInputItem
+  | OpenAIResponsesFunctionCallInputItem
+  | OpenAIResponsesFunctionCallOutputInputItem;
+
+// ───── Anthropic Messages API block shapes ─────
+
+export interface AnthropicTextBlock {
+  type: 'text';
+  text: string;
+}
+
+export interface AnthropicImageBlock {
+  type: 'image';
+  source: { type: 'base64'; media_type: string; data: string };
+}
+
+export interface AnthropicToolUseBlock {
+  type: 'tool_use';
+  id: string;
+  name: string;
+  input: Record<string, unknown>;
+}
+
+export interface AnthropicToolResultBlock {
+  type: 'tool_result';
+  tool_use_id: string;
+  content: string;
+}
+
+export type AnthropicContentBlock =
+  | AnthropicTextBlock
+  | AnthropicImageBlock
+  | AnthropicToolUseBlock
+  | AnthropicToolResultBlock;
+
+export interface AnthropicMessage {
+  role: 'user' | 'assistant';
+  content: AnthropicContentBlock[];
+}
+
+// ───── Gemini Content / Parts ─────
+
+export interface GeminiTextPart {
+  text: string;
+}
+
+export interface GeminiInlineDataPart {
+  inlineData: { mimeType: string; data: string };
+}
+
+export interface GeminiFileDataPart {
+  fileData: { mimeType: string; fileUri: string };
+}
+
+export interface GeminiFunctionCallPart {
+  functionCall: { name: string; args: Record<string, unknown> };
+}
+
+export interface GeminiFunctionResponsePart {
+  functionResponse: { name: string; response: Record<string, unknown> };
+}
+
+export type GeminiPart =
+  | GeminiTextPart
+  | GeminiInlineDataPart
+  | GeminiFileDataPart
+  | GeminiFunctionCallPart
+  | GeminiFunctionResponsePart;
+
+export interface GeminiContent {
+  role: 'user' | 'model';
+  parts: GeminiPart[];
+}
+
+// ───── Body shapes ─────
+//
+// Body return types use a generic so that fields the caller passes in options
+// (e.g. `model`, `temperature`, `tools`) survive into the returned object's
+// type. This lets the helper output be assigned to or `satisfies`-checked
+// against the official SDK request types without `as unknown as` bridges.
+
+type StripChorusOptions<T> = Omit<T, 'unsupportedAttachmentText' | 'stream'>;
+
+export type OpenAIChatCompletionsBody<TOptions = object> = StripChorusOptions<TOptions> & {
   messages: OpenAIChatCompletionsMessage[];
   stream: boolean;
-}
+};
 
-export interface OpenAIResponsesBody extends Record<string, unknown> {
+export type OpenAIResponsesBody<TOptions = object> = StripChorusOptions<TOptions> & {
   input: OpenAIResponsesInputItem[];
   stream: boolean;
-}
+};
 
-export interface AnthropicMessagesBody extends Record<string, unknown> {
+export type AnthropicMessagesBody<TOptions = object> = StripChorusOptions<TOptions> & {
   messages: AnthropicMessage[];
   stream: boolean;
   system?: string;
-}
+};
 
-export interface GeminiGenerateContentBody extends Record<string, unknown> {
+export type GeminiGenerateContentBody<TOptions = object> = Omit<TOptions, 'unsupportedAttachmentText'> & {
   contents: GeminiContent[];
   systemInstruction?: { parts: Array<{ text: string }> };
-}
+};

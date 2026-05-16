@@ -3,7 +3,14 @@ import { dataUrlFromAttachment, unsupportedAttachmentText } from './attachments'
 import { metadataString } from './metadata';
 import { stripAnthropicOptions } from './options';
 import { messageText, objectToolInput, toolContextText, toolOutputText } from './toolOutput';
-import type { AnthropicMessage, AnthropicMessagesBody, AnthropicMessagesBodyOptions, ProviderMappingOptions } from './types';
+import type {
+  AnthropicContentBlock,
+  AnthropicMessage,
+  AnthropicMessagesBody,
+  AnthropicMessagesBodyOptions,
+  AnthropicToolUseBlock,
+  ProviderMappingOptions,
+} from './types';
 
 function anthropicToolUseId(message: Message<unknown>) {
   return metadataString(message, 'anthropic', ['toolUseId', 'tool_use_id'], [
@@ -15,7 +22,7 @@ function anthropicToolUseId(message: Message<unknown>) {
   ]);
 }
 
-function anthropicToolUseBlock(message: Message<unknown>) {
+function anthropicToolUseBlock(message: Message<unknown>): AnthropicToolUseBlock | null {
   const id = anthropicToolUseId(message);
   if (!id || !message.toolCall) return null;
   return {
@@ -26,7 +33,7 @@ function anthropicToolUseBlock(message: Message<unknown>) {
   };
 }
 
-function appendAnthropicToolUseBlocks(target: AnthropicMessage[], blocks: AnthropicMessage[]) {
+function appendAnthropicToolUseBlocks(target: AnthropicMessage[], blocks: AnthropicToolUseBlock[]) {
   const last = target[target.length - 1];
   if (last?.role === 'assistant' && Array.isArray(last.content)) {
     last.content = last.content.concat(blocks);
@@ -44,8 +51,11 @@ function anthropicSystem(history: Message<unknown>[]) {
   return system || undefined;
 }
 
-function anthropicContentBlocks<TMeta>(message: Message<TMeta>, options: ProviderMappingOptions<TMeta>) {
-  const blocks: Array<Record<string, unknown>> = [];
+function anthropicContentBlocks<TMeta>(
+  message: Message<TMeta>,
+  options: ProviderMappingOptions<TMeta>,
+): AnthropicContentBlock[] {
+  const blocks: AnthropicContentBlock[] = [];
   const text = messageText(message);
   if (text.trim()) blocks.push({ type: 'text', text });
 
@@ -114,7 +124,7 @@ export function toAnthropicMessages<TMeta = Record<string, unknown>>(
     }
     i -= 1;
 
-    const providerTools: Array<{ message: Message<TMeta>; block: AnthropicMessage }> = [];
+    const providerTools: Array<{ message: Message<TMeta>; block: AnthropicToolUseBlock }> = [];
     for (const toolMessage of group) {
       const block = anthropicToolUseBlock(toolMessage as Message<unknown>);
       if (block) providerTools.push({ message: toolMessage, block });
@@ -126,7 +136,7 @@ export function toAnthropicMessages<TMeta = Record<string, unknown>>(
         role: 'user',
         content: providerTools.map(entry => ({
           type: 'tool_result',
-          tool_use_id: anthropicToolUseId(entry.message as Message<unknown>),
+          tool_use_id: anthropicToolUseId(entry.message as Message<unknown>) ?? '',
           content: toolOutputText(entry.message),
         })),
       });
@@ -143,18 +153,20 @@ export function toAnthropicMessages<TMeta = Record<string, unknown>>(
 }
 
 /** Build an Anthropic Messages API request body. Defaults `stream` to true. */
-export function toAnthropicMessagesBody<TMeta = Record<string, unknown>>(
-  history: Message<TMeta>[],
-  options: AnthropicMessagesBodyOptions<TMeta> = {},
-): AnthropicMessagesBody {
-  const { bodyOptions, stream } = stripAnthropicOptions(options);
+export function toAnthropicMessagesBody<
+  TMeta = Record<string, unknown>,
+  TOptions extends AnthropicMessagesBodyOptions<TMeta> = AnthropicMessagesBodyOptions<TMeta>,
+>(history: Message<TMeta>[], options?: TOptions): AnthropicMessagesBody<TOptions> {
+  const opts = (options ?? {}) as TOptions;
+  const { bodyOptions, stream } = stripAnthropicOptions(opts);
   const system = anthropicSystem(history as Message<unknown>[]);
-  return {
+  const body = {
     ...bodyOptions,
     ...(system ? { system } : {}),
-    messages: toAnthropicMessages(history, options),
+    messages: toAnthropicMessages(history, opts),
     stream,
   };
+  return body as AnthropicMessagesBody<TOptions>;
 }
 
 /** JSON body formatter for `createFetchSSETransport(..., { formatBody })`. */

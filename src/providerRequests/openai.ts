@@ -4,12 +4,22 @@ import { hasOwn, isRecord, metadataArray, metadataString, nonEmptyString } from 
 import { stripOpenAIChatOptions, stripOpenAIResponsesOptions } from './options';
 import { compactJSONString, messageText, toolContextText, toolOutputText } from './toolOutput';
 import type {
+  OpenAIChatCompletionsAssistantMessage,
   OpenAIChatCompletionsBody,
   OpenAIChatCompletionsBodyOptions,
   OpenAIChatCompletionsMessage,
+  OpenAIChatCompletionsToolCall,
+  OpenAIChatCompletionsUserContentPart,
+  OpenAIResponsesAssistantInputItem,
   OpenAIResponsesBody,
   OpenAIResponsesBodyOptions,
+  OpenAIResponsesFunctionCallInputItem,
+  OpenAIResponsesInputContentPart,
   OpenAIResponsesInputItem,
+  OpenAIResponsesInputTextPart,
+  OpenAIResponsesOutputTextPart,
+  OpenAIResponsesSystemInputItem,
+  OpenAIResponsesUserInputItem,
   ProviderMappingOptions,
 } from './types';
 
@@ -25,15 +35,21 @@ function openAIToolCallId(message: Message<unknown>) {
   ]);
 }
 
-function openAIAssistantToolCalls(message: Message<unknown>) {
-  return metadataArray(message, 'openai', ['toolCalls', 'tool_calls'], ['openaiToolCalls', 'openai_tool_calls', 'toolCalls', 'tool_calls']);
+function openAIAssistantToolCalls(message: Message<unknown>): OpenAIChatCompletionsToolCall[] | null {
+  // Tool call shapes come from caller-supplied metadata; we trust the structure here.
+  return metadataArray(message, 'openai', ['toolCalls', 'tool_calls'], [
+    'openaiToolCalls',
+    'openai_tool_calls',
+    'toolCalls',
+    'tool_calls',
+  ]) as OpenAIChatCompletionsToolCall[] | null;
 }
 
 function openAIChatToolCallIdFromValue(value: unknown) {
   return isRecord(value) ? nonEmptyString(value.id) : null;
 }
 
-function openAIChatToolCall(message: Message<unknown>) {
+function openAIChatToolCall(message: Message<unknown>): OpenAIChatCompletionsToolCall | null {
   const id = openAIToolCallId(message);
   if (!id || !message.toolCall) return null;
   return {
@@ -46,9 +62,10 @@ function openAIChatToolCall(message: Message<unknown>) {
   };
 }
 
-function appendOpenAIChatToolCalls(target: OpenAIChatCompletionsMessage[], toolCalls: OpenAIChatCompletionsMessage[]) {
+function appendOpenAIChatToolCalls(target: OpenAIChatCompletionsMessage[], toolCalls: OpenAIChatCompletionsToolCall[]) {
   const last = target[target.length - 1];
-  const existing = last?.role === 'assistant' && Array.isArray(last.tool_calls) ? last.tool_calls : [];
+  const existing: OpenAIChatCompletionsToolCall[] =
+    last?.role === 'assistant' && Array.isArray(last.tool_calls) ? last.tool_calls : [];
   const seenIds = new Set<string>();
 
   for (const toolCall of existing) {
@@ -56,7 +73,7 @@ function appendOpenAIChatToolCalls(target: OpenAIChatCompletionsMessage[], toolC
     if (id) seenIds.add(id);
   }
 
-  const dedupedToolCalls: OpenAIChatCompletionsMessage[] = [];
+  const dedupedToolCalls: OpenAIChatCompletionsToolCall[] = [];
   for (const toolCall of toolCalls) {
     const id = openAIChatToolCallIdFromValue(toolCall);
     if (id && seenIds.has(id)) continue;
@@ -75,7 +92,7 @@ function appendOpenAIChatToolCalls(target: OpenAIChatCompletionsMessage[], toolC
   target.push({ role: 'assistant', content: null, tool_calls: dedupedToolCalls });
 }
 
-function openAIResponsesFunctionCall(message: Message<unknown>) {
+function openAIResponsesFunctionCall(message: Message<unknown>): OpenAIResponsesFunctionCallInputItem | null {
   const callId = openAIToolCallId(message);
   if (!callId || !message.toolCall) return null;
   return {
@@ -86,8 +103,11 @@ function openAIResponsesFunctionCall(message: Message<unknown>) {
   };
 }
 
-function openAIChatUserContent<TMeta>(message: Message<TMeta>, options: ProviderMappingOptions<TMeta>) {
-  const parts: Array<Record<string, unknown>> = [];
+function openAIChatUserContent<TMeta>(
+  message: Message<TMeta>,
+  options: ProviderMappingOptions<TMeta>,
+): string | OpenAIChatCompletionsUserContentPart[] | null {
+  const parts: OpenAIChatCompletionsUserContentPart[] = [];
   const text = messageText(message);
   if (text.trim()) parts.push({ type: 'text', text });
 
@@ -101,7 +121,8 @@ function openAIChatUserContent<TMeta>(message: Message<TMeta>, options: Provider
   }
 
   if (!parts.length) return null;
-  return parts.length === 1 && parts[0]?.type === 'text' ? parts[0].text : parts;
+  const single = parts[0];
+  return parts.length === 1 && single.type === 'text' ? single.text : parts;
 }
 
 function toOpenAIChatCompletionsMessage<TMeta>(
@@ -116,14 +137,15 @@ function toOpenAIChatCompletionsMessage<TMeta>(
     const toolCalls = openAIAssistantToolCalls(message as Message<unknown>);
     const hasText = Boolean(message.text.trim());
     if (!hasText && !toolCalls?.length) return null;
-    return toolCalls?.length
+    const assistant: OpenAIChatCompletionsAssistantMessage = toolCalls?.length
       ? { role: 'assistant', content: hasText ? message.text : null, tool_calls: toolCalls }
       : { role: 'assistant', content: message.text };
+    return assistant;
   }
 
   if (message.role === 'user') {
     const content = openAIChatUserContent(message, options);
-    return content ? { role: 'user', content } : null;
+    return content !== null ? { role: 'user', content } : null;
   }
 
   if (message.role === 'tool') {
@@ -137,14 +159,13 @@ function toOpenAIChatCompletionsMessage<TMeta>(
   return null;
 }
 
-function openAIResponsesContent<TMeta>(
+function openAIResponsesInputContent<TMeta>(
   message: Message<TMeta>,
-  textType: 'input_text' | 'output_text',
   options: ProviderMappingOptions<TMeta>,
-) {
-  const parts: Array<Record<string, unknown>> = [];
+): OpenAIResponsesInputContentPart[] {
+  const parts: OpenAIResponsesInputContentPart[] = [];
   const text = messageText(message);
-  if (text.trim()) parts.push({ type: textType, text });
+  if (text.trim()) parts.push({ type: 'input_text', text });
 
   if (message.role === 'user') {
     for (const attachment of message.attachments ?? []) {
@@ -160,23 +181,36 @@ function openAIResponsesContent<TMeta>(
   return parts;
 }
 
+function openAIResponsesOutputContent<TMeta>(message: Message<TMeta>): OpenAIResponsesOutputTextPart[] {
+  const parts: OpenAIResponsesOutputTextPart[] = [];
+  const text = messageText(message);
+  if (text.trim()) parts.push({ type: 'output_text', text });
+  return parts;
+}
+
 function toOpenAIResponsesInputItem<TMeta>(
   message: Message<TMeta>,
   options: ProviderMappingOptions<TMeta>,
 ): OpenAIResponsesInputItem | null {
   if (message.role === 'system') {
-    const content = openAIResponsesContent(message, 'input_text', options);
-    return content.length ? { role: 'system', content } : null;
+    const content = openAIResponsesInputContent(message, options);
+    if (!content.length) return null;
+    const item: OpenAIResponsesSystemInputItem = { role: 'system', content };
+    return item;
   }
 
   if (message.role === 'assistant') {
-    const content = openAIResponsesContent(message, 'output_text', options);
-    return content.length ? { role: 'assistant', content } : null;
+    const content = openAIResponsesOutputContent(message);
+    if (!content.length) return null;
+    const item: OpenAIResponsesAssistantInputItem = { role: 'assistant', content };
+    return item;
   }
 
   if (message.role === 'user') {
-    const content = openAIResponsesContent(message, 'input_text', options);
-    return content.length ? { role: 'user', content } : null;
+    const content = openAIResponsesInputContent(message, options);
+    if (!content.length) return null;
+    const item: OpenAIResponsesUserInputItem = { role: 'user', content };
+    return item;
   }
 
   if (message.role === 'tool') {
@@ -184,7 +218,12 @@ function toOpenAIResponsesInputItem<TMeta>(
     if (callId) return { type: 'function_call_output', call_id: callId, output: toolOutputText(message) };
 
     const text = toolContextText(message);
-    return text ? { role: 'system', content: [{ type: 'input_text', text }] } : null;
+    if (!text) return null;
+    const fallback: OpenAIResponsesSystemInputItem = {
+      role: 'system',
+      content: [{ type: 'input_text', text } as OpenAIResponsesInputTextPart],
+    };
+    return fallback;
   }
 
   return null;
@@ -212,7 +251,7 @@ export function toOpenAIChatCompletionsMessages<TMeta = Record<string, unknown>>
     }
     i -= 1;
 
-    const providerTools: Array<{ message: Message<TMeta>; toolCall: OpenAIChatCompletionsMessage }> = [];
+    const providerTools: Array<{ message: Message<TMeta>; toolCall: OpenAIChatCompletionsToolCall }> = [];
     for (const toolMessage of group) {
       const toolCall = openAIChatToolCall(toolMessage as Message<unknown>);
       if (toolCall) providerTools.push({ message: toolMessage, toolCall });
@@ -237,16 +276,18 @@ export function toOpenAIChatCompletionsMessages<TMeta = Record<string, unknown>>
 }
 
 /** Build an OpenAI Chat Completions request body. Defaults `stream` to true. */
-export function toOpenAIChatCompletionsBody<TMeta = Record<string, unknown>>(
-  history: Message<TMeta>[],
-  options: OpenAIChatCompletionsBodyOptions<TMeta> = {},
-): OpenAIChatCompletionsBody {
-  const { bodyOptions, stream } = stripOpenAIChatOptions(options);
-  return {
+export function toOpenAIChatCompletionsBody<
+  TMeta = Record<string, unknown>,
+  TOptions extends OpenAIChatCompletionsBodyOptions<TMeta> = OpenAIChatCompletionsBodyOptions<TMeta>,
+>(history: Message<TMeta>[], options?: TOptions): OpenAIChatCompletionsBody<TOptions> {
+  const opts = (options ?? {}) as TOptions;
+  const { bodyOptions, stream } = stripOpenAIChatOptions(opts);
+  const body = {
     ...bodyOptions,
-    messages: toOpenAIChatCompletionsMessages(history, options),
+    messages: toOpenAIChatCompletionsMessages(history, opts),
     stream,
   };
+  return body as OpenAIChatCompletionsBody<TOptions>;
 }
 
 /** JSON body formatter for `createFetchSSETransport(..., { formatBody })`. */
@@ -296,16 +337,18 @@ export function toOpenAIResponsesInput<TMeta = Record<string, unknown>>(
 }
 
 /** Build an OpenAI Responses API request body. Defaults `stream` to true. */
-export function toOpenAIResponsesBody<TMeta = Record<string, unknown>>(
-  history: Message<TMeta>[],
-  options: OpenAIResponsesBodyOptions<TMeta> = {},
-): OpenAIResponsesBody {
-  const { bodyOptions, stream } = stripOpenAIResponsesOptions(options);
-  return {
+export function toOpenAIResponsesBody<
+  TMeta = Record<string, unknown>,
+  TOptions extends OpenAIResponsesBodyOptions<TMeta> = OpenAIResponsesBodyOptions<TMeta>,
+>(history: Message<TMeta>[], options?: TOptions): OpenAIResponsesBody<TOptions> {
+  const opts = (options ?? {}) as TOptions;
+  const { bodyOptions, stream } = stripOpenAIResponsesOptions(opts);
+  const body = {
     ...bodyOptions,
-    input: toOpenAIResponsesInput(history, options),
+    input: toOpenAIResponsesInput(history, opts),
     stream,
   };
+  return body as OpenAIResponsesBody<TOptions>;
 }
 
 /** JSON body formatter for `createFetchSSETransport(..., { formatBody })`. */

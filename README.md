@@ -225,7 +225,7 @@ export async function POST(request: Request) {
         const completionBody = {
           ...toOpenAIChatCompletionsBody(history, { model: 'gpt-4o-mini' }),
           stream: true,
-        } as ChatCompletionCreateParamsStreaming;
+        } satisfies ChatCompletionCreateParamsStreaming;
 
         const upstream = await openai.chat.completions.create(completionBody, { signal: request.signal });
 
