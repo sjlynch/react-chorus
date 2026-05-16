@@ -1,29 +1,49 @@
 # hooks guide
 
+## `useAssistantSession`
+
+`useAssistantSession.ts` remains the public facade for the built-in Chorus send lifecycle. Internal helpers live in `hooks/assistant-session/`:
+
+- `messageUtils.ts` — message IDs, retry cloning, returned-message normalization, tool metadata helpers.
+- `observer.ts` — guarded observer warning helpers.
+- `toolLoop.ts` — `maxToolIterations` normalization (`Infinity` is the explicit unlimited sentinel) and defaults.
+- `transport.ts` — string-URL transport shortcut. It intentionally mirrors the default fetch SSE request locally to keep transport-only bundles isolated.
+
+The facade owns React lifecycle wiring: send/retry/stop/clear/edit/regenerate/delete, assistant buffering, transport/onSend orchestration, abort callbacks, and tool execution.
+
 ## `useChorusStream`
 
-Core streaming hook for the simple `transport` path.
+Core streaming hook for the simple `transport` path. The facade is `useChorusStream.ts`; focused internals are in `src/streaming/`:
 
-- Accepts a `Transport` and optional connector (`auto`, `openai`, `anthropic`, `gemini`, or custom `Connector`).
-- Creates connector parser state once per `send()` when `connector.createState` exists; never share parser buffers across sends.
-- Manages the send lifecycle: sets `sending`, creates/stores an `AbortController`, streams SSE events, and finalizes or reports errors.
-- Uses `isSendingRef` as a guard so overlapping sends are ignored.
-- Supports `minDelayMs` in callbacks by buffering the first streamed text/reasoning/tool events until the first-token delay elapses.
-- Emits connector `reasoning` and accumulated `toolDelta` events through optional callbacks; `<Chorus>` turns those into `Message.reasoning` and `role: 'tool'` messages, then can execute completed tool calls via `tools`/`onToolCall` after stream completion.
-- `readSSEStream` handles line-by-line SSE parsing across chunk boundaries.
+- `readSSEStream.ts` — line-by-line SSE parser (BOM, colonless fields, CR/LF, chunk boundaries).
+- `delayedStreamEvents.ts` — `minDelayMs` buffering and callback-error propagation.
+- `errors.ts` — `ChorusStreamError`, HTTP error-body snippets/timeouts, connector `errorPayload` preservation.
+- `toolDeltaAccumulator.ts` — merges streamed tool-call argument/output deltas.
+
+The hook creates connector state once per send, feeds SSE payloads through `extract()`, calls connector `flush()` at EOF, delivers text/reasoning/tool events, and finalizes or reports errors.
 
 ## `useChorusPersistence`
 
-Loads and saves message arrays through a `StorageAdapter`.
+Loads and saves message arrays through a `StorageAdapter`. Internals mirror `useConversations`:
 
-- Defaults to `window.localStorage` when available.
-- Supports sync adapters (`localStorage`, `sessionStorage`) during initial state setup.
-- Supports async adapters (for example IndexedDB wrappers) via effect-based loading and promise-aware saving.
-- Returns `{ value, onChange }` so callers can spread persistence into `<Chorus>`.
+- `persistence/messageCodec.ts` — JSON defaults, parse/sanitize, raw-to-state conversion.
+- `persistence/errors.ts` — `ChorusPersistenceError` normalization and dev warnings using shared error helpers.
+- `persistence/writeQueue.ts` — debounced/serialized writes plus page-lifecycle flush support.
+
+The facade keeps storage resolution, initial sync/async read coordination, pre-load `onChange` deferral, and the public result shape.
+
+## `useConversations`
+
+Conversation index persistence is split into:
+
+- `conversations/indexCodec.ts` — index parsing/migration, title derivation, active-id selection.
+- `conversations/storageErrors.ts` — storage error normalization.
+- `conversations/indexWriteQueue.ts` — debounced/serialized index writes.
+- `conversations/storageAdapter.ts` — transcript storage wrapper that touches conversation timestamps.
 
 ## `useLatestRef`
 
-Small helper that stores the latest callback/value in a ref after each render. It is used by stable callbacks and async closures in `useChorusStream`, `useChorusMessages`, and `useRAFQueue` so they can read current props/state without changing callback identity.
+Small helper that stores the latest callback/value in a ref after each render. It is used by stable callbacks and async closures so they can read current props/state without changing callback identity.
 
 ## Closure pattern
 

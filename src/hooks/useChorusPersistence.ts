@@ -1,7 +1,10 @@
 import React from 'react';
 import type { Message, StorageAdapter } from '../types';
 import { useLatestRef } from './useLatestRef';
-import { isChorusDevMode } from '../utils/devMode';
+import { isPromiseLike } from '../utils/async';
+import { createPersistenceError, isPersistenceError, warnPersistenceError } from './persistence/errors';
+import { defaultDeserializeMessages, defaultSerializeMessages, emptyState, stateFromRaw, type PersistenceState } from './persistence/messageCodec';
+import { usePersistenceWriteQueue } from './persistence/writeQueue';
 
 export type SerializeMessages<TMeta = Record<string, unknown>> = (messages: Message<TMeta>[]) => string;
 export type DeserializeMessages<TMeta = Record<string, unknown>> = (raw: string) => Message<TMeta>[];
@@ -47,14 +50,6 @@ export interface UseChorusPersistenceResult<TMeta = Record<string, unknown>> {
   canPersist: boolean;
 }
 
-interface PersistenceState<TMeta = Record<string, unknown>> {
-  key: string;
-  storage: StorageAdapter | null;
-  value: Message<TMeta>[];
-  loaded: boolean;
-  hasStoredValue: boolean;
-}
-
 interface PendingRead {
   key: string;
   storage: StorageAdapter;
@@ -67,29 +62,11 @@ interface InitialSyncRead {
   storage: StorageAdapter;
 }
 
-interface PendingWrite {
-  key: string;
-  storage: StorageAdapter;
-  serialized: string;
-  version: number;
-  remove: boolean;
-}
-
 interface PendingPreloadChange<TMeta = Record<string, unknown>> {
   key: string;
   storage: StorageAdapter;
   messages: Message<TMeta>[];
   options?: PersistenceWriteOptions;
-}
-
-interface ParsedStoredMessages<TMeta = Record<string, unknown>> {
-  messages: Message<TMeta>[];
-  error: ChorusPersistenceError | null;
-}
-
-interface ParsedPersistenceState<TMeta = Record<string, unknown>> {
-  state: PersistenceState<TMeta>;
-  error: ChorusPersistenceError | null;
 }
 
 function resolveDefaultStorage(): StorageAdapter | null {
@@ -104,80 +81,6 @@ function resolveDefaultStorage(): StorageAdapter | null {
 function resolveStorage<TMeta>(options?: UseChorusPersistenceOptions<TMeta>): StorageAdapter | null {
   if (options?.storage !== undefined) return options.storage;
   return resolveDefaultStorage();
-}
-
-function isPromiseLike<T>(value: unknown): value is PromiseLike<T> {
-  return typeof value === 'object'
-    && value !== null
-    && 'then' in value
-    && typeof (value as { then?: unknown }).then === 'function';
-}
-
-function defaultSerializeMessages<TMeta>(messages: Message<TMeta>[]): string {
-  const serialized = JSON.stringify(messages);
-  if (serialized === undefined) throw new Error('Unable to serialize messages.');
-  return serialized;
-}
-
-function defaultDeserializeMessages<TMeta>(raw: string): Message<TMeta>[] {
-  const parsed = JSON.parse(raw) as unknown;
-  return Array.isArray(parsed) ? parsed as Message<TMeta>[] : [];
-}
-
-function toError(error: unknown): Error {
-  if (error instanceof Error) return error;
-  if (typeof DOMException !== 'undefined' && error instanceof DOMException) return error as Error;
-  return new Error(String(error));
-}
-
-function createPersistenceError(key: string, operation: PersistenceOperation, error: unknown): ChorusPersistenceError {
-  const nextError = toError(error) as ChorusPersistenceError;
-  nextError.key = key;
-  nextError.operation = operation;
-  nextError.cause = error;
-  return nextError;
-}
-
-function parseStoredMessages<TMeta = Record<string, unknown>>(
-  key: string,
-  raw: string | null,
-  deserializeMessages: DeserializeMessages<TMeta>,
-): ParsedStoredMessages<TMeta> {
-  if (!raw) return { messages: [], error: null };
-  try {
-    const parsed = deserializeMessages(raw);
-    return { messages: Array.isArray(parsed) ? parsed : [], error: null };
-  } catch (error) {
-    return { messages: [], error: createPersistenceError(key, 'deserialize', error) };
-  }
-}
-
-function emptyState<TMeta>(key: string, storage: StorageAdapter | null, loaded: boolean): PersistenceState<TMeta> {
-  return { key, storage, value: [], loaded, hasStoredValue: false };
-}
-
-function stateFromRaw<TMeta>(
-  key: string,
-  storage: StorageAdapter | null,
-  raw: string | null,
-  deserializeMessages: DeserializeMessages<TMeta>,
-): ParsedPersistenceState<TMeta> {
-  const parsed = parseStoredMessages<TMeta>(key, raw, deserializeMessages);
-  return {
-    state: {
-      key,
-      storage,
-      value: parsed.messages,
-      loaded: true,
-      hasStoredValue: raw !== null,
-    },
-    error: parsed.error,
-  };
-}
-
-function writeToStorage(write: PendingWrite): void | Promise<void> {
-  if (write.remove && write.storage.removeItem) return write.storage.removeItem(write.key);
-  return write.storage.setItem(write.key, write.serialized);
 }
 
 /**
@@ -219,11 +122,6 @@ export function useChorusPersistence<TMeta = Record<string, unknown>>(
   const initialSyncReadRef = React.useRef<InitialSyncRead | null>(null);
   const pendingPreloadChangeRef = React.useRef<PendingPreloadChange<TMeta> | null>(null);
   const initialErrorRef = React.useRef<ChorusPersistenceError | null>(null);
-  const pendingWriteRef = React.useRef<PendingWrite | null>(null);
-  const writeTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const writeChainRef = React.useRef(Promise.resolve());
-  const writeInFlightRef = React.useRef(false);
-  const asyncWriteInFlightRef = React.useRef(false);
   const mountedRef = React.useRef(false);
   const onErrorRef = useLatestRef(options?.onError);
   const writeDebounceMsRef = useLatestRef(Math.max(0, options?.writeDebounceMs ?? 0));
@@ -269,143 +167,30 @@ export function useChorusPersistence<TMeta = Record<string, unknown>>(
   keyRef.current = key;
 
   const notifyPersistenceError = React.useCallback((nextError: ChorusPersistenceError) => {
-    const action = nextError.operation === 'read'
-      ? 'read persisted messages'
-      : nextError.operation === 'deserialize'
-        ? 'deserialize persisted messages'
-        : nextError.operation === 'remove'
-          ? 'remove persisted messages'
-          : 'persist messages';
-
-    if (isChorusDevMode()) {
-      console.warn(`[Chorus] Failed to ${action}.`, nextError);
-    }
-
+    warnPersistenceError(nextError);
     onErrorRef.current?.(nextError);
   }, [onErrorRef]);
 
   const reportPersistenceError = React.useCallback((rawError: unknown, operation: PersistenceOperation, errorKey = keyRef.current) => {
-    const nextError = rawError && typeof rawError === 'object' && 'operation' in rawError && 'key' in rawError
-      ? rawError as ChorusPersistenceError
+    const nextError = isPersistenceError(rawError)
+      ? rawError
       : createPersistenceError(errorKey, operation, rawError);
     if (mountedRef.current) setError(nextError);
     notifyPersistenceError(nextError);
   }, [notifyPersistenceError]);
 
-  const markWriteSuccess = React.useCallback((write: PendingWrite) => {
-    if (mountedRef.current && write.version === writeVersionRef.current) setError(null);
+  const markWriteSuccess = React.useCallback((writeVersion: number) => {
+    if (mountedRef.current && writeVersion === writeVersionRef.current) setError(null);
   }, []);
 
-  const runWrite = React.useCallback(async (write: PendingWrite) => {
-    try {
-      const result = writeToStorage(write);
-      if (isPromiseLike<void>(result)) {
-        asyncWriteInFlightRef.current = true;
-        await result;
-      }
-      markWriteSuccess(write);
-    } catch (writeError) {
-      reportPersistenceError(writeError, write.remove ? 'remove' : 'write', write.key);
-    }
-  }, [markWriteSuccess, reportPersistenceError]);
-
-  const runWriteImmediately = React.useCallback((write: PendingWrite) => {
-    try {
-      const result = writeToStorage(write);
-      if (isPromiseLike<void>(result)) {
-        writeInFlightRef.current = true;
-        asyncWriteInFlightRef.current = true;
-        const tracked = Promise.resolve(result)
-          .then(
-            () => { markWriteSuccess(write); },
-            writeError => reportPersistenceError(writeError, write.remove ? 'remove' : 'write', write.key),
-          )
-          .finally(() => {
-            writeInFlightRef.current = false;
-            asyncWriteInFlightRef.current = false;
-          });
-        writeChainRef.current = tracked;
-        tracked.catch(() => {});
-        return;
-      }
-      markWriteSuccess(write);
-    } catch (writeError) {
-      reportPersistenceError(writeError, write.remove ? 'remove' : 'write', write.key);
-    }
-  }, [markWriteSuccess, reportPersistenceError]);
-
-  const enqueueWrite = React.useCallback((write: PendingWrite) => {
-    const runQueuedWrite = async () => {
-      writeInFlightRef.current = true;
-      asyncWriteInFlightRef.current = false;
-      try {
-        await runWrite(write);
-      } finally {
-        writeInFlightRef.current = false;
-        asyncWriteInFlightRef.current = false;
-      }
-    };
-
-    writeChainRef.current = writeInFlightRef.current
-      ? writeChainRef.current.then(runQueuedWrite, runQueuedWrite)
-      : runQueuedWrite();
-    writeChainRef.current.catch(() => {});
-  }, [runWrite]);
-
-  const takePendingWrite = React.useCallback(() => {
-    if (writeTimerRef.current !== null) {
-      clearTimeout(writeTimerRef.current);
-      writeTimerRef.current = null;
-    }
-
-    const pending = pendingWriteRef.current;
-    pendingWriteRef.current = null;
-    return pending;
-  }, []);
-
-  const flush = React.useCallback(() => {
-    const pending = takePendingWrite();
-    if (!pending) return;
-    enqueueWrite(pending);
-  }, [enqueueWrite, takePendingWrite]);
-
-  const flushForPageLifecycle = React.useCallback(() => {
-    const pending = takePendingWrite();
-    if (!pending) return;
-
-    if (asyncWriteInFlightRef.current) enqueueWrite(pending);
-    else runWriteImmediately(pending);
-  }, [enqueueWrite, runWriteImmediately, takePendingWrite]);
-
-  const queueWrite = React.useCallback((messages: Message<TMeta>[], version: number, flushNow: boolean, removeIfEmpty: boolean) => {
-    const k = keyRef.current;
-    const s = storageRef.current;
-    if (!k || !s) return;
-
-    const pending = pendingWriteRef.current;
-    if (pending && (pending.key !== k || pending.storage !== s)) flush();
-
-    const shouldRemove = removeIfEmpty && messages.length === 0 && typeof s.removeItem === 'function';
-    let serialized = '[]';
-    if (!shouldRemove) {
-      try {
-        serialized = serializeMessagesRef.current(messages);
-      } catch (serializationError) {
-        reportPersistenceError(serializationError, 'write', k);
-        return;
-      }
-    }
-
-    pendingWriteRef.current = { key: k, storage: s, serialized, version, remove: shouldRemove };
-
-    if (flushNow || writeDebounceMsRef.current <= 0) {
-      flush();
-      return;
-    }
-
-    if (writeTimerRef.current !== null) clearTimeout(writeTimerRef.current);
-    writeTimerRef.current = setTimeout(flush, writeDebounceMsRef.current);
-  }, [flush, reportPersistenceError, serializeMessagesRef, writeDebounceMsRef]);
+  const { flush, flushForPageLifecycle, queueWrite } = usePersistenceWriteQueue<TMeta>({
+    keyRef,
+    storageRef,
+    serializeMessagesRef,
+    writeDebounceMsRef,
+    onWriteSuccess: markWriteSuccess,
+    reportPersistenceError,
+  });
 
   React.useEffect(() => {
     mountedRef.current = true;

@@ -6,7 +6,15 @@ Message list and auto-scroll container. It filters roles via `hiddenRoles` (defa
 
 ## `ChatInput`
 
-Textarea plus send/stop button and optional file attachment UI (`accept` enables attach). Enter sends, Shift+Enter inserts a newline, and attached files are read as data URLs. `resizeTextarea()` is the JS auto-resize helper: on change it resets height to `auto`, then sets `min(scrollHeight, 160px)`; CSS also caps growth with `max-height`, and height resets after send.
+Textarea plus send/stop button and optional file attachment UI (`accept` enables attach). Enter sends, Shift+Enter inserts a newline, and attached files are read as data URLs by default. `onSend` may return `false` to veto a send; attachment chips and textarea height are only cleared after an accepted send.
+
+Attachment internals live in `components/chat-input/`:
+
+- `attachmentUtils.ts` — accept/size/file-transfer helpers, pending attachment metadata, FileReader/default upload conversion helpers.
+- `useAttachmentQueue.ts` — cancellable read/upload queue, reset/disabled/unmount aborts, drag state, validation, and error reporting.
+- `AttachmentChips.tsx` — chip/thumbnail/spinner/remove-button rendering.
+
+`resizeTextarea()` remains in `ChatInput.tsx`: on change it resets height to `auto`, then sets `min(scrollHeight, 160px)`; CSS also caps growth with `max-height`, and height resets after accepted sends.
 
 ## `Markdown`
 

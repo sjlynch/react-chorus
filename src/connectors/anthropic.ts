@@ -1,5 +1,5 @@
 import { extractErrorMessage } from './error';
-import type { Connector, ConnectorResult, ConnectorToolDelta } from './openai';
+import type { Connector, ConnectorResult, ConnectorToolDelta } from './types';
 
 export interface AnthropicConnectorState {
   toolIdsByBlockIndex: Map<string, string>;
@@ -44,7 +44,7 @@ export const anthropicConnector: Connector<AnthropicConnectorState> = {
     try {
       const obj = JSON.parse(data);
       const error = extractErrorMessage(obj);
-      if (error) return { error };
+      if (error) return { error, errorPayload: obj };
       if (!obj || typeof obj.type !== 'string') return null;
 
       if (obj.type === 'message_stop') {

@@ -1,5 +1,5 @@
 import { extractErrorMessage } from './error';
-import type { Connector, ConnectorResult, ConnectorToolDelta } from './openai';
+import type { Connector, ConnectorResult, ConnectorToolDelta } from './types';
 
 const DEFAULT_CANDIDATE_INDEX = 0;
 const NORMAL_FINISH_REASONS = new Set(['STOP', 'MAX_TOKENS']);
@@ -96,7 +96,7 @@ export const geminiConnector: Connector = {
     try {
       const obj = JSON.parse(data);
       const error = extractErrorMessage(obj);
-      if (error) return { error };
+      if (error) return { error, errorPayload: obj };
       if (!obj || !Array.isArray(obj.candidates) || obj.candidates.length === 0) return null;
 
       const { candidate, arrayIndex } = selectedCandidate(obj.candidates);
@@ -126,6 +126,7 @@ export const geminiConnector: Connector = {
         return {
           ...result,
           error: 'Gemini response ended with an unspecified finish reason',
+          errorPayload: obj,
         };
       }
 
@@ -133,6 +134,7 @@ export const geminiConnector: Connector = {
         return {
           ...result,
           error: geminiBlockedMessage(finishReason, Boolean(result.text || result.reasoning)),
+          errorPayload: obj,
         };
       }
 

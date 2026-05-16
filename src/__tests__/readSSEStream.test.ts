@@ -38,6 +38,12 @@ describe('readSSEStream', () => {
     expect(events).toEqual(['hello']);
   });
 
+  it('strips a single leading UTF-8 BOM before the first event', async () => {
+    const events: string[] = [];
+    await readSSEStream(makeResponse('\uFEFFdata: hello\n\n'), e => events.push(e));
+    expect(events).toEqual(['hello']);
+  });
+
   it('strips one leading space after "data:"', async () => {
     const events: string[] = [];
     await readSSEStream(makeResponse('data: hello world\n\n'), e => events.push(e));
@@ -127,6 +133,12 @@ describe('readSSEStream', () => {
     const events: string[] = [];
     await readSSEStream(makeResponse('data:\n\n'), e => events.push(e));
     expect(events).toEqual(['']);
+  });
+
+  it('parses colonless data fields as empty data lines', async () => {
+    const events: string[] = [];
+    await readSSEStream(makeResponse('data\ndata: payload\n\n'), e => events.push(e));
+    expect(events).toEqual(['\npayload']);
   });
 
   it('rejects with AbortError and cancels the body when the signal aborts', async () => {

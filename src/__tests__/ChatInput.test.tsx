@@ -272,6 +272,23 @@ describe('ChatInput', () => {
     await waitFor(() => expect(screen.queryByText('notes.txt')).not.toBeInTheDocument());
   });
 
+  it('preserves attachments when onSend returns false', async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn(() => false as const);
+    const file = new File(['hello'], 'blocked.txt', { type: 'text/plain' });
+    const { container } = render(<ControlledChatInput onSend={onSend} accept="text/plain" />);
+
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(fileInput, file);
+    await screen.findByText('blocked.txt');
+    await waitFor(() => expect(screen.getByRole('button', { name: /send/i })).toBeEnabled());
+
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(onSend).toHaveBeenCalledOnce();
+    expect(screen.getByText('blocked.txt')).toBeInTheDocument();
+  });
+
   it('shows the stop button when sending=true', () => {
     render(<ChatInput value="" onChange={vi.fn()} onSend={vi.fn()} sending />);
 

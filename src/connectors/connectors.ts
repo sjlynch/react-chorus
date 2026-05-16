@@ -1,11 +1,11 @@
 import type { ConnectorName } from '../types';
-import { openaiConnector, type Connector } from './openai';
+import type { Connector } from './types';
+import { openaiConnector } from './openai';
 import { anthropicConnector } from './anthropic';
 import { geminiConnector } from './gemini';
 import { extractErrorMessage } from './error';
-import { isChorusDevMode } from '../utils/devMode';
 
-export type { Connector, ConnectorResult, ConnectorToolDelta } from './openai';
+export type { Connector, ConnectorResult, ConnectorToolDelta } from './types';
 export { anthropicConnector } from './anthropic';
 export { geminiConnector } from './gemini';
 
@@ -68,7 +68,7 @@ export const autoConnector: Connector<AutoConnectorState> = {
     try {
       const obj = JSON.parse(data);
       const error = extractErrorMessage(obj);
-      if (error) return { error };
+      if (error) return { error, errorPayload: obj };
       if (obj && Array.isArray(obj.choices)) return openaiConnector.extract(data, state.openai);
       if (obj && Array.isArray(obj.candidates)) return geminiConnector.extract(data, state.gemini);
       if (obj && typeof obj.type === 'string' && obj.type.startsWith('response.')) return openaiConnector.extract(data, state.openai);
@@ -77,11 +77,23 @@ export const autoConnector: Connector<AutoConnectorState> = {
       if (genericText) return { text: genericText };
     } catch {}
     return data ? { text: data } : null;
+  },
+  flush(state = createAutoConnectorState()) {
+    return openaiConnector.flush?.(state.openai) ?? null;
   }
 };
 
 const VALID_CONNECTOR_NAMES = ['auto', 'openai', 'anthropic', 'gemini'] as const;
 const warnedUnknownConnectorNames = new Set<string>();
+
+function isConnectorDevMode() {
+  // Local to keep connector-only chunks independent from widget dev helpers.
+  try {
+    return typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production';
+  } catch {
+    return false;
+  }
+}
 
 export function getConnector(connector?: Connector | ConnectorName): Connector {
   if (!connector) return autoConnector;
@@ -91,7 +103,7 @@ export function getConnector(connector?: Connector | ConnectorName): Connector {
     if (connector === 'anthropic') return anthropicConnector;
     if (connector === 'gemini') return geminiConnector;
 
-    if (isChorusDevMode() && !warnedUnknownConnectorNames.has(connector)) {
+    if (isConnectorDevMode() && !warnedUnknownConnectorNames.has(connector)) {
       warnedUnknownConnectorNames.add(connector);
       console.warn(`[Chorus] Unknown connector \`${connector}\`; falling back to \`auto\`. Valid connector names: ${VALID_CONNECTOR_NAMES.join(', ')}.`);
     }

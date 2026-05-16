@@ -40,14 +40,16 @@ function libraryManualChunks(id: string) {
   // Keep composable root named exports in focused chunks so app bundlers can
   // tree-shake hooks/components without also pulling the full widget graph.
   if (normalizedId.endsWith('/src/utils/devMode.ts')) return 'dev-mode';
-  if (normalizedId.includes('/src/connectors/') || normalizedId.endsWith('/src/hooks/useChorusStream.ts')) return 'streaming-core';
-  if (normalizedId.endsWith('/src/streaming/createFetchSSETransport.ts') || normalizedId.endsWith('/src/streaming/createWebSocketTransport.ts')) return 'transport-core';
-  if (normalizedId.endsWith('/src/hooks/useChorusPersistence.ts')) return 'persistence';
-  if (normalizedId.endsWith('/src/hooks/useConversations.ts')) return 'conversations';
+  if (normalizedId.endsWith('/src/utils/errors.ts') || normalizedId.endsWith('/src/utils/async.ts') || normalizedId.endsWith('/src/utils/ids.ts')) return 'shared-utils';
+  if (normalizedId.endsWith('/src/utils/warnings.ts')) return 'dev-mode';
+  if (normalizedId.includes('/src/connectors/') || normalizedId.endsWith('/src/hooks/useChorusStream.ts') || normalizedId.endsWith('/src/streaming/readSSEStream.ts') || normalizedId.endsWith('/src/streaming/delayedStreamEvents.ts') || normalizedId.endsWith('/src/streaming/errors.ts') || normalizedId.endsWith('/src/streaming/toolDeltaAccumulator.ts')) return 'streaming-core';
+  if (normalizedId.endsWith('/src/streaming/createFetchSSETransport.ts') || normalizedId.endsWith('/src/streaming/createWebSocketTransport.ts') || normalizedId.includes('/src/streaming/websocket/')) return 'transport-core';
+  if (normalizedId.endsWith('/src/hooks/useChorusPersistence.ts') || normalizedId.includes('/src/hooks/persistence/')) return 'persistence';
+  if (normalizedId.endsWith('/src/hooks/useConversations.ts') || normalizedId.includes('/src/hooks/conversations/')) return 'conversations';
   if (normalizedId.endsWith('/src/components/Markdown.tsx') || normalizedId.endsWith('/src/utils/hljsLoader.ts') || normalizedId.endsWith('/src/utils/markdownNormalizer.ts')) return 'markdown';
-  if (normalizedId.endsWith('/src/components/ChatInput.tsx') || normalizedId.endsWith('/src/utils/attachmentPreview.ts')) return 'chat-input';
+  if (normalizedId.endsWith('/src/components/ChatInput.tsx') || normalizedId.includes('/src/components/chat-input/') || normalizedId.endsWith('/src/utils/attachmentPreview.ts')) return 'chat-input';
   if (normalizedId.endsWith('/src/components/ConversationList.tsx') || normalizedId.endsWith('/src/components/ChorusTheme.tsx')) return 'conversation-list';
-  if (normalizedId.endsWith('/src/hooks/useAssistantSession.ts') || normalizedId.endsWith('/src/hooks/useChorusMessages.ts') || normalizedId.endsWith('/src/hooks/useRAFQueue.ts')) return 'chorus-session';
+  if (normalizedId.endsWith('/src/hooks/useAssistantSession.ts') || normalizedId.includes('/src/hooks/assistant-session/') || normalizedId.endsWith('/src/hooks/useChorusMessages.ts') || normalizedId.endsWith('/src/hooks/useRAFQueue.ts')) return 'chorus-session';
 
   return undefined;
 }

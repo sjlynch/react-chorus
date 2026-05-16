@@ -10,6 +10,12 @@ Transports are async functions used by the simple `transport` send path. They ac
 
 The type is exported from `src/hooks/useChorusStream.ts` and re-exported from `Chorus.tsx`.
 
+## Streaming pipeline modules
+
+- `readSSEStream.ts` parses SSE data fields, including one leading BOM, colonless `data` fields, multiline payloads, and CR/LF variants.
+- `delayedStreamEvents.ts` buffers first text/reasoning/tool events for `minDelayMs` and preserves callback-error semantics.
+- `errors.ts` defines `ChorusStreamError`, HTTP error-body snippet/timeout handling, and connector `errorPayload` preservation.
+- `toolDeltaAccumulator.ts` merges streamed tool-call deltas before callbacks see them.
 ## Fetch SSE transport
 
 `createFetchSSETransport(url, init?)` wraps an HTTP URL:
@@ -22,12 +28,11 @@ The type is exported from `src/hooks/useChorusStream.ts` and re-exported from `C
 
 ## WebSocket transport
 
-`createWebSocketTransport(url, opts?)` wraps a WebSocket URL:
+`createWebSocketTransport.ts` is the public facade. Internals are split under `streaming/websocket/`:
 
-- Opens a fresh socket per send by default and sends `formatMessage(text, history)`.
-- With `{ persistent: true }`, opens one socket on first send, reuses it across sends, and exposes `transport.close(code?, reason?)` for explicit cleanup; runtimes with `FinalizationRegistry` also attempt cleanup when the transport is GC'd.
-- Persistent mode keeps the socket open when an individual response stream ends, so application protocol code is responsible for reconnect/backoff, request/response correlation, and emitting done sentinels (or cancelling response bodies) to finish sends.
-- Wraps each incoming WS message as `data: <message>\n\n` in a `ReadableStream`; `onMessage` can observe decoded pushed messages even when no send stream is active.
-- Resolves a `Response` once the socket opens and the message sends, then closes/errors/aborts with the response stream.
+- `shared.ts` — SSE event encoding, message decoding, abort/close helpers, safe socket close.
+- `managedResponseStream.ts` — response-body stream wrapper and cleanup/error handling.
+- `transient.ts` — one-socket-per-send lifecycle.
+- `persistent.ts` — reusable socket/open-waiter lifecycle and `transport.close()`.
 
 Both transports produce SSE-formatted output so `readSSEStream` and connector parsing work unchanged.

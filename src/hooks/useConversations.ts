@@ -2,13 +2,17 @@ import React from 'react';
 import type { Message, StorageAdapter } from '../types';
 import { useLatestRef } from './useLatestRef';
 import { isChorusDevMode } from '../utils/devMode';
+import { isPromiseLike } from '../utils/async';
+import { createRandomId } from '../utils/ids';
+import { chooseActiveId, emptyState, getTimestamp, mergePendingCreates, normalizeTitle, stateFromRaw, titleFromFirstMessage, type ConversationsState, type PendingConversationCreate } from './conversations/indexCodec';
+import { createConversationStorageError, isConversationStorageError } from './conversations/storageErrors';
+import { useConversationIndexWriteQueue, type IndexPersistMode } from './conversations/indexWriteQueue';
+import { createConversationStorageAdapter } from './conversations/storageAdapter';
 
 const DEFAULT_INDEX_KEY = 'chorus-conversations-index';
 const DEFAULT_MESSAGE_KEY_PREFIX = 'chorus-conversation:';
 const DEFAULT_TITLE = 'New conversation';
-const DEFAULT_FIRST_MESSAGE_TITLE_MAX_LENGTH = 48;
 const INDEX_TOUCH_WRITE_DEBOUNCE_MS = 300;
-let fallbackConversationIdCounter = 0;
 
 export interface ConversationSummary {
   id: string;
@@ -21,8 +25,6 @@ export interface ConversationSummary {
 }
 
 export type ConversationStorageOperation = 'read' | 'write' | 'delete';
-
-type IndexPersistMode = 'immediate' | 'debounced';
 
 export interface ConversationStorageError extends Error {
   key: string;
@@ -81,17 +83,6 @@ export interface UseConversationsResult {
   pinConversation: (id: string, pinned?: boolean) => void;
 }
 
-interface ConversationIndexPayload {
-  conversations: ConversationSummary[];
-  activeId: string | null;
-}
-
-interface ConversationsState {
-  conversations: ConversationSummary[];
-  activeId: string | null;
-  loaded: boolean;
-}
-
 interface PendingIndexRead {
   storage: StorageAdapter;
   indexKey: string;
@@ -99,27 +90,9 @@ interface PendingIndexRead {
   version: number;
 }
 
-interface PendingConversationCreate {
-  storage: StorageAdapter;
-  indexKey: string;
-  conversation: ConversationSummary;
-}
-
-interface PendingIndexWrite {
-  storage: StorageAdapter;
-  indexKey: string;
-  serialized: string;
-}
-
 interface InitialSyncRead {
   storage: StorageAdapter;
   indexKey: string;
-}
-
-interface ParsedConversationState {
-  state: ConversationsState;
-  error: ConversationStorageError | null;
-  shouldPersist: boolean;
 }
 
 function resolveDefaultStorage(): StorageAdapter | null {
@@ -136,223 +109,8 @@ function resolveStorage(options?: UseConversationsOptions): StorageAdapter | nul
   return resolveDefaultStorage();
 }
 
-function isPromiseLike<T>(value: unknown): value is PromiseLike<T> {
-  return typeof value === 'object'
-    && value !== null
-    && 'then' in value
-    && typeof (value as { then?: unknown }).then === 'function';
-}
-
 function createDefaultConversationId() {
-  const randomUUID = globalThis.crypto?.randomUUID;
-  if (typeof randomUUID === 'function') return randomUUID.call(globalThis.crypto);
-
-  fallbackConversationIdCounter += 1;
-  return `chorus-conversation-${Date.now()}-${fallbackConversationIdCounter}`;
-}
-
-function normalizeTimestamp(value: Date | string | number): string {
-  if (value instanceof Date) return value.toISOString();
-  if (typeof value === 'number') return new Date(value).toISOString();
-  return value;
-}
-
-function normalizeTitle(title: string | undefined, fallback: string) {
-  const trimmed = title?.trim();
-  return trimmed || fallback;
-}
-
-function getTimestamp(now: () => Date | string | number) {
-  return normalizeTimestamp(now());
-}
-
-interface ConversationSummaryCandidate {
-  id: string;
-  title: string;
-  createdAt?: unknown;
-  updatedAt?: unknown;
-  pinned?: unknown;
-  pristine?: unknown;
-}
-
-interface SanitizedConversation {
-  conversation: ConversationSummary;
-  migrated: boolean;
-}
-
-interface ParsedConversationIndex extends ConversationIndexPayload {
-  shouldPersist: boolean;
-}
-
-function isConversationSummary(value: unknown): value is ConversationSummaryCandidate {
-  return typeof value === 'object'
-    && value !== null
-    && typeof (value as ConversationSummaryCandidate).id === 'string'
-    && typeof (value as ConversationSummaryCandidate).title === 'string';
-}
-
-function warnTimestampBackfill(id: string, fields: string[]) {
-  if (!isChorusDevMode()) return;
-  console.warn(`[Chorus] Migrated conversation index entry "${id}" by backfilling missing ${fields.join(' and ')}.`);
-}
-
-function sanitizeConversation(
-  value: ConversationSummaryCandidate,
-  defaultTitle: string,
-  now: () => Date | string | number,
-): SanitizedConversation {
-  const hasCreatedAt = typeof value.createdAt === 'string';
-  const hasUpdatedAt = typeof value.updatedAt === 'string';
-  const timestamp = hasCreatedAt || hasUpdatedAt ? null : getTimestamp(now);
-  const createdAt = hasCreatedAt
-    ? value.createdAt as string
-    : hasUpdatedAt
-      ? value.updatedAt as string
-      : timestamp as string;
-  const updatedAt = hasUpdatedAt
-    ? value.updatedAt as string
-    : hasCreatedAt
-      ? value.createdAt as string
-      : timestamp as string;
-  const missingTimestampFields = [
-    ...(!hasCreatedAt ? ['createdAt'] : []),
-    ...(!hasUpdatedAt ? ['updatedAt'] : []),
-  ];
-
-  if (missingTimestampFields.length > 0) warnTimestampBackfill(value.id, missingTimestampFields);
-
-  const hasPristine = typeof value.pristine === 'boolean';
-  const pristine = hasPristine ? value.pristine as boolean : value.title.trim() === defaultTitle.trim();
-
-  return {
-    conversation: {
-      id: value.id,
-      title: value.title,
-      createdAt,
-      updatedAt,
-      ...(value.pinned !== undefined ? { pinned: Boolean(value.pinned) } : {}),
-      pristine,
-    },
-    migrated: missingTimestampFields.length > 0 || !hasPristine,
-  };
-}
-
-function chooseActiveId(conversations: ConversationSummary[], preferredId?: string | null) {
-  if (preferredId && conversations.some(conversation => conversation.id === preferredId)) return preferredId;
-  return conversations[0]?.id ?? null;
-}
-
-function parseConversationIndex(
-  raw: string | null,
-  preferredActiveId: string | null | undefined,
-  defaultTitle: string,
-  now: () => Date | string | number,
-): ParsedConversationIndex {
-  if (!raw) return { conversations: [], activeId: null, shouldPersist: false };
-
-  const parsed = JSON.parse(raw) as unknown;
-  const source = Array.isArray(parsed)
-    ? parsed
-    : typeof parsed === 'object' && parsed !== null && Array.isArray((parsed as { conversations?: unknown }).conversations)
-      ? (parsed as { conversations: unknown[] }).conversations
-      : [];
-  const sanitized = source.filter(isConversationSummary).map(conversation => sanitizeConversation(conversation, defaultTitle, now));
-  const conversations = sanitized.map(result => result.conversation);
-  const storedActiveId = typeof parsed === 'object'
-    && parsed !== null
-    && typeof (parsed as { activeId?: unknown }).activeId === 'string'
-    ? (parsed as { activeId: string }).activeId
-    : null;
-
-  return {
-    conversations,
-    activeId: chooseActiveId(conversations, preferredActiveId ?? storedActiveId),
-    shouldPersist: sanitized.some(result => result.migrated),
-  };
-}
-
-function serializeConversationIndex(conversations: ConversationSummary[], activeId: string | null) {
-  return JSON.stringify({ conversations, activeId });
-}
-
-function emptyState(): ConversationsState {
-  return { conversations: [], activeId: null, loaded: true };
-}
-
-function toError(error: unknown): Error {
-  if (error instanceof Error) return error;
-  if (typeof DOMException !== 'undefined' && error instanceof DOMException) return error as Error;
-  return new Error(String(error));
-}
-
-function createConversationStorageError(
-  key: string,
-  operation: ConversationStorageOperation,
-  error: unknown,
-  conversationId?: string,
-): ConversationStorageError {
-  const nextError = toError(error) as ConversationStorageError;
-  nextError.key = key;
-  nextError.operation = operation;
-  nextError.conversationId = conversationId;
-  nextError.cause = error;
-  return nextError;
-}
-
-function stateFromRaw(
-  raw: string | null,
-  preferredActiveId: string | null | undefined,
-  indexKey: string,
-  defaultTitle: string,
-  now: () => Date | string | number,
-): ParsedConversationState {
-  try {
-    const index = parseConversationIndex(raw, preferredActiveId, defaultTitle, now);
-    return {
-      state: { conversations: index.conversations, activeId: index.activeId, loaded: true },
-      error: null,
-      shouldPersist: index.shouldPersist,
-    };
-  } catch (error) {
-    return {
-      state: emptyState(),
-      error: createConversationStorageError(indexKey, 'read', error),
-      shouldPersist: false,
-    };
-  }
-}
-
-function mergePendingCreates(state: ConversationsState, pendingCreates: PendingConversationCreate[]): ConversationsState {
-  if (pendingCreates.length === 0) return state;
-
-  const pendingConversations = pendingCreates.map(create => create.conversation);
-  const pendingIds = new Set(pendingConversations.map(conversation => conversation.id));
-  return {
-    conversations: [
-      ...pendingConversations.slice().reverse(),
-      ...state.conversations.filter(conversation => !pendingIds.has(conversation.id)),
-    ],
-    activeId: pendingConversations[pendingConversations.length - 1]?.id ?? state.activeId,
-    loaded: true,
-  };
-}
-
-function getConversationIdFromKey(key: string, prefix: string) {
-  return key.startsWith(prefix) ? key.slice(prefix.length) : null;
-}
-
-function titleFromFirstMessage(
-  messages: Pick<Message, 'role' | 'text'>[],
-  { fallbackTitle, maxLength = DEFAULT_FIRST_MESSAGE_TITLE_MAX_LENGTH }: Pick<RenameFromFirstMessageOptions, 'fallbackTitle' | 'maxLength'> = {},
-) {
-  const firstUserText = messages.find(message => message.role === 'user' && (message.text ?? '').trim().length > 0)?.text;
-  const normalized = (firstUserText ?? fallbackTitle ?? '').replace(/\s+/g, ' ').trim();
-  if (!normalized) return '';
-
-  const limit = Math.max(1, maxLength);
-  if (normalized.length <= limit) return normalized;
-  if (limit === 1) return '…';
-  return `${normalized.slice(0, limit - 1).trimEnd()}…`;
+  return createRandomId('chorus-conversation');
 }
 
 export function useConversations(options: UseConversationsOptions = {}): UseConversationsResult {
@@ -368,10 +126,6 @@ export function useConversations(options: UseConversationsOptions = {}): UseConv
   const initialSyncReadRef = React.useRef<InitialSyncRead | null>(null);
   const pendingCreatesRef = React.useRef<PendingConversationCreate[]>([]);
   const initialCleanIndexStateRef = React.useRef<ConversationsState | null>(null);
-  const pendingIndexWriteRef = React.useRef<PendingIndexWrite | null>(null);
-  const indexWriteTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const indexWriteChainRef = React.useRef(Promise.resolve());
-  const indexWriteInFlightRef = React.useRef(false);
   const initialErrorRef = React.useRef<ConversationStorageError | null>(null);
   const storageRef = React.useRef(storage);
   storageRef.current = storage;
@@ -418,8 +172,8 @@ export function useConversations(options: UseConversationsOptions = {}): UseConv
   }, [onErrorRef]);
 
   const reportError = React.useCallback((rawError: unknown, operation: ConversationStorageOperation, key: string, conversationId?: string) => {
-    const nextError = rawError && typeof rawError === 'object' && 'operation' in rawError && 'key' in rawError
-      ? rawError as ConversationStorageError
+    const nextError = isConversationStorageError(rawError)
+      ? rawError
       : createConversationStorageError(key, operation, rawError, conversationId);
     setError(nextError);
     notifyError(nextError);
@@ -433,85 +187,12 @@ export function useConversations(options: UseConversationsOptions = {}): UseConv
 
   const getPersistenceKey = React.useCallback((id: string) => `${messageKeyPrefixRef.current}${id}`, []);
 
-  const runIndexWrite = React.useCallback((write: PendingIndexWrite): void | Promise<void> => {
-    try {
-      const result = write.storage.setItem(write.indexKey, write.serialized);
-      if (isPromiseLike<void>(result)) {
-        return Promise.resolve(result).catch(writeError => reportError(writeError, 'write', write.indexKey));
-      }
-    } catch (writeError) {
-      reportError(writeError, 'write', write.indexKey);
-    }
-    return undefined;
-  }, [reportError]);
-
-  const enqueueIndexWrite = React.useCallback((write: PendingIndexWrite) => {
-    const runQueuedWrite = () => {
-      indexWriteInFlightRef.current = true;
-      const result = runIndexWrite(write);
-      if (isPromiseLike<void>(result)) {
-        return Promise.resolve(result).finally(() => {
-          indexWriteInFlightRef.current = false;
-        });
-      }
-
-      indexWriteInFlightRef.current = false;
-      return Promise.resolve();
-    };
-
-    indexWriteChainRef.current = indexWriteInFlightRef.current
-      ? indexWriteChainRef.current.then(runQueuedWrite, runQueuedWrite)
-      : runQueuedWrite();
-    indexWriteChainRef.current.catch(() => {});
-  }, [runIndexWrite]);
-
-  const takePendingIndexWrite = React.useCallback(() => {
-    if (indexWriteTimerRef.current !== null) {
-      clearTimeout(indexWriteTimerRef.current);
-      indexWriteTimerRef.current = null;
-    }
-
-    const pending = pendingIndexWriteRef.current;
-    pendingIndexWriteRef.current = null;
-    return pending;
-  }, []);
-
-  const flushPendingIndexWrite = React.useCallback(() => {
-    const pending = takePendingIndexWrite();
-    if (!pending) return;
-    enqueueIndexWrite(pending);
-  }, [enqueueIndexWrite, takePendingIndexWrite]);
-
-  const persistIndex = React.useCallback((
-    conversations: ConversationSummary[],
-    activeId: string | null,
-    mode: IndexPersistMode = 'immediate',
-  ) => {
-    const targetStorage = storageRef.current;
-    if (!targetStorage) return;
-
-    const key = indexKeyRef.current;
-    const pending = pendingIndexWriteRef.current;
-    if (pending && (pending.storage !== targetStorage || pending.indexKey !== key)) flushPendingIndexWrite();
-
-    let serialized: string;
-    try {
-      serialized = serializeConversationIndex(conversations, activeId);
-    } catch (serializationError) {
-      reportError(serializationError, 'write', key);
-      return;
-    }
-
-    pendingIndexWriteRef.current = { storage: targetStorage, indexKey: key, serialized };
-
-    if (mode === 'debounced') {
-      if (indexWriteTimerRef.current !== null) clearTimeout(indexWriteTimerRef.current);
-      indexWriteTimerRef.current = setTimeout(flushPendingIndexWrite, INDEX_TOUCH_WRITE_DEBOUNCE_MS);
-      return;
-    }
-
-    flushPendingIndexWrite();
-  }, [flushPendingIndexWrite, reportError]);
+  const { flushPendingIndexWrite, persistIndex } = useConversationIndexWriteQueue({
+    storageRef,
+    indexKeyRef,
+    debounceMs: INDEX_TOUCH_WRITE_DEBOUNCE_MS,
+    reportError,
+  });
 
   const commit = React.useCallback((
     conversations: ConversationSummary[],
@@ -537,36 +218,9 @@ export function useConversations(options: UseConversationsOptions = {}): UseConv
     commit(conversations, current.activeId, 'debounced');
   }, [commit, nowRef]);
 
-  const conversationStorage = React.useMemo<StorageAdapter | null>(() => {
-    if (!storage) return storage;
-
-    const touchAfterWrite = (key: string, result: void | Promise<void>) => {
-      const conversationId = getConversationIdFromKey(key, messageKeyPrefix);
-      if (!conversationId) return;
-
-      if (isPromiseLike<void>(result)) {
-        Promise.resolve(result).then(() => touchConversation(conversationId)).catch(() => {});
-      } else {
-        touchConversation(conversationId);
-      }
-    };
-
-    return {
-      getItem: (key) => storage.getItem(key),
-      setItem: (key, value) => {
-        const result = storage.setItem(key, value);
-        touchAfterWrite(key, result);
-        return result;
-      },
-      ...(storage.removeItem ? {
-        removeItem: (key: string) => {
-          const result = storage.removeItem?.(key);
-          touchAfterWrite(key, result);
-          return result;
-        },
-      } : {}),
-    };
-  }, [messageKeyPrefix, storage, touchConversation]);
+  const conversationStorage = React.useMemo<StorageAdapter | null>(() => (
+    createConversationStorageAdapter(storage, messageKeyPrefix, touchConversation)
+  ), [messageKeyPrefix, storage, touchConversation]);
 
   const removeConversationMessages = React.useCallback((id: string) => {
     const targetStorage = storageRef.current;

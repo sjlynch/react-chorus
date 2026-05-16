@@ -3,7 +3,38 @@ import { openaiConnector } from '../connectors/openai';
 import { anthropicConnector } from '../connectors/anthropic';
 import { geminiConnector } from '../connectors/gemini';
 import { autoConnector, getConnector } from '../connectors/connectors';
+import { createThinkTagSplitter } from '../connectors/openai/thinkTagSplitter';
 import type { Connector } from '../connectors/connectors';
+
+// ---------------------------------------------------------------------------
+// OpenAI think tag splitter
+// ---------------------------------------------------------------------------
+
+describe('createThinkTagSplitter', () => {
+  it('splits a clean think tag pair', () => {
+    const splitter = createThinkTagSplitter();
+    expect(splitter.feed('<think>plan</think>answer')).toEqual({ reasoning: 'plan', text: 'answer' });
+  });
+
+  it('handles partial tags spanning chunk boundaries', () => {
+    const splitter = createThinkTagSplitter();
+    expect(splitter.feed('hello <thi')).toEqual({ text: 'hello ' });
+    expect(splitter.feed('nk>plan</thi')).toEqual({ reasoning: 'plan' });
+    expect(splitter.feed('nk>answer')).toEqual({ text: 'answer' });
+  });
+
+  it('flushes a buffered trailing partial tag as literal text at EOF', () => {
+    const splitter = createThinkTagSplitter();
+    expect(splitter.feed('I <')).toEqual({ text: 'I ' });
+    expect(splitter.flush()).toEqual({ text: '<' });
+  });
+
+  it('passes through no-tag text', () => {
+    const splitter = createThinkTagSplitter();
+    expect(splitter.feed('plain text')).toEqual({ text: 'plain text' });
+    expect(splitter.flush()).toEqual({});
+  });
+});
 
 // ---------------------------------------------------------------------------
 // openaiConnector
@@ -139,8 +170,10 @@ describe('openaiConnector', () => {
   });
 
   it('returns an in-band error payload', () => {
-    expect(openaiConnector.extract(JSON.stringify({ error: 'upstream failed' }))).toEqual({ error: 'upstream failed' });
-    expect(openaiConnector.extract(JSON.stringify({ error: { message: 'bad request' } }))).toEqual({ error: 'bad request' });
+    const stringPayload = { error: 'upstream failed' };
+    const objectPayload = { error: { message: 'bad request' } };
+    expect(openaiConnector.extract(JSON.stringify(stringPayload))).toEqual({ error: 'upstream failed', errorPayload: stringPayload });
+    expect(openaiConnector.extract(JSON.stringify(objectPayload))).toEqual({ error: 'bad request', errorPayload: objectPayload });
   });
 });
 
@@ -221,7 +254,8 @@ describe('anthropicConnector', () => {
   });
 
   it('returns an in-band error payload', () => {
-    expect(anthropicConnector.extract(JSON.stringify({ type: 'error', error: { message: 'anthropic failed' } }))).toEqual({ error: 'anthropic failed' });
+    const payload = { type: 'error', error: { message: 'anthropic failed' } };
+    expect(anthropicConnector.extract(JSON.stringify(payload))).toEqual({ error: 'anthropic failed', errorPayload: payload });
   });
 });
 
@@ -311,31 +345,34 @@ describe('geminiConnector', () => {
   });
 
   it.each(['FINISH_REASON_UNSPECIFIED', 'UNSPECIFIED'])('returns an error for Gemini %s finish reason', finishReason => {
-    const data = JSON.stringify({
+    const payload = {
       candidates: [{ finishReason, content: { parts: [{ text: 'Hello' }] } }],
-    });
-    expect(geminiConnector.extract(data)).toEqual({
+    };
+    expect(geminiConnector.extract(JSON.stringify(payload))).toEqual({
       text: 'Hello',
       error: 'Gemini response ended with an unspecified finish reason',
+      errorPayload: payload,
     });
   });
 
   it('returns an error for blocked SAFETY with no text', () => {
-    const data = JSON.stringify({
+    const payload = {
       candidates: [{ finishReason: 'SAFETY', content: { parts: [] }, safetyRatings: [{ category: 'HARM_CATEGORY_DANGEROUS_CONTENT' }] }],
-    });
-    expect(geminiConnector.extract(data)).toEqual({
+    };
+    expect(geminiConnector.extract(JSON.stringify(payload))).toEqual({
       error: 'Gemini response was blocked and returned no text (finishReason: SAFETY)',
+      errorPayload: payload,
     });
   });
 
   it('returns partial text and an error for blocked SAFETY with text', () => {
-    const data = JSON.stringify({
+    const payload = {
       candidates: [{ finishReason: 'SAFETY', content: { parts: [{ text: 'partial' }] } }],
-    });
-    expect(geminiConnector.extract(data)).toEqual({
+    };
+    expect(geminiConnector.extract(JSON.stringify(payload))).toEqual({
       text: 'partial',
       error: 'Gemini response ended with blocked finishReason: SAFETY',
+      errorPayload: payload,
     });
   });
 
@@ -365,7 +402,8 @@ describe('geminiConnector', () => {
   });
 
   it('returns an in-band error payload', () => {
-    expect(geminiConnector.extract(JSON.stringify({ error: { message: 'gemini failed' } }))).toEqual({ error: 'gemini failed' });
+    const payload = { error: { message: 'gemini failed' } };
+    expect(geminiConnector.extract(JSON.stringify(payload))).toEqual({ error: 'gemini failed', errorPayload: payload });
   });
 });
 
@@ -384,7 +422,8 @@ describe('autoConnector', () => {
   });
 
   it('returns an in-band error payload', () => {
-    expect(autoConnector.extract(JSON.stringify({ error: 'stream failed' }))).toEqual({ error: 'stream failed' });
+    const payload = { error: 'stream failed' };
+    expect(autoConnector.extract(JSON.stringify(payload))).toEqual({ error: 'stream failed', errorPayload: payload });
   });
 
   it('delegates to anthropicConnector for Anthropic-shaped JSON', () => {

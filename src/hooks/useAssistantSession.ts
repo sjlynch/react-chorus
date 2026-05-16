@@ -5,6 +5,12 @@ import { useChorusStream, type SendCallbacks, type Transport } from './useChorus
 import { useRAFQueue } from './useRAFQueue';
 import { useLatestRef } from './useLatestRef';
 import { isChorusDevMode } from '../utils/devMode';
+import { createAbortError, isAbortError, toError } from '../utils/errors';
+import { isPromiseLike } from '../utils/async';
+import { createDefaultFetchSSETransport } from './assistant-session/transport';
+import { cloneHistoryForRetry, createMessageId, dropTrailingAssistant, findLastUserMessage, hasToolOutput, metadataWithToolProvider, normalizeReturnedMessage } from './assistant-session/messageUtils';
+import { warnObserverError } from './assistant-session/observer';
+import { DEFAULT_MAX_TOOL_ITERATIONS, normalizeMaxToolIterations } from './assistant-session/toolLoop';
 
 export interface ChorusSendHelpers {
   appendAssistant: (chunk: string) => void;
@@ -153,156 +159,6 @@ export interface UseAssistantSessionResult {
   hasStartedAssistant: boolean;
 }
 
-const DEFAULT_MAX_TOOL_ITERATIONS = 4;
-
-let fallbackMessageIdCounter = 0;
-
-function createMessageId() {
-  const randomUUID = globalThis.crypto?.randomUUID;
-  if (typeof randomUUID === 'function') return randomUUID.call(globalThis.crypto);
-
-  fallbackMessageIdCounter += 1;
-  return `chorus-${Date.now()}-${fallbackMessageIdCounter}`;
-}
-
-function dropTrailingAssistant<TMeta>(history: Message<TMeta>[]) {
-  const last = history[history.length - 1];
-  return last?.role === 'assistant' ? history.slice(0, -1) : history;
-}
-
-function isAbortError(error: unknown) {
-  return typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError';
-}
-
-function isPromiseLike<T>(value: unknown): value is PromiseLike<T> {
-  return typeof value === 'object'
-    && value !== null
-    && 'then' in value
-    && typeof (value as { then?: unknown }).then === 'function';
-}
-
-// Keep the built-in string transport local to the widget path so the public
-// react-chorus/transport subpath can stay free of hook/session chunks.
-function createDefaultFetchSSETransport<TMeta = Record<string, unknown>>(url: string): Transport<TMeta> {
-  return async (text: string, history: Message<TMeta>[], signal: AbortSignal) => fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt: text, history }),
-    signal,
-  });
-}
-
-function createAbortError() {
-  const err = new Error('Aborted');
-  err.name = 'AbortError';
-  return err;
-}
-
-function toError(error: unknown): Error {
-  if (error instanceof Error) return error;
-  if (typeof DOMException !== 'undefined' && error instanceof DOMException) return error as Error;
-  return new Error(String(error));
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function metadataWithToolProvider<TMeta>(existing: TMeta | undefined, delta: ConnectorToolDelta): TMeta | undefined {
-  if (!delta.providerId) return existing;
-
-  const metadata: Record<string, unknown> = isRecord(existing) ? { ...existing } : {};
-  if (delta.provider === 'openai') {
-    const openai = isRecord(metadata.openai) ? { ...metadata.openai } : {};
-    openai.toolCallId = delta.providerId;
-    openai.callId = delta.providerId;
-    metadata.openai = openai;
-  } else if (delta.provider === 'anthropic') {
-    const anthropic = isRecord(metadata.anthropic) ? { ...metadata.anthropic } : {};
-    anthropic.toolUseId = delta.providerId;
-    metadata.anthropic = anthropic;
-  }
-
-  return Object.keys(metadata).length ? metadata as TMeta : existing;
-}
-
-function hasToolOutput<TMeta>(message: Message<TMeta>) {
-  return message.role === 'tool' && Object.prototype.hasOwnProperty.call(message.toolCall, 'output');
-}
-
-function cloneMessageForRetry<TMeta>(message: Message<TMeta>): Message<TMeta> {
-  if (message.role === 'user' || message.role === 'assistant') {
-    return {
-      ...message,
-      attachments: message.attachments?.map(attachment => ({ ...attachment })),
-    };
-  }
-
-  return { ...message };
-}
-
-function cloneHistoryForRetry<TMeta>(history: Message<TMeta>[]): Message<TMeta>[] {
-  return history.map(message => cloneMessageForRetry(message));
-}
-
-function findLastUserMessage<TMeta>(history: Message<TMeta>[]) {
-  for (let i = history.length - 1; i >= 0; i -= 1) {
-    if (history[i].role === 'user') return history[i];
-  }
-  return null;
-}
-
-function normalizeReturnedMessage<TMeta>(message: Partial<Message<TMeta>>): Message<TMeta> {
-  const id = message.id || createMessageId();
-  const text = message.text ?? '';
-
-  if (message.role === 'tool') {
-    return {
-      id,
-      role: 'tool',
-      text,
-      metadata: message.metadata,
-      reasoning: message.reasoning,
-      toolCall: message.toolCall ?? { name: 'tool' },
-    };
-  }
-
-  if (message.role === 'user') {
-    return {
-      id,
-      role: 'user',
-      text,
-      metadata: message.metadata,
-      reasoning: message.reasoning,
-      attachments: message.attachments,
-    };
-  }
-
-  if (message.role === 'system') {
-    return {
-      id,
-      role: 'system',
-      text,
-      metadata: message.metadata,
-      reasoning: message.reasoning,
-    };
-  }
-
-  return {
-    id,
-    role: 'assistant',
-    text,
-    metadata: message.metadata,
-    reasoning: message.reasoning,
-    attachments: message.attachments,
-  };
-}
-
-function warnObserverError(callbackName: string, error: unknown) {
-  if (!isChorusDevMode()) return;
-  console.warn(`[Chorus] \`${callbackName}\` callback threw and was ignored so it could not interrupt message rendering.`, error);
-}
-
 export function useAssistantSession<TMeta = Record<string, unknown>>({
   messages,
   updateMessages,
@@ -378,6 +234,13 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
   const activeSendPathRef = React.useRef<ChorusSendPath | null>(null);
   const warnedMissingHandlerRef = React.useRef(false);
   const warnedTransportOnSendRef = React.useRef(false);
+
+  const warnMissingResponseHandler = React.useCallback(() => {
+    if (isChorusDevMode() && !warnedMissingHandlerRef.current) {
+      warnedMissingHandlerRef.current = true;
+      console.warn('[Chorus] `send` was called but neither `transport` nor `onSend` was provided. Pass one of these props to produce an assistant response.');
+    }
+  }, []);
 
   const updateSessionMessages = React.useCallback((
     updater: (prev: Message<TMeta>[]) => Message<TMeta>[],
@@ -868,10 +731,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     if (!autoContinueToolsRef.current || !toolMessages.length) return false;
     if (!toolMessages.every(hasToolOutput)) return false;
 
-    const configuredMax = maxToolIterationsRef.current;
-    const maxToolIterations = Number.isFinite(configuredMax)
-      ? Math.max(0, Math.floor(configuredMax))
-      : DEFAULT_MAX_TOOL_ITERATIONS;
+    const maxToolIterations = normalizeMaxToolIterations(maxToolIterationsRef.current);
     const nextIteration = iteration + 1;
     if (nextIteration > maxToolIterations) return false;
     if (signal.aborted) throw createAbortError();
@@ -998,10 +858,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
 
     if (!currentOnSend) {
       invalidateAssistantSession(sessionId);
-      if (isChorusDevMode() && !warnedMissingHandlerRef.current) {
-        warnedMissingHandlerRef.current = true;
-        console.warn('[Chorus] `send` was called but neither `transport` nor `onSend` was provided. Pass one of these props to produce an assistant response.');
-      }
+      warnMissingResponseHandler();
       return;
     }
 
@@ -1058,12 +915,16 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
         if (controllerRef.current === controller && !isAssistantSessionActive(sessionId)) controllerRef.current = null;
       }
     })();
-  }, [abortActiveAssistant, beginAssistantSession, clearStreamError, completeActiveSession, createSessionHelpers, invalidateAssistantSession, isAssistantSessionActive, messagesRef, minAssistantDelayMsRef, onSendRef, rememberSubmittedTurn, removePendingAssistant, resetStreamState, safeOnError, setInternalSending, setTransportBusy, showStreamError, startTransportStream, transportRef, updateSessionMessages]);
+  }, [abortActiveAssistant, beginAssistantSession, clearStreamError, completeActiveSession, createSessionHelpers, invalidateAssistantSession, isAssistantSessionActive, messagesRef, minAssistantDelayMsRef, onSendRef, rememberSubmittedTurn, removePendingAssistant, resetStreamState, safeOnError, setInternalSending, setTransportBusy, showStreamError, startTransportStream, transportRef, updateSessionMessages, warnMissingResponseHandler]);
 
   const send = React.useCallback((rawText: string, attachments: Attachment[] = []) => {
     if (isBusy()) return false;
     const text = rawText.trim();
     if (!text && !attachments.length) return false;
+    if (!transportRef.current && !onSendRef.current) {
+      warnMissingResponseHandler();
+      return false;
+    }
 
     const next = updateSessionMessages(prev => prev.concat({
       id: createMessageId(),
@@ -1073,7 +934,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     }), { reason: 'send' });
     triggerAssistant(text, next);
     return true;
-  }, [isBusy, triggerAssistant, updateSessionMessages]);
+  }, [isBusy, onSendRef, transportRef, triggerAssistant, updateSessionMessages, warnMissingResponseHandler]);
 
   const retry = React.useCallback(() => {
     const submitted = lastSubmittedTurnRef.current;

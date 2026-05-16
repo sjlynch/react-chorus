@@ -30,7 +30,7 @@ export type {
   UploadAttachmentOptions,
   UserMessage,
 } from './types';
-export { useChorusStream } from './hooks/useChorusStream';
+export { ChorusStreamError, useChorusStream } from './hooks/useChorusStream';
 export type { SendCallbacks, StreamOptions, Transport } from './hooks/useChorusStream';
 export { useChorusPersistence } from './hooks/useChorusPersistence';
 export type { ChorusPersistenceError, DeserializeMessages, PersistenceOperation, PersistenceWriteOptions, SerializeMessages, UseChorusPersistenceOptions, UseChorusPersistenceResult } from './hooks/useChorusPersistence';

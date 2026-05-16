@@ -40,7 +40,7 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
   confirmDeleteMessage?: ChorusConfirmDeleteMessage<TMeta>;
   /** Opt in to an automatic tool-execution → model-continuation loop on the transport path. */
   autoContinueTools?: boolean;
-  /** Maximum automatic tool iterations when autoContinueTools is enabled. Defaults to 4. */
+  /** Maximum automatic tool iterations when autoContinueTools is enabled. Defaults to 4; pass Infinity to explicitly disable the safety cap. */
   maxToolIterations?: number;
   /** Optional gate for each automatic tool continuation. Return false to stop before the next model request. */
   shouldContinueToolLoop?: ChorusShouldContinueToolLoop<TMeta>;
@@ -280,8 +280,10 @@ function ChorusInner<TMeta = Record<string, unknown>>({
   }, []);
 
   const handleInputSend = React.useCallback((attachments: Attachment[] = []) => {
-    if (writesDisabled) return;
-    if (session.send(draft, attachments)) setDraft('');
+    if (writesDisabled) return false;
+    const accepted = session.send(draft, attachments);
+    if (accepted) setDraft('');
+    return accepted;
   }, [draft, session, writesDisabled]);
 
   const handleStop = React.useCallback(() => {

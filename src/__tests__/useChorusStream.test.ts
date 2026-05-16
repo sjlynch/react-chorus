@@ -408,8 +408,49 @@ describe('useChorusStream', () => {
     expect(onError).toHaveBeenCalledTimes(1);
     expect(onError.mock.calls[0][0]).toBeInstanceOf(Error);
     expect(onError.mock.calls[0][0].message).toBe('provider failed mid-stream');
+    expect(onError.mock.calls[0][0].errorPayload).toEqual({ error: 'provider failed mid-stream' });
     expect(cancelled).toBe(true);
     expect(result.current.sending).toBe(false);
+  });
+
+  it.each([
+    {
+      connector: 'anthropic' as const,
+      payload: { type: 'error', error: { type: 'overloaded_error', message: 'overloaded' } },
+      message: 'overloaded',
+    },
+    {
+      connector: 'gemini' as const,
+      payload: { candidates: [{ finishReason: 'SAFETY', content: { parts: [] }, safetyRatings: [{ category: 'HARM_CATEGORY_DANGEROUS_CONTENT' }] }] },
+      message: 'Gemini response was blocked and returned no text (finishReason: SAFETY)',
+    },
+  ])('surfaces $connector errorPayload through useChorusStream', async ({ connector, payload, message }) => {
+    const transport = vi.fn<Transport>(() => Promise.resolve(makeSseResponse([JSON.stringify(payload)])));
+    const onError = vi.fn();
+    const { result } = renderHook(() => useChorusStream(transport, { connector }));
+
+    await act(async () => {
+      await expect(result.current.send('hello', [], { onChunk: vi.fn(), onError })).rejects.toThrow(message);
+    });
+
+    expect(onError.mock.calls[0][0].errorPayload).toEqual(payload);
+  });
+
+  it('flushes OpenAI think-tag buffers when the response body closes without [DONE]', async () => {
+    const transport = vi.fn<Transport>(() => Promise.resolve(makeSseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { content: 'I <' } }] }),
+    ])));
+    const onChunk = vi.fn();
+    const onDone = vi.fn();
+    const { result } = renderHook(() => useChorusStream(transport, { connector: 'openai' }));
+
+    await act(async () => {
+      await result.current.send('hello', [], { onChunk, onDone });
+    });
+
+    expect(onChunk).toHaveBeenNthCalledWith(1, 'I ');
+    expect(onChunk).toHaveBeenNthCalledWith(2, '<');
+    expect(onDone).toHaveBeenCalledTimes(1);
   });
 
   it('calls onError instead of onDone when transport throws a non-abort error', async () => {
@@ -691,6 +732,23 @@ describe('useChorusStream', () => {
 
     await act(async () => {
       await expect(result.current.send('hello', [], { onChunk: vi.fn() })).rejects.toThrow('HTTP 500 Internal Server Error: upstream exploded');
+    });
+  });
+
+  it('includes slow HTTP error bodies within the extended timeout', async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        setTimeout(() => {
+          controller.enqueue(new TextEncoder().encode('slow upstream failure'));
+          controller.close();
+        }, 1000);
+      },
+    });
+    const transport = vi.fn<Transport>(() => Promise.resolve(new Response(stream, { status: 502 })));
+    const { result } = renderHook(() => useChorusStream(transport));
+
+    await act(async () => {
+      await expect(result.current.send('hello', [], { onChunk: vi.fn() })).rejects.toThrow('HTTP 502: slow upstream failure');
     });
   });
 

@@ -1,6 +1,5 @@
 import React from 'react';
 import type { ConversationSummary } from '../hooks/useConversations';
-import { isChorusDevMode } from '../utils/devMode';
 import { styleVarsFromPalette, type Palette } from './ChorusTheme';
 
 export interface ConfirmDeleteConversationContext {
@@ -61,8 +60,17 @@ function isPromiseLike<T>(value: unknown): value is PromiseLike<T> {
     && typeof (value as { then?: unknown }).then === 'function';
 }
 
+function isConversationListDevMode() {
+  // Kept local so the standalone ConversationList chunk does not import hook/widget chunks.
+  try {
+    return typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production';
+  } catch {
+    return false;
+  }
+}
+
 function warnDeleteConfirmationError(callbackName: string, error: unknown) {
-  if (!isChorusDevMode()) return;
+  if (!isConversationListDevMode()) return;
   console.warn(`[Chorus] \`${callbackName}\` callback threw/rejected; delete was cancelled.`, error);
 }
 

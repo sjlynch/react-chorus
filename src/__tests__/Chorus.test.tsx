@@ -540,6 +540,24 @@ describe('Chorus', () => {
     expect(transport).toHaveBeenCalledTimes(2);
   });
 
+  it('treats maxToolIterations={Infinity} as an explicit unlimited cap', async () => {
+    const user = userEvent.setup();
+    const search = vi.fn(async () => ({ ok: true }));
+    const shouldContinueToolLoop = vi.fn(context => context.iteration < 6);
+    const transport = vi.fn<Transport>(async () => sseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: transport.mock.calls.length - 1, id: `call_${transport.mock.calls.length}`, function: { name: 'search', arguments: '{}' } }] } }] }),
+      '[DONE]',
+    ]));
+
+    render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} autoContinueTools maxToolIterations={Infinity} tools={{ search }} shouldContinueToolLoop={shouldContinueToolLoop} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'loop');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    await waitFor(() => expect(transport).toHaveBeenCalledTimes(6));
+    expect(shouldContinueToolLoop).toHaveBeenLastCalledWith(expect.objectContaining({ iteration: 6, maxToolIterations: Infinity }));
+  });
+
   it('lets shouldContinueToolLoop veto automatic continuation', async () => {
     const user = userEvent.setup();
     const search = vi.fn(async () => ({ ok: true }));
@@ -1084,7 +1102,7 @@ describe('Chorus', () => {
       setItem: vi.fn(() => { throw quotaError; }),
     };
 
-    render(<Chorus persistenceKey="chat" persistenceStorage={storage} onPersistenceError={onPersistenceError} />);
+    render(<Chorus persistenceKey="chat" persistenceStorage={storage} onPersistenceError={onPersistenceError} onSend={() => undefined} />);
 
     await user.type(screen.getByPlaceholderText('Send a message'), 'will persist');
     await user.click(screen.getByRole('button', { name: /send/i }));
@@ -1222,19 +1240,21 @@ describe('Chorus', () => {
     warn.mockRestore();
   });
 
-  it('warns once at send time when neither transport nor onSend is provided', async () => {
+  it('warns once at send time when neither transport nor onSend is provided without mutating the transcript', async () => {
     const user = userEvent.setup();
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
     render(<Chorus />);
 
-    await user.type(screen.getByPlaceholderText('Send a message'), 'hello');
+    const textbox = screen.getByPlaceholderText('Send a message');
+    await user.type(textbox, 'hello');
     await user.click(screen.getByRole('button', { name: /send/i }));
-    await user.type(screen.getByPlaceholderText('Send a message'), 'again');
     await user.click(screen.getByRole('button', { name: /send/i }));
 
     await waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining('`transport` nor `onSend`')));
     expect(warn.mock.calls.filter(call => String(call[0]).includes('`transport` nor `onSend`'))).toHaveLength(1);
+    expect(screen.getByRole('log')).not.toHaveTextContent('hello');
+    expect(textbox).toHaveValue('hello');
     warn.mockRestore();
   });
 
@@ -2003,19 +2023,24 @@ describe('Chorus', () => {
     const user = userEvent.setup();
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const transport = vi.fn<Transport>(() => new Promise<Response>(() => undefined));
+    const file = new File(['image-bytes'], 'blocked.png', { type: 'image/png' });
 
-    render(<Chorus transport={transport} sending={false} minAssistantDelayMs={0} />);
+    const { container } = render(<Chorus transport={transport} sending={false} minAssistantDelayMs={0} accept="image/*" />);
 
     await user.type(screen.getByPlaceholderText('Send a message'), 'first');
     await user.click(screen.getByRole('button', { name: /send/i }));
     await waitFor(() => expect(transport).toHaveBeenCalledTimes(1));
 
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(fileInput, file);
+    await screen.findByText('blocked.png');
     await user.type(screen.getByPlaceholderText('Send a message'), 'second');
     await user.click(screen.getByRole('button', { name: /send/i }));
 
     expect(transport).toHaveBeenCalledTimes(1);
     expect(screen.getAllByText('first')).toHaveLength(1);
     expect(screen.getByRole('log')).not.toHaveTextContent('second');
+    expect(screen.getByText('blocked.png')).toBeInTheDocument();
     warn.mockRestore();
   });
 
@@ -2276,6 +2301,7 @@ describe('Chorus', () => {
         serializeMessages={serializeMessages}
         deserializeMessages={deserializeMessages}
         initialMessages={[{ id: 'welcome', role: 'assistant', text: 'Welcome!' }]}
+        onSend={() => undefined}
       />
     );
 

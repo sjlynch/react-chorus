@@ -1,0 +1,41 @@
+// These tiny helpers stay local to the transport chunk so the transport-only
+// subpath never imports UI/hook chunks through shared utilities.
+export function toError(error: unknown): Error {
+  if (error instanceof Error) return error;
+  return new Error(String(error));
+}
+
+export function createAbortError(message = 'Aborted'): Error {
+  if (typeof DOMException === 'function') return new DOMException(message, 'AbortError') as Error;
+  const error = new Error(message);
+  error.name = 'AbortError';
+  return error;
+}
+
+export function encodeSSEDataEvent(data: string) {
+  return `${data.split(/\r\n|\r|\n/).map(line => `data: ${line}`).join('\n')}\n\n`;
+}
+
+export function createClosedBeforeOpenError(event: CloseEvent) {
+  const reason = event.reason ? `: ${event.reason}` : '';
+  return new Error(`WebSocket closed before opening (code ${event.code}${reason})`);
+}
+
+export function safeCloseSocket(ws: WebSocket, code?: number, reason?: string) {
+  try {
+    if (code === undefined) ws.close();
+    else ws.close(code, reason);
+  } catch {}
+}
+
+function isArrayBufferLike(data: unknown): data is ArrayBuffer {
+  return typeof data === 'object' && data !== null && typeof (data as ArrayBuffer).byteLength === 'number' && typeof (data as ArrayBuffer).slice === 'function';
+}
+
+export async function webSocketMessageToText(data: unknown): Promise<string> {
+  if (typeof data === 'string') return data;
+  if (isArrayBufferLike(data)) return new TextDecoder().decode(data);
+  if (ArrayBuffer.isView(data)) return new TextDecoder().decode(data);
+  if (typeof Blob !== 'undefined' && data instanceof Blob) return data.text();
+  throw new Error('WebSocket message data must be a string, Blob, ArrayBuffer, or typed array');
+}
