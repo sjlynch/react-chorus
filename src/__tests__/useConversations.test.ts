@@ -372,6 +372,141 @@ describe('useConversations', () => {
     expect(onError).toHaveBeenCalledWith(expect.objectContaining({ operation: 'write', key: 'chorus-conversations-index' }));
   });
 
+  describe('cross-tab sync', () => {
+    function dispatchStorageEvent(key: string, newValue: string | null) {
+      window.dispatchEvent(new StorageEvent('storage', {
+        key,
+        newValue,
+        oldValue: null,
+        storageArea: window.localStorage,
+      }));
+    }
+
+    function makeConversation(id: string, title: string) {
+      return {
+        id,
+        title,
+        createdAt: '2026-05-14T00:00:00.000Z',
+        updatedAt: '2026-05-14T00:00:00.000Z',
+        pristine: false,
+      };
+    }
+
+    it('picks up index writes from another tab via the storage event', () => {
+      const indexKey = 'chorus-cross-tab-index-pickup';
+      try {
+        const { result } = renderHook(() => useConversations({ indexKey }));
+        expect(result.current.conversations).toEqual([]);
+
+        const payload = JSON.stringify({
+          activeId: 'from-a',
+          conversations: [makeConversation('from-a', 'From tab A')],
+        });
+        window.localStorage.setItem(indexKey, payload);
+        act(() => dispatchStorageEvent(indexKey, payload));
+
+        expect(result.current.conversations.map(c => c.id)).toEqual(['from-a']);
+        expect(result.current.activeId).toBe('from-a');
+      } finally {
+        window.localStorage.removeItem(indexKey);
+      }
+    });
+
+    it('preserves the local active selection when the synced index still contains it', () => {
+      const indexKey = 'chorus-cross-tab-index-active';
+      try {
+        const ids = ['local'];
+        const { result } = renderHook(() => useConversations({
+          indexKey,
+          createId: () => ids.shift() ?? 'fallback',
+          now: () => '2026-05-14T00:01:00.000Z',
+        }));
+        act(() => { result.current.createConversation('Local'); });
+        expect(result.current.activeId).toBe('local');
+
+        const payload = JSON.stringify({
+          activeId: 'from-a',
+          conversations: [
+            makeConversation('from-a', 'From A'),
+            makeConversation('local', 'Local'),
+          ],
+        });
+        window.localStorage.setItem(indexKey, payload);
+        act(() => dispatchStorageEvent(indexKey, payload));
+
+        expect(result.current.conversations.map(c => c.id).sort()).toEqual(['from-a', 'local']);
+        expect(result.current.activeId).toBe('local');
+      } finally {
+        window.localStorage.removeItem(indexKey);
+      }
+    });
+
+    it('lets a subsequent createConversation merge with another tab\'s entries rather than stomping them', () => {
+      const indexKey = 'chorus-cross-tab-index-merge';
+      try {
+        const ids = ['from-b'];
+        const { result } = renderHook(() => useConversations({
+          indexKey,
+          createId: () => ids.shift() ?? 'fallback',
+          now: () => '2026-05-14T00:02:00.000Z',
+        }));
+
+        const payload = JSON.stringify({
+          activeId: 'from-a',
+          conversations: [makeConversation('from-a', 'From A')],
+        });
+        window.localStorage.setItem(indexKey, payload);
+        act(() => dispatchStorageEvent(indexKey, payload));
+        expect(result.current.conversations.map(c => c.id)).toEqual(['from-a']);
+
+        act(() => { result.current.createConversation('From B'); });
+
+        const stored = JSON.parse(window.localStorage.getItem(indexKey) ?? '{}');
+        expect(stored.conversations.map((c: { id: string }) => c.id).sort()).toEqual(['from-a', 'from-b']);
+      } finally {
+        window.localStorage.removeItem(indexKey);
+      }
+    });
+
+    it('ignores storage events that mirror the current in-memory index (polyfill defense)', () => {
+      const indexKey = 'chorus-cross-tab-index-mirror';
+      try {
+        const { result } = renderHook(() => useConversations({
+          indexKey,
+          createId: () => 'abc',
+          now: () => '2026-05-14T00:00:00.000Z',
+        }));
+        act(() => { result.current.createConversation('Mirror'); });
+        const previousConversations = result.current.conversations;
+
+        const sameValue = window.localStorage.getItem(indexKey);
+        act(() => dispatchStorageEvent(indexKey, sameValue));
+
+        expect(result.current.conversations).toBe(previousConversations);
+      } finally {
+        window.localStorage.removeItem(indexKey);
+      }
+    });
+
+    it('does not subscribe when a custom StorageAdapter is supplied', () => {
+      const storage = makeSyncStorage();
+      const { result } = renderHook(() => useConversations({
+        storage,
+        createId: () => 'b',
+        now: () => '2026-05-14T00:03:00.000Z',
+      }));
+      act(() => { result.current.createConversation('B'); });
+      expect(result.current.conversations.map(c => c.id)).toEqual(['b']);
+
+      act(() => dispatchStorageEvent('chorus-conversations-index', JSON.stringify({
+        activeId: 'a',
+        conversations: [makeConversation('a', 'A')],
+      })));
+
+      expect(result.current.conversations.map(c => c.id)).toEqual(['b']);
+    });
+  });
+
   it('surfaces failed transcript deletion through error and onError while deleting the index entry', async () => {
     const deleteError = new Error('delete failed');
     const onError = vi.fn();
