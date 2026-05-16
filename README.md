@@ -351,6 +351,8 @@ export default function App() {
 
 Each incoming WebSocket message is treated as one SSE payload, so the same connector/extraction pipeline applies unchanged. By default a WebSocket transport opens a fresh socket for each send. For backends where the auth/subscribe handshake is expensive, pass `{ persistent: true }` to reuse one socket across sends and call `transport.close()` when your component/app no longer needs it.
 
+> ⚠️ **Persistent mode has no built-in request/response correlation.** Every inbound frame is broadcast to every currently active response stream, so if two sends overlap (e.g. the user submits a second message before the first finishes, or a Stop-then-resend race) the same chunks are duplicated into both assistant messages. Either guarantee at the protocol layer that responses can never interleave, or pair a `formatMessage` that returns `{ payload, correlationId }` with a `correlate(frame)` callback so each frame is routed to the request that started it. In dev mode the transport will log a one-time `console.warn` the first time it sees overlapping sends without a `correlate` callback.
+
 If you only need the non-React transport factories, import them from the transport-only subpath to avoid pulling UI or Markdown code into that bundle:
 
 ```ts
@@ -697,7 +699,7 @@ react-chorus keeps React/ReactDOM as peer dependencies and externalizes runtime 
 | `react-chorus` (`Markdown`) | 74.7 kB | 25.3 kB | Standalone Markdown renderer; includes Markdown parsing/sanitization, not chat icons. |
 | `react-chorus` (`ChatWindow`) | 101.1 kB | 34.5 kB | Transcript renderer with Markdown and message action icons, without the composer/widget shell. |
 | `react-chorus` (`ConversationList`) | 5.4 kB | 1.9 kB | Conversation sidebar component only; no Markdown/icon graph. |
-| `react-chorus/transport` | 4.3 kB | 1.9 kB | Transport factories only; no React/UI/Markdown runtime. |
+| `react-chorus/transport` | 5.3 kB | 2.3 kB | Transport factories only; no React/UI/Markdown runtime. |
 | `react-chorus/provider-requests` | 8.2 kB | 2.4 kB | Provider request mappers only; no React/UI/Markdown runtime. |
 | Lazy `highlight.js` runtime | 891.4 kB | 295.9 kB | Async code-fence chunk, never part of initial JS. |
 
@@ -1229,11 +1231,26 @@ Returns a `Transport` that connects over a native WebSocket. Each incoming messa
 | `onClose` | `(code: number, reason: string) => void` | – | Called once for each real WebSocket close transition, with the close code and reason |
 | `onError` | `(event: Event) => void` | – | Called when the WebSocket reports an error |
 | `onMessage` | `(data: string, event: MessageEvent) => void` | – | Observes every decoded WebSocket message; useful for persistent server-pushed updates when no send stream is active |
-| `formatMessage` | `(text, history: Message<TMeta>[]) => string` | `JSON.stringify({ prompt, history })` | Serialise the outgoing request |
+| `formatMessage` | `(text, history: Message<TMeta>[]) => string \| { payload: string; correlationId?: string \| null }` | `JSON.stringify({ prompt, history })` | Serialise the outgoing request. Return `{ payload, correlationId }` in persistent mode to register the active stream so `correlate` can route inbound frames to it |
+| `correlate` | `(frame: string) => string \| null \| undefined` | – | Persistent mode only: extract the correlation id from each inbound frame. Non-null ids route the frame to the matching stream; `null`/`undefined` falls through to the legacy broadcast |
 
 Default mode opens a fresh socket per send, then closes it when the response stream ends, the connector reports a done sentinel, or the `AbortSignal` fires. Serializer (`formatMessage`) and `ws.send()` failures reject the transport promise and close that socket, so they surface through `onError` like HTTP/SSE failures. Incoming string, `Blob`, `ArrayBuffer`, and typed-array messages are decoded as text; other message types error the response body instead of silently emitting an empty chunk.
 
-Persistent mode opens a single socket on the first send and keeps it open across sends. The returned transport is still callable as a normal `Transport`, and also exposes `transport.close(code?, reason?)` for explicit cleanup; runtimes with `FinalizationRegistry` also attempt to close the persistent socket when the transport is garbage-collected, but UI code should call `close()` during unmount/dispose rather than relying on GC timing. `onOpen` and `onClose` fire for real socket transitions, not once per send. Because the socket stays open, application/server protocol code is responsible for reconnect/backoff and request/response correlation. If multiple requests or pushed messages can overlap, include request IDs (or similar) in your protocol and filter in a custom connector/`onMessage`. Make sure each response emits a connector-specific done sentinel (or cancel the response body) so `useChorusStream` can finish the current send while the socket remains open.
+Persistent mode opens a single socket on the first send and keeps it open across sends. The returned transport is still callable as a normal `Transport`, and also exposes `transport.close(code?, reason?)` for explicit cleanup; runtimes with `FinalizationRegistry` also attempt to close the persistent socket when the transport is garbage-collected, but UI code should call `close()` during unmount/dispose rather than relying on GC timing. `onOpen` and `onClose` fire for real socket transitions, not once per send. Because the socket stays open, application/server protocol code is responsible for reconnect/backoff and request/response correlation. **If sends can overlap (a second message starting before the first finishes, including the built-in Stop-then-resend flow) every inbound frame is broadcast to every active response stream, which duplicates payloads across assistant messages.** Pair a `formatMessage` that returns `{ payload, correlationId }` with `correlate(frame)` so each frame is dispatched to the request that started it; `correlate` returning `null`/`undefined` falls back to the broadcast (use this for server-pushed updates). The transport logs a one-time dev-mode warning the first time it sees overlapping sends without a `correlate` callback. Make sure each response emits a connector-specific done sentinel (or cancel the response body) so `useChorusStream` can finish the current send while the socket remains open.
+
+```ts
+let nextId = 0;
+const transport = createWebSocketTransport('wss://api.example.com/chat', {
+  persistent: true,
+  formatMessage: (text, history) => {
+    const id = String(++nextId);
+    return { payload: JSON.stringify({ id, prompt: text, history }), correlationId: id };
+  },
+  correlate: (frame) => {
+    try { return (JSON.parse(frame) as { id?: string }).id ?? null; } catch { return null; }
+  },
+});
+```
 
 ### Custom connector
 
