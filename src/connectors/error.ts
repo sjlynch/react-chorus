@@ -14,5 +14,10 @@ export function extractErrorMessage(obj: unknown): string | null {
     return value.message;
   }
 
+  // Vercel AI SDK UI message stream error frames use { type: 'error', errorText: '...' }.
+  if (value.type === 'error' && typeof value.errorText === 'string' && value.errorText) {
+    return value.errorText;
+  }
+
   return null;
 }

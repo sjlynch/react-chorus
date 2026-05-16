@@ -40,7 +40,8 @@ Known string names use the centralized `ConnectorName` alias in `src/types.ts`.
 - `openai.ts` — public OpenAI facade and state factory. Internals are split under `connectors/openai/`: `thinkTagSplitter.ts` for `<think>` parsing + EOF flush, `chatCompletions.ts` for `choices[].delta`, `responses.ts` for `response.*` events, and `shared.ts` for small result helpers.
 - `anthropic.ts` — reads `content_block_delta` text/thinking events and `tool_use` / `input_json_delta`; treats `message_stop` as done.
 - `gemini.ts` — reads selected `candidates[0]` text/thought/functionCall parts; treats normal `STOP` / `MAX_TOKENS` as done and blocked finish reasons as errors.
-- All JSON connectors call `extractErrorMessage()` first and preserve the original provider payload as `errorPayload` when surfacing `{ error }`.
+- `aiSdk.ts` — reads Vercel AI SDK output in two shapes: SSE-wrapped UI-message-stream JSON (`text-delta`, `reasoning-delta`, `tool-input-*`, `tool-output-available`, `finish` / `finish-message`, `{ type: 'error', errorText }`) and the prefix-coded data-stream protocol (`0:`, `g:`, `9:`, `b:`, `c:`, `a:`, `d:`, `e:`, `3:`). Unknown frames return null instead of leaking protocol text. Data-stream lines must arrive through SSE — see the README recipe for the one-line server wrap.
+- All JSON connectors call `extractErrorMessage()` first and preserve the original provider payload as `errorPayload` when surfacing `{ error }`. `extractErrorMessage` also recognises the AI SDK's `{ type: 'error', errorText }` shape.
 
 ## Auto detection
 
@@ -49,7 +50,9 @@ Known string names use the centralized `ConnectorName` alias in `src/types.ts`.
 - `choices` array => OpenAI
 - `candidates` array => Gemini
 - `type` starting with `response.` => OpenAI Responses API
-- other string `type` field => Anthropic
+- known Anthropic event `type` => Anthropic
+- known AI SDK event `type` (`text-delta`, `reasoning-delta`, `tool-input-*`, `tool-output-available`, `finish` / `finish-message` / `finish-step`, `start` / `start-step`, `source-*`, `file`) => AI SDK
+- non-JSON data starting with a single-character `<prefix>:` (the AI SDK data-stream protocol) => AI SDK
 - otherwise non-empty data is treated as plain text
 
 ## Adding a provider

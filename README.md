@@ -12,7 +12,7 @@ The live demo runs entirely in your browser — no backend needed. It drives `<C
 
 react-chorus is for React developers who want a drop-in AI chat UI that stays composable. Use the batteries-included `<Chorus>` widget for a production-ready shell, or import the headless/hooks/components when your product needs a custom layout.
 
-- **Versus Vercel AI SDK:** react-chorus focuses on the visible chat UI and composer UX; pair it with any backend or SDK, including Vercel AI SDK, instead of adopting a specific transport stack.
+- **Versus Vercel AI SDK:** react-chorus focuses on the visible chat UI and composer UX; pair it with any backend or SDK, including Vercel AI SDK, instead of adopting a specific transport stack. A dedicated [`'ai-sdk'` connector](#vercel-ai-sdk-stream-format) understands both AI SDK UI-message-stream JSON and the prefix-coded data-stream protocol so AI SDK routes work without writing a custom parser.
 - **Versus assistant-ui:** react-chorus keeps the default path small and direct while still exposing message rendering, streaming, persistence, and theme primitives.
 - **Versus rolling your own:** you get SSE parsing, retry/edit/regenerate flows, Markdown, attachment handling, and local persistence without rebuilding the common edge cases.
 
@@ -441,7 +441,8 @@ Connectors tell Chorus how to parse the streaming response from different AI pro
 | `'openai'` | OpenAI Chat Completions / Responses-compatible streams | selected `choices[0].delta.content`, reasoning fields, `tool_calls`, and common Responses API deltas |
 | `'anthropic'` | Anthropic Messages API | `content_block_delta` text/thinking deltas plus `tool_use` / `input_json_delta` |
 | `'gemini'` | Google Gemini (AI / Vertex AI) | selected `candidates[0].content.parts[*].text`, thought parts, and `functionCall` parts |
-| `'auto'` *(default)* | Auto-detect | Tries OpenAI, then Gemini, known Anthropic events, generic JSON text fields (`text`/`content`/`delta`), then raw plain text |
+| `'ai-sdk'` | Vercel AI SDK (`toUIMessageStreamResponse` / `toDataStreamResponse`) | `text-delta` / `reasoning-delta` / `tool-input-*` / `tool-output-*` JSON events, plus prefix-coded data-stream frames (`0:"..."`, `g:"..."`, `9:{...}`, `c:{...}`, `a:{...}`, `d:`/`e:` finish, `3:"..."` error) |
+| `'auto'` *(default)* | Auto-detect | Tries OpenAI, then Gemini, known Anthropic events, known Vercel AI SDK events (UI-message-stream JSON and data-stream prefix lines), generic JSON text fields (`text`/`content`/`delta`), then raw plain text |
 
 All built-in connectors also recognise in-band stream errors. If a backend has already started a `200` SSE/WebSocket stream, send `data: {"error":"message"}` (or `{"error":{"message":"message"}}`) to abort the response, call `onError` with an `Error`, and show the configured error banner. Unknown JSON events with a `type` field are no longer assumed to be Anthropic; `{ "type": "delta", "text": "hi" }` renders `hi`, and unknown JSON without a text-like field falls back to the raw payload string.
 
@@ -481,6 +482,9 @@ const { send } = useChorusStream(transport, { connector: 'anthropic' });
 
 // Google Gemini
 const { send } = useChorusStream(transport, { connector: 'gemini' });
+
+// Vercel AI SDK (toUIMessageStreamResponse / wrapped toDataStreamResponse)
+const { send } = useChorusStream(transport, { connector: 'ai-sdk' });
 
 // Auto-detect (default)
 const { send } = useChorusStream(transport);
@@ -577,6 +581,110 @@ app.post('/api/chat', async (req, res) => {
   }
 });
 ```
+
+## Vercel AI SDK stream format
+
+The `'ai-sdk'` connector understands both shapes the Vercel AI SDK can emit:
+
+- **UI message stream** (`result.toUIMessageStreamResponse()`, AI SDK v5+) is already SSE-formatted, so `createFetchSSETransport` and the default `transport="/api/chat"` shortcut work without any extra wiring. Each frame is a JSON object such as `{"type":"text-delta","id":"...","delta":"hi"}` or `{"type":"tool-input-available","toolCallId":"...","toolName":"...","input":{...}}`. The connector maps `text-delta` to assistant text, `reasoning-delta` to reasoning, `tool-input-*` / `tool-input-available` / `tool-output-available` to streaming tool messages, `finish` / `finish-message` to done, and `{"type":"error","errorText":"..."}` to the in-band error path. Lifecycle frames such as `start`, `start-step`, `text-start`, `text-end`, `reasoning-start`, `reasoning-end`, and `finish-step` are silently ignored so the user never sees protocol text.
+- **Data-stream protocol** (`result.toDataStreamResponse()`, AI SDK v4) emits prefix-coded lines like `0:"hi"`, `g:"considering"`, `9:{...}`, `c:{...}`, `a:{...}`, `d:{...}`, `e:{...}`, and `3:"error message"`. The pipeline expects each frame to arrive as the value of an SSE `data:` field, so wrap each line as `data: <line>\n\n` when streaming the AI SDK response yourself (one-line server snippet below). Unknown / annotation-only frames (`1`, `2`, `7`, `8`, `f`, `h`, `i`, `j`) are ignored.
+
+### Vercel AI SDK with Next.js App Router (UI message stream — recommended)
+
+```ts
+// app/api/chat/route.ts
+import { openai } from '@ai-sdk/openai';
+import { streamText, convertToModelMessages } from 'ai';
+import type { Message } from 'react-chorus';
+
+export const runtime = 'nodejs';
+export const maxDuration = 60;
+
+export async function POST(request: Request) {
+  const body = (await request.json()) as { history?: Message[] };
+  const history = Array.isArray(body.history) ? body.history : [];
+
+  const result = streamText({
+    model: openai('gpt-4o-mini'),
+    messages: convertToModelMessages(history.map(m => ({
+      id: m.id,
+      role: m.role,
+      parts: [{ type: 'text', text: m.text ?? '' }],
+    }))),
+  });
+
+  // toUIMessageStreamResponse returns text/event-stream with `data: {...}\n\n` frames.
+  return result.toUIMessageStreamResponse();
+}
+```
+
+```tsx
+// app/page.tsx
+'use client';
+import { Chorus } from 'react-chorus';
+
+export default function Page() {
+  return (
+    <main style={{ height: '100dvh' }}>
+      <Chorus transport="/api/chat" connector="ai-sdk" />
+    </main>
+  );
+}
+```
+
+The default `connector="auto"` also dispatches AI SDK frames correctly; spelling out `connector="ai-sdk"` just makes the intent explicit.
+
+### Vercel AI SDK data-stream protocol (legacy `toDataStreamResponse`)
+
+The AI SDK v4 data stream is plain `text/plain`, not SSE — its lines start with `0:`, `9:`, `e:`, etc. instead of `data:`. Re-emit each line as an SSE frame in your route so it reaches the connector:
+
+```ts
+// app/api/chat/route.ts
+import { openai } from '@ai-sdk/openai';
+import { streamText } from 'ai';
+
+export async function POST(request: Request) {
+  const body = (await request.json()) as { history?: Array<{ role: string; text?: string }> };
+  const result = streamText({
+    model: openai('gpt-4o-mini'),
+    messages: (body.history ?? []).map(m => ({ role: m.role as 'user' | 'assistant', content: m.text ?? '' })),
+  });
+
+  const upstream = result.toDataStream(); // newline-delimited prefix lines
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+  let buffered = '';
+
+  const sse = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const reader = upstream.getReader();
+      try {
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffered += decoder.decode(value, { stream: true });
+          let newline = buffered.indexOf('\n');
+          while (newline !== -1) {
+            const line = buffered.slice(0, newline);
+            buffered = buffered.slice(newline + 1);
+            if (line) controller.enqueue(encoder.encode(`data: ${line}\n\n`));
+            newline = buffered.indexOf('\n');
+          }
+        }
+        if (buffered) controller.enqueue(encoder.encode(`data: ${buffered}\n\n`));
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(sse, {
+    headers: { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform' },
+  });
+}
+```
+
+With either route the client just needs `<Chorus transport="/api/chat" connector="ai-sdk" />`. The connector returns the same `text` / `reasoning` / `toolDelta` / `done` / `error` shape as the other built-in connectors, so retry/stop/edit/regenerate, `<ToolCallBlock>`, and `onError` all work unchanged.
 
 ## Examples
 
@@ -691,9 +799,9 @@ react-chorus keeps React/ReactDOM as peer dependencies and externalizes runtime 
 
 | Entry | Initial JS | gzip | Notes |
 |-------|------------|------|-------|
-| `react-chorus` (`<Chorus>`) | 152.4 kB | 52.0 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
-| `react-chorus/headless` | 152.8 kB | 52.2 kB | Headless defaults, same behavior surface. |
-| `react-chorus` (`useChorusStream`) | 34.1 kB | 11.2 kB | Root hook import; CI fails if it pulls UI, Markdown, or icon dependencies. |
+| `react-chorus` (`<Chorus>`) | 155.8 kB | 52.8 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
+| `react-chorus/headless` | 156.2 kB | 53.0 kB | Headless defaults, same behavior surface. |
+| `react-chorus` (`useChorusStream`) | 37.5 kB | 12.1 kB | Root hook import; CI fails if it pulls UI, Markdown, or icon dependencies. |
 | `react-chorus` (`Markdown`) | 74.7 kB | 25.3 kB | Standalone Markdown renderer; includes Markdown parsing/sanitization, not chat icons. |
 | `react-chorus` (`ChatWindow`) | 101.1 kB | 34.5 kB | Transcript renderer with Markdown and message action icons, without the composer/widget shell. |
 | `react-chorus` (`ConversationList`) | 5.4 kB | 1.9 kB | Conversation sidebar component only; no Markdown/icon graph. |
@@ -703,7 +811,7 @@ react-chorus keeps React/ReactDOM as peer dependencies and externalizes runtime 
 
 `highlight.js` is only fetched the first time a fenced code block (` ``` ` or `~~~`) appears in rendered text. The matching GitHub dark/light token-color stylesheet is also injected on demand based on `codeBlockTheme`; code renders immediately as plain text and is re-rendered with syntax highlighting once the chunk arrives. While an assistant message is actively streaming, Chorus renders that growing message as React-escaped plain text and switches to full Markdown parsing/sanitization when the stream finalizes.
 
-The playground has a separate budget because it intentionally bundles a complete demo app. `npm run build:playground` also runs `npm run verify:playground-size`, writes `.cache/react-chorus/playground-bundle-size-report.json`, and checks this paragraph. The current playground initial JS graph is 371.5 kB / 118.3 kB gzip and its largest lazy chunk (highlight.js) is 890.9 kB / 295.7 kB gzip. Vite's chunk warning limit is raised to that documented lazy budget so the playground build stays free of Vite chunk warnings while the budget script tracks regressions.
+The playground has a separate budget because it intentionally bundles a complete demo app. `npm run build:playground` also runs `npm run verify:playground-size`, writes `.cache/react-chorus/playground-bundle-size-report.json`, and checks this paragraph. The current playground initial JS graph is 374.9 kB / 119.1 kB gzip and its largest lazy chunk (highlight.js) is 890.9 kB / 295.7 kB gzip. Vite's chunk warning limit is raised to that documented lazy budget so the playground build stays free of Vite chunk warnings while the budget script tracks regressions.
 
 To refresh the published size claims after dependency or feature changes, run `npm run build`, `npm run verify:bundle-size`, and `npm run build:playground`, then copy the updated values from stdout or the `.cache/react-chorus/*-bundle-size-report.json` files into this section. The verification commands may fail until the README values are updated to match their reports.
 
