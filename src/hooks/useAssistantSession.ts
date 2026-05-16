@@ -87,16 +87,38 @@ export type ChorusOnToolCall<TMeta = Record<string, unknown>> = (context: Chorus
 export type ChorusToolHandler<TMeta = Record<string, unknown>> = (input: unknown, context: ChorusToolCallContext<TMeta>) => unknown | Promise<unknown>;
 export type ChorusToolRegistry<TMeta = Record<string, unknown>> = Record<string, ChorusToolHandler<TMeta>>;
 
+/**
+ * Why a transport stream's tool-loop iteration ended. Hosts that opt in to `autoContinueTools` use this to
+ * distinguish a normal terminal completion from the safety cap firing (`'max-tool-iterations'`), a host veto
+ * (`'tool-loop-veto'`), or an intermediate iteration that will continue (`'tool-loop-continue'`). The
+ * `'max-tool-iterations'` reason is callback-only; Chorus deliberately does not render a default banner so
+ * hosts can choose how to surface or recover from the cap.
+ */
+export type ChorusStreamDoneReason =
+  | 'completed'
+  | 'tool-loop-continue'
+  | 'tool-loop-veto'
+  | 'max-tool-iterations';
+
 export interface ChorusStreamDoneContext<TMeta = Record<string, unknown>> {
   assistantMessage: Message<TMeta> | null;
   toolMessages: ToolMessage<TMeta>[];
   messages: Message<TMeta>[];
   response?: Response;
+  /** Why this stream ended. See {@link ChorusStreamDoneReason}. */
+  reason: ChorusStreamDoneReason;
+  /** Whether Chorus will immediately start another tool-loop continuation after this callback returns. */
+  willContinue: boolean;
+  /** 1-based count of completed tool-loop iterations on this turn (always >= 1). */
+  iteration: number;
+  /** Normalized cap (after defaulting and `Infinity` handling) used to evaluate the loop. */
+  maxToolIterations: number;
 }
 
 export type ChorusOnStreamDone<TMeta = Record<string, unknown>> = (context: ChorusStreamDoneContext<TMeta>) => void;
 
-export interface ChorusToolLoopContext<TMeta = Record<string, unknown>> extends ChorusStreamDoneContext<TMeta> {
+export interface ChorusToolLoopContext<TMeta = Record<string, unknown>>
+  extends Omit<ChorusStreamDoneContext<TMeta>, 'reason' | 'willContinue'> {
   /** Number of completed tool-execution iterations, starting at 1 for the first continuation. */
   iteration: number;
   maxToolIterations: number;
@@ -721,32 +743,51 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     });
   }, [appendAssistantNow, appendAssistantReasoningNow, appendToolDeltaNow, doStream, historyForTransport, invalidateAssistantSession, isAssistantSessionActive, minAssistantDelayMsRef, removePendingAssistant, safeOnError, setTransportBusy, showStreamError]);
 
-  const shouldContinueAfterTools = React.useCallback(async (
+  interface ToolLoopDecision {
+    reason: ChorusStreamDoneReason;
+    iteration: number;
+    maxToolIterations: number;
+    willContinue: boolean;
+  }
+
+  const decideToolLoopContinuation = React.useCallback(async (
     iteration: number,
     assistantMessage: Message<TMeta> | null,
     toolMessages: ToolMessage<TMeta>[],
     response: Response | undefined,
     signal: AbortSignal,
-  ) => {
-    if (!autoContinueToolsRef.current || !toolMessages.length) return false;
-    if (!toolMessages.every(hasToolOutput)) return false;
-
+  ): Promise<ToolLoopDecision> => {
     const maxToolIterations = normalizeMaxToolIterations(maxToolIterationsRef.current);
-    const nextIteration = iteration + 1;
-    if (nextIteration > maxToolIterations) return false;
+    const completedIteration = iteration + 1;
+
+    if (!autoContinueToolsRef.current || !toolMessages.length || !toolMessages.every(hasToolOutput)) {
+      return { reason: 'completed', iteration: completedIteration, maxToolIterations, willContinue: false };
+    }
+
+    if (completedIteration > maxToolIterations) {
+      return { reason: 'max-tool-iterations', iteration: completedIteration, maxToolIterations, willContinue: false };
+    }
+
     if (signal.aborted) throw createAbortError();
 
-    const shouldContinue = await shouldContinueToolLoopRef.current?.({
+    const userDecision = await shouldContinueToolLoopRef.current?.({
       assistantMessage,
       toolMessages,
       messages: messagesRef.current,
       response,
-      iteration: nextIteration,
+      iteration: completedIteration,
       maxToolIterations,
       signal,
     });
     if (signal.aborted) throw createAbortError();
-    return shouldContinue ?? true;
+
+    const willContinue = userDecision ?? true;
+    return {
+      reason: willContinue ? 'tool-loop-continue' : 'tool-loop-veto',
+      iteration: completedIteration,
+      maxToolIterations,
+      willContinue,
+    };
   }, [autoContinueToolsRef, maxToolIterationsRef, messagesRef, shouldContinueToolLoopRef]);
 
   const finishTransportStream = React.useCallback<FinishTransportStream>(async (sessionId, response, controller, iteration) => {
@@ -768,17 +809,41 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
       }
 
       const toolMessages = getToolMessagesByIds(toolMessageIds);
+
+      let decision: ToolLoopDecision;
+      try {
+        decision = await decideToolLoopContinuation(iteration, assistantMessage, toolMessages, response, controller.signal);
+      } catch (decisionError) {
+        if (!isAbortError(decisionError) && isAssistantSessionActive(sessionId)) {
+          // shouldContinueToolLoop threw. Surface a terminal callback so observers see the
+          // turn end before the error is reported via onError.
+          safeOnStreamDone({
+            assistantMessage,
+            toolMessages,
+            messages: messagesRef.current,
+            response,
+            reason: 'tool-loop-veto',
+            willContinue: false,
+            iteration: iteration + 1,
+            maxToolIterations: normalizeMaxToolIterations(maxToolIterationsRef.current),
+          });
+        }
+        throw decisionError;
+      }
+      if (!isAssistantSessionActive(sessionId)) return;
+
       safeOnStreamDone({
         assistantMessage,
         toolMessages,
         messages: messagesRef.current,
         response,
+        reason: decision.reason,
+        willContinue: decision.willContinue,
+        iteration: decision.iteration,
+        maxToolIterations: decision.maxToolIterations,
       });
 
-      const shouldContinue = await shouldContinueAfterTools(iteration, assistantMessage, toolMessages, response, controller.signal);
-      if (!isAssistantSessionActive(sessionId)) return;
-
-      if (shouldContinue) {
+      if (decision.willContinue) {
         keepTransportBusy = true;
         startTransportStream(sessionId, '', messagesRef.current, controller, iteration + 1);
         return;
@@ -807,7 +872,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
         if (controllerRef.current === controller) controllerRef.current = null;
       }
     }
-  }, [cancelPending, finalizeAssistantNow, flushPersistence, getToolMessagesByIds, invalidateAssistantSession, isAssistantSessionActive, messagesRef, runCompletedToolCalls, safeOnError, safeOnFinish, safeOnStreamDone, setTransportBusy, shouldContinueAfterTools, showStreamError, startTransportStream]);
+  }, [cancelPending, decideToolLoopContinuation, finalizeAssistantNow, flushPersistence, getToolMessagesByIds, invalidateAssistantSession, isAssistantSessionActive, maxToolIterationsRef, messagesRef, runCompletedToolCalls, safeOnError, safeOnFinish, safeOnStreamDone, setTransportBusy, showStreamError, startTransportStream]);
 
   finishTransportStreamRef.current = finishTransportStream;
 

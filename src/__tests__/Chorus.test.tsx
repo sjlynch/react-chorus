@@ -524,12 +524,13 @@ describe('Chorus', () => {
   it('stops automatic tool loops at maxToolIterations', async () => {
     const user = userEvent.setup();
     const search = vi.fn(async () => ({ ok: true }));
+    const onStreamDone = vi.fn();
     const transport = vi.fn<Transport>(async () => sseResponse([
       JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: transport.mock.calls.length - 1, id: `call_${transport.mock.calls.length}`, function: { name: 'search', arguments: '{}' } }] } }] }),
       '[DONE]',
     ]));
 
-    render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} autoContinueTools maxToolIterations={1} tools={{ search }} />);
+    render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} autoContinueTools maxToolIterations={1} tools={{ search }} onStreamDone={onStreamDone} />);
 
     await user.type(screen.getByPlaceholderText('Send a message'), 'loop');
     await user.click(screen.getByRole('button', { name: /send/i }));
@@ -538,6 +539,103 @@ describe('Chorus', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument());
     expect(search).toHaveBeenCalledTimes(2);
     expect(transport).toHaveBeenCalledTimes(2);
+    expect(onStreamDone).toHaveBeenCalledTimes(2);
+    expect(onStreamDone).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      reason: 'tool-loop-continue',
+      willContinue: true,
+      iteration: 1,
+      maxToolIterations: 1,
+    }));
+    expect(onStreamDone).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      reason: 'max-tool-iterations',
+      willContinue: false,
+      iteration: 2,
+      maxToolIterations: 1,
+    }));
+  });
+
+  it('reports max-tool-iterations on the very first tool batch when maxToolIterations is 0', async () => {
+    const user = userEvent.setup();
+    const search = vi.fn(async () => ({ ok: true }));
+    const onStreamDone = vi.fn();
+    const transport = vi.fn<Transport>(async () => sseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'search', arguments: '{}' } }] } }] }),
+      '[DONE]',
+    ]));
+
+    render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} autoContinueTools maxToolIterations={0} tools={{ search }} onStreamDone={onStreamDone} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'loop');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    await waitFor(() => expect(search).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument());
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(onStreamDone).toHaveBeenCalledTimes(1);
+    expect(onStreamDone).toHaveBeenCalledWith(expect.objectContaining({
+      reason: 'max-tool-iterations',
+      willContinue: false,
+      iteration: 1,
+      maxToolIterations: 0,
+      toolMessages: [expect.objectContaining({ toolCall: expect.objectContaining({ id: 'call_1' }) })],
+    }));
+  });
+
+  it('reports completed when a transport stream ends with no auto-continue tool calls', async () => {
+    const user = userEvent.setup();
+    const onStreamDone = vi.fn();
+    const transport = vi.fn<Transport>(async () => sseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { content: 'hi there' } }] }),
+      '[DONE]',
+    ]));
+
+    render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} onStreamDone={onStreamDone} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'hello');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    await screen.findByText('hi there');
+    expect(onStreamDone).toHaveBeenCalledTimes(1);
+    expect(onStreamDone).toHaveBeenCalledWith(expect.objectContaining({
+      reason: 'completed',
+      willContinue: false,
+      iteration: 1,
+      maxToolIterations: 4,
+    }));
+  });
+
+  it('reports tool-loop-veto when shouldContinueToolLoop returns false', async () => {
+    const user = userEvent.setup();
+    const search = vi.fn(async () => ({ ok: true }));
+    const onStreamDone = vi.fn();
+    const transport = vi.fn<Transport>(async () => sseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'search', arguments: '{}' } }] } }] }),
+      '[DONE]',
+    ]));
+
+    render(<Chorus
+      transport={transport}
+      connector="openai"
+      minAssistantDelayMs={0}
+      autoContinueTools
+      tools={{ search }}
+      shouldContinueToolLoop={() => false}
+      onStreamDone={onStreamDone}
+    />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'veto');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    await waitFor(() => expect(search).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument());
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(onStreamDone).toHaveBeenCalledTimes(1);
+    expect(onStreamDone).toHaveBeenCalledWith(expect.objectContaining({
+      reason: 'tool-loop-veto',
+      willContinue: false,
+      iteration: 1,
+      maxToolIterations: 4,
+    }));
   });
 
   it('treats maxToolIterations={Infinity} as an explicit unlimited cap', async () => {

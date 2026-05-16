@@ -691,9 +691,9 @@ react-chorus keeps React/ReactDOM as peer dependencies and externalizes runtime 
 
 | Entry | Initial JS | gzip | Notes |
 |-------|------------|------|-------|
-| `react-chorus` (`<Chorus>`) | 152.4 kB | 52.0 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
-| `react-chorus/headless` | 152.8 kB | 52.2 kB | Headless defaults, same behavior surface. |
-| `react-chorus` (`useChorusStream`) | 34.1 kB | 11.2 kB | Root hook import; CI fails if it pulls UI, Markdown, or icon dependencies. |
+| `react-chorus` (`<Chorus>`) | 153.0 kB | 52.1 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
+| `react-chorus/headless` | 153.3 kB | 52.3 kB | Headless defaults, same behavior surface. |
+| `react-chorus` (`useChorusStream`) | 34.7 kB | 11.3 kB | Root hook import; CI fails if it pulls UI, Markdown, or icon dependencies. |
 | `react-chorus` (`Markdown`) | 74.7 kB | 25.3 kB | Standalone Markdown renderer; includes Markdown parsing/sanitization, not chat icons. |
 | `react-chorus` (`ChatWindow`) | 101.1 kB | 34.5 kB | Transcript renderer with Markdown and message action icons, without the composer/widget shell. |
 | `react-chorus` (`ConversationList`) | 5.4 kB | 1.9 kB | Conversation sidebar component only; no Markdown/icon graph. |
@@ -703,7 +703,7 @@ react-chorus keeps React/ReactDOM as peer dependencies and externalizes runtime 
 
 `highlight.js` is only fetched the first time a fenced code block (` ``` ` or `~~~`) appears in rendered text. The matching GitHub dark/light token-color stylesheet is also injected on demand based on `codeBlockTheme`; code renders immediately as plain text and is re-rendered with syntax highlighting once the chunk arrives. While an assistant message is actively streaming, Chorus renders that growing message as React-escaped plain text and switches to full Markdown parsing/sanitization when the stream finalizes.
 
-The playground has a separate budget because it intentionally bundles a complete demo app. `npm run build:playground` also runs `npm run verify:playground-size`, writes `.cache/react-chorus/playground-bundle-size-report.json`, and checks this paragraph. The current playground initial JS graph is 371.5 kB / 118.3 kB gzip and its largest lazy chunk (highlight.js) is 890.9 kB / 295.7 kB gzip. Vite's chunk warning limit is raised to that documented lazy budget so the playground build stays free of Vite chunk warnings while the budget script tracks regressions.
+The playground has a separate budget because it intentionally bundles a complete demo app. `npm run build:playground` also runs `npm run verify:playground-size`, writes `.cache/react-chorus/playground-bundle-size-report.json`, and checks this paragraph. The current playground initial JS graph is 372.0 kB / 118.4 kB gzip and its largest lazy chunk (highlight.js) is 890.9 kB / 295.7 kB gzip. Vite's chunk warning limit is raised to that documented lazy budget so the playground build stays free of Vite chunk warnings while the budget script tracks regressions.
 
 To refresh the published size claims after dependency or feature changes, run `npm run build`, `npm run verify:bundle-size`, and `npm run build:playground`, then copy the updated values from stdout or the `.cache/react-chorus/*-bundle-size-report.json` files into this section. The verification commands may fail until the README values are updated to match their reports.
 
@@ -771,7 +771,7 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `autoContinueTools` | `boolean` | `false` | Opt in to an automatic tool-execution → model-continuation loop on the `transport` path after all completed tool calls have outputs. |
 | `maxToolIterations` | `number` | `4` | Maximum automatic tool iterations when `autoContinueTools` is enabled. Prevents infinite loops. |
 | `shouldContinueToolLoop` | `(context) => boolean \| Promise<boolean>` | — | Optional gate before each automatic continuation. Return `false` to stop after rendering/executing the current tool batch. |
-| `onStreamDone` | `({ assistantMessage, toolMessages, messages, response }) => void` | — | Called after each `transport` stream completes normally and tool handlers (if any) finish. Fires for tool-only turns where `onFinish` has no assistant message. |
+| `onStreamDone` | `({ assistantMessage, toolMessages, messages, response, reason, willContinue, iteration, maxToolIterations }) => void` | — | Called after each `transport` stream completes normally and tool handlers (if any) finish. Fires for tool-only turns where `onFinish` has no assistant message. `reason` is `'completed'`, `'tool-loop-continue'`, `'tool-loop-veto'`, or `'max-tool-iterations'` — use it to detect when `autoContinueTools` stops because the safety cap was reached. |
 | `onCopy` | `(message: Message<TMeta>) => void` | Clipboard copy when available | Overrides the built-in per-message Copy action. If omitted, Chorus copies `message.text` with `navigator.clipboard.writeText` when the Clipboard API is available. |
 | `getMessageFeedback` | `(message: Message<TMeta>) => 'up' \| 'down' \| null \| undefined` | `message.metadata.feedback` | Seeds the pressed thumb state from persisted feedback. Return `null` for no selection; return `undefined` to fall back to `message.metadata.feedback` when it is `'up'` or `'down'`. |
 | `onFeedback` | `(message: Message<TMeta>, feedback: 'up' \| 'down') => void` | — | Enables built-in thumbs-up / thumbs-down per-message feedback actions and reports changes. Clicking the already-selected thumb is ignored (no toggle-off callback). |
@@ -1343,7 +1343,7 @@ To observe deltas without executing tools:
 
 To execute tools in the simple path, pass a `tools` registry. Handlers run after streaming input completes, receive the final parsed `input` plus an abortable context, and their return value is appended as `toolCall.output`. If the user clicks Stop while a handler is running, `context.signal` is aborted and late outputs are ignored. If a handler throws a non-abort error, Chorus keeps the tool row inspectable, writes `{ error: message }` to its output, calls `onError`, and shows the friendly error banner; clicking Retry removes the failed assistant/tool attempt before rendering the fresh response.
 
-By default this remains display/manual mode: Chorus does not make a second model request after tool execution, so use `onToolCall`/`onStreamDone` or your backend to continue the agent loop when needed. To opt in to a built-in loop, set `autoContinueTools`. Chorus will run the handlers, append outputs, then send a continuation request with the updated history. `maxToolIterations` (default `4`) prevents runaway loops, `shouldContinueToolLoop(context)` can stop a specific continuation, and Stop aborts both tool execution and continuation streams.
+By default this remains display/manual mode: Chorus does not make a second model request after tool execution, so use `onToolCall`/`onStreamDone` or your backend to continue the agent loop when needed. To opt in to a built-in loop, set `autoContinueTools`. Chorus will run the handlers, append outputs, then send a continuation request with the updated history. `maxToolIterations` (default `4`) prevents runaway loops, `shouldContinueToolLoop(context)` can stop a specific continuation, and Stop aborts both tool execution and continuation streams. When the cap fires (or any other terminal condition), `onStreamDone` receives a `reason` (`'max-tool-iterations' | 'tool-loop-veto' | 'tool-loop-continue' | 'completed'`) plus `willContinue`, `iteration`, and `maxToolIterations` — hosts decide how to surface the cap in their UI (Chorus deliberately does not render a default banner).
 
 ```tsx
 <Chorus
