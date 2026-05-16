@@ -78,7 +78,7 @@ export default function App() {
 }
 ```
 
-`transport` requires an endpoint that returns Server-Sent Events. Chorus POSTs `{ prompt: string, history: Message[] }` to the URL and streams the SSE response into the assistant message automatically. `history` already includes the current user turn; `prompt` is a convenience copy of that latest user text. See the [Next.js App Router route handler](#nextjs-app-router-route-handler), the [Minimal Express + OpenAI backend](#minimal-express--openai-backend), or the runnable [`examples/with-next`](./examples/with-next) and [`examples/with-openai`](./examples/with-openai) apps for server-safe proxies.
+`transport` requires an endpoint that returns Server-Sent Events. Chorus POSTs `{ prompt: string, history: Message[] }` to the URL and streams the SSE response into the assistant message automatically. **`history` already includes the latest user turn** — `prompt` is a duplicate convenience copy of that same text, not the next message to append. Map `history` directly on the server and ignore `prompt`; appending `prompt` to `history` will send the new user message to the model twice. See the [Next.js App Router route handler](#nextjs-app-router-route-handler), the [Minimal Express + OpenAI backend](#minimal-express--openai-backend), or the runnable [`examples/with-next`](./examples/with-next) and [`examples/with-openai`](./examples/with-openai) apps for server-safe proxies.
 
 ## Two usage paths
 
@@ -87,7 +87,9 @@ export default function App() {
 Pass a URL string or `Transport` function. Chorus handles everything:
 
 ```tsx
-// String: Chorus POSTs { prompt, history } and reads the SSE stream
+// String: Chorus POSTs { prompt, history } and reads the SSE stream.
+// `history` already includes the new user turn; `prompt` is a duplicate
+// of `history[last].text`. Read `history` on the server and ignore `prompt`.
 <Chorus transport="/api/chat" />
 
 // Custom Transport function
@@ -159,7 +161,7 @@ export default function App() {
 }
 ```
 
-`createFetchSSETransport(url)` posts `{ prompt, history }` to your endpoint and reads the response as a Server-Sent Events stream. `history` includes the latest user message, so backend examples should map `history` directly instead of appending `prompt` again. Pass a `formatBody` option to customise the request shape for OpenAI, FastAPI, FormData uploads, or any other backend. The transport sets `Content-Type: application/json` only for its default JSON body; custom serializers should set JSON headers themselves and FormData/Blob/URLSearchParams are not forced to JSON. The `openai` connector parses the standard selected `choices[0]` text, reasoning, and tool-call delta shapes.
+`createFetchSSETransport(url)` posts `{ prompt, history }` to your endpoint and reads the response as a Server-Sent Events stream. **`history` already includes the latest user message** — `prompt` is a duplicate convenience copy, not a separate "new message" field. Backends should map `history` directly; appending `prompt` to `history` will deliver the latest user turn to the model twice, and using `prompt` alone will drop all prior context. Pass a `formatBody` option to customise the request shape for OpenAI, FastAPI, FormData uploads, or any other backend. The transport sets `Content-Type: application/json` only for its default JSON body; custom serializers should set JSON headers themselves and FormData/Blob/URLSearchParams are not forced to JSON. The `openai` connector parses the standard selected `choices[0]` text, reasoning, and tool-call delta shapes.
 
 For reusable callbacks, import `ChorusOnSend<TMeta>` or the lower-level `ChorusSendHelpers` type instead of duplicating the helper shape. `ChorusOnSend<TMeta>` preserves your `Message<TMeta>.metadata` type through the `messages` argument and returned assistant message. If you pass `systemPrompt`, read it from `helpers.systemPrompt`; Chorus intentionally does not prepend it to `messages` on the `onSend` path so custom senders that already manage system messages do not get duplicates.
 
@@ -216,6 +218,8 @@ export async function POST(request: Request) {
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       try {
+        // Chorus POSTs `{ prompt, history }`. `history` already includes the new
+        // user turn — don't also append `body.prompt`, or the message goes twice.
         const body = (await request.json()) as { history?: unknown };
         const history = Array.isArray(body.history) ? (body.history as Message[]) : [];
         const apiKey = process.env.OPENAI_API_KEY;
@@ -270,6 +274,8 @@ const openai = new OpenAI(); // reads OPENAI_API_KEY from env; keep this server-
 app.use(express.json({ limit: '10mb' })); // data URL image attachments can be large
 
 app.post('/api/chat', async (req, res) => {
+  // Chorus POSTs `{ prompt, history }`. `history` already includes the new
+  // user turn — don't also append `req.body.prompt`, or the message goes twice.
   const history = Array.isArray(req.body?.history) ? req.body.history : [];
 
   res.setHeader('Content-Type', 'text/event-stream');
@@ -370,6 +376,8 @@ const client = new Anthropic(); // reads ANTHROPIC_API_KEY from env; keep this s
 
 wss.on('connection', (ws) => {
   ws.on('message', async (raw) => {
+    // Chorus sends `{ prompt, history }` on every frame. `history` already
+    // includes the new user turn; ignore `prompt` to avoid sending it twice.
     const { history = [] } = JSON.parse(raw.toString());
 
     try {
@@ -560,6 +568,8 @@ import { toGeminiGenerateContentBody } from 'react-chorus/provider-requests';
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY); // keep this server-side
 
 app.post('/api/chat', async (req, res) => {
+  // Chorus POSTs `{ prompt, history }`. `history` already includes the new
+  // user turn — don't also append `req.body.prompt`, or the message goes twice.
   const history = Array.isArray(req.body?.history) ? req.body.history : [];
   const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
@@ -1169,11 +1179,11 @@ const { send, abort, sending } = useChorusStream<MyMeta>(transport, { connector:
 
 ### `createFetchSSETransport(url, init?)`
 
-Returns a `Transport` that POSTs to `url` and reads the response as a Server-Sent Events stream. With no `formatBody`, it sends JSON `{ prompt, history }` and defaults `Content-Type: application/json`. With a custom `formatBody`, headers are left alone so FormData/Blob/URLSearchParams can set their own content type; add an explicit JSON Content-Type when your custom serializer returns JSON.
+Returns a `Transport` that POSTs to `url` and reads the response as a Server-Sent Events stream. With no `formatBody`, it sends JSON `{ prompt, history }` and defaults `Content-Type: application/json`. **`history` already includes the latest user turn; `prompt` is a duplicate convenience copy of `history[last].text`.** Server handlers should map `history` directly and ignore `prompt` — appending `prompt` to `history` will send the new user message to the model twice. With a custom `formatBody`, headers are left alone so FormData/Blob/URLSearchParams can set their own content type; add an explicit JSON Content-Type when your custom serializer returns JSON.
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `formatBody` | `(text, history: Message<TMeta>[]) => BodyInit` | `JSON.stringify({ prompt, history })` | Serialise the outgoing request body. Custom serializers do not get an automatic JSON Content-Type. |
+| `formatBody` | `(text, history: Message<TMeta>[]) => BodyInit` | `JSON.stringify({ prompt, history })` | Serialise the outgoing request body. `text` equals `history[last].text` — both arguments describe the same user turn. Custom serializers do not get an automatic JSON Content-Type. |
 | *(any `RequestInit` field)* | | | Forwarded to `fetch` (e.g. `headers`, `credentials`) |
 
 ```ts
@@ -1229,7 +1239,7 @@ Returns a `Transport` that connects over a native WebSocket. Each incoming messa
 | `onClose` | `(code: number, reason: string) => void` | – | Called once for each real WebSocket close transition, with the close code and reason |
 | `onError` | `(event: Event) => void` | – | Called when the WebSocket reports an error |
 | `onMessage` | `(data: string, event: MessageEvent) => void` | – | Observes every decoded WebSocket message; useful for persistent server-pushed updates when no send stream is active |
-| `formatMessage` | `(text, history: Message<TMeta>[]) => string` | `JSON.stringify({ prompt, history })` | Serialise the outgoing request |
+| `formatMessage` | `(text, history: Message<TMeta>[]) => string` | `JSON.stringify({ prompt, history })` | Serialise the outgoing request. As with the fetch transport, `history` already includes the new user turn and `prompt`/`text` are duplicate copies — backends should consume `history` and ignore `prompt`. |
 
 Default mode opens a fresh socket per send, then closes it when the response stream ends, the connector reports a done sentinel, or the `AbortSignal` fires. Serializer (`formatMessage`) and `ws.send()` failures reject the transport promise and close that socket, so they surface through `onError` like HTTP/SSE failures. Incoming string, `Blob`, `ArrayBuffer`, and typed-array messages are decoded as text; other message types error the response body instead of silently emitting an empty chunk.
 
@@ -1271,7 +1281,7 @@ const bufferedConnector: Connector<{ buffer: string }> = {
 
 Recommended patterns:
 
-- Keep the default transport body (`{ prompt, history }`) and map `history` safely on your server with `toOpenAIChatCompletionsBody`, `toAnthropicMessagesBody`, or `toGeminiGenerateContentBody`.
+- Keep the default transport body (`{ prompt, history }`) and map `history` safely on your server with `toOpenAIChatCompletionsBody`, `toAnthropicMessagesBody`, or `toGeminiGenerateContentBody`. `history` already includes the latest user turn — `prompt` is a duplicate copy and the provider helpers read `history` only.
 - Or pass a `format*Body` helper to `createFetchSSETransport('/api/chat', { formatBody, headers })` when your own backend expects a provider-shaped JSON body.
 - Keep API keys in that backend proxy. Client-side `formatBody` is for shaping requests to your server, not for calling provider APIs directly with secrets.
 
