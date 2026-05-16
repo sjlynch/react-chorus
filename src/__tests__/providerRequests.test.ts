@@ -217,6 +217,66 @@ describe('provider request mappers', () => {
     });
   });
 
+  it('flags Anthropic tool_result blocks with is_error: true when the tool message is marked errored', () => {
+    const erroredHistory: Message[] = [
+      { id: 'user', role: 'user', text: 'Use the tool' },
+      { id: 'assistant', role: 'assistant', text: 'Calling.' },
+      {
+        id: 'errored-tool',
+        role: 'tool',
+        text: '',
+        toolCall: { name: 'lookup', input: { q: 'x' }, output: { error: 'boom' } },
+        metadata: { anthropic: { toolUseId: 'toolu_err', isError: true } },
+      },
+    ];
+
+    expect(toAnthropicMessagesBody(erroredHistory, { model: 'claude-sonnet-4-6', max_tokens: 64 }).messages).toEqual([
+      { role: 'user', content: [{ type: 'text', text: 'Use the tool' }] },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'Calling.' },
+          { type: 'tool_use', id: 'toolu_err', name: 'lookup', input: { q: 'x' } },
+        ],
+      },
+      {
+        role: 'user',
+        content: [{
+          type: 'tool_result',
+          tool_use_id: 'toolu_err',
+          content: '{\n  "error": "boom"\n}',
+          is_error: true,
+        }],
+      },
+    ]);
+
+    const rootMetaHistory: Message[] = [
+      {
+        id: 'single-tool',
+        role: 'tool',
+        text: '',
+        toolCall: { name: 'lookup', output: { error: 'fail' } },
+        metadata: { anthropic: { toolUseId: 'toolu_root' }, isError: true },
+      },
+    ];
+
+    expect(toAnthropicMessagesBody(rootMetaHistory).messages).toEqual([
+      {
+        role: 'assistant',
+        content: [{ type: 'tool_use', id: 'toolu_root', name: 'lookup', input: {} }],
+      },
+      {
+        role: 'user',
+        content: [{
+          type: 'tool_result',
+          tool_use_id: 'toolu_root',
+          content: '{\n  "error": "fail"\n}',
+          is_error: true,
+        }],
+      },
+    ]);
+  });
+
   it('maps Chorus history to a Gemini generateContent body', () => {
     expect(toGeminiGenerateContentBody(history(), { generationConfig: { temperature: 0.2 } })).toEqual({
       generationConfig: { temperature: 0.2 },
