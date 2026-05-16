@@ -4,7 +4,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event';
 import { Chorus, type ChorusOnSend, type ChorusProps, type ChorusRef, type ChorusSendHelpers, type Transport } from '../Chorus';
 import { useChorusStream } from '../hooks/useChorusStream';
-import { toAnthropicMessagesBody, toOpenAIChatCompletionsBody } from '../providerRequests';
+import { defineTool, toAnthropicMessagesBody, toOpenAIChatCompletionsBody } from '../providerRequests';
 import type { Message, StorageAdapter } from '../types';
 
 type OnSend = ChorusOnSend;
@@ -332,6 +332,30 @@ describe('Chorus', () => {
     const toolButton = screen.getByRole('button', { name: /search/i });
     await user.click(toolButton);
     expect(screen.getByText(/first result/)).toBeInTheDocument();
+  });
+
+  it('routes a streamed tool call to the matching defineTool entry in a tools array', async () => {
+    const user = userEvent.setup();
+    const handler = vi.fn(async () => ({ results: ['from array'] }));
+    const searchTool = defineTool({
+      name: 'search',
+      description: 'Search the docs',
+      inputSchema: { type: 'object', properties: { q: { type: 'string' } }, required: ['q'] },
+      handler,
+    });
+    const transport = vi.fn<Transport>(async () => sseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_arr', function: { name: 'search', arguments: '{"q":"chorus"}' } }] } }] }),
+      JSON.stringify({ choices: [{ index: 0, delta: { content: 'done' } }] }),
+      '[DONE]',
+    ]));
+
+    render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} tools={[searchTool]} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'go');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    await waitFor(() => expect(handler).toHaveBeenCalledWith({ q: 'chorus' }, expect.objectContaining({ id: 'call_arr', name: 'search' })));
+    expect(await screen.findByText('done')).toBeInTheDocument();
   });
 
   it('renders and executes every parallel tool call in one provider chunk', async () => {

@@ -11,6 +11,7 @@ import { createDefaultFetchSSETransport } from './assistant-session/transport';
 import { cloneHistoryForRetry, createMessageId, dropTrailingAssistant, findLastUserMessage, hasToolOutput, metadataWithToolProvider, normalizeReturnedMessage } from './assistant-session/messageUtils';
 import { warnObserverError } from './assistant-session/observer';
 import { DEFAULT_MAX_TOOL_ITERATIONS, normalizeMaxToolIterations } from './assistant-session/toolLoop';
+import type { ChorusToolDefinition, ChorusToolRegistry } from '../tools';
 
 export interface ChorusSendHelpers {
   appendAssistant: (chunk: string) => void;
@@ -85,7 +86,23 @@ export interface ChorusToolCallContext<TMeta = Record<string, unknown>> {
 
 export type ChorusOnToolCall<TMeta = Record<string, unknown>> = (context: ChorusToolCallContext<TMeta>) => unknown | Promise<unknown>;
 export type ChorusToolHandler<TMeta = Record<string, unknown>> = (input: unknown, context: ChorusToolCallContext<TMeta>) => unknown | Promise<unknown>;
-export type ChorusToolRegistry<TMeta = Record<string, unknown>> = Record<string, ChorusToolHandler<TMeta>>;
+export type { ChorusToolRegistry };
+
+// Inlined to avoid pulling the runtime body of `src/tools.ts` into the
+// assistant-session chunk; the provider-requests subpath imports tools.ts and
+// must stay independent of the session bundle.
+function resolveToolHandlerLocal<TMeta>(
+  registry: ChorusToolRegistry<TMeta> | undefined,
+  name: string,
+): ChorusToolHandler<TMeta> | undefined {
+  if (!registry) return undefined;
+  const entry = Array.isArray(registry)
+    ? registry.find((definition: ChorusToolDefinition<TMeta>) => definition.name === name)
+    : registry[name];
+  if (!entry) return undefined;
+  if (typeof entry === 'function') return entry as ChorusToolHandler<TMeta>;
+  return typeof entry.handler === 'function' ? (entry.handler as ChorusToolHandler<TMeta>) : undefined;
+}
 
 export interface ChorusStreamDoneContext<TMeta = Record<string, unknown>> {
   assistantMessage: Message<TMeta> | null;
@@ -471,7 +488,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
       if (!context) continue;
 
       try {
-        const handler = toolsRef.current?.[context.name];
+        const handler = resolveToolHandlerLocal(toolsRef.current, context.name);
         if (handler) {
           const output = await handler(context.input, context);
           if (!isAssistantSessionActive(sessionId)) return;

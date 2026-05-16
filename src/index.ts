@@ -47,29 +47,42 @@ export {
   formatOpenAIResponsesBody,
   toAnthropicMessages,
   toAnthropicMessagesBody,
+  toAnthropicTools,
   toGeminiContents,
   toGeminiGenerateContentBody,
+  toGeminiTools,
   toOpenAIChatCompletionsBody,
   toOpenAIChatCompletionsMessages,
+  toOpenAIChatCompletionsTools,
   toOpenAIResponsesBody,
   toOpenAIResponsesInput,
+  toOpenAIResponsesTools,
 } from './providerRequests';
 export type {
   AnthropicMessage,
   AnthropicMessagesBody,
   AnthropicMessagesBodyOptions,
+  AnthropicTool,
   GeminiContent,
+  GeminiFunctionDeclaration,
   GeminiGenerateContentBody,
   GeminiGenerateContentBodyOptions,
+  GeminiToolGroup,
   OpenAIChatCompletionsBody,
   OpenAIChatCompletionsBodyOptions,
   OpenAIChatCompletionsMessage,
+  OpenAIChatCompletionsTool,
   OpenAIResponsesBody,
   OpenAIResponsesBodyOptions,
   OpenAIResponsesInputItem,
+  OpenAIResponsesTool,
   ProviderMappingOptions,
+  ProviderToolsOption,
+  ProviderToolsSource,
   UnsupportedAttachmentText,
 } from './providerRequests';
+export { defineTool } from './tools';
+export type { ChorusToolDefinition } from './tools';
 export { Markdown } from './components/Markdown';
 export type { MarkdownProps, MarkdownSanitizer } from './components/Markdown';
 

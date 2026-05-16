@@ -691,19 +691,19 @@ react-chorus keeps React/ReactDOM as peer dependencies and externalizes runtime 
 
 | Entry | Initial JS | gzip | Notes |
 |-------|------------|------|-------|
-| `react-chorus` (`<Chorus>`) | 152.4 kB | 52.0 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
-| `react-chorus/headless` | 152.8 kB | 52.2 kB | Headless defaults, same behavior surface. |
-| `react-chorus` (`useChorusStream`) | 34.1 kB | 11.2 kB | Root hook import; CI fails if it pulls UI, Markdown, or icon dependencies. |
+| `react-chorus` (`<Chorus>`) | 152.6 kB | 52.0 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
+| `react-chorus/headless` | 152.9 kB | 52.2 kB | Headless defaults, same behavior surface. |
+| `react-chorus` (`useChorusStream`) | 34.3 kB | 11.3 kB | Root hook import; CI fails if it pulls UI, Markdown, or icon dependencies. |
 | `react-chorus` (`Markdown`) | 74.7 kB | 25.3 kB | Standalone Markdown renderer; includes Markdown parsing/sanitization, not chat icons. |
 | `react-chorus` (`ChatWindow`) | 101.1 kB | 34.5 kB | Transcript renderer with Markdown and message action icons, without the composer/widget shell. |
 | `react-chorus` (`ConversationList`) | 5.4 kB | 1.9 kB | Conversation sidebar component only; no Markdown/icon graph. |
 | `react-chorus/transport` | 4.3 kB | 1.9 kB | Transport factories only; no React/UI/Markdown runtime. |
-| `react-chorus/provider-requests` | 8.2 kB | 2.4 kB | Provider request mappers only; no React/UI/Markdown runtime. |
+| `react-chorus/provider-requests` | 9.4 kB | 2.8 kB | Provider request mappers and tool serializers; no React/UI/Markdown runtime. |
 | Lazy `highlight.js` runtime | 891.4 kB | 295.9 kB | Async code-fence chunk, never part of initial JS. |
 
 `highlight.js` is only fetched the first time a fenced code block (` ``` ` or `~~~`) appears in rendered text. The matching GitHub dark/light token-color stylesheet is also injected on demand based on `codeBlockTheme`; code renders immediately as plain text and is re-rendered with syntax highlighting once the chunk arrives. While an assistant message is actively streaming, Chorus renders that growing message as React-escaped plain text and switches to full Markdown parsing/sanitization when the stream finalizes.
 
-The playground has a separate budget because it intentionally bundles a complete demo app. `npm run build:playground` also runs `npm run verify:playground-size`, writes `.cache/react-chorus/playground-bundle-size-report.json`, and checks this paragraph. The current playground initial JS graph is 371.5 kB / 118.3 kB gzip and its largest lazy chunk (highlight.js) is 890.9 kB / 295.7 kB gzip. Vite's chunk warning limit is raised to that documented lazy budget so the playground build stays free of Vite chunk warnings while the budget script tracks regressions.
+The playground has a separate budget because it intentionally bundles a complete demo app. `npm run build:playground` also runs `npm run verify:playground-size`, writes `.cache/react-chorus/playground-bundle-size-report.json`, and checks this paragraph. The current playground initial JS graph is 371.6 kB / 118.3 kB gzip and its largest lazy chunk (highlight.js) is 890.9 kB / 295.7 kB gzip. Vite's chunk warning limit is raised to that documented lazy budget so the playground build stays free of Vite chunk warnings while the budget script tracks regressions.
 
 To refresh the published size claims after dependency or feature changes, run `npm run build`, `npm run verify:bundle-size`, and `npm run build:playground`, then copy the updated values from stdout or the `.cache/react-chorus/*-bundle-size-report.json` files into this section. The verification commands may fail until the README values are updated to match their reports.
 
@@ -1345,20 +1345,69 @@ To execute tools in the simple path, pass a `tools` registry. Handlers run after
 
 By default this remains display/manual mode: Chorus does not make a second model request after tool execution, so use `onToolCall`/`onStreamDone` or your backend to continue the agent loop when needed. To opt in to a built-in loop, set `autoContinueTools`. Chorus will run the handlers, append outputs, then send a continuation request with the updated history. `maxToolIterations` (default `4`) prevents runaway loops, `shouldContinueToolLoop(context)` can stop a specific continuation, and Stop aborts both tool execution and continuation streams.
 
+#### One source of truth for schema + handler
+
+`defineTool` produces a `ChorusToolDefinition` that pairs the model-facing name, description, and input JSON Schema with the local handler. Pass the same array to `<Chorus tools={...} />` to execute calls and to the provider-request helpers to advertise the schema — so a typo or schema drift can't slip in between client and server:
+
+```ts
+// tools.ts — shared by both the React app and your backend
+import { defineTool } from 'react-chorus';
+
+export const searchTool = defineTool({
+  name: 'search',
+  description: 'Search the docs for a query string',
+  inputSchema: {
+    type: 'object',
+    properties: { q: { type: 'string', description: 'query text' } },
+    required: ['q'],
+  },
+  // Optional per-provider overrides merged into the generated tool entry:
+  // openai: { strict: true }, anthropic: { cache_control: { type: 'ephemeral' } },
+  handler: async (input, { signal }) => {
+    const { q } = input as { q: string };
+    const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`, { signal });
+    return res.json();
+  },
+});
+
+export const tools = [searchTool];
+```
+
+```tsx
+// client: register handlers + advertise to the model in one place
+import { Chorus } from 'react-chorus';
+import { tools } from './tools';
+
+<Chorus
+  transport="/api/chat"
+  connector="openai"
+  tools={tools}
+  autoContinueTools
+  maxToolIterations={2}
+/>
+```
+
+```ts
+// server: same array → provider-specific tool declarations
+import { toOpenAIChatCompletionsBody } from 'react-chorus/provider-requests';
+import { tools } from '../tools';
+
+const body = toOpenAIChatCompletionsBody(history, { model: 'gpt-4o-mini', tools });
+// body.tools === [{ type: 'function', function: { name: 'search', description: ..., parameters: ... } }]
+const stream = await openai.chat.completions.create(body);
+```
+
+The body helpers detect Chorus-shaped definitions and serialize them. For Anthropic and Gemini the equivalent helpers (`toAnthropicMessagesBody`, `toGeminiGenerateContentBody`) emit `input_schema` and `functionDeclarations` respectively. Standalone serializers (`toOpenAIChatCompletionsTools`, `toOpenAIResponsesTools`, `toAnthropicTools`, `toGeminiTools`) are exported when you want the `tools` field on its own. If you pass an already-shaped provider tools array as `tools`, the helpers leave it untouched as an escape hatch.
+
+The legacy `Record<name, handler>` shape still works for handler-only registries when you have no schema to advertise:
+
 ```tsx
 <Chorus
   transport="/api/chat"
   connector="openai"
   tools={{
-    search: async (input, { signal }) => {
-      const { q } = input as { q: string };
-      const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`, { signal });
-      return res.json();
-    },
+    search: async (input, { signal }) => { /* ... */ },
   }}
-  // Optional: after search returns, send updated history back to the model.
-  autoContinueTools
-  maxToolIterations={2}
   onToolCall={({ name, input, output }) => {
     // When a matching tools[name] handler exists, this is an observer; its
     // return value is ignored. Without a tools handler, returning a value here
