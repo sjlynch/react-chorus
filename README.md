@@ -691,7 +691,7 @@ react-chorus keeps React/ReactDOM as peer dependencies and externalizes runtime 
 
 | Entry | Initial JS | gzip | Notes |
 |-------|------------|------|-------|
-| `react-chorus` (`<Chorus>`) | 152.4 kB | 52.0 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
+| `react-chorus` (`<Chorus>`) | 152.5 kB | 52.0 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
 | `react-chorus/headless` | 152.8 kB | 52.2 kB | Headless defaults, same behavior surface. |
 | `react-chorus` (`useChorusStream`) | 34.1 kB | 11.2 kB | Root hook import; CI fails if it pulls UI, Markdown, or icon dependencies. |
 | `react-chorus` (`Markdown`) | 74.7 kB | 25.3 kB | Standalone Markdown renderer; includes Markdown parsing/sanitization, not chat icons. |
@@ -901,7 +901,6 @@ const conversations = useConversations({ defaultTitle: 'New chat' });
 
 <ConversationList {...conversations} />
 <Chorus
-  key={conversations.activeId ?? 'none'}
   persistenceKey={conversations.activePersistenceKey}
   persistenceStorage={conversations.storage ?? undefined}
   disabled={!conversations.loaded || !conversations.activeId}

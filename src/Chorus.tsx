@@ -283,6 +283,13 @@ function ChorusInner<TMeta = Record<string, unknown>>({
     setComposerResetKey(key => key + 1);
   }, []);
 
+  const previousPersistenceKeyRef = React.useRef(builtInPersistenceKey);
+  React.useEffect(() => {
+    if (previousPersistenceKeyRef.current === builtInPersistenceKey) return;
+    previousPersistenceKeyRef.current = builtInPersistenceKey;
+    resetComposer();
+  }, [builtInPersistenceKey, resetComposer]);
+
   const handleInputSend = React.useCallback((attachments: Attachment[] = []) => {
     if (writesDisabled) return false;
     const accepted = session.send(draft, attachments);
