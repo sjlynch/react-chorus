@@ -1,17 +1,21 @@
 import React from 'react';
 import type { Message, Role } from '../types';
 import { ToolCallBlock } from './ToolCallBlock';
-import { getInitialMessageFeedback, MessageActionControls, MessageRenderStateProvider, MessageRow, MessageSpeakerLabel } from './MessageRow';
-import type { GetMessageFeedback, MessageBubbleSlots, MessageFeedback, MessageMarkdownProps, MessageRenderActions } from './MessageRow';
+import { MessageActionControls, MessageRenderStateProvider, MessageRow, MessageSpeakerLabel } from './MessageRow';
+import type { GetMessageFeedback, MessageBubbleSlots, MessageCopyResult, MessageFeedback, MessageMarkdownProps, MessageRenderActions } from './MessageRow';
 import type { MarkdownSanitizer } from './Markdown';
 import { canWriteTextToClipboard, writeTextToClipboard } from '../utils/messageCopy';
+import { visibleActivityKey } from './chat-window/activityKey';
+import { useMessageFeedbackState } from './chat-window/feedback';
+import { attachMessageRootProps, DefaultEmptyState } from './chat-window/rendering';
+import { useAutoScroll } from './chat-window/useAutoScroll';
 
+export { stringActivityKey } from './chat-window/activityKey';
 export { MessageBubble } from './MessageRow';
-export type { GetMessageFeedback, MessageBubbleProps, MessageBubbleSlots, MessageFeedback, MessageMarkdownProps, MessageRenderActions } from './MessageRow';
+export type { GetMessageFeedback, MessageBubbleProps, MessageBubbleSlots, MessageCopyResult, MessageFeedback, MessageMarkdownProps, MessageRenderActions } from './MessageRow';
 
 const DEFAULT_HIDDEN_ROLES: Role[] = ['system', 'tool'];
 const NO_HIDDEN_ROLES: Role[] = [];
-const SCROLL_BOTTOM_THRESHOLD_PX = 48;
 let didWarnShowSystemMessages = false;
 
 // Keep this local so hook-only chunks do not share a dev-mode module with ChatWindow.
@@ -23,83 +27,12 @@ function isChorusDevMode() {
   }
 }
 
-function isNearBottom(el: HTMLElement) {
-  return el.scrollHeight - el.scrollTop - el.clientHeight <= SCROLL_BOTTOM_THRESHOLD_PX;
-}
-
 function noop() {}
 
 function normalizeMaxRenderedMessages(maxRenderedMessages: number | undefined) {
   if (maxRenderedMessages === undefined) return null;
   if (!Number.isFinite(maxRenderedMessages)) return null;
   return Math.max(0, Math.floor(maxRenderedMessages));
-}
-
-const objectActivityIds = new WeakMap<object, number>();
-let nextObjectActivityId = 1;
-
-function objectActivityKey(value: object) {
-  let id = objectActivityIds.get(value);
-  if (!id) {
-    id = nextObjectActivityId;
-    nextObjectActivityId += 1;
-    objectActivityIds.set(value, id);
-  }
-  return `o:${id}`;
-}
-
-export function stringActivityKey(value: string) {
-  const codePoints = Array.from(value);
-  return `s:${value.length}:${codePoints.slice(0, 24).join('')}:${codePoints.slice(-24).join('')}`;
-}
-
-function unknownActivityKey(value: unknown): string {
-  if (value == null) return 'null';
-  if (typeof value === 'string') return stringActivityKey(value);
-  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') return `${typeof value}:${String(value)}`;
-  if (typeof value === 'symbol') return `symbol:${String(value.description ?? '')}`;
-  if (typeof value === 'function') return objectActivityKey(value);
-  if (typeof value === 'object') return objectActivityKey(value);
-  return typeof value;
-}
-
-function attachmentActivityKey(attachment: NonNullable<Message['attachments']>[number]) {
-  const source = attachment.url ?? attachment.id ?? attachment.data ?? '';
-  return [
-    attachment.name,
-    attachment.type,
-    attachment.size,
-    stringActivityKey(source),
-    unknownActivityKey(attachment.metadata),
-  ].join(',');
-}
-
-function messageActivityKey<TMeta>(message: Message<TMeta>) {
-  const toolCall = message.toolCall;
-  return [
-    message.id,
-    message.role,
-    stringActivityKey(message.text ?? ''),
-    stringActivityKey(message.reasoning ?? ''),
-    message.attachments?.length ?? 0,
-    ...(message.attachments?.map(attachmentActivityKey) ?? []),
-    toolCall?.id ?? '',
-    toolCall?.name ?? '',
-    toolCall && Object.prototype.hasOwnProperty.call(toolCall, 'input') ? 'input' : '',
-    unknownActivityKey(toolCall?.input),
-    toolCall && Object.prototype.hasOwnProperty.call(toolCall, 'output') ? 'output' : '',
-    unknownActivityKey(toolCall?.output),
-  ].join('~');
-}
-
-function visibleActivityKey<TMeta>(visible: Message<TMeta>[], typing: boolean | undefined, streamingMessageId: string | null | undefined, error: string | null | undefined) {
-  return [
-    visible.length,
-    ...visible.map(messageActivityKey),
-    typing ? 'typing' : '',
-    streamingMessageId ?? '',
-    error ?? '',
-  ].join('|');
 }
 
 export interface RenderErrorContext {
@@ -138,7 +71,11 @@ export interface ChatWindowProps<TMeta = Record<string, unknown>> extends Omit<R
   messages: Message<TMeta>[];
   /** Return a persisted feedback selection for a message. If omitted or undefined, message.metadata.feedback seeds the built-in thumb state when it is 'up' or 'down'. */
   getMessageFeedback?: GetMessageFeedback<TMeta>;
-  onCopy?: (message: Message<TMeta>) => void;
+  /**
+   * Overrides the built-in per-message Copy action. Return false (or Promise<false>)
+   * to show the Copy failed indicator; return void to keep historical assume-success behavior.
+   */
+  onCopy?: (message: Message<TMeta>) => MessageCopyResult;
   onDelete?: (id: string) => void;
   onDismissError?: () => void;
   onEdit?: (id: string, newText: string) => void;
@@ -160,46 +97,6 @@ export interface ChatWindowProps<TMeta = Record<string, unknown>> extends Omit<R
   suggestedPromptsDisabled?: boolean;
   suggestedPromptsDisabledReason?: string;
   typing?: boolean;
-}
-
-function DefaultEmptyState({ prompts, onSuggestedPrompt, disabled = false, disabledReason }: {
-  prompts: string[];
-  onSuggestedPrompt?: (prompt: string) => void;
-  disabled?: boolean;
-  disabledReason?: string;
-}) {
-  return (
-    <div className="chorus-empty-state chorus-empty-state-default">
-      <div className="chorus-empty-title">How can I help?</div>
-      <div className="chorus-suggested-prompts" aria-label="Suggested prompts">
-        {prompts.map(prompt => (
-          <button
-            key={prompt}
-            type="button"
-            className="chorus-suggested-prompt"
-            onClick={() => { if (!disabled) onSuggestedPrompt?.(prompt); }}
-            disabled={disabled}
-            aria-disabled={disabled || undefined}
-            title={disabled ? disabledReason : undefined}
-          >
-            {prompt}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function attachMessageRootProps(node: React.ReactNode, messageProps: RenderMessageRootProps) {
-  if (!React.isValidElement(node) || typeof node.type !== 'string') return node;
-
-  const props = node.props as Partial<RenderMessageRootProps>;
-  if (props['data-chorus-message-id'] != null) return node;
-
-  return React.cloneElement(
-    node as React.ReactElement<Record<string, unknown>>,
-    messageProps as unknown as Partial<Record<string, unknown>>,
-  );
 }
 
 function ChatWindowInner<TMeta = Record<string, unknown>>({
@@ -251,99 +148,15 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
     return visible.slice(-normalizedMaxRenderedMessages);
   }, [normalizedMaxRenderedMessages, visible]);
   const copyAvailable = Boolean(onCopy) || canWriteTextToClipboard();
-  const copyMessage = React.useCallback((message: Message<TMeta>) => {
-    if (onCopy) {
-      onCopy(message);
-      return true;
-    }
+  const copyMessage = React.useCallback((message: Message<TMeta>): MessageCopyResult => {
+    if (onCopy) return onCopy(message);
 
     return writeTextToClipboard(message.text ?? '');
   }, [onCopy]);
-  const [feedbackOverrides, setFeedbackOverrides] = React.useState<Record<string, MessageFeedback>>({});
-  const feedbackOverridesRef = React.useRef(feedbackOverrides);
-
-  React.useEffect(() => {
-    feedbackOverridesRef.current = feedbackOverrides;
-  }, [feedbackOverrides]);
-
-  React.useEffect(() => {
-    const messageIds = new Set(messages.map(message => message.id));
-    const current = feedbackOverridesRef.current;
-    let changed = false;
-    const next: Record<string, MessageFeedback> = {};
-
-    for (const [messageId, feedback] of Object.entries(current)) {
-      if (messageIds.has(messageId)) next[messageId] = feedback;
-      else changed = true;
-    }
-
-    if (changed) {
-      feedbackOverridesRef.current = next;
-      setFeedbackOverrides(next);
-    }
-  }, [messages]);
-
-  const getSelectedFeedback = React.useCallback((message: Message<TMeta>) => {
-    return feedbackOverrides[message.id] ?? getInitialMessageFeedback(message, getMessageFeedback);
-  }, [feedbackOverrides, getMessageFeedback]);
-
-  const handleMessageFeedback = React.useCallback((message: Message<TMeta>, variant: MessageFeedback) => {
-    const current = feedbackOverridesRef.current[message.id] ?? getInitialMessageFeedback(message, getMessageFeedback);
-    if (current === variant) return;
-
-    const next = { ...feedbackOverridesRef.current, [message.id]: variant };
-    feedbackOverridesRef.current = next;
-    setFeedbackOverrides(next);
-    onFeedback?.(message, variant);
-  }, [getMessageFeedback, onFeedback]);
-
-  const windowRef = React.useRef<HTMLDivElement>(null);
-  const bottomRef = React.useRef<HTMLDivElement>(null);
-  const shouldAutoScrollRef = React.useRef(true);
-
-  React.useImperativeHandle(ref, () => windowRef.current!);
+  const { getSelectedFeedback, handleMessageFeedback } = useMessageFeedbackState({ messages, getMessageFeedback, onFeedback });
   const activityKey = React.useMemo(() => visibleActivityKey(visible, typing, streamingMessageId, error), [visible, typing, streamingMessageId, error]);
-  const previousActivityKeyRef = React.useRef(activityKey);
-  const [hasUnreadActivity, setHasUnreadActivity] = React.useState(false);
-  const [isAutoScrollPaused, setIsAutoScrollPaused] = React.useState(false);
-
-  const scrollToBottom = React.useCallback(() => {
-    const el = windowRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-    shouldAutoScrollRef.current = true;
-    setIsAutoScrollPaused(false);
-    setHasUnreadActivity(false);
-  }, []);
-
-  React.useEffect(() => {
-    const el = windowRef.current;
-    if (!el) return;
-
-    const onScroll = () => {
-      const nearBottom = isNearBottom(el);
-      shouldAutoScrollRef.current = nearBottom;
-      setIsAutoScrollPaused(!nearBottom);
-      if (nearBottom) setHasUnreadActivity(false);
-    };
-
-    el.addEventListener('scroll', onScroll, { passive: true });
-    return () => el.removeEventListener('scroll', onScroll);
-  }, []);
-
-  React.useEffect(() => {
-    if (previousActivityKeyRef.current === activityKey) return;
-
-    if (!shouldAutoScrollRef.current) setHasUnreadActivity(true);
-    previousActivityKeyRef.current = activityKey;
-  }, [activityKey]);
-
-  React.useLayoutEffect(() => {
-    if (!shouldAutoScrollRef.current) return;
-    const el = windowRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-  }, [activityKey]);
+  const { windowRef, hasUnreadActivity, isAutoScrollPaused, scrollToBottom } = useAutoScroll<HTMLDivElement>(activityKey, ref);
+  const bottomRef = React.useRef<HTMLDivElement>(null);
 
   const hasEmptyTranscript = visible.length === 0 && !typing;
   const suggestedPromptList = suggestedPrompts ?? [];

@@ -1,6 +1,6 @@
 import React from 'react';
 import './Chorus.css';
-import { ChatWindow, type GetMessageFeedback, type MessageFeedback, type MessageMarkdownProps, type RenderErrorContext, type RenderMessageContext } from './components/ChatWindow';
+import { ChatWindow, type GetMessageFeedback, type MessageCopyResult, type MessageFeedback, type MessageMarkdownProps, type RenderErrorContext, type RenderMessageContext } from './components/ChatWindow';
 import { ChatInput } from './components/ChatInput';
 import { styleVarsFromPalette, type Palette } from './components/ChorusTheme';
 import type { Attachment, AttachmentError, ConnectorName, Message, Role, StorageAdapter, UploadAttachment } from './types';
@@ -73,7 +73,11 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
   onChunk?: (chunk: string, messageId: string) => void;
   /** Called after the clear/reset action chooses the next message list. */
   onClear?: (messages: Message<TMeta>[]) => void;
-  onCopy?: (message: Message<TMeta>) => void;
+  /**
+   * Overrides the built-in per-message Copy action. Return false (or Promise<false>)
+   * to show the Copy failed indicator; return void to keep historical assume-success behavior.
+   */
+  onCopy?: (message: Message<TMeta>) => MessageCopyResult;
   onError?: (error: Error) => void;
   /** Built-in controls call this only when the chosen variant differs from the current selection; clicks do not toggle feedback off. */
   onFeedback?: (message: Message<TMeta>, feedback: MessageFeedback) => void;

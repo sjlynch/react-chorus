@@ -691,14 +691,14 @@ react-chorus keeps React/ReactDOM as peer dependencies and externalizes runtime 
 
 | Entry | Initial JS | gzip | Notes |
 |-------|------------|------|-------|
-| `react-chorus` (`<Chorus>`) | 142.1 kB | 48.8 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
-| `react-chorus/headless` | 142.4 kB | 49.0 kB | Headless defaults, same behavior surface. |
-| `react-chorus` (`useChorusStream`) | 29.5 kB | 9.9 kB | Root hook import; CI fails if it pulls UI, Markdown, or icon dependencies. |
-| `react-chorus` (`Markdown`) | 73.1 kB | 24.8 kB | Standalone Markdown renderer; includes Markdown parsing/sanitization, not chat icons. |
-| `react-chorus` (`ChatWindow`) | 96.7 kB | 33.1 kB | Transcript renderer with Markdown and message action icons, without the composer/widget shell. |
-| `react-chorus` (`ConversationList`) | 4.5 kB | 1.6 kB | Conversation sidebar component only; no Markdown/icon graph. |
-| `react-chorus/transport` | 2.0 kB | 1.1 kB | Transport factories only; no React/UI/Markdown runtime. |
-| `react-chorus/provider-requests` | 7.4 kB | 2.2 kB | Provider request mappers only; no React/UI/Markdown runtime. |
+| `react-chorus` (`<Chorus>`) | 148.6 kB | 50.8 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
+| `react-chorus/headless` | 148.9 kB | 51.0 kB | Headless defaults, same behavior surface. |
+| `react-chorus` (`useChorusStream`) | 31.9 kB | 10.5 kB | Root hook import; CI fails if it pulls UI, Markdown, or icon dependencies. |
+| `react-chorus` (`Markdown`) | 74.2 kB | 25.1 kB | Standalone Markdown renderer; includes Markdown parsing/sanitization, not chat icons. |
+| `react-chorus` (`ChatWindow`) | 99.5 kB | 34.0 kB | Transcript renderer with Markdown and message action icons, without the composer/widget shell. |
+| `react-chorus` (`ConversationList`) | 5.6 kB | 2.0 kB | Conversation sidebar component only; no Markdown/icon graph. |
+| `react-chorus/transport` | 4.3 kB | 1.8 kB | Transport factories only; no React/UI/Markdown runtime. |
+| `react-chorus/provider-requests` | 7.3 kB | 2.2 kB | Provider request mappers only; no React/UI/Markdown runtime. |
 | Lazy `highlight.js` runtime | 891.4 kB | 295.9 kB | Async code-fence chunk, never part of initial JS. |
 
 `highlight.js` is only fetched the first time a fenced code block (` ``` ` or `~~~`) appears in rendered text. The matching GitHub dark/light token-color stylesheet is also injected on demand based on `codeBlockTheme`; code renders immediately as plain text and is re-rendered with syntax highlighting once the chunk arrives. While an assistant message is actively streaming, Chorus renders that growing message as React-escaped plain text and switches to full Markdown parsing/sanitization when the stream finalizes.
@@ -772,7 +772,7 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `maxToolIterations` | `number` | `4` | Maximum automatic tool iterations when `autoContinueTools` is enabled. Prevents infinite loops. |
 | `shouldContinueToolLoop` | `(context) => boolean \| Promise<boolean>` | — | Optional gate before each automatic continuation. Return `false` to stop after rendering/executing the current tool batch. |
 | `onStreamDone` | `({ assistantMessage, toolMessages, messages, response }) => void` | — | Called after each `transport` stream completes normally and tool handlers (if any) finish. Fires for tool-only turns where `onFinish` has no assistant message. |
-| `onCopy` | `(message: Message<TMeta>) => void` | Clipboard copy when available | Overrides the built-in per-message Copy action. If omitted, Chorus copies `message.text` with `navigator.clipboard.writeText` when the Clipboard API is available. |
+| `onCopy` | `(message: Message<TMeta>) => boolean \| void \| Promise<boolean \| void>` | Clipboard copy when available | Overrides the built-in per-message Copy action. Return `false` / `Promise<false>` to show the Copy failed indicator; return `void` to keep the historical assume-success behavior. If omitted, Chorus copies `message.text` with `navigator.clipboard.writeText` when the Clipboard API is available. |
 | `getMessageFeedback` | `(message: Message<TMeta>) => 'up' \| 'down' \| null \| undefined` | `message.metadata.feedback` | Seeds the pressed thumb state from persisted feedback. Return `null` for no selection; return `undefined` to fall back to `message.metadata.feedback` when it is `'up'` or `'down'`. |
 | `onFeedback` | `(message: Message<TMeta>, feedback: 'up' \| 'down') => void` | — | Enables built-in thumbs-up / thumbs-down per-message feedback actions and reports changes. Clicking the already-selected thumb is ignored (no toggle-off callback). |
 | `confirmDeleteMessage` | `({ message, messages }) => boolean \| void \| Promise<boolean \| void>` | — | Optional gate for built-in message delete actions. Return or resolve `false` to cancel; persistence is flushed only after deletion is confirmed. |

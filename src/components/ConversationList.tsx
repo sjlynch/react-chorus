@@ -1,6 +1,5 @@
 import React from 'react';
 import type { ConversationSummary } from '../hooks/useConversations';
-import { isChorusDevMode } from '../utils/devMode';
 import { styleVarsFromPalette, type Palette } from './ChorusTheme';
 
 export interface ConfirmDeleteConversationContext {
@@ -10,6 +9,15 @@ export interface ConfirmDeleteConversationContext {
 }
 
 export type ConfirmDeleteConversation = (context: ConfirmDeleteConversationContext) => boolean | void | Promise<boolean | void>;
+
+// Keep this local so ConversationList-only imports do not share a dev-mode module with the Chorus widget/session chunks.
+function isChorusDevMode() {
+  try {
+    return typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production';
+  } catch {
+    return false;
+  }
+}
 
 export interface ConversationListProps {
   conversations: ConversationSummary[];
