@@ -371,6 +371,20 @@ describe('ChatWindow', () => {
     expect(css).toContain('.chorus-msg:hover + .chorus-render-actions .chorus-actions');
   });
 
+  it('respects prefers-reduced-motion by disabling looping animations and non-essential transitions', () => {
+    const css = readFileSync('src/Chorus.css', 'utf8');
+    const block = css.match(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\n\}/);
+    expect(block, 'expected a prefers-reduced-motion: reduce block in Chorus.css').not.toBeNull();
+    const body = block![0];
+    // Looping indicators must stop.
+    expect(body).toMatch(/\.chorus-attachment-spinner\s*\{[^}]*animation:\s*none/);
+    expect(body).toMatch(/\.chorus-dot\s*\{[^}]*animation:\s*none/);
+    // Typing dots stay visible without motion.
+    expect(body).toMatch(/\.chorus-dot\s*\{[^}]*opacity:\s*1/);
+    // Non-essential hover/focus transitions are dropped.
+    expect(body).toMatch(/transition:\s*none/);
+  });
+
   it('calls onDelete with message id when delete button is clicked', async () => {
     const user = userEvent.setup();
     const onDelete = vi.fn();

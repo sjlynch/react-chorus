@@ -1544,6 +1544,10 @@ Pass a `palette` prop to `<Chorus>` (or wrap components in `<ChorusTheme palette
 
 Available palette keys: `chatBg`, `chatText`, `border`, `assistantBubbleBg`, `assistantText`, `assistantBorder`, `userBubbleBg`, `userText`, `userBorder`, `inputAreaBg`, `inputBg`, `inputText`, `inputBorder`, `sendButtonBg`, `sendButtonText`, `focusRing`, `actionText`, `actionHoverBg`, `actionHoverText`, `errorBg`, `errorBorder`, `errorText`, `toolBorder`, `toolHeaderBg`, `toolHeaderText`, `toolHeaderHover`, `toolNameText`, `toolBodyBg`, `toolLabelText`, `toolCodeText`.
 
+### Reduced motion
+
+The bundled stylesheet honors `@media (prefers-reduced-motion: reduce)`: the attachment-upload spinner and the assistant typing dots stop animating (dots remain visible at full opacity), and non-essential hover/focus transitions on the textarea and message-action buttons are disabled. If you replace `Chorus.css` with your own stylesheet or use the `react-chorus/headless` subpath, you are responsible for providing equivalent reduced-motion handling.
+
 ## Individual Components
 
 You can compose the UI from smaller pieces:

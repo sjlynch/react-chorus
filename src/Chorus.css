@@ -149,3 +149,14 @@
 .chorus-error-text { font-size: 13px; color: var(--chorus-error-text, #fca5a5); flex: 1; }
 .chorus-retry-btn { font-size: 12px; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--chorus-error-border, rgba(220, 38, 38, 0.4)); background: transparent; color: var(--chorus-error-text, #fca5a5); cursor: pointer; white-space: nowrap; }
 .chorus-retry-btn:hover { background: var(--chorus-error-bg, rgba(220, 38, 38, 0.15)); opacity: 0.8; }
+
+/* Respect prefers-reduced-motion: replace continuous loops with static states
+   and drop non-essential hover/focus transitions in the chorus widget. */
+@media (prefers-reduced-motion: reduce) {
+  .chorus-attachment-spinner { animation: none; }
+  .chorus-dot { animation: none; opacity: 1; }
+  .chorus-dot:nth-child(2), .chorus-dot:nth-child(3) { animation-delay: 0s; }
+  .chorus-input-row textarea,
+  .chorus-actions,
+  .chorus-action-btn { transition: none; }
+}
