@@ -9,6 +9,8 @@ app.use(express.json({ limit: '10mb' }));
 
 app.post('/api/chat', async (req, res) => {
   const history = Array.isArray(req.body?.history) ? req.body.history : [];
+  const controller = new AbortController();
+  req.on('close', () => controller.abort());
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -18,16 +20,21 @@ app.post('/api/chat', async (req, res) => {
   try {
     const stream = await openai.chat.completions.create(
       toOpenAIChatCompletionsBody(history, { model: 'gpt-4o-mini' }),
+      { signal: controller.signal },
     );
 
     for await (const chunk of stream) {
       res.write(`data: ${JSON.stringify(chunk)}\n\n`);
     }
 
-    res.write('data: [DONE]\n\n');
+    if (!controller.signal.aborted) {
+      res.write('data: [DONE]\n\n');
+    }
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
+    if (!controller.signal.aborted) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
+    }
   } finally {
     res.end();
   }
