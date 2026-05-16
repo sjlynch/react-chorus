@@ -271,6 +271,8 @@ app.use(express.json({ limit: '10mb' })); // data URL image attachments can be l
 
 app.post('/api/chat', async (req, res) => {
   const history = Array.isArray(req.body?.history) ? req.body.history : [];
+  const controller = new AbortController();
+  req.on('close', () => controller.abort());
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -279,16 +281,21 @@ app.post('/api/chat', async (req, res) => {
   try {
     const stream = await openai.chat.completions.create(
       toOpenAIChatCompletionsBody(history, { model: 'gpt-4o-mini' }),
+      { signal: controller.signal },
     );
 
     for await (const chunk of stream) {
       res.write(`data: ${JSON.stringify(chunk)}\n\n`);
     }
 
-    res.write('data: [DONE]\n\n');
+    if (!controller.signal.aborted) {
+      res.write('data: [DONE]\n\n');
+    }
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
+    if (!controller.signal.aborted) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
+    }
   } finally {
     res.end();
   }
@@ -296,6 +303,8 @@ app.post('/api/chat', async (req, res) => {
 
 app.listen(3001);
 ```
+
+Forwarding the Express connection close into the provider request matters: when a user clicks **Stop**, Chorus aborts the browser fetch and closes the SSE connection. Without the `AbortController`, the upstream model stream can keep running, billing tokens and consuming provider quota after the client is gone.
 
 ## Using the WebSocket transport
 
@@ -562,16 +571,22 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY); // keep this s
 app.post('/api/chat', async (req, res) => {
   const history = Array.isArray(req.body?.history) ? req.body.history : [];
   const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+  const controller = new AbortController();
+  req.on('close', () => controller.abort());
 
   res.setHeader('Content-Type', 'text/event-stream');
   try {
-    const result = await model.generateContentStream(toGeminiGenerateContentBody(history));
+    const result = await model.generateContentStream(toGeminiGenerateContentBody(history), {
+      signal: controller.signal,
+    });
     for await (const chunk of result.stream) {
       res.write(`data: ${JSON.stringify(chunk)}\n\n`);
     }
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
+    if (!controller.signal.aborted) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
+    }
   } finally {
     res.end();
   }
@@ -703,7 +718,7 @@ react-chorus keeps React/ReactDOM as peer dependencies and externalizes runtime 
 
 `highlight.js` is only fetched the first time a fenced code block (` ``` ` or `~~~`) appears in rendered text. The matching GitHub dark/light token-color stylesheet is also injected on demand based on `codeBlockTheme`; code renders immediately as plain text and is re-rendered with syntax highlighting once the chunk arrives. While an assistant message is actively streaming, Chorus renders that growing message as React-escaped plain text and switches to full Markdown parsing/sanitization when the stream finalizes.
 
-The playground has a separate budget because it intentionally bundles a complete demo app. `npm run build:playground` also runs `npm run verify:playground-size`, writes `.cache/react-chorus/playground-bundle-size-report.json`, and checks this paragraph. The current playground initial JS graph is 342.8 kB / 108.7 kB gzip and its largest lazy chunk (highlight.js) is 890.9 kB / 295.7 kB gzip. Vite's chunk warning limit is raised to that documented lazy budget so the playground build stays free of Vite chunk warnings while the budget script tracks regressions.
+The playground has a separate budget because it intentionally bundles a complete demo app. `npm run build:playground` also runs `npm run verify:playground-size`, writes `.cache/react-chorus/playground-bundle-size-report.json`, and checks this paragraph. The current playground initial JS graph is 345.7 kB / 109.8 kB gzip and its largest lazy chunk (highlight.js) is 890.9 kB / 295.7 kB gzip. Vite's chunk warning limit is raised to that documented lazy budget so the playground build stays free of Vite chunk warnings while the budget script tracks regressions.
 
 To refresh the published size claims after dependency or feature changes, run `npm run build`, `npm run verify:bundle-size`, and `npm run build:playground`, then copy the updated values from stdout or the `.cache/react-chorus/*-bundle-size-report.json` files into this section. The verification commands may fail until the README values are updated to match their reports.
 
