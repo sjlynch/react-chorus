@@ -34,9 +34,9 @@ react-chorus is a composable React chat UI library with batteries-included messa
 
 ## CI gate (run before pushing)
 
-Two recurring CI failures: lint errors (`no-explicit-any`, `prefer-const`, `no-this-alias`) and README bundle-size drift. Lint runs first with `--max-warnings=0` and skips everything else on failure, so one error masks the rest. Any `src/` change can shift the README bundle-size table (~line 692) and playground sentence below it — refresh the numbers from stdout or `.cache/react-chorus/*-bundle-size-report.json`. For unavoidable `any` (e.g. `Connector<State = any>` bivariance), use a focused `// eslint-disable-next-line` with a one-line reason.
+Recurring CI failures: lint errors (`no-explicit-any`, `prefer-const`, `no-this-alias`), README bundle-size drift, and `examples/*` build failures. Lint runs first with `--max-warnings=0` and skips everything else on failure, so one error masks the rest. Any `src/` change can shift the README bundle-size table (~line 692) and playground sentence below it — refresh the numbers from stdout or `.cache/react-chorus/*-bundle-size-report.json`. Example builds run each example's own `next build`/`vite build` against its pinned typings, so type refactors in `src/` (and the library's React 19 typings) can surface in examples even though the root typecheck passes; bump `@types/react`/`@types/react-dom` in an example if it pins v18 and hits a `ReactPortal`/`ReactNode` mismatch. For unavoidable `any` (e.g. `Connector<State = any>` bivariance), use a focused `// eslint-disable-next-line` with a one-line reason.
 
-Pre-push one-liner: `npm run lint && npm run typecheck && npm run build && npm run verify:bundle-size && npm run build:playground`.
+Pre-push one-liner: `npm run lint && npm run typecheck && npm run build && npm run verify:bundle-size && npm run build:playground && npm run verify:examples`.
 
 ## Design invariant
 

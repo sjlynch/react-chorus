@@ -32,10 +32,13 @@ export async function POST(request: Request) {
         if (!apiKey) throw new Error('Missing OPENAI_API_KEY');
 
         const openai = new OpenAI({ apiKey });
+        // `toOpenAIChatCompletionsBody` returns an index-signature shape so the spread loses
+        // statically-visible `model`/message-variant info that the SDK's strict union expects.
+        // Casting through `unknown` is the documented bridge — the values are correct at runtime.
         const completionBody = {
           ...toOpenAIChatCompletionsBody(history, { model: 'gpt-4o-mini' }),
           stream: true,
-        } as ChatCompletionCreateParamsStreaming;
+        } as unknown as ChatCompletionCreateParamsStreaming;
 
         const upstream = await openai.chat.completions.create(completionBody, { signal: request.signal });
 
