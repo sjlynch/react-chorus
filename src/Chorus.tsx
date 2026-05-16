@@ -1,7 +1,7 @@
 import React from 'react';
 import './Chorus.css';
 import { ChatWindow, type GetMessageFeedback, type MessageCopyResult, type MessageFeedback, type MessageMarkdownProps, type RenderErrorContext, type RenderMessageContext } from './components/ChatWindow';
-import { ChatInput } from './components/ChatInput';
+import { ChatInput, type RenderAttachmentErrorContext } from './components/ChatInput';
 import { styleVarsFromPalette, type Palette } from './components/ChorusTheme';
 import type { Attachment, AttachmentError, ConnectorName, Message, Role, StorageAdapter, UploadAttachment } from './types';
 import type { Transport } from './hooks/useChorusStream';
@@ -15,6 +15,7 @@ import { isChorusDevMode } from './utils/devMode';
 
 export type { Transport };
 export type { Connector };
+export type { RenderAttachmentErrorContext };
 export type { ChorusAbortContext, ChorusAbortReason, ChorusAbortSource, ChorusConfirmDeleteMessage, ChorusDeleteMessageContext, ChorusFinishContext, ChorusMessagesChangeContext, ChorusOnAbort, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusSendHelpers, ChorusSendPath, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolLoopContext, ChorusToolRegistry };
 
 const DEFAULT_MIN_ASSISTANT_DELAY_MS = 300;
@@ -69,6 +70,12 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
   messages?: Message<TMeta>[];
   minAssistantDelayMs?: number;
   onAttachmentError?: (error: AttachmentError) => void;
+  /**
+   * Replace the built-in attachment error region rendered under the composer.
+   * Pass `null` to suppress the default UI entirely (e.g. when you fully handle
+   * errors via `onAttachmentError`).
+   */
+  renderAttachmentError?: ((context: RenderAttachmentErrorContext) => React.ReactNode) | null;
   onChange?: (messages: Message<TMeta>[]) => void;
   onChunk?: (chunk: string, messageId: string) => void;
   /** Called after the clear/reset action chooses the next message list. */
@@ -150,6 +157,7 @@ function ChorusInner<TMeta = Record<string, unknown>>({
   messages,
   minAssistantDelayMs = DEFAULT_MIN_ASSISTANT_DELAY_MS,
   onAttachmentError,
+  renderAttachmentError,
   onChange,
   onChunk,
   onClear,
@@ -409,6 +417,7 @@ function ChorusInner<TMeta = Record<string, unknown>>({
         maxAttachmentBytes={maxAttachmentBytes}
         maxAttachments={maxAttachments}
         onAttachmentError={onAttachmentError}
+        renderAttachmentError={renderAttachmentError}
         uploadAttachment={uploadAttachment}
       />
     </div>

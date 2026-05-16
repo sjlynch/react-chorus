@@ -96,6 +96,12 @@
 .chorus-attachment-remove:hover:not(:disabled) { background: rgba(255,255,255,.3); }
 @keyframes chorus-attachment-spin { to { transform: rotate(360deg); } }
 
+/* Inline attachment error (validation / read / upload failures) */
+.chorus-attachment-error { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; background: var(--chorus-error-bg, rgba(220, 38, 38, 0.15)); border: 1px solid var(--chorus-error-border, rgba(220, 38, 38, 0.4)); }
+.chorus-attachment-error-text { font-size: 12px; color: var(--chorus-error-text, #fca5a5); flex: 1; line-height: 1.4; }
+.chorus-attachment-error-dismiss { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 0; border: none; border-radius: 9999px; background: transparent; color: var(--chorus-error-text, #fca5a5); cursor: pointer; flex-shrink: 0; }
+.chorus-attachment-error-dismiss:hover { background: var(--chorus-error-bg, rgba(220, 38, 38, 0.15)); }
+
 /* Message content wrapper (stacks reasoning + bubble + actions vertically) */
 .chorus-msg-content { display: flex; flex-direction: column; max-width: 80%; }
 .chorus-user .chorus-msg-content { align-items: flex-end; }
