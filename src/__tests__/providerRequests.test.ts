@@ -79,6 +79,57 @@ describe('provider request mappers', () => {
     });
   });
 
+  it('does not duplicate OpenAI Chat tool_calls already present on the preceding assistant', () => {
+    const nativeToolCall = {
+      id: 'call_openai',
+      type: 'function',
+      function: { name: 'lookup', arguments: '{"q":"react-chorus"}' },
+    };
+    const importedHistory: Message[] = [
+      { id: 'user', role: 'user', text: 'Describe this' },
+      { id: 'assistant', role: 'assistant', text: '', metadata: { openai: { toolCalls: [nativeToolCall] } } },
+      {
+        id: 'tool',
+        role: 'tool',
+        text: '',
+        toolCall: { name: 'lookup', input: { q: 'react-chorus' }, output: { ok: true } },
+        metadata: { openai: { toolCallId: 'call_openai' } },
+      },
+    ];
+
+    expect(toOpenAIChatCompletionsBody(importedHistory).messages).toEqual([
+      { role: 'user', content: 'Describe this' },
+      { role: 'assistant', content: null, tool_calls: [nativeToolCall] },
+      { role: 'tool', tool_call_id: 'call_openai', content: '{\n  "ok": true\n}' },
+    ]);
+  });
+
+  it('synthesizes OpenAI Chat assistant tool_calls when the preceding assistant lacks them', () => {
+    const body = toOpenAIChatCompletionsBody([
+      { id: 'assistant', role: 'assistant', text: 'I will look.' },
+      {
+        id: 'tool',
+        role: 'tool',
+        text: '',
+        toolCall: { name: 'lookup', input: { q: 'x' }, output: 'found' },
+        metadata: { openai: { toolCallId: 'call_lookup' } },
+      },
+    ]);
+
+    expect(body.messages).toEqual([
+      {
+        role: 'assistant',
+        content: 'I will look.',
+        tool_calls: [{
+          id: 'call_lookup',
+          type: 'function',
+          function: { name: 'lookup', arguments: '{"q":"x"}' },
+        }],
+      },
+      { role: 'tool', tool_call_id: 'call_lookup', content: 'found' },
+    ]);
+  });
+
   it('falls back to safe context for OpenAI tool messages without provider ids', () => {
     const body = toOpenAIChatCompletionsBody([
       {
@@ -179,10 +230,68 @@ describe('provider request mappers', () => {
             { text: '[Unsupported attachment omitted: notes.pdf (application/pdf)]' },
           ],
         },
-        { role: 'model', parts: [{ text: 'I will check.' }] },
+        {
+          role: 'model',
+          parts: [
+            { text: 'I will check.' },
+            { functionCall: { name: 'lookup', args: { q: 'react-chorus' } } },
+          ],
+        },
         { role: 'user', parts: [{ functionResponse: { name: 'lookup', response: { ok: true } } }] },
       ],
     });
+  });
+
+  it('groups consecutive Gemini tool messages into one functionCall/functionResponse exchange', () => {
+    expect(toGeminiGenerateContentBody([
+      { id: 'user', role: 'user', text: 'Use tools' },
+      { id: 'assistant', role: 'assistant', text: 'Checking.' },
+      {
+        id: 'lookup-tool',
+        role: 'tool',
+        text: '',
+        toolCall: { name: 'lookup', input: { q: 'react-chorus' }, output: { ok: true } },
+      },
+      {
+        id: 'weather-tool',
+        role: 'tool',
+        text: '',
+        toolCall: { name: 'weather', input: { city: 'Paris' }, output: 'sunny' },
+      },
+    ]).contents).toEqual([
+      { role: 'user', parts: [{ text: 'Use tools' }] },
+      {
+        role: 'model',
+        parts: [
+          { text: 'Checking.' },
+          { functionCall: { name: 'lookup', args: { q: 'react-chorus' } } },
+          { functionCall: { name: 'weather', args: { city: 'Paris' } } },
+        ],
+      },
+      {
+        role: 'user',
+        parts: [
+          { functionResponse: { name: 'lookup', response: { ok: true } } },
+          { functionResponse: { name: 'weather', response: { content: 'sunny' } } },
+        ],
+      },
+    ]);
+  });
+
+  it('falls back to safe Gemini text context for malformed tool messages without a name', () => {
+    expect(toGeminiGenerateContentBody([
+      {
+        id: 'tool',
+        role: 'tool',
+        text: '',
+        toolCall: { name: '', input: { q: 'x' }, output: { error: 'missing name' } },
+      },
+    ]).contents).toEqual([
+      {
+        role: 'user',
+        parts: [{ text: 'Tool call tool\nInput:\n{\n  "q": "x"\n}\nOutput:\n{\n  "error": "missing name"\n}' }],
+      },
+    ]);
   });
 
   it('keeps non-OpenAI image URI schemes as Gemini fileData fileUris', () => {
