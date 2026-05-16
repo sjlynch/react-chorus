@@ -40,6 +40,16 @@ export interface ConversationListProps {
   emptyLabel?: string;
 }
 
+// Keep this local so standalone ConversationList imports do not pull shared
+// hook/widget development-warning chunks into consumer bundles.
+function isChorusDevMode() {
+  try {
+    return typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production';
+  } catch {
+    return false;
+  }
+}
+
 function conversationClasses(active: boolean, pinned: boolean) {
   return [
     'chorus-conversation-item',
@@ -69,8 +79,14 @@ function isPromiseLike<T>(value: unknown): value is PromiseLike<T> {
     && typeof (value as { then?: unknown }).then === 'function';
 }
 
+function isConversationListDevMode() {
+  return typeof process !== 'undefined'
+    && typeof process.env !== 'undefined'
+    && process.env.NODE_ENV !== 'production';
+}
+
 function warnDeleteConfirmationError(callbackName: string, error: unknown) {
-  if (!isChorusDevMode()) return;
+  if (!isConversationListDevMode()) return;
   console.warn(`[Chorus] \`${callbackName}\` callback threw/rejected; delete was cancelled.`, error);
 }
 

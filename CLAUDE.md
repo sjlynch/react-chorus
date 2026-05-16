@@ -4,17 +4,27 @@ react-chorus is a composable React chat UI library with batteries-included messa
 
 ## Directory map
 
+- `src/index.ts` — root public barrel; update it when the exported API surface changes.
+- `src/types.ts` — core public types for messages, roles, attachments, tool calls, connectors, and storage adapters.
 - `src/Chorus.tsx` — main public component and `ChorusProps`; coordinates state, streaming, persistence, errors, retry/stop/edit/regenerate.
+- `src/headless.ts` / `src/ChorusHeadless.tsx` — `react-chorus/headless` entry and wrapper that default supported components to `headless: true`.
+- `src/providerRequests.ts` — outbound request mappers and `formatXyzBody` helpers for OpenAI Chat/Responses, Anthropic Messages, and Gemini GenerateContent, exported via root and `react-chorus/provider-requests`.
+- `src/transport.ts` — `react-chorus/transport` barrel for transport factories and the `Transport` type.
 - `src/components/` — UI pieces (`ChatWindow`, `ChatInput`, `Markdown`, `ChorusTheme`, `ToolCallBlock`, `MessageBubble`).
 - `src/hooks/` — reusable streaming and persistence hooks.
 - `src/connectors/` — provider-specific SSE payload parsers.
 - `src/streaming/` — transport factories that return SSE-shaped `Response` streams.
+- `src/utils/` — shared helpers for attachment previews, dev gates, markdown/code highlighting, and copy UX; see `src/utils/CLAUDE.md`.
 
 ## Send paths
 
 - Simple path: pass `transport` (URL string or `Transport`) and Chorus handles POST/fetch/WebSocket-style SSE streaming through connectors.
 - Advanced path: pass `onSend` for custom clients or non-SSE flows; use helpers (`appendAssistant`, `finalizeAssistant`, `signal`) to drive output.
 - If both are provided, `transport` takes precedence.
+
+## Provider mapping vs connectors
+
+`providerRequests.ts` builds outbound provider request bodies; `connectors/` parses inbound SSE chunks. Keep provider-specific request mapping and response parsing paired conceptually but implemented separately.
 
 ## Commands
 

@@ -271,6 +271,8 @@ app.use(express.json({ limit: '10mb' })); // data URL image attachments can be l
 
 app.post('/api/chat', async (req, res) => {
   const history = Array.isArray(req.body?.history) ? req.body.history : [];
+  const controller = new AbortController();
+  req.on('close', () => controller.abort());
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -279,16 +281,21 @@ app.post('/api/chat', async (req, res) => {
   try {
     const stream = await openai.chat.completions.create(
       toOpenAIChatCompletionsBody(history, { model: 'gpt-4o-mini' }),
+      { signal: controller.signal },
     );
 
     for await (const chunk of stream) {
       res.write(`data: ${JSON.stringify(chunk)}\n\n`);
     }
 
-    res.write('data: [DONE]\n\n');
+    if (!controller.signal.aborted) {
+      res.write('data: [DONE]\n\n');
+    }
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
+    if (!controller.signal.aborted) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
+    }
   } finally {
     res.end();
   }
@@ -296,6 +303,8 @@ app.post('/api/chat', async (req, res) => {
 
 app.listen(3001);
 ```
+
+Forwarding the Express connection close into the provider request matters: when a user clicks **Stop**, Chorus aborts the browser fetch and closes the SSE connection. Without the `AbortController`, the upstream model stream can keep running, billing tokens and consuming provider quota after the client is gone.
 
 ## Using the WebSocket transport
 
@@ -424,7 +433,7 @@ These helpers are also re-exported from `react-chorus` for browser apps; the `re
 | `toOpenAIChatCompletionsBody(history, opts)` / `formatOpenAIChatCompletionsBody(opts)` | `{ model, messages, stream }` | Maps `system`/`user`/`assistant`, user image attachments to `image_url`, unsupported attachments to text notes, and `tool` messages with `metadata.openai.toolCallId` (or `metadata.tool_call_id`) to OpenAI `role: 'tool'`. Without a provider tool id, tool results become safe system context instead of invalid OpenAI messages. |
 | `toOpenAIResponsesBody(history, opts)` / `formatOpenAIResponsesBody(opts)` | `{ model, input, stream }` | Uses Responses `input_text` / `input_image` / `output_text` items and `function_call_output` when an OpenAI call id is present in metadata. |
 | `toAnthropicMessagesBody(history, opts)` / `formatAnthropicMessagesBody(opts)` | `{ model, max_tokens, system, messages, stream }` | Joins Chorus `system` messages into Anthropic's top-level `system`, maps data-URL images to base64 image blocks, and maps `metadata.anthropic.toolUseId` (or `metadata.tool_use_id`) to `tool_result`. |
-| `toGeminiGenerateContentBody(history, opts)` / `formatGeminiGenerateContentBody(opts)` | `{ systemInstruction, contents, ...opts }` | Maps `system` to `systemInstruction`, `assistant` to Gemini `model`, data-URL images to `inlineData`, uploaded file URLs/ids to `fileData`, and Chorus tool outputs to `functionResponse` parts when `toolCall.name` is available. |
+| `toGeminiGenerateContentBody(history, opts)` / `formatGeminiGenerateContentBody(opts)` | `{ systemInstruction, contents, ...opts }` | Maps `system` to `systemInstruction`, `assistant` to Gemini `model`, data-URL images to `inlineData`, uploaded file URLs/ids to `fileData`, and Chorus tool messages with `toolCall.name` to model `functionCall` parts followed by user `functionResponse` parts. |
 
 All helpers preserve extra provider options you pass (for example `model`, `max_tokens`, `generationConfig`, `tools`) and default OpenAI/Anthropic `stream` to `true`. They insert explicit text fallbacks for unsupported attachments so request mapping failures are visible to the model instead of silently dropping context. Override that text with `unsupportedAttachmentText` when needed.
 
@@ -562,16 +571,22 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY); // keep this s
 app.post('/api/chat', async (req, res) => {
   const history = Array.isArray(req.body?.history) ? req.body.history : [];
   const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+  const controller = new AbortController();
+  req.on('close', () => controller.abort());
 
   res.setHeader('Content-Type', 'text/event-stream');
   try {
-    const result = await model.generateContentStream(toGeminiGenerateContentBody(history));
+    const result = await model.generateContentStream(toGeminiGenerateContentBody(history), {
+      signal: controller.signal,
+    });
     for await (const chunk of result.stream) {
       res.write(`data: ${JSON.stringify(chunk)}\n\n`);
     }
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
+    if (!controller.signal.aborted) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
+    }
   } finally {
     res.end();
   }
@@ -703,7 +718,7 @@ react-chorus keeps React/ReactDOM as peer dependencies and externalizes runtime 
 
 `highlight.js` is only fetched the first time a fenced code block (` ``` ` or `~~~`) appears in rendered text. The matching GitHub dark/light token-color stylesheet is also injected on demand based on `codeBlockTheme`; code renders immediately as plain text and is re-rendered with syntax highlighting once the chunk arrives. While an assistant message is actively streaming, Chorus renders that growing message as React-escaped plain text and switches to full Markdown parsing/sanitization when the stream finalizes.
 
-The playground has a separate budget because it intentionally bundles a complete demo app. `npm run build:playground` also runs `npm run verify:playground-size`, writes `.cache/react-chorus/playground-bundle-size-report.json`, and checks this paragraph. The current playground initial JS graph is 342.8 kB / 108.7 kB gzip and its largest lazy chunk (highlight.js) is 890.9 kB / 295.7 kB gzip. Vite's chunk warning limit is raised to that documented lazy budget so the playground build stays free of Vite chunk warnings while the budget script tracks regressions.
+The playground has a separate budget because it intentionally bundles a complete demo app. `npm run build:playground` also runs `npm run verify:playground-size`, writes `.cache/react-chorus/playground-bundle-size-report.json`, and checks this paragraph. The current playground initial JS graph is 345.7 kB / 109.8 kB gzip and its largest lazy chunk (highlight.js) is 890.9 kB / 295.7 kB gzip. Vite's chunk warning limit is raised to that documented lazy budget so the playground build stays free of Vite chunk warnings while the budget script tracks regressions.
 
 To refresh the published size claims after dependency or feature changes, run `npm run build`, `npm run verify:bundle-size`, and `npm run build:playground`, then copy the updated values from stdout or the `.cache/react-chorus/*-bundle-size-report.json` files into this section. The verification commands may fail until the README values are updated to match their reports.
 
@@ -1316,7 +1331,7 @@ Chorus displays tool steps as `role: 'tool'` with `message.toolCall`, but those 
 }
 ```
 
-The request helpers use those IDs for OpenAI `tool_call_id` / Responses `call_id` and Anthropic `tool_result.tool_use_id`. They also synthesize the provider-required assistant tool-call records (`assistant.tool_calls`, Responses `function_call`, Anthropic `tool_use`) before the tool result. When an ID is missing, they convert the tool result to safe text context instead of emitting an invalid provider-specific tool message. Gemini function responses use `toolCall.name` and the output payload.
+The request helpers use those IDs for OpenAI `tool_call_id` / Responses `call_id` and Anthropic `tool_result.tool_use_id`. They also synthesize the provider-required assistant tool-call records (`assistant.tool_calls`, Responses `function_call`, Anthropic `tool_use`) before the tool result. When an ID is missing, they convert the tool result to safe text context instead of emitting an invalid provider-specific tool message. Gemini uses `toolCall.name`/`input` to reconstruct model `functionCall` parts before the matching `functionResponse` output payload, grouping consecutive tool messages into one tool exchange.
 
 ## Tool calls and agent steps
 

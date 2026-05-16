@@ -1,9 +1,26 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { cleanup, render } from '@testing-library/react';
-import { ChatWindow, Markdown, MessageBubble } from '../headless';
+import {
+  ChatWindow,
+  Chorus,
+  ConversationList,
+  Markdown,
+  MessageBubble,
+  formatOpenAIChatCompletionsBody,
+  useChorusPersistence,
+  useConversations,
+} from '../headless';
+import {
+  formatOpenAIChatCompletionsBody as rootFormatOpenAIChatCompletionsBody,
+  useChorusPersistence as rootUseChorusPersistence,
+  useConversations as rootUseConversations,
+} from '../index';
 import type { Message } from '../types';
 
 const USER_MSG: Message = { id: 'u1', role: 'user', text: 'Hello' };
+const CONVERSATIONS = [
+  { id: 'c1', title: 'General', createdAt: '2026-05-16T00:00:00.000Z', updatedAt: '2026-05-16T00:00:00.000Z' },
+];
 
 beforeEach(() => {
   document.getElementById('chorus-md-styles')?.remove();
@@ -15,6 +32,12 @@ afterEach(() => {
 });
 
 describe('react-chorus/headless defaults', () => {
+  it('re-exports non-overridden root API sentinels', () => {
+    expect(useChorusPersistence).toBe(rootUseChorusPersistence);
+    expect(useConversations).toBe(rootUseConversations);
+    expect(formatOpenAIChatCompletionsBody).toBe(rootFormatOpenAIChatCompletionsBody);
+  });
+
   it('Markdown does not inject Markdown styles by default', () => {
     render(<Markdown text="Hello" />);
 
@@ -29,6 +52,18 @@ describe('react-chorus/headless defaults', () => {
 
   it('ChatWindow does not inject Markdown styles by default', () => {
     render(<ChatWindow messages={[USER_MSG]} />);
+
+    expect(document.getElementById('chorus-md-styles')).not.toBeInTheDocument();
+  });
+
+  it('ConversationList defaults to headless mode', () => {
+    const { container } = render(<ConversationList conversations={CONVERSATIONS} />);
+
+    expect(container.querySelector('.chorus-conversation-list')).toHaveClass('chorus-conversation-list--headless');
+  });
+
+  it('Chorus does not inject Markdown styles by default', () => {
+    render(<Chorus initialMessages={[USER_MSG]} />);
 
     expect(document.getElementById('chorus-md-styles')).not.toBeInTheDocument();
   });
