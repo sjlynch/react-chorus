@@ -1,4 +1,4 @@
-import type { Message } from '../types';
+import type { Attachment, Message } from '../types';
 import { dataUrlFromAttachment, unsupportedAttachmentText } from './attachments';
 import { metadataString } from './metadata';
 import { stripAnthropicOptions } from './options';
@@ -44,6 +44,24 @@ function anthropicSystem(history: Message<unknown>[]) {
   return system || undefined;
 }
 
+function anthropicAttachmentBlock(attachment: Attachment): Record<string, unknown> | null {
+  const dataUrl = dataUrlFromAttachment(attachment);
+  if (!dataUrl) return null;
+  if (attachment.type.startsWith('image/')) {
+    return {
+      type: 'image',
+      source: { type: 'base64', media_type: attachment.type || dataUrl.mimeType, data: dataUrl.base64 },
+    };
+  }
+  if (attachment.type === 'application/pdf') {
+    return {
+      type: 'document',
+      source: { type: 'base64', media_type: 'application/pdf', data: dataUrl.base64 },
+    };
+  }
+  return null;
+}
+
 function anthropicContentBlocks<TMeta>(message: Message<TMeta>, options: ProviderMappingOptions<TMeta>) {
   const blocks: Array<Record<string, unknown>> = [];
   const text = messageText(message);
@@ -51,12 +69,9 @@ function anthropicContentBlocks<TMeta>(message: Message<TMeta>, options: Provide
 
   if (message.role === 'user') {
     for (const attachment of message.attachments ?? []) {
-      const dataUrl = attachment.type.startsWith('image/') ? dataUrlFromAttachment(attachment) : null;
-      if (dataUrl) {
-        blocks.push({
-          type: 'image',
-          source: { type: 'base64', media_type: attachment.type || dataUrl.mimeType, data: dataUrl.base64 },
-        });
+      const block = anthropicAttachmentBlock(attachment);
+      if (block) {
+        blocks.push(block);
       } else {
         blocks.push({ type: 'text', text: unsupportedAttachmentText(attachment, message, options) });
       }

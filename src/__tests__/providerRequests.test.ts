@@ -169,6 +169,54 @@ describe('provider request mappers', () => {
     });
   });
 
+  it('maps uploaded non-image attachments to OpenAI Responses input_file parts', () => {
+    expect(toOpenAIResponsesBody([
+      {
+        id: 'user',
+        role: 'user',
+        text: 'Review docs',
+        attachments: [
+          { name: 'report.pdf', type: 'application/pdf', data: '', id: 'file_abc', size: 1 },
+          { name: 'spec.pdf', type: 'application/pdf', data: '', url: 'https://files.example.com/spec.pdf', size: 1 },
+          { name: 'inline.pdf', type: 'application/pdf', data: 'data:application/pdf;base64,xyz', size: 1 },
+        ],
+      },
+    ]).input).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'input_text', text: 'Review docs' },
+          { type: 'input_file', file_id: 'file_abc' },
+          { type: 'input_file', file_url: 'https://files.example.com/spec.pdf' },
+          { type: 'input_text', text: '[Unsupported attachment omitted: inline.pdf (application/pdf)]' },
+        ],
+      },
+    ]);
+  });
+
+  it('keeps OpenAI Chat Completions image-only when given a non-image attachment', () => {
+    expect(toOpenAIChatCompletionsBody([
+      {
+        id: 'user',
+        role: 'user',
+        text: 'Review docs',
+        attachments: [
+          { name: 'report.pdf', type: 'application/pdf', data: '', id: 'file_abc', size: 1 },
+          { name: 'spec.pdf', type: 'application/pdf', data: '', url: 'https://files.example.com/spec.pdf', size: 1 },
+        ],
+      },
+    ]).messages).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Review docs' },
+          { type: 'text', text: '[Unsupported attachment omitted: report.pdf (application/pdf)]' },
+          { type: 'text', text: '[Unsupported attachment omitted: spec.pdf (application/pdf)]' },
+        ],
+      },
+    ]);
+  });
+
   it('omits non-OpenAI image URI schemes from OpenAI image fields', () => {
     expect(toOpenAIChatCompletionsBody(nonOpenAIUriImageHistory()).messages).toEqual([
       {
@@ -205,7 +253,7 @@ describe('provider request mappers', () => {
           content: [
             { type: 'text', text: 'Describe this' },
             { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'aGVsbG8=' } },
-            { type: 'text', text: '[Unsupported attachment omitted: notes.pdf (application/pdf)]' },
+            { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'abc' } },
           ],
         },
         { role: 'assistant', content: [
@@ -215,6 +263,30 @@ describe('provider request mappers', () => {
         { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: '{\n  "ok": true\n}' }] },
       ],
     });
+  });
+
+  it('falls back to Anthropic text for non-PDF non-image attachments without a data URL', () => {
+    const body = toAnthropicMessagesBody([
+      {
+        id: 'user',
+        role: 'user',
+        text: 'Listen',
+        attachments: [
+          { name: 'audio.mp3', type: 'audio/mpeg', data: '', size: 1 },
+          { name: 'doc.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', data: 'data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,zzz', size: 1 },
+        ],
+      },
+    ]);
+    expect(body.messages).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Listen' },
+          { type: 'text', text: '[Unsupported attachment omitted: audio.mp3 (audio/mpeg)]' },
+          { type: 'text', text: '[Unsupported attachment omitted: doc.docx (application/vnd.openxmlformats-officedocument.wordprocessingml.document)]' },
+        ],
+      },
+    ]);
   });
 
   it('maps Chorus history to a Gemini generateContent body', () => {
@@ -227,7 +299,7 @@ describe('provider request mappers', () => {
           parts: [
             { text: 'Describe this' },
             { inlineData: { mimeType: 'image/png', data: 'aGVsbG8=' } },
-            { text: '[Unsupported attachment omitted: notes.pdf (application/pdf)]' },
+            { inlineData: { mimeType: 'application/pdf', data: 'abc' } },
           ],
         },
         {
@@ -240,6 +312,48 @@ describe('provider request mappers', () => {
         { role: 'user', parts: [{ functionResponse: { name: 'lookup', response: { ok: true } } }] },
       ],
     });
+  });
+
+  it('maps uploaded non-image Gemini attachments to fileData', () => {
+    expect(toGeminiGenerateContentBody([
+      {
+        id: 'user',
+        role: 'user',
+        text: 'Watch',
+        attachments: [
+          { name: 'clip.mp4', type: 'video/mp4', data: '', url: 'gs://bucket/clip.mp4', size: 1 },
+          { name: 'paper.pdf', type: 'application/pdf', data: '', id: 'files/abc123', size: 1 },
+        ],
+      },
+    ]).contents).toEqual([
+      {
+        role: 'user',
+        parts: [
+          { text: 'Watch' },
+          { fileData: { mimeType: 'video/mp4', fileUri: 'gs://bucket/clip.mp4' } },
+          { fileData: { mimeType: 'application/pdf', fileUri: 'files/abc123' } },
+        ],
+      },
+    ]);
+  });
+
+  it('falls back to Gemini text only when no data URL or uploaded URI is available', () => {
+    expect(toGeminiGenerateContentBody([
+      {
+        id: 'user',
+        role: 'user',
+        text: 'Empty',
+        attachments: [{ name: 'mystery.bin', type: 'application/octet-stream', data: '', size: 0 }],
+      },
+    ]).contents).toEqual([
+      {
+        role: 'user',
+        parts: [
+          { text: 'Empty' },
+          { text: '[Unsupported attachment omitted: mystery.bin (application/octet-stream)]' },
+        ],
+      },
+    ]);
   });
 
   it('groups consecutive Gemini tool messages into one functionCall/functionResponse exchange', () => {
