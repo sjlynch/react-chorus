@@ -178,7 +178,10 @@ body {
   flex-direction: column;
   gap: 10px;
 }
-.pg-tab-stack > .chorus { flex: 1 1 auto; min-height: 0; }
+.pg-tab-stack > .chorus,
+.pg-tab-stack > .pg-theme-stage { flex: 1 1 auto; min-height: 0; }
+.pg-tab-stack > .pg-theme-stage { display: flex; }
+.pg-tab-stack > .pg-theme-stage > .chorus { flex: 1 1 auto; min-height: 0; }
 
 .pg-card .chorus-window {
   border: 0;
@@ -415,6 +418,108 @@ body {
   border-bottom: 1px dashed rgba(199,210,254,0.4);
 }
 .pg-citations-list a:hover { color: #e0e7ff; }
+
+/* Quick-prompt chips (Markdown tab toolbar) */
+.pg-quick-prompts { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.pg-quick-prompt {
+  appearance: none;
+  background: rgba(99,102,241,0.12);
+  border: 1px solid rgba(99,102,241,0.35);
+  color: #c7d2fe;
+  border-radius: 9999px;
+  padding: 4px 12px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+.pg-quick-prompt:hover {
+  background: rgba(99,102,241,0.22);
+  border-color: rgba(99,102,241,0.6);
+  color: #e0e7ff;
+}
+.pg-quick-prompt:focus-visible {
+  outline: 2px solid rgba(99,102,241,0.5);
+  outline-offset: 1px;
+}
+
+/* Theming-tab avatar slots (rendered via MessageBubbleSlots.before / .after) */
+.pg-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 9999px;
+  display: inline-grid;
+  place-items: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  flex-shrink: 0;
+  margin-top: 4px;
+  user-select: none;
+  border: 1px solid rgba(255,255,255,0.18);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+  transition: background 220ms ease, border-color 220ms ease, box-shadow 220ms ease;
+}
+.pg-avatar--assistant {
+  background: linear-gradient(135deg, #6366f1, #4f46e5);
+  margin-right: 8px;
+}
+.pg-avatar--user {
+  background: var(--chorus-user-bg, #6366f1);
+  border-color: var(--chorus-user-border, rgba(255,255,255,0.18));
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  margin-left: 8px;
+}
+
+/* Smooth palette tweens for theming tab */
+.pg-theme-stage .chorus-bubble,
+.pg-theme-stage .chorus-input-row textarea,
+.pg-theme-stage button.chorus-send {
+  transition: background 280ms ease, border-color 280ms ease, color 280ms ease, box-shadow 280ms ease;
+}
+
+/* Aurora: pull the gradient into a subtle ambient assistant border-glow */
+.pg-theme-stage[data-theme="aurora"] .chorus-assistant .chorus-bubble {
+  box-shadow: 0 0 0 1px rgba(168, 85, 247, 0.18), 0 6px 30px rgba(168, 85, 247, 0.18);
+}
+.pg-theme-stage[data-theme="aurora"] .pg-avatar--assistant {
+  background: linear-gradient(135deg, #06b6d4 0%, #a855f7 50%, #ec4899 100%);
+}
+
+/* Neon: glowing user bubble + intensified focus ring */
+.pg-theme-stage[data-theme="neon"] .chorus-user .chorus-bubble {
+  box-shadow: 0 0 14px rgba(217, 70, 239, 0.55), 0 0 30px rgba(217, 70, 239, 0.25);
+}
+.pg-theme-stage[data-theme="neon"] .pg-avatar--user {
+  box-shadow: 0 0 12px rgba(217, 70, 239, 0.55);
+}
+.pg-theme-stage[data-theme="neon"] .chorus-assistant .chorus-bubble {
+  box-shadow: 0 0 12px rgba(217, 70, 239, 0.15);
+}
+
+/* Glass: frosted backdrop blur (relies on bubble bg being semi-transparent) */
+.pg-theme-stage[data-theme="glass"] {
+  border-radius: 12px;
+  background:
+    radial-gradient(600px 200px at 20% 0%, rgba(99,102,241,0.25), transparent 70%),
+    radial-gradient(500px 200px at 90% 80%, rgba(236,72,153,0.18), transparent 70%);
+  padding: 0;
+}
+.pg-theme-stage[data-theme="glass"] .chorus-bubble {
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+}
+.pg-theme-stage[data-theme="glass"] .pg-avatar--assistant {
+  background: rgba(255,255,255,0.22);
+  border-color: rgba(255,255,255,0.4);
+  backdrop-filter: blur(10px);
+}
+
+/* Sunset: warm ambient glow on user bubbles */
+.pg-theme-stage[data-theme="sunset"] .chorus-user .chorus-bubble {
+  box-shadow: 0 6px 22px rgba(239, 68, 68, 0.35);
+}
 
 /* Footer */
 .pg-footer {

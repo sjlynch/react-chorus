@@ -1,6 +1,6 @@
 import React from 'react';
 import { Chorus } from '../../Chorus';
-import type { RenderMessageContext } from '../../components/ChatWindow';
+import type { MessageBubbleSlots, RenderMessageContext } from '../../components/ChatWindow';
 import type { Message } from '../../types';
 import { THEME_PRESETS } from './palettes';
 import { citationsForPrompt, themingTransport, type Citation } from './themingTransport';
@@ -12,7 +12,7 @@ interface CitationMeta {
 const WELCOME_MESSAGE: Message<CitationMeta> = {
   id: 'welcome-theming',
   role: 'assistant',
-  text: "**Theming + custom rendering.** Pick a palette preset on the right to live-swap the `palette` prop. Every assistant reply also flows through a `renderMessage` callback that appends a **Citations** footer using `defaultRender({ footerSlot })` — no need to re-implement the bubble.\n\nFlip **Headless mode** to drop all built-in CSS and see the raw structure.",
+  text: "**Theming + custom rendering.** Pick a preset on the right to live-swap the `palette` prop — bubbles tween between values in CSS. Every assistant reply also flows through a `renderMessage` callback that adds avatars (via `before`/`after` slots) and a **Citations** footer using `defaultRender({ footerSlot })` — no need to re-implement the bubble.\n\nTry **Aurora**, **Neon**, or **Glass** for the gradient/glow/blur palettes that go beyond plain solid colors.",
 };
 
 function findLastUserText<M>(messages: Message<M>[]): string {
@@ -37,6 +37,14 @@ function CitationsFooter({ items }: { items: Citation[] }) {
   );
 }
 
+function Avatar({ role }: { role: 'assistant' | 'user' }) {
+  return (
+    <div className={`pg-avatar pg-avatar--${role}`} aria-hidden="true">
+      {role === 'assistant' ? '✦' : 'You'}
+    </div>
+  );
+}
+
 export function ThemingTab() {
   const [messages, setMessages] = React.useState<Message<CitationMeta>[]>([WELCOME_MESSAGE]);
   const [presetId, setPresetId] = React.useState<string>(THEME_PRESETS[0].id);
@@ -45,11 +53,17 @@ export function ThemingTab() {
   const activePreset = THEME_PRESETS.find(p => p.id === presetId) ?? THEME_PRESETS[0];
 
   const renderMessage = React.useCallback((message: Message<CitationMeta>, context: RenderMessageContext<CitationMeta>) => {
-    const citations = message.role === 'assistant' ? message.metadata?.citations : undefined;
-    if (citations?.length) {
-      return context.defaultRender({ footerSlot: <CitationsFooter items={citations} /> });
+    const slots: MessageBubbleSlots = {};
+    if (message.role === 'assistant') {
+      slots.before = <Avatar role="assistant" />;
+      const citations = message.metadata?.citations;
+      if (citations?.length) {
+        slots.footerSlot = <CitationsFooter items={citations} />;
+      }
+    } else if (message.role === 'user') {
+      slots.after = <Avatar role="user" />;
     }
-    return context.defaultRender();
+    return context.defaultRender(slots);
   }, []);
 
   const handleFinish = React.useCallback((ctx: { message: Message<CitationMeta>; messages: Message<CitationMeta>[] }) => {
@@ -82,7 +96,7 @@ export function ThemingTab() {
             </button>
           ))}
         </div>
-        <label className="pg-toggle">
+        <label className="pg-toggle" style={{ marginLeft: 'auto' }}>
           <input
             type="checkbox"
             checked={headless}
@@ -92,18 +106,20 @@ export function ThemingTab() {
         </label>
       </div>
 
-      <Chorus<CitationMeta>
-        value={messages}
-        onChange={setMessages}
-        transport={themingTransport}
-        suggestedPrompts={['How does palette theming work?', 'How do I customize rendering?', 'Show me the ChorusTheme wrapper']}
-        placeholder="Ask about theming or rendering…"
-        showClearButton
-        headless={headless}
-        palette={activePreset.palette}
-        renderMessage={renderMessage}
-        onFinish={handleFinish}
-      />
+      <div className="pg-theme-stage" data-theme={presetId}>
+        <Chorus<CitationMeta>
+          value={messages}
+          onChange={setMessages}
+          transport={themingTransport}
+          suggestedPrompts={['How does palette theming work?', 'How do I customize rendering?', 'Show me the ChorusTheme wrapper']}
+          placeholder="Ask about theming or rendering…"
+          showClearButton
+          headless={headless}
+          palette={activePreset.palette}
+          renderMessage={renderMessage}
+          onFinish={handleFinish}
+        />
+      </div>
     </div>
   );
 }
