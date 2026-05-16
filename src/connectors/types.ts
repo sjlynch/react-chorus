@@ -24,6 +24,9 @@ export interface ConnectorResult {
   errorPayload?: unknown;
 }
 
+// `any` here is deliberate: lets `Connector<SomeState>` flow into APIs typed as
+// plain `Connector` (e.g. registries, props) without contravariant-parameter errors.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export interface Connector<State = any> {
   name: string;
   /**

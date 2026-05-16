@@ -46,7 +46,7 @@ export function readSSEStream(res: Response, onEvent: (payload: string) => unkno
 
   const processText = (text: string) => {
     for (let i = 0; !stopped && i < text.length; i += 1) {
-      let ch = text[i];
+      const ch = text[i];
       if (!sawStreamStart) {
         sawStreamStart = true;
         if (ch === '\uFEFF') continue;

@@ -32,6 +32,12 @@ react-chorus is a composable React chat UI library with batteries-included messa
 - Dev playground: `npm run dev`
 - Build: `npm run build`
 
+## CI gate (run before pushing)
+
+Two recurring CI failures: lint errors (`no-explicit-any`, `prefer-const`, `no-this-alias`) and README bundle-size drift. Lint runs first with `--max-warnings=0` and skips everything else on failure, so one error masks the rest. Any `src/` change can shift the README bundle-size table (~line 692) and playground sentence below it — refresh the numbers from stdout or `.cache/react-chorus/*-bundle-size-report.json`. For unavoidable `any` (e.g. `Connector<State = any>` bivariance), use a focused `// eslint-disable-next-line` with a one-line reason.
+
+Pre-push one-liner: `npm run lint && npm run typecheck && npm run build && npm run verify:bundle-size && npm run build:playground`.
+
 ## Design invariant
 
 Public API stability matters: never break `ChorusProps` or exported component/hook contracts without a major version bump.
