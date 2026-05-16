@@ -271,8 +271,6 @@ app.use(express.json({ limit: '10mb' })); // data URL image attachments can be l
 
 app.post('/api/chat', async (req, res) => {
   const history = Array.isArray(req.body?.history) ? req.body.history : [];
-  const controller = new AbortController();
-  req.on('close', () => controller.abort());
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -281,21 +279,16 @@ app.post('/api/chat', async (req, res) => {
   try {
     const stream = await openai.chat.completions.create(
       toOpenAIChatCompletionsBody(history, { model: 'gpt-4o-mini' }),
-      { signal: controller.signal },
     );
 
     for await (const chunk of stream) {
       res.write(`data: ${JSON.stringify(chunk)}\n\n`);
     }
 
-    if (!controller.signal.aborted) {
-      res.write('data: [DONE]\n\n');
-    }
+    res.write('data: [DONE]\n\n');
   } catch (err) {
-    if (!controller.signal.aborted) {
-      const message = err instanceof Error ? err.message : String(err);
-      res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
-    }
+    const message = err instanceof Error ? err.message : String(err);
+    res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
   } finally {
     res.end();
   }
@@ -303,8 +296,6 @@ app.post('/api/chat', async (req, res) => {
 
 app.listen(3001);
 ```
-
-Forwarding the Express connection close into the provider request matters: when a user clicks **Stop**, Chorus aborts the browser fetch and closes the SSE connection. Without the `AbortController`, the upstream model stream can keep running, billing tokens and consuming provider quota after the client is gone.
 
 ## Using the WebSocket transport
 
@@ -433,7 +424,7 @@ These helpers are also re-exported from `react-chorus` for browser apps; the `re
 | `toOpenAIChatCompletionsBody(history, opts)` / `formatOpenAIChatCompletionsBody(opts)` | `{ model, messages, stream }` | Maps `system`/`user`/`assistant`, user image attachments to `image_url`, unsupported attachments to text notes, and `tool` messages with `metadata.openai.toolCallId` (or `metadata.tool_call_id`) to OpenAI `role: 'tool'`. Without a provider tool id, tool results become safe system context instead of invalid OpenAI messages. |
 | `toOpenAIResponsesBody(history, opts)` / `formatOpenAIResponsesBody(opts)` | `{ model, input, stream }` | Uses Responses `input_text` / `input_image` / `output_text` items and `function_call_output` when an OpenAI call id is present in metadata. |
 | `toAnthropicMessagesBody(history, opts)` / `formatAnthropicMessagesBody(opts)` | `{ model, max_tokens, system, messages, stream }` | Joins Chorus `system` messages into Anthropic's top-level `system`, maps data-URL images to base64 image blocks, and maps `metadata.anthropic.toolUseId` (or `metadata.tool_use_id`) to `tool_result`. |
-| `toGeminiGenerateContentBody(history, opts)` / `formatGeminiGenerateContentBody(opts)` | `{ systemInstruction, contents, ...opts }` | Maps `system` to `systemInstruction`, `assistant` to Gemini `model`, data-URL images to `inlineData`, uploaded file URLs/ids to `fileData`, and Chorus tool messages with `toolCall.name` to model `functionCall` parts followed by user `functionResponse` parts. |
+| `toGeminiGenerateContentBody(history, opts)` / `formatGeminiGenerateContentBody(opts)` | `{ systemInstruction, contents, ...opts }` | Maps `system` to `systemInstruction`, `assistant` to Gemini `model`, data-URL images to `inlineData`, uploaded file URLs/ids to `fileData`, and Chorus tool outputs to `functionResponse` parts when `toolCall.name` is available. |
 
 All helpers preserve extra provider options you pass (for example `model`, `max_tokens`, `generationConfig`, `tools`) and default OpenAI/Anthropic `stream` to `true`. They insert explicit text fallbacks for unsupported attachments so request mapping failures are visible to the model instead of silently dropping context. Override that text with `unsupportedAttachmentText` when needed.
 
@@ -470,11 +461,10 @@ type ConnectorResult = {
   toolDeltas?: Array<{ id: string; name?: string; input?: unknown; output?: unknown; providerId?: string; generated?: boolean }>;
   done?: boolean;
   error?: string;
-  errorPayload?: unknown;
 };
 ```
 
-Connector parser state is per send. Stateless connectors can keep a simple `extract(data)` function; stateful connectors should expose `createState()` and accept that state as the second `extract(data, state)` argument. Connectors that buffer partial output can also expose `flush(state)` so EOF without `[DONE]`/provider completion still delivers trailing text or reasoning. `useChorusStream` creates a fresh state object for every `send()` call, so concurrent widgets/streams do not share buffers, `<think>` state, or provider tool-id maps.
+Connector parser state is per send. Stateless connectors can keep a simple `extract(data)` function; stateful connectors should expose `createState()` and accept that state as the second `extract(data, state)` argument. `useChorusStream` creates a fresh state object for every `send()` call, so concurrent widgets/streams do not share buffers, `<think>` state, or provider tool-id maps.
 
 When providers return multiple alternatives (`choices` / `candidates`), the built-in OpenAI and Gemini connectors select alternative index `0` by default. They do **not** concatenate alternatives into one message. If your app intentionally requests `n > 1` / `candidateCount > 1`, provide a custom `Connector` (or multiple UI messages) that models those alternatives explicitly.
 
@@ -572,22 +562,16 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY); // keep this s
 app.post('/api/chat', async (req, res) => {
   const history = Array.isArray(req.body?.history) ? req.body.history : [];
   const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-  const controller = new AbortController();
-  req.on('close', () => controller.abort());
 
   res.setHeader('Content-Type', 'text/event-stream');
   try {
-    const result = await model.generateContentStream(toGeminiGenerateContentBody(history), {
-      signal: controller.signal,
-    });
+    const result = await model.generateContentStream(toGeminiGenerateContentBody(history));
     for await (const chunk of result.stream) {
       res.write(`data: ${JSON.stringify(chunk)}\n\n`);
     }
   } catch (err) {
-    if (!controller.signal.aborted) {
-      const message = err instanceof Error ? err.message : String(err);
-      res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
-    }
+    const message = err instanceof Error ? err.message : String(err);
+    res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
   } finally {
     res.end();
   }
@@ -707,19 +691,19 @@ react-chorus keeps React/ReactDOM as peer dependencies and externalizes runtime 
 
 | Entry | Initial JS | gzip | Notes |
 |-------|------------|------|-------|
-| `react-chorus` (`<Chorus>`) | 151.7 kB | 51.8 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
-| `react-chorus/headless` | 152.0 kB | 51.9 kB | Headless defaults, same behavior surface. |
-| `react-chorus` (`useChorusStream`) | 34.1 kB | 11.2 kB | Root hook import; CI fails if it pulls UI, Markdown, or icon dependencies. |
+| `react-chorus` (`<Chorus>`) | 147.9 kB | 50.6 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
+| `react-chorus/headless` | 148.2 kB | 50.8 kB | Headless defaults, same behavior surface. |
+| `react-chorus` (`useChorusStream`) | 31.9 kB | 10.5 kB | Root hook import; CI fails if it pulls UI, Markdown, or icon dependencies. |
 | `react-chorus` (`Markdown`) | 74.2 kB | 25.1 kB | Standalone Markdown renderer; includes Markdown parsing/sanitization, not chat icons. |
-| `react-chorus` (`ChatWindow`) | 100.1 kB | 34.2 kB | Transcript renderer with Markdown and message action icons, without the composer/widget shell. |
-| `react-chorus` (`ConversationList`) | 5.6 kB | 2.0 kB | Conversation sidebar component only; no Markdown/icon graph. |
-| `react-chorus/transport` | 4.3 kB | 1.9 kB | Transport factories only; no React/UI/Markdown runtime. |
+| `react-chorus` (`ChatWindow`) | 99.1 kB | 33.9 kB | Transcript renderer with Markdown and message action icons, without the composer/widget shell. |
+| `react-chorus` (`ConversationList`) | 5.4 kB | 1.9 kB | Conversation sidebar component only; no Markdown/icon graph. |
+| `react-chorus/transport` | 4.3 kB | 1.8 kB | Transport factories only; no React/UI/Markdown runtime. |
 | `react-chorus/provider-requests` | 7.3 kB | 2.2 kB | Provider request mappers only; no React/UI/Markdown runtime. |
 | Lazy `highlight.js` runtime | 891.4 kB | 295.9 kB | Async code-fence chunk, never part of initial JS. |
 
 `highlight.js` is only fetched the first time a fenced code block (` ``` ` or `~~~`) appears in rendered text. The matching GitHub dark/light token-color stylesheet is also injected on demand based on `codeBlockTheme`; code renders immediately as plain text and is re-rendered with syntax highlighting once the chunk arrives. While an assistant message is actively streaming, Chorus renders that growing message as React-escaped plain text and switches to full Markdown parsing/sanitization when the stream finalizes.
 
-The playground has a separate budget because it intentionally bundles a complete demo app. `npm run build:playground` also runs `npm run verify:playground-size`, writes `.cache/react-chorus/playground-bundle-size-report.json`, and checks this paragraph. The current playground initial JS graph is 345.7 kB / 109.8 kB gzip and its largest lazy chunk (highlight.js) is 890.9 kB / 295.7 kB gzip. Vite's chunk warning limit is raised to that documented lazy budget so the playground build stays free of Vite chunk warnings while the budget script tracks regressions.
+The playground has a separate budget because it intentionally bundles a complete demo app. `npm run build:playground` also runs `npm run verify:playground-size`, writes `.cache/react-chorus/playground-bundle-size-report.json`, and checks this paragraph. The current playground initial JS graph is 350.6 kB / 110.9 kB gzip and its largest lazy chunk (highlight.js) is 890.9 kB / 295.7 kB gzip. Vite's chunk warning limit is raised to that documented lazy budget so the playground build stays free of Vite chunk warnings while the budget script tracks regressions.
 
 To refresh the published size claims after dependency or feature changes, run `npm run build`, `npm run verify:bundle-size`, and `npm run build:playground`, then copy the updated values from stdout or the `.cache/react-chorus/*-bundle-size-report.json` files into this section. The verification commands may fail until the README values are updated to match their reports.
 
@@ -785,10 +769,10 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `onToolCall` | `({ id, name, input, output, message, messages, signal }) => unknown \| Promise<unknown>` | — | Called after stream input completes for each streamed tool call. If no matching `tools[name]` handler exists, a non-`undefined` return value is appended as `toolCall.output`. |
 | `tools` | `Record<string, (input, context) => unknown \| Promise<unknown>>` | — | Executable tool registry keyed by tool name. Matching handlers run after the stream completes; their return value is appended to the tool message as output. |
 | `autoContinueTools` | `boolean` | `false` | Opt in to an automatic tool-execution → model-continuation loop on the `transport` path after all completed tool calls have outputs. |
-| `maxToolIterations` | `number` | `4` | Maximum automatic tool iterations when `autoContinueTools` is enabled. Prevents infinite loops; pass `Infinity` to explicitly disable the cap. |
+| `maxToolIterations` | `number` | `4` | Maximum automatic tool iterations when `autoContinueTools` is enabled. Prevents infinite loops. |
 | `shouldContinueToolLoop` | `(context) => boolean \| Promise<boolean>` | — | Optional gate before each automatic continuation. Return `false` to stop after rendering/executing the current tool batch. |
 | `onStreamDone` | `({ assistantMessage, toolMessages, messages, response }) => void` | — | Called after each `transport` stream completes normally and tool handlers (if any) finish. Fires for tool-only turns where `onFinish` has no assistant message. |
-| `onCopy` | `(message: Message<TMeta>) => boolean \| void \| Promise<boolean \| void>` | Clipboard copy when available | Overrides the built-in per-message Copy action. Return `false` / `Promise<false>` to show the Copy failed indicator; return `void` to keep the historical assume-success behavior. If omitted, Chorus copies `message.text` with `navigator.clipboard.writeText` when the Clipboard API is available. |
+| `onCopy` | `(message: Message<TMeta>) => void` | Clipboard copy when available | Overrides the built-in per-message Copy action. If omitted, Chorus copies `message.text` with `navigator.clipboard.writeText` when the Clipboard API is available. |
 | `getMessageFeedback` | `(message: Message<TMeta>) => 'up' \| 'down' \| null \| undefined` | `message.metadata.feedback` | Seeds the pressed thumb state from persisted feedback. Return `null` for no selection; return `undefined` to fall back to `message.metadata.feedback` when it is `'up'` or `'down'`. |
 | `onFeedback` | `(message: Message<TMeta>, feedback: 'up' \| 'down') => void` | — | Enables built-in thumbs-up / thumbs-down per-message feedback actions and reports changes. Clicking the already-selected thumb is ignored (no toggle-off callback). |
 | `confirmDeleteMessage` | `({ message, messages }) => boolean \| void \| Promise<boolean \| void>` | — | Optional gate for built-in message delete actions. Return or resolve `false` to cancel; persistence is flushed only after deletion is confirmed. |
@@ -1179,9 +1163,9 @@ const { send, abort, sending } = useChorusStream<MyMeta>(transport, { connector:
 - `send(..., { onReasoning, onToolDelta })` receives connector-emitted reasoning chunks and accumulated tool deltas when you use the hook directly. `<Chorus>` wires these into `Message.reasoning` and `role: 'tool'` messages automatically; advanced `onSend` bridges can pass `helpers.streamCallbacks?.()` to preserve the same behavior.
 - Non-abort transport, HTTP, connector, and in-band provider errors call `onError` when supplied and reject the returned `send()` promise. This lets README-style `await send(...)` bridges surface the friendly Chorus error banner through the surrounding `onSend` catch path.
 - If `onError` itself throws while handling a stream error, Chorus warns in development and still rejects `send()` with the original stream error. If `onDone` throws after a successful stream, `send()` rejects with that completion callback error and does not call `onError`.
-- `onError` receives raw transport details (including bounded HTTP response body snippets). In-band provider errors are thrown as `ChorusStreamError` with `errorPayload` preserving the source SSE JSON; the built-in UI continues to show only `errorMessage`.
+- `onError` receives raw transport details (including bounded HTTP response body snippets); the built-in UI continues to show only `errorMessage`.
 - `opts.connector` — `'openai'` | `'anthropic'` | `'gemini'` | `'auto'` | custom `Connector`. Defaults to `'auto'` which handles OpenAI, Gemini, Anthropic JSON, plain-text SSE, reasoning/tool deltas, and in-band `{ error }` payloads.
-- If a connector exposes `createState()`, the hook creates one state object per `send()` and passes it to every `extract(data, state)` call for that stream. If it exposes `flush(state)`, Chorus calls it at EOF so buffered trailing text/reasoning is delivered even when the stream closes without a done sentinel. Do not store per-stream parser buffers in module globals; use connector state instead.
+- If a connector exposes `createState()`, the hook creates one state object per `send()` and passes it to every `extract(data, state)` call for that stream. Do not store per-stream parser buffers in module globals; use connector state instead.
 
 ### `createFetchSSETransport(url, init?)`
 
@@ -1332,7 +1316,7 @@ Chorus displays tool steps as `role: 'tool'` with `message.toolCall`, but those 
 }
 ```
 
-The request helpers use those IDs for OpenAI `tool_call_id` / Responses `call_id` and Anthropic `tool_result.tool_use_id`. They also synthesize the provider-required assistant tool-call records (`assistant.tool_calls`, Responses `function_call`, Anthropic `tool_use`) before the tool result. When an ID is missing, they convert the tool result to safe text context instead of emitting an invalid provider-specific tool message. Gemini uses `toolCall.name`/`input` to reconstruct model `functionCall` parts before the matching `functionResponse` output payload, grouping consecutive tool messages into one tool exchange.
+The request helpers use those IDs for OpenAI `tool_call_id` / Responses `call_id` and Anthropic `tool_result.tool_use_id`. They also synthesize the provider-required assistant tool-call records (`assistant.tool_calls`, Responses `function_call`, Anthropic `tool_use`) before the tool result. When an ID is missing, they convert the tool result to safe text context instead of emitting an invalid provider-specific tool message. Gemini function responses use `toolCall.name` and the output payload.
 
 ## Tool calls and agent steps
 
@@ -1359,7 +1343,7 @@ To observe deltas without executing tools:
 
 To execute tools in the simple path, pass a `tools` registry. Handlers run after streaming input completes, receive the final parsed `input` plus an abortable context, and their return value is appended as `toolCall.output`. If the user clicks Stop while a handler is running, `context.signal` is aborted and late outputs are ignored. If a handler throws a non-abort error, Chorus keeps the tool row inspectable, writes `{ error: message }` to its output, calls `onError`, and shows the friendly error banner; clicking Retry removes the failed assistant/tool attempt before rendering the fresh response.
 
-By default this remains display/manual mode: Chorus does not make a second model request after tool execution, so use `onToolCall`/`onStreamDone` or your backend to continue the agent loop when needed. To opt in to a built-in loop, set `autoContinueTools`. Chorus will run the handlers, append outputs, then send a continuation request with the updated history. `maxToolIterations` (default `4`) prevents runaway loops, `Infinity` explicitly disables that safety cap, `shouldContinueToolLoop(context)` can stop a specific continuation, and Stop aborts both tool execution and continuation streams.
+By default this remains display/manual mode: Chorus does not make a second model request after tool execution, so use `onToolCall`/`onStreamDone` or your backend to continue the agent loop when needed. To opt in to a built-in loop, set `autoContinueTools`. Chorus will run the handlers, append outputs, then send a continuation request with the updated history. `maxToolIterations` (default `4`) prevents runaway loops, `shouldContinueToolLoop(context)` can stop a specific continuation, and Stop aborts both tool execution and continuation streams.
 
 ```tsx
 <Chorus

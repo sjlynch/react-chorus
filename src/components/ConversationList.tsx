@@ -10,15 +10,6 @@ export interface ConfirmDeleteConversationContext {
 
 export type ConfirmDeleteConversation = (context: ConfirmDeleteConversationContext) => boolean | void | Promise<boolean | void>;
 
-// Keep this local so ConversationList-only imports do not share a dev-mode module with the Chorus widget/session chunks.
-function isChorusDevMode() {
-  try {
-    return typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production';
-  } catch {
-    return false;
-  }
-}
-
 export interface ConversationListProps {
   conversations: ConversationSummary[];
   activeId?: string | null;
@@ -38,16 +29,6 @@ export interface ConversationListProps {
   style?: React.CSSProperties;
   newConversationLabel?: string;
   emptyLabel?: string;
-}
-
-// Keep this local so standalone ConversationList imports do not pull shared
-// hook/widget development-warning chunks into consumer bundles.
-function isChorusDevMode() {
-  try {
-    return typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production';
-  } catch {
-    return false;
-  }
 }
 
 function conversationClasses(active: boolean, pinned: boolean) {
@@ -79,17 +60,10 @@ function isPromiseLike<T>(value: unknown): value is PromiseLike<T> {
     && typeof (value as { then?: unknown }).then === 'function';
 }
 
-function isConversationListDevMode() {
-  // Kept local so the standalone ConversationList chunk does not import hook/widget chunks.
-  try {
-    return typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production';
-  } catch {
-    return false;
-  }
-}
-
 function warnDeleteConfirmationError(callbackName: string, error: unknown) {
-  if (!isConversationListDevMode()) return;
+  // Inlined dev-mode gate: importing the shared helper would pull the heavy chorus-session
+  // chunk into ConversationList's initial graph, blowing the bundle budget.
+  if (typeof process === 'undefined' || process.env?.NODE_ENV === 'production') return;
   console.warn(`[Chorus] \`${callbackName}\` callback threw/rejected; delete was cancelled.`, error);
 }
 
