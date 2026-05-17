@@ -26,6 +26,9 @@ export async function POST(request: Request) {
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       try {
+        // Chorus POSTs `{ prompt, history }`. `history` already includes the new
+        // user turn — do not also append `body.prompt`, or the latest message
+        // will be sent to the model twice. `prompt` is just a convenience copy.
         const body = (await request.json()) as { history?: unknown };
         const history = Array.isArray(body.history) ? (body.history as Message[]) : [];
         const apiKey = process.env.OPENAI_API_KEY;

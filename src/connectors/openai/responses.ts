@@ -16,7 +16,7 @@ export function extractOpenAIResponseEvent(obj: Record<string, unknown>, state: 
   const result: ConnectorResult = {};
 
   if (type === 'response.completed') {
-    mergeResult(result, createThinkTagSplitter(state.thinkState).flush());
+    mergeResult(result, createThinkTagSplitter(state.thinkState, state.thinkOptions).flush());
     result.done = true;
     return result;
   }
@@ -28,7 +28,7 @@ export function extractOpenAIResponseEvent(obj: Record<string, unknown>, state: 
 
   if (type === 'response.output_text.delta') {
     const text = stringFromUnknown(obj.delta);
-    if (text) mergeResult(result, createThinkTagSplitter(state.thinkState).feed(text));
+    if (text) mergeResult(result, createThinkTagSplitter(state.thinkState, state.thinkOptions).feed(text));
   }
 
   if (

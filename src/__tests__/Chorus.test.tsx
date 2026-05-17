@@ -950,6 +950,24 @@ describe('Chorus', () => {
     await waitFor(() => expect(onMessagesChange).toHaveBeenLastCalledWith([], expect.objectContaining({ source: 'persistence', reason: 'clear' })));
   });
 
+  it('resets composer draft when persistenceKey switches conversations', async () => {
+    const user = userEvent.setup();
+    const storage = makeSyncStorage({
+      'chat:a': JSON.stringify([{ id: 'a1', role: 'assistant', text: 'Conversation A' }]),
+      'chat:b': JSON.stringify([{ id: 'b1', role: 'assistant', text: 'Conversation B' }]),
+    });
+
+    const { rerender } = render(<Chorus persistenceKey="chat:a" persistenceStorage={storage} />);
+
+    const composer = screen.getByRole('textbox', { name: /send a message/i });
+    await user.type(composer, 'unsent draft for A');
+    expect(composer).toHaveValue('unsent draft for A');
+
+    rerender(<Chorus persistenceKey="chat:b" persistenceStorage={storage} />);
+
+    expect(screen.getByRole('textbox', { name: /send a message/i })).toHaveValue('');
+  });
+
   it('waits for an empty async persistence load before rendering and saving the seed', async () => {
     const pendingRead = deferred<string | null>();
     const welcome: Message[] = [{ id: 'welcome', role: 'assistant', text: 'Async welcome!' }];
