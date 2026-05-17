@@ -1,6 +1,6 @@
 import type { ConnectorName } from '../types';
 import type { Connector } from './types';
-import { openaiConnector } from './openai';
+import { openaiConnector, createOpenAIConnector, type OpenAIConnectorOptions } from './openai';
 import { anthropicConnector } from './anthropic';
 import { geminiConnector } from './gemini';
 import { extractErrorMessage } from './error';
@@ -8,6 +8,7 @@ import { extractErrorMessage } from './error';
 export type { Connector, ConnectorResult, ConnectorToolDelta } from './types';
 export { anthropicConnector } from './anthropic';
 export { geminiConnector } from './gemini';
+export { createOpenAIConnector, type OpenAIConnectorOptions } from './openai';
 
 interface AutoConnectorState {
   openai?: ReturnType<NonNullable<typeof openaiConnector.createState>>;
@@ -95,11 +96,11 @@ function isConnectorDevMode() {
   }
 }
 
-export function getConnector(connector?: Connector | ConnectorName): Connector {
+export function getConnector(connector?: Connector | ConnectorName, options?: OpenAIConnectorOptions): Connector {
   if (!connector) return autoConnector;
   if (typeof connector === 'string') {
     if (connector === 'auto') return autoConnector;
-    if (connector === 'openai') return openaiConnector;
+    if (connector === 'openai') return options ? createOpenAIConnector(options) : openaiConnector;
     if (connector === 'anthropic') return anthropicConnector;
     if (connector === 'gemini') return geminiConnector;
 
