@@ -1,4 +1,5 @@
 import type { Attachment, Message } from '../types';
+import type { ChorusToolDefinition, ChorusToolRegistry } from '../tools';
 
 export type UnsupportedAttachmentText<TMeta = Record<string, unknown>> = (
   attachment: Attachment,
@@ -10,15 +11,24 @@ export interface ProviderMappingOptions<TMeta = Record<string, unknown>> {
   unsupportedAttachmentText?: UnsupportedAttachmentText<TMeta>;
 }
 
+/** Convenience type for the `tools` body option: array of definitions or full Chorus tool registry. */
+export type ProviderToolsOption<TMeta = Record<string, unknown>> =
+  | ChorusToolDefinition<TMeta>[]
+  | ChorusToolRegistry<TMeta>;
+
 export interface OpenAIChatCompletionsBodyOptions<TMeta = Record<string, unknown>> extends ProviderMappingOptions<TMeta> {
   model?: string;
   stream?: boolean;
+  /** Chorus tool definitions; serialized into OpenAI Chat Completions `tools`. Falls through unchanged if a raw OpenAI tool array is detected. */
+  tools?: ProviderToolsOption<TMeta>;
   [key: string]: unknown;
 }
 
 export interface OpenAIResponsesBodyOptions<TMeta = Record<string, unknown>> extends ProviderMappingOptions<TMeta> {
   model?: string;
   stream?: boolean;
+  /** Chorus tool definitions; serialized into OpenAI Responses `tools`. Falls through unchanged if a raw OpenAI tool array is detected. */
+  tools?: ProviderToolsOption<TMeta>;
   [key: string]: unknown;
 }
 
@@ -26,10 +36,14 @@ export interface AnthropicMessagesBodyOptions<TMeta = Record<string, unknown>> e
   model?: string;
   max_tokens?: number;
   stream?: boolean;
+  /** Chorus tool definitions; serialized into Anthropic Messages `tools`. Falls through unchanged if a raw Anthropic tool array is detected. */
+  tools?: ProviderToolsOption<TMeta>;
   [key: string]: unknown;
 }
 
 export interface GeminiGenerateContentBodyOptions<TMeta = Record<string, unknown>> extends ProviderMappingOptions<TMeta> {
+  /** Chorus tool definitions; serialized into Gemini `tools` (wrapped in `functionDeclarations`). Falls through unchanged if a raw Gemini tool array is detected. */
+  tools?: ProviderToolsOption<TMeta>;
   [key: string]: unknown;
 }
 
@@ -100,9 +114,16 @@ export interface OpenAIResponsesInputImagePart {
   image_url: string;
 }
 
+export interface OpenAIResponsesInputFilePart {
+  type: 'input_file';
+  file_id?: string;
+  file_url?: string;
+}
+
 export type OpenAIResponsesInputContentPart =
   | OpenAIResponsesInputTextPart
-  | OpenAIResponsesInputImagePart;
+  | OpenAIResponsesInputImagePart
+  | OpenAIResponsesInputFilePart;
 
 export interface OpenAIResponsesSystemInputItem {
   role: 'system';
@@ -151,6 +172,11 @@ export interface AnthropicImageBlock {
   source: { type: 'base64'; media_type: string; data: string };
 }
 
+export interface AnthropicDocumentBlock {
+  type: 'document';
+  source: { type: 'base64'; media_type: string; data: string };
+}
+
 export interface AnthropicToolUseBlock {
   type: 'tool_use';
   id: string;
@@ -162,11 +188,13 @@ export interface AnthropicToolResultBlock {
   type: 'tool_result';
   tool_use_id: string;
   content: string;
+  is_error?: boolean;
 }
 
 export type AnthropicContentBlock =
   | AnthropicTextBlock
   | AnthropicImageBlock
+  | AnthropicDocumentBlock
   | AnthropicToolUseBlock
   | AnthropicToolResultBlock;
 

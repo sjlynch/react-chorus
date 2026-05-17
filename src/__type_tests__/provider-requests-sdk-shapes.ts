@@ -79,9 +79,14 @@ void sdkCreateChatCompletion(chatBodyWithExtras);
 type SdkResponsesInputTextPart = { type: 'input_text'; text: string };
 type SdkResponsesOutputTextPart = { type: 'output_text'; text: string };
 type SdkResponsesInputImagePart = { type: 'input_image'; image_url: string };
+type SdkResponsesInputFilePart = { type: 'input_file'; file_id?: string; file_url?: string };
+type SdkResponsesUserContentPart =
+  | SdkResponsesInputTextPart
+  | SdkResponsesInputImagePart
+  | SdkResponsesInputFilePart;
 type SdkResponsesInputItem =
-  | { role: 'system'; content: Array<SdkResponsesInputTextPart | SdkResponsesInputImagePart> }
-  | { role: 'user'; content: Array<SdkResponsesInputTextPart | SdkResponsesInputImagePart> }
+  | { role: 'system'; content: SdkResponsesUserContentPart[] }
+  | { role: 'user'; content: SdkResponsesUserContentPart[] }
   | { role: 'assistant'; content: SdkResponsesOutputTextPart[] }
   | { type: 'function_call'; call_id: string; name: string; arguments: string }
   | { type: 'function_call_output'; call_id: string; output: string };
@@ -122,6 +127,10 @@ type SdkAnthropicImageBlock = {
   type: 'image';
   source: { type: 'base64'; media_type: string; data: string };
 };
+type SdkAnthropicDocumentBlock = {
+  type: 'document';
+  source: { type: 'base64'; media_type: string; data: string };
+};
 type SdkAnthropicToolUseBlock = {
   type: 'tool_use';
   id: string;
@@ -132,10 +141,12 @@ type SdkAnthropicToolResultBlock = {
   type: 'tool_result';
   tool_use_id: string;
   content: string | SdkAnthropicTextBlock[];
+  is_error?: boolean;
 };
 type SdkAnthropicContentBlock =
   | SdkAnthropicTextBlock
   | SdkAnthropicImageBlock
+  | SdkAnthropicDocumentBlock
   | SdkAnthropicToolUseBlock
   | SdkAnthropicToolResultBlock;
 

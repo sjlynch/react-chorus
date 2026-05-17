@@ -1,13 +1,16 @@
-import type { Message } from '../types';
+import type { Attachment, Message } from '../types';
 import { dataUrlFromAttachment, unsupportedAttachmentText } from './attachments';
-import { metadataString } from './metadata';
+import { metadataBoolean, metadataString } from './metadata';
 import { stripAnthropicOptions } from './options';
 import { messageText, objectToolInput, toolContextText, toolOutputText } from './toolOutput';
 import type {
   AnthropicContentBlock,
+  AnthropicDocumentBlock,
+  AnthropicImageBlock,
   AnthropicMessage,
   AnthropicMessagesBody,
   AnthropicMessagesBodyOptions,
+  AnthropicToolResultBlock,
   AnthropicToolUseBlock,
   ProviderMappingOptions,
 } from './types';
@@ -20,6 +23,20 @@ function anthropicToolUseId(message: Message<unknown>) {
     'tool_use_id',
     'providerToolUseId',
   ]);
+}
+
+function anthropicToolResultIsError(message: Message<unknown>) {
+  return metadataBoolean(message, 'anthropic', ['isError', 'is_error'], ['isError', 'is_error']);
+}
+
+function anthropicToolResultBlock(message: Message<unknown>, toolUseId: string): AnthropicToolResultBlock {
+  const block: AnthropicToolResultBlock = {
+    type: 'tool_result',
+    tool_use_id: toolUseId,
+    content: toolOutputText(message),
+  };
+  if (anthropicToolResultIsError(message)) block.is_error = true;
+  return block;
 }
 
 function anthropicToolUseBlock(message: Message<unknown>): AnthropicToolUseBlock | null {
@@ -51,6 +68,24 @@ function anthropicSystem(history: Message<unknown>[]) {
   return system || undefined;
 }
 
+function anthropicAttachmentBlock(attachment: Attachment): AnthropicImageBlock | AnthropicDocumentBlock | null {
+  const dataUrl = dataUrlFromAttachment(attachment);
+  if (!dataUrl) return null;
+  if (attachment.type.startsWith('image/')) {
+    return {
+      type: 'image',
+      source: { type: 'base64', media_type: attachment.type || dataUrl.mimeType, data: dataUrl.base64 },
+    };
+  }
+  if (attachment.type === 'application/pdf') {
+    return {
+      type: 'document',
+      source: { type: 'base64', media_type: 'application/pdf', data: dataUrl.base64 },
+    };
+  }
+  return null;
+}
+
 function anthropicContentBlocks<TMeta>(
   message: Message<TMeta>,
   options: ProviderMappingOptions<TMeta>,
@@ -61,12 +96,9 @@ function anthropicContentBlocks<TMeta>(
 
   if (message.role === 'user') {
     for (const attachment of message.attachments ?? []) {
-      const dataUrl = attachment.type.startsWith('image/') ? dataUrlFromAttachment(attachment) : null;
-      if (dataUrl) {
-        blocks.push({
-          type: 'image',
-          source: { type: 'base64', media_type: attachment.type || dataUrl.mimeType, data: dataUrl.base64 },
-        });
+      const block = anthropicAttachmentBlock(attachment);
+      if (block) {
+        blocks.push(block);
       } else {
         blocks.push({ type: 'text', text: unsupportedAttachmentText(attachment, message, options) });
       }
@@ -92,7 +124,7 @@ function toAnthropicMessage<TMeta>(message: Message<TMeta>, options: ProviderMap
   if (message.role === 'tool') {
     const toolUseId = anthropicToolUseId(message as Message<unknown>);
     if (toolUseId) {
-      return { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content: toolOutputText(message) }] };
+      return { role: 'user', content: [anthropicToolResultBlock(message as Message<unknown>, toolUseId)] };
     }
 
     const text = toolContextText(message);
@@ -134,11 +166,10 @@ export function toAnthropicMessages<TMeta = Record<string, unknown>>(
       appendAnthropicToolUseBlocks(messages, providerTools.map(entry => entry.block));
       messages.push({
         role: 'user',
-        content: providerTools.map(entry => ({
-          type: 'tool_result',
-          tool_use_id: anthropicToolUseId(entry.message as Message<unknown>) ?? '',
-          content: toolOutputText(entry.message),
-        })),
+        content: providerTools.map(entry => anthropicToolResultBlock(
+          entry.message as Message<unknown>,
+          anthropicToolUseId(entry.message as Message<unknown>) ?? '',
+        )),
       });
     }
 

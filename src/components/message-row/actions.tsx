@@ -1,7 +1,9 @@
 import React from 'react';
 import { Copy, Pencil, RefreshCw, ThumbsDown, ThumbsUp, Trash2 } from 'lucide-react';
 import type { Message, MessageFeedback } from '../../types';
-import { COPY_FAILED_LABEL, COPY_FEEDBACK_DURATION_MS, canWriteTextToClipboard, writeTextToClipboard } from '../../utils/messageCopy';
+import { DEFAULT_MESSAGE_ACTION_LABELS } from '../../labels/messageActions';
+import type { ChorusMessageActionLabels, ChorusSpeakerLabels } from '../../labels/types';
+import { COPY_FEEDBACK_DURATION_MS, canWriteTextToClipboard, writeTextToClipboard } from '../../utils/messageCopy';
 import { InlineMessageEditor } from './InlineMessageEditor';
 import { useActionEditing } from './renderState';
 import { MessageSpeakerLabel } from './speaker';
@@ -18,9 +20,10 @@ function hasRenderableActions(actions: MessageRenderActions) {
 export interface MessageActionsProps {
   actions: MessageRenderActions;
   onEditRequested: () => void;
+  labels?: ChorusMessageActionLabels;
 }
 
-export function MessageActions({ actions, onEditRequested }: MessageActionsProps) {
+export function MessageActions({ actions, onEditRequested, labels = DEFAULT_MESSAGE_ACTION_LABELS }: MessageActionsProps) {
   const initialFeedback = actions.initialFeedback ?? null;
   const [selectedFeedback, setSelectedFeedback] = React.useState<MessageFeedback | null>(initialFeedback);
   const selectedFeedbackRef = React.useRef<MessageFeedback | null>(initialFeedback);
@@ -64,25 +67,27 @@ export function MessageActions({ actions, onEditRequested }: MessageActionsProps
     actions.feedback?.(variant);
   };
 
+  const copyLabel = copyFailed ? labels.copyFailed : labels.copy;
+
   return (
     <div className="chorus-actions">
       {actions.canEdit && actions.edit && (
-        <button type="button" className="chorus-action-btn" onClick={onEditRequested} title="Edit" aria-label="Edit"><Pencil size={13} /></button>
+        <button type="button" className="chorus-action-btn" onClick={onEditRequested} title={labels.edit} aria-label={labels.edit}><Pencil size={13} /></button>
       )}
       {actions.canRegenerate && actions.regenerate && (
-        <button type="button" className="chorus-action-btn" onClick={actions.regenerate} title="Regenerate" aria-label="Regenerate"><RefreshCw size={13} /></button>
+        <button type="button" className="chorus-action-btn" onClick={actions.regenerate} title={labels.regenerate} aria-label={labels.regenerate}><RefreshCw size={13} /></button>
       )}
       {actions.copy && (
-        <button type="button" className={actionButtonClass(copyFailed, copyFailed ? 'chorus-action-btn--copy-failed' : undefined)} onClick={handleCopy} title={copyFailed ? COPY_FAILED_LABEL : 'Copy'} aria-label={copyFailed ? COPY_FAILED_LABEL : 'Copy'}>{copyFailed ? COPY_FAILED_LABEL : <Copy size={13} />}</button>
+        <button type="button" className={actionButtonClass(copyFailed, copyFailed ? 'chorus-action-btn--copy-failed' : undefined)} onClick={handleCopy} title={copyLabel} aria-label={copyLabel}>{copyFailed ? labels.copyFailed : <Copy size={13} />}</button>
       )}
       {actions.feedback && (
         <>
-          <button type="button" className={actionButtonClass(selectedFeedback === 'up')} onClick={() => handleFeedback('up')} title="Thumbs up" aria-label="Thumbs up" aria-pressed={selectedFeedback === 'up'}><ThumbsUp size={13} /></button>
-          <button type="button" className={actionButtonClass(selectedFeedback === 'down')} onClick={() => handleFeedback('down')} title="Thumbs down" aria-label="Thumbs down" aria-pressed={selectedFeedback === 'down'}><ThumbsDown size={13} /></button>
+          <button type="button" className={actionButtonClass(selectedFeedback === 'up')} onClick={() => handleFeedback('up')} title={labels.thumbsUp} aria-label={labels.thumbsUp} aria-pressed={selectedFeedback === 'up'}><ThumbsUp size={13} /></button>
+          <button type="button" className={actionButtonClass(selectedFeedback === 'down')} onClick={() => handleFeedback('down')} title={labels.thumbsDown} aria-label={labels.thumbsDown} aria-pressed={selectedFeedback === 'down'}><ThumbsDown size={13} /></button>
         </>
       )}
       {actions.canDelete && actions.delete && (
-        <button type="button" className="chorus-action-btn" onClick={actions.delete} title="Delete" aria-label="Delete"><Trash2 size={13} /></button>
+        <button type="button" className="chorus-action-btn" onClick={actions.delete} title={labels.delete} aria-label={labels.delete}><Trash2 size={13} /></button>
       )}
     </div>
   );
@@ -94,7 +99,14 @@ export function createCopyAction<TMeta>(message: Message<TMeta>, onCopy?: (messa
   return undefined;
 }
 
-export function MessageActionControls<TMeta = Record<string, unknown>>({ message, actions }: { message: Message<TMeta>; actions: MessageRenderActions }) {
+export interface MessageActionControlsProps<TMeta> {
+  message: Message<TMeta>;
+  actions: MessageRenderActions;
+  labels?: ChorusMessageActionLabels;
+  speakerLabels?: ChorusSpeakerLabels;
+}
+
+export function MessageActionControls<TMeta = Record<string, unknown>>({ message, actions, labels = DEFAULT_MESSAGE_ACTION_LABELS, speakerLabels }: MessageActionControlsProps<TMeta>) {
   const [editing, setEditing] = useActionEditing(message.id);
   const hasActions = hasRenderableActions(actions);
 
@@ -103,7 +115,7 @@ export function MessageActionControls<TMeta = Record<string, unknown>>({ message
   if (editing && actions.edit) {
     return (
       <div className={`chorus-msg chorus-${message.role}`} data-chorus-message-id={message.id}>
-        <MessageSpeakerLabel role={message.role} />
+        <MessageSpeakerLabel role={message.role} speakers={speakerLabels} />
         <InlineMessageEditor
           initialText={message.text ?? ''}
           onSubmit={(newText) => {
@@ -111,6 +123,7 @@ export function MessageActionControls<TMeta = Record<string, unknown>>({ message
             setEditing(false);
           }}
           onCancel={() => setEditing(false)}
+          labels={labels}
         />
       </div>
     );
@@ -119,7 +132,7 @@ export function MessageActionControls<TMeta = Record<string, unknown>>({ message
   return (
     <div className={`chorus-render-actions chorus-${message.role}`}>
       <div className="chorus-msg-content">
-        <MessageActions actions={actions} onEditRequested={() => setEditing(true)} />
+        <MessageActions actions={actions} onEditRequested={() => setEditing(true)} labels={labels} />
       </div>
     </div>
   );

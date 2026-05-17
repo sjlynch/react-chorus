@@ -291,4 +291,150 @@ describe('createWebSocketTransport', () => {
 
     expect(pushed).toEqual(['volunteer update']);
   });
+
+  it('warns once in dev when persistent sends overlap without a correlate callback', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const transport = createWebSocketTransport('wss://api.example.com/chat', { persistent: true });
+
+      const firstPromise = transport('one', [], new AbortController().signal);
+      const ws = MockWebSocket.instances[0];
+      ws.emitOpen();
+      await firstPromise;
+
+      // First send's response stream is still active (not cancelled/closed).
+      // Start a second send — the warning should fire.
+      const secondPromise = transport('two', [], new AbortController().signal);
+      await secondPromise;
+
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]![0]).toMatch(/persistent WebSocket/);
+      expect(warn.mock.calls[0]![0]).toMatch(/correlate/);
+
+      // Third overlapping send should not re-fire (warn-once per transport).
+      await transport('three', [], new AbortController().signal);
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('does not warn when persistent sends do not overlap', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const transport = createWebSocketTransport('wss://api.example.com/chat', { persistent: true });
+
+      const firstPromise = transport('one', [], new AbortController().signal);
+      const ws = MockWebSocket.instances[0];
+      ws.emitOpen();
+      const firstResponse = await firstPromise;
+      await firstResponse.body!.cancel();
+
+      // Previous stream has been cleared, so a follow-up send should not warn.
+      await transport('two', [], new AbortController().signal);
+
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('does not warn when overlapping persistent sends provide a correlate callback', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const transport = createWebSocketTransport('wss://api.example.com/chat', {
+        persistent: true,
+        formatMessage: (text) => ({ payload: text, correlationId: text }),
+        correlate: () => null,
+      });
+
+      const firstPromise = transport('one', [], new AbortController().signal);
+      const ws = MockWebSocket.instances[0];
+      ws.emitOpen();
+      await firstPromise;
+
+      await transport('two', [], new AbortController().signal);
+
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('routes correlated frames only to the matching response stream', async () => {
+    const transport = createWebSocketTransport('wss://api.example.com/chat', {
+      persistent: true,
+      formatMessage: (text) => ({
+        payload: JSON.stringify({ id: text, prompt: text }),
+        correlationId: text,
+      }),
+      correlate: (frame) => {
+        try { return (JSON.parse(frame) as { id?: string }).id ?? null; } catch { return null; }
+      },
+    });
+
+    const firstPromise = transport('one', [], new AbortController().signal);
+    const ws = MockWebSocket.instances[0];
+    ws.emitOpen();
+    const firstResponse = await firstPromise;
+    const firstReader = firstResponse.body!.getReader();
+
+    const secondPromise = transport('two', [], new AbortController().signal);
+    const secondResponse = await secondPromise;
+    const secondReader = secondResponse.body!.getReader();
+
+    const decoder = new TextDecoder();
+
+    ws.onmessage?.({ data: JSON.stringify({ id: 'one', token: 'A1' }) } as MessageEvent);
+    await Promise.resolve();
+    ws.onmessage?.({ data: JSON.stringify({ id: 'two', token: 'B1' }) } as MessageEvent);
+    await Promise.resolve();
+    ws.onmessage?.({ data: JSON.stringify({ id: 'one', token: 'A2' }) } as MessageEvent);
+    await Promise.resolve();
+
+    const firstChunkA = await firstReader.read();
+    const firstChunkB = await firstReader.read();
+    expect(decoder.decode(firstChunkA.value)).toBe(`data: ${JSON.stringify({ id: 'one', token: 'A1' })}\n\n`);
+    expect(decoder.decode(firstChunkB.value)).toBe(`data: ${JSON.stringify({ id: 'one', token: 'A2' })}\n\n`);
+
+    const secondChunk = await secondReader.read();
+    expect(decoder.decode(secondChunk.value)).toBe(`data: ${JSON.stringify({ id: 'two', token: 'B1' })}\n\n`);
+
+    // Frame whose correlation id matches no active stream is silently dropped.
+    ws.onmessage?.({ data: JSON.stringify({ id: 'orphan', token: 'X' }) } as MessageEvent);
+    await Promise.resolve();
+
+    // A null-id frame falls through to the broadcast — both streams see it.
+    ws.onmessage?.({ data: 'unrelated push' } as MessageEvent);
+    const firstBroadcast = await firstReader.read();
+    const secondBroadcast = await secondReader.read();
+    expect(decoder.decode(firstBroadcast.value)).toBe('data: unrelated push\n\n');
+    expect(decoder.decode(secondBroadcast.value)).toBe('data: unrelated push\n\n');
+
+    await firstReader.cancel();
+    await secondReader.cancel();
+  });
+
+  it('falls back to broadcasting when a correlate callback throws', async () => {
+    const transport = createWebSocketTransport('wss://api.example.com/chat', {
+      persistent: true,
+      formatMessage: (text) => ({ payload: text, correlationId: text }),
+      correlate: () => { throw new Error('boom'); },
+    });
+
+    const firstPromise = transport('one', [], new AbortController().signal);
+    const ws = MockWebSocket.instances[0];
+    ws.emitOpen();
+    const firstResponse = await firstPromise;
+    const firstReader = firstResponse.body!.getReader();
+
+    const secondResponse = await transport('two', [], new AbortController().signal);
+    const secondReader = secondResponse.body!.getReader();
+
+    ws.onmessage?.({ data: 'shared' } as MessageEvent);
+
+    const decoder = new TextDecoder();
+    expect(decoder.decode((await firstReader.read()).value)).toBe('data: shared\n\n');
+    expect(decoder.decode((await secondReader.read()).value)).toBe('data: shared\n\n');
+  });
 });

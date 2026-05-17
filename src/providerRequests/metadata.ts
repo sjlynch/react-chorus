@@ -64,3 +64,23 @@ export function metadataArray(
 
   return null;
 }
+
+export function metadataBoolean(
+  message: Message<unknown>,
+  providerKey: string,
+  providerKeys: string[],
+  rootKeys: string[],
+) {
+  const metadata = metadataRecord(message);
+  const provider = nestedRecord(metadata, providerKey);
+
+  for (const key of providerKeys) {
+    if (provider && hasOwn(provider, key)) return provider[key] === true;
+  }
+
+  for (const key of rootKeys) {
+    if (metadata && hasOwn(metadata, key)) return metadata[key] === true;
+  }
+
+  return false;
+}

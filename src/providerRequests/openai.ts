@@ -15,6 +15,7 @@ import type {
   OpenAIResponsesBodyOptions,
   OpenAIResponsesFunctionCallInputItem,
   OpenAIResponsesInputContentPart,
+  OpenAIResponsesInputFilePart,
   OpenAIResponsesInputItem,
   OpenAIResponsesInputTextPart,
   OpenAIResponsesOutputTextPart,
@@ -159,6 +160,16 @@ function toOpenAIChatCompletionsMessage<TMeta>(
   return null;
 }
 
+function openAIResponsesFilePart(attachment: { id?: string; url?: string }): OpenAIResponsesInputFilePart | null {
+  if (typeof attachment.id === 'string' && attachment.id) {
+    return { type: 'input_file', file_id: attachment.id };
+  }
+  if (typeof attachment.url === 'string' && attachment.url && !attachment.url.startsWith('data:')) {
+    return { type: 'input_file', file_url: attachment.url };
+  }
+  return null;
+}
+
 function openAIResponsesInputContent<TMeta>(
   message: Message<TMeta>,
   options: ProviderMappingOptions<TMeta>,
@@ -169,12 +180,21 @@ function openAIResponsesInputContent<TMeta>(
 
   if (message.role === 'user') {
     for (const attachment of message.attachments ?? []) {
-      const imageUrl = attachment.type.startsWith('image/') ? openAIImageUrlFromAttachment(attachment) : null;
-      if (imageUrl) {
-        parts.push({ type: 'input_image', image_url: imageUrl });
+      if (attachment.type.startsWith('image/')) {
+        const imageUrl = openAIImageUrlFromAttachment(attachment);
+        if (imageUrl) {
+          parts.push({ type: 'input_image', image_url: imageUrl });
+          continue;
+        }
       } else {
-        parts.push({ type: 'input_text', text: unsupportedAttachmentText(attachment, message, options) });
+        const filePart = openAIResponsesFilePart(attachment);
+        if (filePart) {
+          parts.push(filePart);
+          continue;
+        }
       }
+
+      parts.push({ type: 'input_text', text: unsupportedAttachmentText(attachment, message, options) });
     }
   }
 

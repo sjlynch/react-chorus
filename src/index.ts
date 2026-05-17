@@ -9,7 +9,19 @@ export type { ConfirmDeleteConversation, ConfirmDeleteConversationContext, Conve
 export { Chorus } from './Chorus';
 export { ChorusTheme } from './components/ChorusTheme';
 export type { Palette } from './components/ChorusTheme';
-export type { ChorusAbortContext, ChorusAbortReason, ChorusAbortSource, ChorusConfirmDeleteMessage, ChorusDeleteMessageContext, ChorusFinishContext, ChorusMessagesChangeContext, ChorusOnAbort, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusProps, ChorusRef, ChorusSendHelpers, ChorusSendPath, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolLoopContext, ChorusToolRegistry } from './Chorus';
+export { DEFAULT_CHORUS_LABELS, resolveChorusLabels } from './labels';
+export type {
+  ChorusCodeCopyLabels,
+  ChorusComposerLabels,
+  ChorusConversationListLabels,
+  ChorusLabels,
+  ChorusMessageActionLabels,
+  ChorusSpeakerLabels,
+  ChorusToolCallLabels,
+  ChorusTranscriptLabels,
+  ResolvedChorusLabels,
+} from './labels';
+export type { ChorusAbortContext, ChorusAbortReason, ChorusAbortSource, ChorusClearConversationContext, ChorusConfirmClearConversation, ChorusConfirmDeleteMessage, ChorusDeleteMessageContext, ChorusFinishContext, ChorusMessagesChangeContext, ChorusOnAbort, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusProps, ChorusRef, ChorusSendHelpers, ChorusSendPath, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusStreamDoneReason, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolLoopContext, ChorusToolRegistry, FetchTransportInit } from './Chorus';
 
 export type { Message } from './types';
 export type {
@@ -47,31 +59,39 @@ export {
   formatOpenAIResponsesBody,
   toAnthropicMessages,
   toAnthropicMessagesBody,
+  toAnthropicTools,
   toGeminiContents,
   toGeminiGenerateContentBody,
+  toGeminiTools,
   toOpenAIChatCompletionsBody,
   toOpenAIChatCompletionsMessages,
+  toOpenAIChatCompletionsTools,
   toOpenAIResponsesBody,
   toOpenAIResponsesInput,
+  toOpenAIResponsesTools,
 } from './providerRequests';
 export type {
   AnthropicContentBlock,
+  AnthropicDocumentBlock,
   AnthropicImageBlock,
   AnthropicMessage,
   AnthropicMessagesBody,
   AnthropicMessagesBodyOptions,
   AnthropicTextBlock,
+  AnthropicTool,
   AnthropicToolResultBlock,
   AnthropicToolUseBlock,
   GeminiContent,
   GeminiFileDataPart,
   GeminiFunctionCallPart,
+  GeminiFunctionDeclaration,
   GeminiFunctionResponsePart,
   GeminiGenerateContentBody,
   GeminiGenerateContentBodyOptions,
   GeminiInlineDataPart,
   GeminiPart,
   GeminiTextPart,
+  GeminiToolGroup,
   OpenAIChatCompletionsAssistantMessage,
   OpenAIChatCompletionsBody,
   OpenAIChatCompletionsBodyOptions,
@@ -79,6 +99,7 @@ export type {
   OpenAIChatCompletionsMessage,
   OpenAIChatCompletionsSystemMessage,
   OpenAIChatCompletionsTextPart,
+  OpenAIChatCompletionsTool,
   OpenAIChatCompletionsToolCall,
   OpenAIChatCompletionsToolMessage,
   OpenAIChatCompletionsUserContentPart,
@@ -89,20 +110,27 @@ export type {
   OpenAIResponsesFunctionCallInputItem,
   OpenAIResponsesFunctionCallOutputInputItem,
   OpenAIResponsesInputContentPart,
+  OpenAIResponsesInputFilePart,
   OpenAIResponsesInputImagePart,
   OpenAIResponsesInputItem,
   OpenAIResponsesInputTextPart,
   OpenAIResponsesOutputTextPart,
   OpenAIResponsesSystemInputItem,
+  OpenAIResponsesTool,
   OpenAIResponsesUserInputItem,
   ProviderMappingOptions,
+  ProviderToolsOption,
+  ProviderToolsSource,
   UnsupportedAttachmentText,
 } from './providerRequests';
+export { defineTool } from './tools';
+export type { ChorusToolDefinition } from './tools';
 export { Markdown } from './components/Markdown';
 export type { MarkdownProps, MarkdownSanitizer } from './components/Markdown';
 
 export type { Connector, ConnectorResult, ConnectorToolDelta } from './connectors/connectors';
 export { getConnector, autoConnector } from './connectors/connectors';
-export { openaiConnector } from './connectors/openai';
+export { openaiConnector, createOpenAIConnector } from './connectors/openai';
+export type { OpenAIConnectorOptions, ThinkTagSplitterOptions } from './connectors/openai';
 export { anthropicConnector } from './connectors/anthropic';
 export { geminiConnector } from './connectors/gemini';

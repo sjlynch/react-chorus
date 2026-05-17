@@ -1,9 +1,24 @@
+import { ChorusStreamError } from './errors';
+
 // Local duplicate keeps streaming-only imports from pulling UI-owned utility chunks.
 function createAbortError(message = 'Aborted'): Error {
   if (typeof DOMException === 'function') return new DOMException(message, 'AbortError') as Error;
   const error = new Error(message);
   error.name = 'AbortError';
   return error;
+}
+
+const MALFORMED_SSE_PREVIEW_CHARS = 256;
+
+function createMalformedSseError(res: Response, bodyPreview: string, truncated: boolean): ChorusStreamError {
+  const contentType = res.headers.get('content-type');
+  const ctPart = contentType ? ` Received Content-Type "${contentType}".` : '';
+  const preview = bodyPreview.trim();
+  const previewPart = preview ? ` Body started with: ${preview}${truncated ? '…' : ''}` : '';
+  return new ChorusStreamError(
+    `HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''} response contained no Server-Sent Events. ` +
+    `Expected Content-Type "text/event-stream" with \`data:\` lines.${ctPart}${previewPart}`,
+  );
 }
 
 /**
@@ -24,6 +39,9 @@ export function readSSEStream(res: Response, onEvent: (payload: string) => unkno
   let dataLines: string[] = [];
   let stopped = false;
   let sawStreamStart = false;
+  let sawDataField = false;
+  let bodyTotalLength = 0;
+  let bodyPreview = '';
 
   const flushEvent = () => {
     if (!dataLines.length || stopped) return;
@@ -41,10 +59,19 @@ export function readSSEStream(res: Response, onEvent: (payload: string) => unkno
     let value = colon === -1 ? '' : line.slice(colon + 1);
     if (value.startsWith(' ')) value = value.slice(1);
 
-    if (field === 'data') dataLines.push(value);
+    if (field === 'data') {
+      sawDataField = true;
+      dataLines.push(value);
+    }
   };
 
   const processText = (text: string) => {
+    if (text.length > 0) {
+      bodyTotalLength += text.length;
+      if (bodyPreview.length < MALFORMED_SSE_PREVIEW_CHARS) {
+        bodyPreview = (bodyPreview + text).slice(0, MALFORMED_SSE_PREVIEW_CHARS);
+      }
+    }
     for (let i = 0; !stopped && i < text.length; i += 1) {
       const ch = text[i];
       if (!sawStreamStart) {
@@ -119,6 +146,14 @@ export function readSSEStream(res: Response, onEvent: (payload: string) => unkno
             currentLine = '';
           }
           flushEvent();
+
+          // A successful HTTP response that never delivered a single SSE `data:` field is
+          // almost certainly a backend mistake (200 JSON `{ "error": ... }` or plain text
+          // instead of `text/event-stream`). Without this guard the stream closes silently
+          // and the UI looks broken — no chunks, no error banner, no onError callback.
+          if (!sawDataField && bodyTotalLength > 0 && bodyPreview.trim().length > 0) {
+            throw createMalformedSseError(res, bodyPreview, bodyTotalLength > bodyPreview.length);
+          }
         }
         if (stopped) await cancelReader();
         settleResolve();
