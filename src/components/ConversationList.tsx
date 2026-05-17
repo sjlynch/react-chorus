@@ -1,5 +1,7 @@
 import React from 'react';
 import type { ConversationSummary } from '../hooks/useConversations';
+import { DEFAULT_CONVERSATION_LIST_LABELS } from '../labels/conversationList';
+import type { ChorusConversationListLabels } from '../labels/types';
 import { styleVarsFromPalette, type Palette } from './ChorusTheme';
 
 export interface ConfirmDeleteConversationContext {
@@ -29,6 +31,11 @@ export interface ConversationListProps {
   style?: React.CSSProperties;
   newConversationLabel?: string;
   emptyLabel?: string;
+  /**
+   * Localized labels for the conversation sidebar. Existing `newConversationLabel`
+   * and `emptyLabel` props take precedence so adding `labels` is non-breaking.
+   */
+  labels?: ChorusConversationListLabels;
 }
 
 function conversationClasses(active: boolean, pinned: boolean) {
@@ -99,9 +106,12 @@ export function ConversationList({
   headless = false,
   className,
   style,
-  newConversationLabel = 'New conversation',
-  emptyLabel = 'No conversations yet',
+  newConversationLabel,
+  emptyLabel,
+  labels = DEFAULT_CONVERSATION_LIST_LABELS,
 }: ConversationListProps) {
+  const resolvedNewConversation = newConversationLabel ?? labels.newConversation;
+  const resolvedEmpty = emptyLabel ?? labels.empty;
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [draftTitle, setDraftTitle] = React.useState('');
   const [pendingDeleteIds, setPendingDeleteIds] = React.useState<ReadonlySet<string>>(() => new Set());
@@ -178,15 +188,15 @@ export function ConversationList({
   }, [activeId, confirmDeleteConversation, conversations, deleteConversation, interactionsDisabled, pendingDeleteIds, setDeletePending]);
 
   return (
-    <nav className={rootClassName} style={{ ...paletteVars, ...style }} aria-label="Conversations">
+    <nav className={rootClassName} style={{ ...paletteVars, ...style }} aria-label={labels.navAriaLabel}>
       {createConversation && (
         <button type="button" className="chorus-conversation-new" onClick={() => createConversation()} disabled={interactionsDisabled} aria-disabled={interactionsDisabled || undefined}>
-          {newConversationLabel}
+          {resolvedNewConversation}
         </button>
       )}
 
       <div className="chorus-conversation-items" role="list">
-        {conversations.length === 0 && <div className="chorus-conversation-empty">{emptyLabel}</div>}
+        {conversations.length === 0 && <div className="chorus-conversation-empty">{resolvedEmpty}</div>}
         {orderedConversations.map(conversation => {
           const active = conversation.id === activeId;
           const editing = conversation.id === editingId;
@@ -205,15 +215,15 @@ export function ConversationList({
                 >
                   <input
                     className="chorus-conversation-rename-input"
-                    aria-label={`Rename ${conversation.title}`}
+                    aria-label={labels.renameAriaLabel(conversation.title)}
                     value={draftTitle}
                     onChange={event => setDraftTitle(event.target.value)}
                     onKeyDown={event => {
                       if (event.key === 'Escape') cancelRename();
                     }}
                   />
-                  <button type="submit" className="chorus-conversation-action">Save</button>
-                  <button type="button" className="chorus-conversation-action" onClick={cancelRename}>Cancel</button>
+                  <button type="submit" className="chorus-conversation-action">{labels.save}</button>
+                  <button type="button" className="chorus-conversation-action" onClick={cancelRename}>{labels.cancel}</button>
                 </form>
               ) : (
                 <>
@@ -237,22 +247,22 @@ export function ConversationList({
                         type="button"
                         className="chorus-conversation-action chorus-conversation-pin"
                         onClick={() => pinConversation(conversation.id, !pinned)}
-                        aria-label={`${pinned ? 'Unpin' : 'Pin'} ${conversation.title}`}
+                        aria-label={labels.pinAriaLabel(conversation.title, pinned)}
                         aria-pressed={pinned}
                         disabled={interactionsDisabled}
                         aria-disabled={interactionsDisabled || undefined}
                       >
-                        {pinned ? 'Unpin' : 'Pin'}
+                        {pinned ? labels.unpin : labels.pin}
                       </button>
                     )}
                     {renameConversation && (
-                      <button type="button" className="chorus-conversation-action" onClick={() => startRename(conversation)} aria-label={`Rename ${conversation.title}`} disabled={interactionsDisabled} aria-disabled={interactionsDisabled || undefined}>
-                        Rename
+                      <button type="button" className="chorus-conversation-action" onClick={() => startRename(conversation)} aria-label={labels.renameAriaLabel(conversation.title)} disabled={interactionsDisabled} aria-disabled={interactionsDisabled || undefined}>
+                        {labels.rename}
                       </button>
                     )}
                     {deleteConversation && (
-                      <button type="button" className="chorus-conversation-action" onClick={() => handleDeleteConversation(conversation)} aria-label={`Delete ${conversation.title}`} disabled={interactionsDisabled || deletePending} aria-disabled={interactionsDisabled || deletePending || undefined}>
-                        Delete
+                      <button type="button" className="chorus-conversation-action" onClick={() => handleDeleteConversation(conversation)} aria-label={labels.deleteAriaLabel(conversation.title)} disabled={interactionsDisabled || deletePending} aria-disabled={interactionsDisabled || deletePending || undefined}>
+                        {labels.delete}
                       </button>
                     )}
                   </div>

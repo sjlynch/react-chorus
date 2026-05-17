@@ -113,8 +113,15 @@
 .chorus-actions { display: flex; gap: 2px; padding: 2px 2px 0; opacity: 0; pointer-events: none; transition: opacity 0.15s; }
 .chorus-msg:hover .chorus-actions, .chorus-msg:focus-within .chorus-actions { opacity: 1; pointer-events: auto; }
 .chorus-msg:hover + .chorus-render-actions .chorus-actions, .chorus-render-actions:hover .chorus-actions, .chorus-render-actions:focus-within .chorus-actions { opacity: 1; pointer-events: auto; }
+/* Touch/coarse-pointer devices have no reliable hover — keep actions visible so they remain discoverable and tappable. */
+@media (hover: none), (pointer: coarse) {
+  .chorus-actions { opacity: 1; pointer-events: auto; transition: none; }
+}
+/* Opt-in via the alwaysShowMessageActions prop (Chorus adds .chorus--always-show-actions on the root). */
+.chorus--always-show-actions .chorus-actions { opacity: 1; pointer-events: auto; transition: none; }
 .chorus-action-btn { display: inline-flex; align-items: center; justify-content: center; padding: 3px 5px; border: none; border-radius: 6px; background: transparent; color: var(--chorus-action-text, #888); cursor: pointer; transition: background 0.15s, color 0.15s; line-height: 0; }
 .chorus-action-btn:hover, .chorus-action-btn--active { background: var(--chorus-action-hover-bg, rgba(255,255,255,0.15)); color: var(--chorus-action-hover-text, #eee); }
+.chorus-action-btn:focus-visible { outline: 2px solid var(--chorus-send-bg, #ffffff); outline-offset: 1px; }
 .chorus-action-btn--copy-failed { background: var(--chorus-error-bg, rgba(220, 38, 38, 0.15)); color: var(--chorus-error-text, #fca5a5); line-height: 1; white-space: nowrap; }
 
 /* Inline message editing */

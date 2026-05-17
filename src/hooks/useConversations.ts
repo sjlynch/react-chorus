@@ -4,7 +4,7 @@ import { useLatestRef } from './useLatestRef';
 import { isChorusDevMode } from '../utils/devMode';
 import { isPromiseLike } from '../utils/async';
 import { createRandomId } from '../utils/ids';
-import { chooseActiveId, emptyState, getTimestamp, mergePendingCreates, normalizeTitle, stateFromRaw, titleFromFirstMessage, type ConversationsState, type PendingConversationCreate } from './conversations/indexCodec';
+import { chooseActiveId, emptyState, getTimestamp, mergePendingCreates, normalizeTitle, serializeConversationIndex, stateFromRaw, titleFromFirstMessage, type ConversationsState, type PendingConversationCreate } from './conversations/indexCodec';
 import { createConversationStorageError, isConversationStorageError } from './conversations/storageErrors';
 import { useConversationIndexWriteQueue, type IndexPersistMode } from './conversations/indexWriteQueue';
 import { createConversationStorageAdapter } from './conversations/storageAdapter';
@@ -256,6 +256,47 @@ export function useConversations(options: UseConversationsOptions = {}): UseConv
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [flushPendingIndexWrite]);
+
+  // Cross-tab sync: pick up index writes from other tabs sharing the same
+  // localStorage. Skipped for custom StorageAdapter values — async/remote
+  // adapters are responsible for their own change notification.
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    let localStorageRef: Storage | null;
+    try {
+      localStorageRef = window.localStorage;
+    } catch {
+      return undefined;
+    }
+    if (storage !== localStorageRef) return undefined;
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.storageArea && event.storageArea !== localStorageRef) return;
+      if (event.key !== indexKey) return;
+
+      // Defensive against same-tab polyfills: skip if the event mirrors what
+      // we already have in memory.
+      try {
+        const currentSerialized = serializeConversationIndex(stateRef.current.conversations, stateRef.current.activeId);
+        if (event.newValue === currentSerialized) return;
+      } catch {
+        // fall through and apply the event
+      }
+
+      const parsed = stateFromRaw(event.newValue, stateRef.current.activeId, indexKey, defaultTitleRef.current, nowRef.current);
+      if (parsed.error) {
+        reportError(parsed.error, 'read', indexKey);
+        return;
+      }
+      versionRef.current += 1;
+      stateRef.current = parsed.state;
+      setState(parsed.state);
+      setError(null);
+    };
+
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, [defaultTitleRef, indexKey, nowRef, reportError, storage]);
 
   React.useEffect(() => {
     let cancelled = false;

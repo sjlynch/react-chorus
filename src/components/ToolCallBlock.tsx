@@ -1,5 +1,7 @@
 import React from 'react';
 import type { ToolCall } from '../types';
+import { DEFAULT_TOOL_CALL_LABELS } from '../labels/toolCall';
+import type { ChorusToolCallLabels } from '../labels/types';
 
 function fallbackString(value: unknown): string {
   try {
@@ -45,7 +47,12 @@ function hasOwn(value: object, key: PropertyKey) {
   return Object.prototype.hasOwnProperty.call(value, key);
 }
 
-export function ToolCallBlock({ toolCall }: { toolCall: ToolCall }) {
+export interface ToolCallBlockProps {
+  toolCall: ToolCall;
+  labels?: ChorusToolCallLabels;
+}
+
+export function ToolCallBlock({ toolCall, labels = DEFAULT_TOOL_CALL_LABELS }: ToolCallBlockProps) {
   const [open, setOpen] = React.useState(false);
   const bodyId = React.useId();
   const hasInput = hasOwn(toolCall, 'input');
@@ -71,13 +78,13 @@ export function ToolCallBlock({ toolCall }: { toolCall: ToolCall }) {
             <>
               {hasInput && (
                 <div className="chorus-tool-call-section">
-                  <div className="chorus-tool-call-label">Input</div>
+                  <div className="chorus-tool-call-label">{labels.input}</div>
                   <pre className="chorus-tool-call-pre">{fmt(toolCall.input)}</pre>
                 </div>
               )}
               {hasOutput && (
                 <div className="chorus-tool-call-section">
-                  <div className="chorus-tool-call-label">Output</div>
+                  <div className="chorus-tool-call-label">{labels.output}</div>
                   <pre className="chorus-tool-call-pre">{fmt(toolCall.output)}</pre>
                 </div>
               )}

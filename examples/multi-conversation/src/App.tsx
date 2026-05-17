@@ -31,7 +31,6 @@ export default function App() {
       <ConversationList {...conversations} newConversationLabel="+ New chat" style={{ width: 280, flex: '0 0 280px' }} />
       <main style={{ minWidth: 0, flex: 1 }}>
         <Chorus
-          key={conversations.activeId ?? 'no-conversation'}
           persistenceKey={conversations.activePersistenceKey}
           persistenceStorage={conversations.storage ?? undefined}
           onSend={handleSend}

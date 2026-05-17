@@ -5,17 +5,21 @@ import { ChatInput } from './components/ChatInput';
 import { styleVarsFromPalette, type Palette } from './components/ChorusTheme';
 import type { Attachment, AttachmentError, ConnectorName, Message, Role, StorageAdapter, UploadAttachment } from './types';
 import type { Transport } from './hooks/useChorusStream';
+import { resolveChorusLabels } from './labels/resolve';
+import type { ChorusLabels } from './labels/types';
+import type { FetchTransportInit } from './hooks/assistant-session/transport';
 import { useChorusPersistence, type DeserializeMessages, type SerializeMessages } from './hooks/useChorusPersistence';
 import { useChorusMessages, type ChorusMessagesChangeContext } from './hooks/useChorusMessages';
 import { useAssistantSession } from './hooks/useAssistantSession';
-import type { ChorusAbortContext, ChorusAbortReason, ChorusAbortSource, ChorusConfirmDeleteMessage, ChorusDeleteMessageContext, ChorusFinishContext, ChorusOnAbort, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusSendHelpers, ChorusSendPath, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusStreamDoneReason, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolLoopContext, ChorusToolRegistry } from './hooks/useAssistantSession';
+import type { ChorusAbortContext, ChorusAbortReason, ChorusAbortSource, ChorusClearConversationContext, ChorusConfirmClearConversation, ChorusConfirmDeleteMessage, ChorusDeleteMessageContext, ChorusFinishContext, ChorusOnAbort, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusSendHelpers, ChorusSendPath, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusStreamDoneReason, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolLoopContext, ChorusToolRegistry } from './hooks/useAssistantSession';
 import type { Connector } from './connectors/connectors';
 import type { MarkdownSanitizer } from './components/Markdown';
 import { isChorusDevMode } from './utils/devMode';
 
 export type { Transport };
+export type { FetchTransportInit };
 export type { Connector };
-export type { ChorusAbortContext, ChorusAbortReason, ChorusAbortSource, ChorusConfirmDeleteMessage, ChorusDeleteMessageContext, ChorusFinishContext, ChorusMessagesChangeContext, ChorusOnAbort, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusSendHelpers, ChorusSendPath, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusStreamDoneReason, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolLoopContext, ChorusToolRegistry };
+export type { ChorusAbortContext, ChorusAbortReason, ChorusAbortSource, ChorusClearConversationContext, ChorusConfirmClearConversation, ChorusConfirmDeleteMessage, ChorusDeleteMessageContext, ChorusFinishContext, ChorusMessagesChangeContext, ChorusOnAbort, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusSendHelpers, ChorusSendPath, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusStreamDoneReason, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolLoopContext, ChorusToolRegistry };
 
 const DEFAULT_MIN_ASSISTANT_DELAY_MS = 300;
 const DEFAULT_PERSISTENCE_WRITE_DEBOUNCE_MS = 80;
@@ -32,12 +36,20 @@ export interface ChorusRef<TMeta = Record<string, unknown>> {
 
 export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React.HTMLAttributes<HTMLDivElement>, 'onChange' | 'onError' | 'onCopy' | 'onAbort'> {
   accept?: string;
+  /**
+   * Always render the per-message action buttons (edit/regenerate/copy/feedback/delete)
+   * instead of revealing them on hover. Coarse pointers and `(hover: none)` media
+   * already get this behavior automatically; set this to opt in on pointer devices too.
+   */
+  alwaysShowMessageActions?: boolean;
   /** Accessible/button label for the built-in clear action. */
   clearLabel?: string;
   codeBlockTheme?: 'dark' | 'light';
   connector?: Connector | ConnectorName;
   /** Optional gate for built-in message deletes. Return or resolve false to cancel. */
   confirmDeleteMessage?: ChorusConfirmDeleteMessage<TMeta>;
+  /** Optional gate for the built-in clear/reset action. Return or resolve false to cancel before persistence is touched. While an async confirmation is pending, the clear button is disabled and duplicate clears are ignored. */
+  confirmClearConversation?: ChorusConfirmClearConversation<TMeta>;
   /** Opt in to an automatic tool-execution → model-continuation loop on the transport path. */
   autoContinueTools?: boolean;
   /** Maximum automatic tool iterations when autoContinueTools is enabled. Defaults to 4; pass Infinity to explicitly disable the safety cap. */
@@ -117,19 +129,29 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
   suggestedPrompts?: string[];
   /** Hidden system prompt. Prepended to transport history; exposed as helpers.systemPrompt on the onSend path. */
   systemPrompt?: string;
-  /** Simple path: URL or Transport function. */
-  transport?: string | Transport<TMeta>;
+  /** Simple path: URL string, `{ url, headers, credentials, ... }` config object, or a custom `Transport` function. */
+  transport?: string | FetchTransportInit<TMeta> | Transport<TMeta>;
   uploadAttachment?: UploadAttachment;
   value?: Message<TMeta>[];
+  /**
+   * Localized labels for every built-in UI string (composer placeholder/aria-labels,
+   * transcript aria-label/typing/retry/jump/empty title, message actions, speakers,
+   * tool call sections, reasoning summary, code-copy button, and the clear button).
+   * Defaults preserve the current English strings; the existing `placeholder`,
+   * `disabledReason`, and `clearLabel` props take precedence when provided.
+   */
+  labels?: ChorusLabels;
 }
 
 function ChorusInner<TMeta = Record<string, unknown>>({
   accept,
+  alwaysShowMessageActions = false,
   className,
-  clearLabel = 'Clear conversation',
+  clearLabel,
   codeBlockTheme = 'dark',
   connector,
   confirmDeleteMessage,
+  confirmClearConversation,
   autoContinueTools,
   maxToolIterations,
   shouldContinueToolLoop,
@@ -183,8 +205,11 @@ function ChorusInner<TMeta = Record<string, unknown>>({
   transport,
   uploadAttachment,
   value,
+  labels,
   ...rest
 }: ChorusProps<TMeta>, ref: React.ForwardedRef<ChorusRef<TMeta>>) {
+  const resolvedLabels = React.useMemo(() => resolveChorusLabels(labels), [labels]);
+  const resolvedClearLabel = clearLabel ?? resolvedLabels.clearConversation;
   const rootRef = React.useRef<HTMLDivElement>(null);
   const inputRef = React.useRef<HTMLDivElement>(null);
   const [draft, setDraft] = React.useState('');
@@ -242,6 +267,21 @@ function ChorusInner<TMeta = Record<string, unknown>>({
     }
   }, [messages, initialMessages, onChange, value, persistenceKey, connector, transport, onSend, sendingProp]);
 
+  const resetComposer = React.useCallback(() => {
+    setDraft('');
+    setComposerResetKey(key => key + 1);
+  }, []);
+
+  const onClearRef = React.useRef(onClear);
+  React.useEffect(() => {
+    onClearRef.current = onClear;
+  }, [onClear]);
+
+  const handleClearCommit = React.useCallback((next: Message<TMeta>[]) => {
+    resetComposer();
+    onClearRef.current?.(next);
+  }, [resetComposer]);
+
   const session = useAssistantSession<TMeta>({
     messages: msgs,
     updateMessages: updateMsgs,
@@ -264,9 +304,11 @@ function ChorusInner<TMeta = Record<string, unknown>>({
     maxToolIterations,
     shouldContinueToolLoop,
     confirmDeleteMessage,
+    confirmClearConversation,
+    persistenceKey: builtInPersistenceKey || undefined,
     flushPersistence: persisted.flush,
     resetToInitialMessages,
-    onClear,
+    onClear: handleClearCommit,
   });
 
   const visualSending = sendingProp ?? session.sending;
@@ -278,10 +320,13 @@ function ChorusInner<TMeta = Record<string, unknown>>({
   const writesDisabled = disabled || readOnly || persistenceLoading;
   const composerDisabled = disabled || persistenceLoading;
   const resolvedDisabledReason = persistenceLoading ? disabledReason ?? 'Loading saved conversation…' : disabledReason;
-  const resetComposer = React.useCallback(() => {
-    setDraft('');
-    setComposerResetKey(key => key + 1);
-  }, []);
+
+  const previousPersistenceKeyRef = React.useRef(builtInPersistenceKey);
+  React.useEffect(() => {
+    if (previousPersistenceKeyRef.current === builtInPersistenceKey) return;
+    previousPersistenceKeyRef.current = builtInPersistenceKey;
+    resetComposer();
+  }, [builtInPersistenceKey, resetComposer]);
 
   const handleInputSend = React.useCallback((attachments: Attachment[] = []) => {
     if (writesDisabled) return false;
@@ -295,10 +340,9 @@ function ChorusInner<TMeta = Record<string, unknown>>({
   }, [session]);
 
   const handleClear = React.useCallback(() => {
-    if (writesDisabled) return;
-    resetComposer();
+    if (writesDisabled || session.clearConfirmationPending) return;
     session.clear('user');
-  }, [resetComposer, session, writesDisabled]);
+  }, [session, writesDisabled]);
 
   const handleSuggestedPrompt = React.useCallback((prompt: string) => {
     if (writesDisabled) return;
@@ -328,8 +372,7 @@ function ChorusInner<TMeta = Record<string, unknown>>({
       session.stop('programmatic');
     },
     clear() {
-      if (writesDisabled) return;
-      resetComposer();
+      if (writesDisabled || session.clearConfirmationPending) return;
       session.clear('programmatic');
     },
     focus() {
@@ -347,13 +390,13 @@ function ChorusInner<TMeta = Record<string, unknown>>({
       target.scrollIntoView({ block: 'nearest' });
       return true;
     },
-  }), [messagesRef, resetComposer, session, writesDisabled]);
+  }), [messagesRef, session, writesDisabled]);
 
   return (
     <div
       {...rest}
       ref={rootRef}
-      className={["chorus", disabled && "chorus--disabled", readOnly && "chorus--readonly", className].filter(Boolean).join(" ")}
+      className={["chorus", disabled && "chorus--disabled", readOnly && "chorus--readonly", alwaysShowMessageActions && "chorus--always-show-actions", className].filter(Boolean).join(" ")}
       style={{ ...paletteVars, ...style }}
       aria-disabled={writesDisabled ? true : rest['aria-disabled']}
     >
@@ -385,11 +428,12 @@ function ChorusInner<TMeta = Record<string, unknown>>({
         suggestedPrompts={canRenderEmptyAffordance ? suggestedPrompts : undefined}
         suggestedPromptsDisabled={writesDisabled}
         suggestedPromptsDisabledReason={resolvedDisabledReason}
+        labels={labels}
       />
       {showClearButton && (
         <div className="chorus-clear-row">
-          <button type="button" className="chorus-clear-btn" onClick={handleClear} disabled={writesDisabled || (!session.sending && msgs.length === 0)}>
-            {clearLabel}
+          <button type="button" className="chorus-clear-btn" onClick={handleClear} disabled={writesDisabled || session.clearConfirmationPending || (!session.sending && msgs.length === 0)}>
+            {resolvedClearLabel}
           </button>
         </div>
       )}
@@ -405,6 +449,7 @@ function ChorusInner<TMeta = Record<string, unknown>>({
         disabledReason={resolvedDisabledReason}
         resetKey={composerResetKey}
         placeholder={placeholder}
+        labels={resolvedLabels.composer}
         accept={accept}
         maxAttachmentBytes={maxAttachmentBytes}
         maxAttachments={maxAttachments}
