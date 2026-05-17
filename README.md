@@ -84,13 +84,22 @@ export default function App() {
 
 ### Simple path — `transport` prop
 
-Pass a URL string or `Transport` function. Chorus handles everything:
+Pass a URL string, a `{ url, headers, credentials, ... }` config object, or a `Transport` function. Chorus handles everything:
 
 ```tsx
 // String: Chorus POSTs { prompt, history } and reads the SSE stream
 <Chorus transport="/api/chat" />
 
-// Custom Transport function
+// Object form: same defaults, plus auth headers / cookies / any RequestInit field
+<Chorus
+  transport={{
+    url: '/api/chat',
+    headers: { Authorization: `Bearer ${token}` },
+    credentials: 'include',
+  }}
+/>
+
+// Custom Transport function (for non-default request shapes)
 import { createFetchSSETransport } from 'react-chorus';
 
 const transport = createFetchSSETransport('/api/chat', {
@@ -99,6 +108,29 @@ const transport = createFetchSSETransport('/api/chat', {
 
 <Chorus transport={transport} />
 ```
+
+#### Adding auth headers / cookies
+
+The string shorthand has no place to hang an `Authorization` header or `credentials: 'include'`. Pass the object form (or a `createFetchSSETransport` instance) the moment you need either:
+
+```tsx
+// Session cookies on a same-origin endpoint
+<Chorus transport={{ url: '/api/chat', credentials: 'same-origin' }} />
+
+// Bearer token + CSRF + cross-origin cookies
+<Chorus
+  transport={{
+    url: 'https://api.example.com/chat',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'X-CSRF-Token': csrfToken,
+    },
+    credentials: 'include',
+  }}
+/>
+```
+
+`headers`, `credentials`, `cache`, `mode`, `referrer`, and the other [`RequestInit`](https://developer.mozilla.org/docs/Web/API/RequestInit) fields are forwarded straight to `fetch`. Chorus reserves `body`, `method`, and `signal` (the body is `JSON.stringify({ prompt, history })` by default — pass a `formatBody` to override). Annotate the config with `FetchTransportInit` if you want to extract it into a reusable constant.
 
 Seed an uncontrolled chat with a welcome message and include a hidden system prompt in every transport request:
 
@@ -421,10 +453,10 @@ These helpers are also re-exported from `react-chorus` for browser apps; the `re
 
 | Helper | Provider request shape | Notes |
 |--------|------------------------|-------|
-| `toOpenAIChatCompletionsBody(history, opts)` / `formatOpenAIChatCompletionsBody(opts)` | `{ model, messages, stream }` | Maps `system`/`user`/`assistant`, user image attachments to `image_url`, unsupported attachments to text notes, and `tool` messages with `metadata.openai.toolCallId` (or `metadata.tool_call_id`) to OpenAI `role: 'tool'`. Without a provider tool id, tool results become safe system context instead of invalid OpenAI messages. |
-| `toOpenAIResponsesBody(history, opts)` / `formatOpenAIResponsesBody(opts)` | `{ model, input, stream }` | Uses Responses `input_text` / `input_image` / `output_text` items and `function_call_output` when an OpenAI call id is present in metadata. |
-| `toAnthropicMessagesBody(history, opts)` / `formatAnthropicMessagesBody(opts)` | `{ model, max_tokens, system, messages, stream }` | Joins Chorus `system` messages into Anthropic's top-level `system`, maps data-URL images to base64 image blocks, and maps `metadata.anthropic.toolUseId` (or `metadata.tool_use_id`) to `tool_result`. |
-| `toGeminiGenerateContentBody(history, opts)` / `formatGeminiGenerateContentBody(opts)` | `{ systemInstruction, contents, ...opts }` | Maps `system` to `systemInstruction`, `assistant` to Gemini `model`, data-URL images to `inlineData`, uploaded file URLs/ids to `fileData`, and Chorus tool outputs to `functionResponse` parts when `toolCall.name` is available. |
+| `toOpenAIChatCompletionsBody(history, opts)` / `formatOpenAIChatCompletionsBody(opts)` | `{ model, messages, stream }` | Maps `system`/`user`/`assistant`, user image attachments to `image_url`, and `tool` messages with `metadata.openai.toolCallId` (or `metadata.tool_call_id`) to OpenAI `role: 'tool'`. Attachments other than images are not supported by the Chat Completions content spec and fall back to text notes. Without a provider tool id, tool results become safe system context instead of invalid OpenAI messages. |
+| `toOpenAIResponsesBody(history, opts)` / `formatOpenAIResponsesBody(opts)` | `{ model, input, stream }` | Uses Responses `input_text` / `input_image` / `output_text` items and `function_call_output` when an OpenAI call id is present in metadata. Non-image attachments with an uploaded `id` map to `{ type: 'input_file', file_id }` and ones with an uploaded `url` map to `{ type: 'input_file', file_url }`; otherwise they fall back to text notes (base64 file data is not inlined). |
+| `toAnthropicMessagesBody(history, opts)` / `formatAnthropicMessagesBody(opts)` | `{ model, max_tokens, system, messages, stream }` | Joins Chorus `system` messages into Anthropic's top-level `system`, maps data-URL images to base64 `image` blocks, maps `application/pdf` data URLs to base64 `document` blocks, and maps `metadata.anthropic.toolUseId` (or `metadata.tool_use_id`) to `tool_result`. Other non-image MIME types still fall back to text notes. When `metadata.anthropic.isError === true` (or top-level `metadata.isError === true`), the emitted `tool_result` block includes `is_error: true` so Claude knows the tool execution failed. The OpenAI and Gemini helpers accept the same `isError` metadata, but their request shapes have no equivalent slot, so the flag is currently Anthropic-only. Built-in tool execution via `autoContinueTools` + a `tools` handler sets this flag automatically when a handler throws. |
+| `toGeminiGenerateContentBody(history, opts)` / `formatGeminiGenerateContentBody(opts)` | `{ systemInstruction, contents, ...opts }` | Maps `system` to `systemInstruction`, `assistant` to Gemini `model`, and Chorus tool outputs to `functionResponse` parts when `toolCall.name` is available. Any user attachment with a data URL maps to `inlineData` and any with an uploaded URL/file id maps to `fileData` — both honour the attachment's actual MIME type, so PDFs, audio, and video all pass through. Only attachments lacking both data URL and uploaded URI fall back to text notes. |
 
 All helpers preserve extra provider options you pass (for example `model`, `max_tokens`, `generationConfig`, `tools`) and default OpenAI/Anthropic `stream` to `true`. They insert explicit text fallbacks for unsupported attachments so request mapping failures are visible to the model instead of silently dropping context. Override that text with `unsupportedAttachmentText` when needed.
 
@@ -512,6 +544,25 @@ That tool stream becomes a Chorus message similar to:
 
 For OpenAI Responses API-style streams, common `response.output_text.delta`, `response.reasoning_summary_text.delta`, `response.output_item.added`, and `response.function_call_arguments.delta` events are also recognised.
 
+### Custom reasoning tag pair
+
+The `<think>...</think>` pair is matched case-insensitively by default and tolerates whitespace inside the angle brackets, so DeepSeek-style proxies that emit `<Think>`, `<THINK>`, or `< think >` are split into `reasoning` correctly. To use a different delimiter pair (for example, `<reasoning>...</reasoning>` or `<scratchpad>...</scratchpad>`), pass a `thinkTag` option to either `createOpenAIConnector` or `getConnector('openai', { ... })`:
+
+```ts
+import { createOpenAIConnector, getConnector } from 'react-chorus';
+
+const connector = createOpenAIConnector({
+  thinkTag: { start: '<reasoning>', end: '</reasoning>' },
+});
+
+// Same thing via the string registry:
+const sameConnector = getConnector('openai', {
+  thinkTag: { start: '<reasoning>', end: '</reasoning>' },
+});
+```
+
+Set `thinkTag.caseInsensitive: false` if you need to match the literal casing only. This option only affects the OpenAI connector; Anthropic and Gemini convey reasoning via structured fields, not embedded tags.
+
 ## Anthropic SSE format
 
 The Anthropic Messages API streams server-sent events. The `anthropicConnector` extracts text and thinking/tool-use deltas from content block events and signals completion on `message_stop`:
@@ -584,10 +635,10 @@ Runnable examples live in the [`/examples`](./examples) directory. They declare 
 
 | Example | Description |
 |---------|-------------|
-| [`examples/basic`](./examples/basic) | Zero-backend demo using a simulated streaming response, local persistence, clear/reset, and a custom error banner — great for local development |
-| [`examples/multi-conversation`](./examples/multi-conversation) | Sidebar-driven local conversations with pinned chats, per-chat persistence, and first-message auto-titles |
-| [`examples/with-next`](./examples/with-next) | Next.js App Router example with a serverless `/api/chat` SSE route handler proxying to OpenAI |
-| [`examples/with-openai`](./examples/with-openai) | Full-stack example: Vite frontend + Express backend proxying to OpenAI |
+| [`examples/basic`](./examples/basic/README.md) | Zero-backend demo using a simulated streaming response, local persistence, clear/reset, and a custom error banner — great for local development |
+| [`examples/multi-conversation`](./examples/multi-conversation/README.md) | Sidebar-driven local conversations with pinned chats, per-chat persistence, and first-message auto-titles |
+| [`examples/with-next`](./examples/with-next/README.md) | Next.js App Router example with a serverless `/api/chat` SSE route handler proxying to OpenAI |
+| [`examples/with-openai`](./examples/with-openai/README.md) | Full-stack example: Vite frontend + Express backend proxying to OpenAI |
 
 ### Running the basic example
 
@@ -691,19 +742,19 @@ react-chorus keeps React/ReactDOM as peer dependencies and externalizes runtime 
 
 | Entry | Initial JS | gzip | Notes |
 |-------|------------|------|-------|
-| `react-chorus` (`<Chorus>`) | 152.5 kB | 52.0 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
-| `react-chorus/headless` | 152.8 kB | 52.2 kB | Headless defaults, same behavior surface. |
+| `react-chorus` (`<Chorus>`) | 153.0 kB | 52.1 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
+| `react-chorus/headless` | 153.3 kB | 52.3 kB | Headless defaults, same behavior surface. |
 | `react-chorus` (`useChorusStream`) | 34.1 kB | 11.2 kB | Root hook import; CI fails if it pulls UI, Markdown, or icon dependencies. |
 | `react-chorus` (`Markdown`) | 74.7 kB | 25.3 kB | Standalone Markdown renderer; includes Markdown parsing/sanitization, not chat icons. |
 | `react-chorus` (`ChatWindow`) | 101.1 kB | 34.5 kB | Transcript renderer with Markdown and message action icons, without the composer/widget shell. |
 | `react-chorus` (`ConversationList`) | 5.4 kB | 1.9 kB | Conversation sidebar component only; no Markdown/icon graph. |
 | `react-chorus/transport` | 4.3 kB | 1.9 kB | Transport factories only; no React/UI/Markdown runtime. |
-| `react-chorus/provider-requests` | 8.2 kB | 2.4 kB | Provider request mappers only; no React/UI/Markdown runtime. |
+| `react-chorus/provider-requests` | 8.5 kB | 2.5 kB | Provider request mappers only; no React/UI/Markdown runtime. |
 | Lazy `highlight.js` runtime | 891.4 kB | 295.9 kB | Async code-fence chunk, never part of initial JS. |
 
 `highlight.js` is only fetched the first time a fenced code block (` ``` ` or `~~~`) appears in rendered text. The matching GitHub dark/light token-color stylesheet is also injected on demand based on `codeBlockTheme`; code renders immediately as plain text and is re-rendered with syntax highlighting once the chunk arrives. While an assistant message is actively streaming, Chorus renders that growing message as React-escaped plain text and switches to full Markdown parsing/sanitization when the stream finalizes.
 
-The playground has a separate budget because it intentionally bundles a complete demo app. `npm run build:playground` also runs `npm run verify:playground-size`, writes `.cache/react-chorus/playground-bundle-size-report.json`, and checks this paragraph. The current playground initial JS graph is 371.5 kB / 118.3 kB gzip and its largest lazy chunk (highlight.js) is 890.9 kB / 295.7 kB gzip. Vite's chunk warning limit is raised to that documented lazy budget so the playground build stays free of Vite chunk warnings while the budget script tracks regressions.
+The playground has a separate budget because it intentionally bundles a complete demo app. `npm run build:playground` also runs `npm run verify:playground-size`, writes `.cache/react-chorus/playground-bundle-size-report.json`, and checks this paragraph. The current playground initial JS graph is 372.5 kB / 118.6 kB gzip and its largest lazy chunk (highlight.js) is 890.9 kB / 295.7 kB gzip. Vite's chunk warning limit is raised to that documented lazy budget so the playground build stays free of Vite chunk warnings while the budget script tracks regressions.
 
 To refresh the published size claims after dependency or feature changes, run `npm run build`, `npm run verify:bundle-size`, and `npm run build:playground`, then copy the updated values from stdout or the `.cache/react-chorus/*-bundle-size-report.json` files into this section. The verification commands may fail until the README values are updated to match their reports.
 
@@ -786,7 +837,7 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `clearLabel` | `string` | `'Clear conversation'` | Label for the built-in clear/reset button. |
 | `onClear` | `(messages: Message<TMeta>[]) => void` | — | Called with the reset message list after the built-in clear action runs. |
 | `resetToInitialMessages` | `boolean` | `false` | When clearing, restore the initial `messages`/`initialMessages` seed instead of saving an empty transcript. |
-| `showJumpToBottomButton` | `boolean` | `true` (`false` in headless exports) | Shows a floating “Jump to latest” button when auto-scroll is paused and new activity arrives. |
+| `showJumpToBottomButton` | `boolean` | `!headless` | Shows the floating “Jump to latest” button when the user scrolls away from the bottom and new activity arrives. Pass `false` to disable it (for example when you own the scroll affordance); the headless exports default `headless={true}` so the button is off by default there. |
 | `headless` | `boolean` | `false` | Strip all default styles and inline style injection. |
 | `renderMessage` | `(message: Message<TMeta>, ctx: RenderMessageContext<TMeta>) => ReactNode` | — | Custom per-message renderer. Return `null` to fall back to default rendering. `ctx` includes `isStreaming`, `messageProps` for scroll targets, `defaultRender(slots?)`, and action callbacks/default action controls. Existing one-argument renderers continue to work. |
 | `markdownProps` | `Omit<MarkdownProps, 'text' \| 'codeTheme' \| 'headless' \| 'streaming'>` | — | Props forwarded to the built-in Markdown renderer for every message, including `sanitizer`, `markedOptions`, `markedExtensions`, and `onCopyError`. |
@@ -912,6 +963,8 @@ const conversations = useConversations({ defaultTitle: 'New chat' });
 ```
 
 `useConversations({ indexKey, messageKeyPrefix, storage, onError })` stores a JSON index of `{ id, title, createdAt, updatedAt, pinned, pristine }` records under `indexKey` (default `chorus-conversations-index`) and stores each transcript under `${messageKeyPrefix}${id}`. `pristine` tracks whether `renameFromFirstMessage()` may still auto-title the conversation; explicit renames and successful auto-renames clear it. Selecting a conversation bumps `updatedAt` so recency-sorted lists promote recently visited chats. `deleteConversation(id)` removes the transcript key via `removeItem` when available (or writes `[]` without it). To gate the built-in sidebar delete affordance, pass `confirmDeleteConversation={({ conversation }) => window.confirm('Delete ' + conversation.title + '?')}` to `ConversationList`; returning or resolving `false` cancels before `deleteConversation` updates storage. Index read/write and transcript delete failures surface through `result.error` and `onError(error)` with `error.key`, `error.operation` (`'read' | 'write' | 'delete'`), and `error.conversationId` for transcript deletes. With async storage, `createConversation()` calls made before `loaded` resolves are queued and merged into the loaded index; custom sidebars should still disable New/Rename/Delete controls while `loaded` is false to avoid surprising delayed mutations.
+
+When the default `localStorage` adapter is used, both `useConversations` and `useChorusPersistence` listen for the browser's `storage` event so writes from another tab (a new conversation, a streamed reply, a deletion) are picked up automatically. Cross-tab sync is intentionally limited to the default adapter — if you pass a custom `StorageAdapter` (sessionStorage, IndexedDB, a remote API, etc.), the hooks do not subscribe to `storage` events and that adapter is responsible for its own change notification.
 
 ### Persistence examples
 
@@ -1551,7 +1604,7 @@ You can compose the UI from smaller pieces:
 import { ChatWindow, ChatInput, ChorusTheme, Markdown } from 'react-chorus';
 ```
 
-- **`<ChatWindow messages={…} typing={…} />`** — renders the scrollable message list with empty-state prompts, a typing indicator, errors, optional jump-to-latest button, and optional `maxRenderedMessages` windowing. It accepts `hiddenRoles?: Role[]` (default `['system', 'tool']`); `showSystemMessages` is deprecated but remains supported as an alias for showing all roles. Pass `markdownSanitizer`, `markdownProps`, `renderError`, or `renderMessage` to customize built-in rendering.
+- **`<ChatWindow messages={…} typing={…} />`** — renders the scrollable message list with empty-state prompts, a typing indicator, errors, the optional floating jump-to-latest button, and optional `maxRenderedMessages` windowing. It accepts `hiddenRoles?: Role[]` (default `['system', 'tool']`); `showSystemMessages` is deprecated but remains supported as an alias for showing all roles. `showJumpToBottomButton?: boolean` defaults to `!headless` and toggles the floating “Jump to latest” button that surfaces when the user scrolls away from the bottom and new activity arrives — pass `false` to disable it and render your own affordance. Pass `markdownSanitizer`, `markdownProps`, `renderError`, or `renderMessage` to customize built-in rendering.
 - **`<ChatInput value onSend onStop placeholder sending />`** — the text input, send/stop button, disabled/read-only states, and optional attachment composer (`accept`, paste/drop, limits, cancellable `uploadAttachment`).
 - **`<ChorusTheme palette={…}>`** — applies theme CSS variables to any subtree.
 - **`<Markdown text={…} codeTheme="dark" />`** — standalone markdown renderer with syntax highlighting and copy buttons. It supports `streaming` to render escaped plain text until finalization, `sanitizer` to provide a custom DOMPurify-compatible sanitizer when SSR needs sanitized raw HTML instead of the built-in no-raw-HTML safe mode, `markedOptions`/`markedExtensions` for per-instance parser customization, and `onCopyError` for clipboard-copy failures.
@@ -1560,6 +1613,8 @@ import { ChatWindow, ChatInput, ChorusTheme, Markdown } from 'react-chorus';
 ### Headless subpath
 
 Import from `react-chorus/headless` when you want semantic markup and behavior without default styling. The headless subpath preserves class names as styling hooks, and its `Chorus`, `ChatWindow`, `MessageBubble`, `ConversationList`, and `Markdown` exports default `headless={true}` so Markdown styles and syntax-highlight theme CSS are not injected unless you explicitly pass `headless={false}`. It re-exports the same public message, attachment, upload, streaming, and persistence types as the root entry point so `ChatInput` handlers can be typed from the subpath alone.
+
+Because `showJumpToBottomButton` defaults to `!headless`, the floating jump button is off on the headless exports. Pass `showJumpToBottomButton={true}` to opt the built-in button back in, or leave it off and render your own jump-to-latest UI from the same "auto-scroll paused" + "has unread activity" signals the built-in button reacts to — track them with a scroll listener on the `ChatWindow` ref (the built-in `useAutoScroll` helper compares `scrollHeight - scrollTop - clientHeight` against a 48 px near-bottom threshold and flags unread activity when a new message arrives while paused).
 
 ```tsx
 import { ChatWindow, ConversationList, Markdown, MessageBubble } from 'react-chorus/headless';
