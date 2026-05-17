@@ -3,6 +3,8 @@ import type { Transport } from '../hooks/useChorusStream';
 import { createPersistentWebSocketTransport } from './websocket/persistent';
 import { createTransientWebSocketTransport } from './websocket/transient';
 
+export type FormatMessageResult = string | { payload: string; correlationId?: string | null };
+
 export interface WebSocketTransportOptions<TMeta = Record<string, unknown>> {
   /** WebSocket sub-protocols forwarded to the WebSocket constructor. */
   protocols?: string | string[];
@@ -28,10 +30,32 @@ export interface WebSocketTransportOptions<TMeta = Record<string, unknown>> {
   onMessage?: (data: string, event: MessageEvent) => void;
   /**
    * Serialize the outgoing request.
+   *
+   * Return a string payload (default behaviour) or `{ payload, correlationId }`
+   * to register the active response stream under a correlation id. In
+   * persistent mode the paired `correlate` callback can then route each inbound
+   * frame back to the request that started it instead of broadcasting to every
+   * active stream.
+   *
    * Defaults to `JSON.stringify({ prompt, history })`, matching the fetch SSE transport.
    * `history` includes the current user turn; `prompt` is a convenience copy.
    */
-  formatMessage?: (text: string, history: Message<TMeta>[]) => string;
+  formatMessage?: (text: string, history: Message<TMeta>[]) => FormatMessageResult;
+  /**
+   * Route inbound frames to a specific active request in persistent mode.
+   *
+   * Receives each decoded WebSocket frame and returns the correlation id that
+   * `formatMessage` registered for the request that produced it. Frames whose
+   * id matches an active stream are enqueued to that stream only; frames whose
+   * id matches no active stream are dropped. Return `null` (or `undefined`) to
+   * fall through to the legacy fan-out broadcast for that frame (e.g. for
+   * server-pushed messages that aren't request responses).
+   *
+   * Only consulted in persistent mode. Without this callback every inbound
+   * frame is broadcast to every active response stream, which duplicates
+   * payloads when sends overlap.
+   */
+  correlate?: (frame: string) => string | null | undefined;
 }
 
 export type WebSocketTransport<TMeta = Record<string, unknown>> = Transport<TMeta> & {
@@ -68,7 +92,7 @@ export function createWebSocketTransport<TMeta = Record<string, unknown>>(
   url: string,
   opts?: WebSocketTransportOptions<TMeta>,
 ): WebSocketTransport<TMeta> {
-  const formatMessage =
+  const formatMessage: (text: string, history: Message<TMeta>[]) => FormatMessageResult =
     opts?.formatMessage ??
     ((text: string, history: Message<TMeta>[]) => JSON.stringify({ prompt: text, history }));
 

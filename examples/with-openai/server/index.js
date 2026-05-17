@@ -8,6 +8,10 @@ const openai = new OpenAI(); // reads OPENAI_API_KEY from environment; keep it s
 app.use(express.json({ limit: '10mb' }));
 
 app.post('/api/chat', async (req, res) => {
+  // Chorus POSTs `{ prompt, history }`. `history` already includes the new user
+  // turn — do not also append `req.body.prompt`, or the latest message will be
+  // sent to the model twice. `prompt` is only a convenience copy for backends
+  // that prefer to read the new turn as a separate field.
   const history = Array.isArray(req.body?.history) ? req.body.history : [];
   const controller = new AbortController();
   req.on('close', () => controller.abort());
