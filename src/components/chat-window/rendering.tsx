@@ -1,17 +1,27 @@
 import React from 'react';
+import { DEFAULT_TRANSCRIPT_LABELS } from '../../labels/transcript';
 
 export interface DefaultEmptyStateProps {
   prompts: string[];
   onSuggestedPrompt?: (prompt: string) => void;
   disabled?: boolean;
   disabledReason?: string;
+  title?: string;
+  ariaLabel?: string;
 }
 
-export function DefaultEmptyState({ prompts, onSuggestedPrompt, disabled = false, disabledReason }: DefaultEmptyStateProps) {
+export function DefaultEmptyState({
+  prompts,
+  onSuggestedPrompt,
+  disabled = false,
+  disabledReason,
+  title = DEFAULT_TRANSCRIPT_LABELS.emptyStateTitle,
+  ariaLabel = DEFAULT_TRANSCRIPT_LABELS.suggestedPromptsAriaLabel,
+}: DefaultEmptyStateProps) {
   return (
     <div className="chorus-empty-state chorus-empty-state-default">
-      <div className="chorus-empty-title">How can I help?</div>
-      <div className="chorus-suggested-prompts" aria-label="Suggested prompts">
+      <div className="chorus-empty-title">{title}</div>
+      <div className="chorus-suggested-prompts" aria-label={ariaLabel}>
         {prompts.map(prompt => (
           <button
             key={prompt}

@@ -1,0 +1,11 @@
+import type { ChorusComposerLabels } from './types';
+
+export const DEFAULT_COMPOSER_LABELS: ChorusComposerLabels = {
+  placeholder: 'Send a message',
+  ariaLabel: 'Send a message',
+  attachFile: 'Attach file',
+  send: 'Send',
+  stop: 'Stop',
+  disabledReason: 'Composer is disabled.',
+  readOnlyReason: 'Composer is read-only.',
+};

@@ -50,6 +50,10 @@ function libraryManualChunks(id: string) {
   if (normalizedId.endsWith('/src/components/ChatInput.tsx') || normalizedId.includes('/src/components/chat-input/') || normalizedId.endsWith('/src/utils/attachmentPreview.ts')) return 'chat-input';
   if (normalizedId.endsWith('/src/components/ConversationList.tsx') || normalizedId.endsWith('/src/components/ChorusTheme.tsx')) return 'conversation-list';
   if (normalizedId.endsWith('/src/hooks/useAssistantSession.ts') || normalizedId.includes('/src/hooks/assistant-session/') || normalizedId.endsWith('/src/hooks/useChorusMessages.ts') || normalizedId.endsWith('/src/hooks/useRAFQueue.ts')) return 'chorus-session';
+  // tools.ts is shared by the chorus-session graph (handler lookup) and the
+  // provider-requests subpath (defineTool, tool-definition serialization).
+  // Park it in its own micro-chunk so importing one side does not drag in the other.
+  if (normalizedId.endsWith('/src/tools.ts')) return 'tools';
 
   return undefined;
 }
