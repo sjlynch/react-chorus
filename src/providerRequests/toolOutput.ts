@@ -19,7 +19,7 @@ function toolOutputValue<TMeta>(message: Message<TMeta>) {
   const rawText = messageText(message);
   if (message.toolCall && hasOwn(message.toolCall, 'output')) return message.toolCall.output;
   const text = rawText.trim();
-  return text ? rawText : message.toolCall?.input;
+  return text ? rawText : undefined;
 }
 
 export function toolOutputText<TMeta>(message: Message<TMeta>) {
