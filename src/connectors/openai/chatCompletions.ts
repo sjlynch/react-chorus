@@ -72,7 +72,7 @@ export function extractChatCompletionEvent(obj: Record<string, unknown>, state: 
   if (reasoning) appendField(result, 'reasoning', reasoning);
 
   const content = typeof delta.content === 'string' ? delta.content : '';
-  if (content) mergeResult(result, createThinkTagSplitter(state.thinkState).feed(content));
+  if (content) mergeResult(result, createThinkTagSplitter(state.thinkState, state.thinkOptions).feed(content));
 
   const toolCalls = delta.tool_calls;
   if (Array.isArray(toolCalls)) {

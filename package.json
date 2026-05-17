@@ -27,6 +27,11 @@
       "import": "./dist/provider-requests.es.js",
       "require": "./dist/provider-requests.cjs"
     },
+    "./server": {
+      "types": "./dist/types/server.d.ts",
+      "import": "./dist/react-chorus-server.es.js",
+      "require": "./dist/react-chorus-server.cjs"
+    },
     "./styles.css": {
       "types": "./dist/styles.css.d.ts",
       "default": "./dist/styles.css"

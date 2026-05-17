@@ -1,9 +1,19 @@
-import type { Message } from '../types';
+import type { Attachment, Message } from '../types';
 import { dataUrlFromAttachment, unsupportedAttachmentText } from './attachments';
-import { metadataString } from './metadata';
+import { metadataBoolean, metadataString } from './metadata';
 import { stripAnthropicOptions } from './options';
 import { messageText, objectToolInput, toolContextText, toolOutputText } from './toolOutput';
-import type { AnthropicMessage, AnthropicMessagesBody, AnthropicMessagesBodyOptions, ProviderMappingOptions } from './types';
+import type {
+  AnthropicContentBlock,
+  AnthropicDocumentBlock,
+  AnthropicImageBlock,
+  AnthropicMessage,
+  AnthropicMessagesBody,
+  AnthropicMessagesBodyOptions,
+  AnthropicToolResultBlock,
+  AnthropicToolUseBlock,
+  ProviderMappingOptions,
+} from './types';
 
 function anthropicToolUseId(message: Message<unknown>) {
   return metadataString(message, 'anthropic', ['toolUseId', 'tool_use_id'], [
@@ -15,7 +25,21 @@ function anthropicToolUseId(message: Message<unknown>) {
   ]);
 }
 
-function anthropicToolUseBlock(message: Message<unknown>) {
+function anthropicToolResultIsError(message: Message<unknown>) {
+  return metadataBoolean(message, 'anthropic', ['isError', 'is_error'], ['isError', 'is_error']);
+}
+
+function anthropicToolResultBlock(message: Message<unknown>, toolUseId: string): AnthropicToolResultBlock {
+  const block: AnthropicToolResultBlock = {
+    type: 'tool_result',
+    tool_use_id: toolUseId,
+    content: toolOutputText(message),
+  };
+  if (anthropicToolResultIsError(message)) block.is_error = true;
+  return block;
+}
+
+function anthropicToolUseBlock(message: Message<unknown>): AnthropicToolUseBlock | null {
   const id = anthropicToolUseId(message);
   if (!id || !message.toolCall) return null;
   return {
@@ -26,7 +50,7 @@ function anthropicToolUseBlock(message: Message<unknown>) {
   };
 }
 
-function appendAnthropicToolUseBlocks(target: AnthropicMessage[], blocks: AnthropicMessage[]) {
+function appendAnthropicToolUseBlocks(target: AnthropicMessage[], blocks: AnthropicToolUseBlock[]) {
   const last = target[target.length - 1];
   if (last?.role === 'assistant' && Array.isArray(last.content)) {
     last.content = last.content.concat(blocks);
@@ -44,19 +68,37 @@ function anthropicSystem(history: Message<unknown>[]) {
   return system || undefined;
 }
 
-function anthropicContentBlocks<TMeta>(message: Message<TMeta>, options: ProviderMappingOptions<TMeta>) {
-  const blocks: Array<Record<string, unknown>> = [];
+function anthropicAttachmentBlock(attachment: Attachment): AnthropicImageBlock | AnthropicDocumentBlock | null {
+  const dataUrl = dataUrlFromAttachment(attachment);
+  if (!dataUrl) return null;
+  if (attachment.type.startsWith('image/')) {
+    return {
+      type: 'image',
+      source: { type: 'base64', media_type: attachment.type || dataUrl.mimeType, data: dataUrl.base64 },
+    };
+  }
+  if (attachment.type === 'application/pdf') {
+    return {
+      type: 'document',
+      source: { type: 'base64', media_type: 'application/pdf', data: dataUrl.base64 },
+    };
+  }
+  return null;
+}
+
+function anthropicContentBlocks<TMeta>(
+  message: Message<TMeta>,
+  options: ProviderMappingOptions<TMeta>,
+): AnthropicContentBlock[] {
+  const blocks: AnthropicContentBlock[] = [];
   const text = messageText(message);
   if (text.trim()) blocks.push({ type: 'text', text });
 
   if (message.role === 'user') {
     for (const attachment of message.attachments ?? []) {
-      const dataUrl = attachment.type.startsWith('image/') ? dataUrlFromAttachment(attachment) : null;
-      if (dataUrl) {
-        blocks.push({
-          type: 'image',
-          source: { type: 'base64', media_type: attachment.type || dataUrl.mimeType, data: dataUrl.base64 },
-        });
+      const block = anthropicAttachmentBlock(attachment);
+      if (block) {
+        blocks.push(block);
       } else {
         blocks.push({ type: 'text', text: unsupportedAttachmentText(attachment, message, options) });
       }
@@ -82,7 +124,7 @@ function toAnthropicMessage<TMeta>(message: Message<TMeta>, options: ProviderMap
   if (message.role === 'tool') {
     const toolUseId = anthropicToolUseId(message as Message<unknown>);
     if (toolUseId) {
-      return { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content: toolOutputText(message) }] };
+      return { role: 'user', content: [anthropicToolResultBlock(message as Message<unknown>, toolUseId)] };
     }
 
     const text = toolContextText(message);
@@ -114,7 +156,7 @@ export function toAnthropicMessages<TMeta = Record<string, unknown>>(
     }
     i -= 1;
 
-    const providerTools: Array<{ message: Message<TMeta>; block: AnthropicMessage }> = [];
+    const providerTools: Array<{ message: Message<TMeta>; block: AnthropicToolUseBlock }> = [];
     for (const toolMessage of group) {
       const block = anthropicToolUseBlock(toolMessage as Message<unknown>);
       if (block) providerTools.push({ message: toolMessage, block });
@@ -124,11 +166,10 @@ export function toAnthropicMessages<TMeta = Record<string, unknown>>(
       appendAnthropicToolUseBlocks(messages, providerTools.map(entry => entry.block));
       messages.push({
         role: 'user',
-        content: providerTools.map(entry => ({
-          type: 'tool_result',
-          tool_use_id: anthropicToolUseId(entry.message as Message<unknown>),
-          content: toolOutputText(entry.message),
-        })),
+        content: providerTools.map(entry => anthropicToolResultBlock(
+          entry.message as Message<unknown>,
+          anthropicToolUseId(entry.message as Message<unknown>) ?? '',
+        )),
       });
     }
 
@@ -143,18 +184,20 @@ export function toAnthropicMessages<TMeta = Record<string, unknown>>(
 }
 
 /** Build an Anthropic Messages API request body. Defaults `stream` to true. */
-export function toAnthropicMessagesBody<TMeta = Record<string, unknown>>(
-  history: Message<TMeta>[],
-  options: AnthropicMessagesBodyOptions<TMeta> = {},
-): AnthropicMessagesBody {
-  const { bodyOptions, stream } = stripAnthropicOptions(options);
+export function toAnthropicMessagesBody<
+  TMeta = Record<string, unknown>,
+  TOptions extends AnthropicMessagesBodyOptions<TMeta> = AnthropicMessagesBodyOptions<TMeta>,
+>(history: Message<TMeta>[], options?: TOptions): AnthropicMessagesBody<TOptions> {
+  const opts = (options ?? {}) as TOptions;
+  const { bodyOptions, stream } = stripAnthropicOptions(opts);
   const system = anthropicSystem(history as Message<unknown>[]);
-  return {
+  const body = {
     ...bodyOptions,
     ...(system ? { system } : {}),
-    messages: toAnthropicMessages(history, options),
+    messages: toAnthropicMessages(history, opts),
     stream,
   };
+  return body as AnthropicMessagesBody<TOptions>;
 }
 
 /** JSON body formatter for `createFetchSSETransport(..., { formatBody })`. */

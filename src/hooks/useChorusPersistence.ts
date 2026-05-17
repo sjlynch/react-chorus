@@ -224,6 +224,51 @@ export function useChorusPersistence<TMeta = Record<string, unknown>>(
     };
   }, [flushForPageLifecycle]);
 
+  // Cross-tab sync: pick up message writes from other tabs sharing the same
+  // localStorage. Skipped for custom StorageAdapter values — async/remote
+  // adapters are responsible for their own change notification.
+  React.useEffect(() => {
+    if (typeof window === 'undefined' || !key) return undefined;
+    let localStorageRef: Storage | null;
+    try {
+      localStorageRef = window.localStorage;
+    } catch {
+      return undefined;
+    }
+    if (storage !== localStorageRef) return undefined;
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.storageArea && event.storageArea !== localStorageRef) return;
+      if (event.key !== key) return;
+
+      // Defensive against same-tab polyfills: skip if the event mirrors what
+      // we already have in memory.
+      if (event.newValue !== null) {
+        try {
+          const currentSerialized = serializeMessagesRef.current(stateRef.current.value);
+          if (event.newValue === currentSerialized) return;
+        } catch {
+          // fall through and apply the event
+        }
+      } else if (stateRef.current.value.length === 0 && !stateRef.current.hasStoredValue) {
+        return;
+      }
+
+      const parsed = stateFromRaw<TMeta>(key, storage, event.newValue, deserializeMessagesRef.current);
+      if (parsed.error) {
+        reportPersistenceError(parsed.error, 'deserialize', key);
+        return;
+      }
+      writeVersionRef.current += 1;
+      stateRef.current = parsed.state;
+      setState(parsed.state);
+      setError(null);
+    };
+
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, [key, reportPersistenceError, storage]);
+
   React.useEffect(() => {
     let cancelled = false;
     const pendingPreloadChange = pendingPreloadChangeRef.current;

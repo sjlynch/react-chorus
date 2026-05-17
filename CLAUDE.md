@@ -10,6 +10,7 @@ react-chorus is a composable React chat UI library with batteries-included messa
 - `src/headless.ts` / `src/ChorusHeadless.tsx` — `react-chorus/headless` entry and wrapper that default supported components to `headless: true`.
 - `src/providerRequests.ts` — outbound request mappers and `formatXyzBody` helpers for OpenAI Chat/Responses, Anthropic Messages, and Gemini GenerateContent, exported via root and `react-chorus/provider-requests`.
 - `src/transport.ts` — `react-chorus/transport` barrel for transport factories and the `Transport` type.
+- `src/server.ts` — `react-chorus/server` barrel for SSE framing helpers (`sseHeaders`, `formatSSEEvent`/`encodeSSEEvent`, `formatSSEDone`/`encodeSSEDone`, `formatSSEError`/`encodeSSEError`) used by proxy routes (Next.js, Express, etc.).
 - `src/components/` — UI pieces (`ChatWindow`, `ChatInput`, `Markdown`, `ChorusTheme`, `ToolCallBlock`, `MessageBubble`).
 - `src/hooks/` — reusable streaming and persistence hooks.
 - `src/connectors/` — provider-specific SSE payload parsers.

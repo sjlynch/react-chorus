@@ -1,5 +1,7 @@
 import React from 'react';
 import type { MarkedExtension, MarkedOptions } from 'marked';
+import { DEFAULT_CODE_COPY_LABELS } from '../labels/codeCopy';
+import type { ChorusCodeCopyLabels } from '../labels/types';
 import { normalizeStreamingMarkdown } from '../utils/markdownNormalizer';
 import { addCodeBlockChrome } from './markdown/codeBlockChrome';
 import { useHighlightLoader, type CodeTheme } from './markdown/highlight';
@@ -29,6 +31,8 @@ export interface MarkdownProps {
   markedExtensions?: MarkedExtension[];
   /** Called when a code-block copy button cannot write to the Clipboard API. */
   onCopyError?: (error: Error) => void;
+  /** Localized labels for the code-block copy button. */
+  codeCopyLabels?: ChorusCodeCopyLabels;
 }
 
 function useMarkdownStyles(headless: boolean) {
@@ -54,12 +58,13 @@ function useMarkdownStyles(headless: boolean) {
   }, [headless]);
 }
 
-export function Markdown({ text, codeTheme = 'dark', headless = false, streaming = false, sanitizer, markedOptions, markedExtensions, onCopyError }: MarkdownProps) {
+export function Markdown({ text, codeTheme = 'dark', headless = false, streaming = false, sanitizer, markedOptions, markedExtensions, onCopyError, codeCopyLabels }: MarkdownProps) {
   const containerRef = React.useRef<HTMLDivElement>(null);
   const sanitize = React.useMemo(() => resolveSanitizer(sanitizer), [sanitizer]);
   const safe = !sanitize;
   const marked = React.useMemo(() => resolveMarkedInstance(safe, markedOptions, markedExtensions), [safe, markedOptions, markedExtensions]);
   const hljsReady = useHighlightLoader({ text, codeTheme, headless, streaming });
+  const labels = codeCopyLabels ?? DEFAULT_CODE_COPY_LABELS;
 
   useMarkdownStyles(headless);
 
@@ -70,10 +75,10 @@ export function Markdown({ text, codeTheme = 'dark', headless = false, streaming
     const sanitized = renderMarkdown(text, sanitize, marked);
     if (headless) return sanitized;
 
-    return addCodeBlockChrome(sanitized, codeTheme);
-  }, [text, codeTheme, headless, hljsReady, streaming, sanitize, marked]);
+    return addCodeBlockChrome(sanitized, codeTheme, labels);
+  }, [text, codeTheme, headless, hljsReady, streaming, sanitize, marked, labels]);
 
-  useCodeCopy(containerRef, onCopyError);
+  useCodeCopy(containerRef, onCopyError, labels);
 
   const className = streaming ? 'chorus-md chorus-md-streaming' : 'chorus-md';
   if (streaming) return <div ref={containerRef} className={className}>{text}</div>;
