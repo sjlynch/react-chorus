@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { openaiConnector } from '../connectors/openai';
+import { openaiConnector, createOpenAIConnector } from '../connectors/openai';
 import { anthropicConnector } from '../connectors/anthropic';
 import { geminiConnector } from '../connectors/gemini';
 import { autoConnector, getConnector } from '../connectors/connectors';
@@ -33,6 +33,36 @@ describe('createThinkTagSplitter', () => {
     const splitter = createThinkTagSplitter();
     expect(splitter.feed('plain text')).toEqual({ text: 'plain text' });
     expect(splitter.flush()).toEqual({});
+  });
+
+  it('matches the default tag pair case-insensitively', () => {
+    const splitter = createThinkTagSplitter();
+    expect(splitter.feed('<Think>plan</Think>answer')).toEqual({ reasoning: 'plan', text: 'answer' });
+  });
+
+  it('matches mixed-case tags like <THINK>', () => {
+    const splitter = createThinkTagSplitter();
+    expect(splitter.feed('hi <THINK>secret</THINK>bye')).toEqual({ reasoning: 'secret', text: 'hi bye' });
+  });
+
+  it('tolerates whitespace inside the angle brackets', () => {
+    const splitter = createThinkTagSplitter();
+    expect(splitter.feed('< think >plan</ think >answer')).toEqual({ reasoning: 'plan', text: 'answer' });
+  });
+
+  it('supports a custom reasoning tag pair', () => {
+    const splitter = createThinkTagSplitter(undefined, { start: '<reasoning>', end: '</reasoning>' });
+    expect(splitter.feed('<reasoning>plan</reasoning>answer')).toEqual({ reasoning: 'plan', text: 'answer' });
+  });
+
+  it('does not split default <think> tags when configured with a custom pair', () => {
+    const splitter = createThinkTagSplitter(undefined, { start: '<scratchpad>', end: '</scratchpad>' });
+    expect(splitter.feed('<think>still text</think>after')).toEqual({ text: '<think>still text</think>after' });
+  });
+
+  it('respects caseInsensitive: false', () => {
+    const splitter = createThinkTagSplitter(undefined, { caseInsensitive: false });
+    expect(splitter.feed('<Think>plan</Think>answer')).toEqual({ text: '<Think>plan</Think>answer' });
   });
 });
 
@@ -174,6 +204,31 @@ describe('openaiConnector', () => {
     const objectPayload = { error: { message: 'bad request' } };
     expect(openaiConnector.extract(JSON.stringify(stringPayload))).toEqual({ error: 'upstream failed', errorPayload: stringPayload });
     expect(openaiConnector.extract(JSON.stringify(objectPayload))).toEqual({ error: 'bad request', errorPayload: objectPayload });
+  });
+
+  it('splits mixed-case <Think> tags out of text content', () => {
+    const data = JSON.stringify({ choices: [{ index: 0, delta: { content: '<Think>plan</Think>answer' } }] });
+    expect(openaiConnector.extract(data)).toEqual({ reasoning: 'plan', text: 'answer' });
+  });
+});
+
+describe('createOpenAIConnector', () => {
+  it('accepts a custom reasoning tag pair', () => {
+    const connector = createOpenAIConnector({ thinkTag: { start: '<reasoning>', end: '</reasoning>' } });
+    const data = JSON.stringify({ choices: [{ index: 0, delta: { content: '<reasoning>plan</reasoning>answer' } }] });
+    expect(connector.extract(data)).toEqual({ reasoning: 'plan', text: 'answer' });
+  });
+
+  it('leaves default <think> tags untouched when a custom pair is configured', () => {
+    const connector = createOpenAIConnector({ thinkTag: { start: '<scratchpad>', end: '</scratchpad>' } });
+    const data = JSON.stringify({ choices: [{ index: 0, delta: { content: '<think>plan</think>answer' } }] });
+    expect(connector.extract(data)).toEqual({ text: '<think>plan</think>answer' });
+  });
+
+  it('opts out of case-insensitive matching when configured', () => {
+    const connector = createOpenAIConnector({ thinkTag: { caseInsensitive: false } });
+    const data = JSON.stringify({ choices: [{ index: 0, delta: { content: '<Think>plan</Think>answer' } }] });
+    expect(connector.extract(data)).toEqual({ text: '<Think>plan</Think>answer' });
   });
 });
 
@@ -513,5 +568,17 @@ describe('getConnector', () => {
   it('falls back to autoConnector for unknown string', () => {
     // @ts-expect-error intentional unknown string
     expect(getConnector('unknown-provider')).toBe(autoConnector);
+  });
+
+  it('returns a configured openai connector when called with options', () => {
+    const connector = getConnector('openai', { thinkTag: { start: '<reasoning>', end: '</reasoning>' } });
+    expect(connector).not.toBe(openaiConnector);
+    expect(connector.name).toBe('openai');
+    const data = JSON.stringify({ choices: [{ index: 0, delta: { content: '<reasoning>plan</reasoning>answer' } }] });
+    expect(connector.extract(data)).toEqual({ reasoning: 'plan', text: 'answer' });
+  });
+
+  it('returns the default openaiConnector when no options are provided', () => {
+    expect(getConnector('openai')).toBe(openaiConnector);
   });
 });

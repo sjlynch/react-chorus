@@ -78,19 +78,30 @@ export default function App() {
 }
 ```
 
-`transport` requires an endpoint that returns Server-Sent Events. Chorus POSTs `{ prompt: string, history: Message[] }` to the URL and streams the SSE response into the assistant message automatically. `history` already includes the current user turn; `prompt` is a convenience copy of that latest user text. See the [Next.js App Router route handler](#nextjs-app-router-route-handler), the [Minimal Express + OpenAI backend](#minimal-express--openai-backend), or the runnable [`examples/with-next`](./examples/with-next) and [`examples/with-openai`](./examples/with-openai) apps for server-safe proxies.
+`transport` requires an endpoint that returns Server-Sent Events. Chorus POSTs `{ prompt: string, history: Message[] }` to the URL and streams the SSE response into the assistant message automatically. **`history` already includes the latest user turn** — `prompt` is a duplicate convenience copy of that same text, not the next message to append. Map `history` directly on the server and ignore `prompt`; appending `prompt` to `history` will send the new user message to the model twice. See the [Next.js App Router route handler](#nextjs-app-router-route-handler), the [Minimal Express + OpenAI backend](#minimal-express--openai-backend), or the runnable [`examples/with-next`](./examples/with-next) and [`examples/with-openai`](./examples/with-openai) apps for server-safe proxies.
 
 ## Two usage paths
 
 ### Simple path — `transport` prop
 
-Pass a URL string or `Transport` function. Chorus handles everything:
+Pass a URL string, a `{ url, headers, credentials, ... }` config object, or a `Transport` function. Chorus handles everything:
 
 ```tsx
-// String: Chorus POSTs { prompt, history } and reads the SSE stream
+// String: Chorus POSTs { prompt, history } and reads the SSE stream.
+// `history` already includes the new user turn; `prompt` is a duplicate
+// of `history[last].text`. Read `history` on the server and ignore `prompt`.
 <Chorus transport="/api/chat" />
 
-// Custom Transport function
+// Object form: same defaults, plus auth headers / cookies / any RequestInit field
+<Chorus
+  transport={{
+    url: '/api/chat',
+    headers: { Authorization: `Bearer ${token}` },
+    credentials: 'include',
+  }}
+/>
+
+// Custom Transport function (for non-default request shapes)
 import { createFetchSSETransport } from 'react-chorus';
 
 const transport = createFetchSSETransport('/api/chat', {
@@ -99,6 +110,29 @@ const transport = createFetchSSETransport('/api/chat', {
 
 <Chorus transport={transport} />
 ```
+
+#### Adding auth headers / cookies
+
+The string shorthand has no place to hang an `Authorization` header or `credentials: 'include'`. Pass the object form (or a `createFetchSSETransport` instance) the moment you need either:
+
+```tsx
+// Session cookies on a same-origin endpoint
+<Chorus transport={{ url: '/api/chat', credentials: 'same-origin' }} />
+
+// Bearer token + CSRF + cross-origin cookies
+<Chorus
+  transport={{
+    url: 'https://api.example.com/chat',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'X-CSRF-Token': csrfToken,
+    },
+    credentials: 'include',
+  }}
+/>
+```
+
+`headers`, `credentials`, `cache`, `mode`, `referrer`, and the other [`RequestInit`](https://developer.mozilla.org/docs/Web/API/RequestInit) fields are forwarded straight to `fetch`. Chorus reserves `body`, `method`, and `signal` (the body is `JSON.stringify({ prompt, history })` by default — pass a `formatBody` to override). Annotate the config with `FetchTransportInit` if you want to extract it into a reusable constant.
 
 Seed an uncontrolled chat with a welcome message and include a hidden system prompt in every transport request:
 
@@ -159,7 +193,7 @@ export default function App() {
 }
 ```
 
-`createFetchSSETransport(url)` posts `{ prompt, history }` to your endpoint and reads the response as a Server-Sent Events stream. `history` includes the latest user message, so backend examples should map `history` directly instead of appending `prompt` again. Pass a `formatBody` option to customise the request shape for OpenAI, FastAPI, FormData uploads, or any other backend. The transport sets `Content-Type: application/json` only for its default JSON body; custom serializers should set JSON headers themselves and FormData/Blob/URLSearchParams are not forced to JSON. The `openai` connector parses the standard selected `choices[0]` text, reasoning, and tool-call delta shapes.
+`createFetchSSETransport(url)` posts `{ prompt, history }` to your endpoint and reads the response as a Server-Sent Events stream. **`history` already includes the latest user message** — `prompt` is a duplicate convenience copy, not a separate "new message" field. Backends should map `history` directly; appending `prompt` to `history` will deliver the latest user turn to the model twice, and using `prompt` alone will drop all prior context. Pass a `formatBody` option to customise the request shape for OpenAI, FastAPI, FormData uploads, or any other backend. The transport sets `Content-Type: application/json` only for its default JSON body; custom serializers should set JSON headers themselves and FormData/Blob/URLSearchParams are not forced to JSON. The `openai` connector parses the standard selected `choices[0]` text, reasoning, and tool-call delta shapes.
 
 For reusable callbacks, import `ChorusOnSend<TMeta>` or the lower-level `ChorusSendHelpers` type instead of duplicating the helper shape. `ChorusOnSend<TMeta>` preserves your `Message<TMeta>.metadata` type through the `messages` argument and returned assistant message. If you pass `systemPrompt`, read it from `helpers.systemPrompt`; Chorus intentionally does not prepend it to `messages` on the `onSend` path so custom senders that already manage system messages do not get duplicates.
 
@@ -216,6 +250,8 @@ export async function POST(request: Request) {
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       try {
+        // Chorus POSTs `{ prompt, history }`. `history` already includes the new
+        // user turn — don't also append `body.prompt`, or the message goes twice.
         const body = (await request.json()) as { history?: unknown };
         const history = Array.isArray(body.history) ? (body.history as Message[]) : [];
         const apiKey = process.env.OPENAI_API_KEY;
@@ -270,6 +306,8 @@ const openai = new OpenAI(); // reads OPENAI_API_KEY from env; keep this server-
 app.use(express.json({ limit: '10mb' })); // data URL image attachments can be large
 
 app.post('/api/chat', async (req, res) => {
+  // Chorus POSTs `{ prompt, history }`. `history` already includes the new
+  // user turn — don't also append `req.body.prompt`, or the message goes twice.
   const history = Array.isArray(req.body?.history) ? req.body.history : [];
 
   res.setHeader('Content-Type', 'text/event-stream');
@@ -351,6 +389,8 @@ export default function App() {
 
 Each incoming WebSocket message is treated as one SSE payload, so the same connector/extraction pipeline applies unchanged. By default a WebSocket transport opens a fresh socket for each send. For backends where the auth/subscribe handshake is expensive, pass `{ persistent: true }` to reuse one socket across sends and call `transport.close()` when your component/app no longer needs it.
 
+> ⚠️ **Persistent mode has no built-in request/response correlation.** Every inbound frame is broadcast to every currently active response stream, so if two sends overlap (e.g. the user submits a second message before the first finishes, or a Stop-then-resend race) the same chunks are duplicated into both assistant messages. Either guarantee at the protocol layer that responses can never interleave, or pair a `formatMessage` that returns `{ payload, correlationId }` with a `correlate(frame)` callback so each frame is routed to the request that started it. In dev mode the transport will log a one-time `console.warn` the first time it sees overlapping sends without a `correlate` callback.
+
 If you only need the non-React transport factories, import them from the transport-only subpath to avoid pulling UI or Markdown code into that bundle:
 
 ```ts
@@ -370,6 +410,8 @@ const client = new Anthropic(); // reads ANTHROPIC_API_KEY from env; keep this s
 
 wss.on('connection', (ws) => {
   ws.on('message', async (raw) => {
+    // Chorus sends `{ prompt, history }` on every frame. `history` already
+    // includes the new user turn; ignore `prompt` to avoid sending it twice.
     const { history = [] } = JSON.parse(raw.toString());
 
     try {
@@ -421,10 +463,10 @@ These helpers are also re-exported from `react-chorus` for browser apps; the `re
 
 | Helper | Provider request shape | Notes |
 |--------|------------------------|-------|
-| `toOpenAIChatCompletionsBody(history, opts)` / `formatOpenAIChatCompletionsBody(opts)` | `{ model, messages, stream }` | Maps `system`/`user`/`assistant`, user image attachments to `image_url`, unsupported attachments to text notes, and `tool` messages with `metadata.openai.toolCallId` (or `metadata.tool_call_id`) to OpenAI `role: 'tool'`. Without a provider tool id, tool results become safe system context instead of invalid OpenAI messages. |
-| `toOpenAIResponsesBody(history, opts)` / `formatOpenAIResponsesBody(opts)` | `{ model, input, stream }` | Uses Responses `input_text` / `input_image` / `output_text` items and `function_call_output` when an OpenAI call id is present in metadata. |
-| `toAnthropicMessagesBody(history, opts)` / `formatAnthropicMessagesBody(opts)` | `{ model, max_tokens, system, messages, stream }` | Joins Chorus `system` messages into Anthropic's top-level `system`, maps data-URL images to base64 image blocks, and maps `metadata.anthropic.toolUseId` (or `metadata.tool_use_id`) to `tool_result`. |
-| `toGeminiGenerateContentBody(history, opts)` / `formatGeminiGenerateContentBody(opts)` | `{ systemInstruction, contents, ...opts }` | Maps `system` to `systemInstruction`, `assistant` to Gemini `model`, data-URL images to `inlineData`, uploaded file URLs/ids to `fileData`, and Chorus tool outputs to `functionResponse` parts when `toolCall.name` is available. |
+| `toOpenAIChatCompletionsBody(history, opts)` / `formatOpenAIChatCompletionsBody(opts)` | `{ model, messages, stream }` | Maps `system`/`user`/`assistant`, user image attachments to `image_url`, and `tool` messages with `metadata.openai.toolCallId` (or `metadata.tool_call_id`) to OpenAI `role: 'tool'`. Attachments other than images are not supported by the Chat Completions content spec and fall back to text notes. Without a provider tool id, tool results become safe system context instead of invalid OpenAI messages. |
+| `toOpenAIResponsesBody(history, opts)` / `formatOpenAIResponsesBody(opts)` | `{ model, input, stream }` | Uses Responses `input_text` / `input_image` / `output_text` items and `function_call_output` when an OpenAI call id is present in metadata. Non-image attachments with an uploaded `id` map to `{ type: 'input_file', file_id }` and ones with an uploaded `url` map to `{ type: 'input_file', file_url }`; otherwise they fall back to text notes (base64 file data is not inlined). |
+| `toAnthropicMessagesBody(history, opts)` / `formatAnthropicMessagesBody(opts)` | `{ model, max_tokens, system, messages, stream }` | Joins Chorus `system` messages into Anthropic's top-level `system`, maps data-URL images to base64 `image` blocks, maps `application/pdf` data URLs to base64 `document` blocks, and maps `metadata.anthropic.toolUseId` (or `metadata.tool_use_id`) to `tool_result`. Other non-image MIME types still fall back to text notes. When `metadata.anthropic.isError === true` (or top-level `metadata.isError === true`), the emitted `tool_result` block includes `is_error: true` so Claude knows the tool execution failed. The OpenAI and Gemini helpers accept the same `isError` metadata, but their request shapes have no equivalent slot, so the flag is currently Anthropic-only. Built-in tool execution via `autoContinueTools` + a `tools` handler sets this flag automatically when a handler throws. |
+| `toGeminiGenerateContentBody(history, opts)` / `formatGeminiGenerateContentBody(opts)` | `{ systemInstruction, contents, ...opts }` | Maps `system` to `systemInstruction`, `assistant` to Gemini `model`, and Chorus tool outputs to `functionResponse` parts when `toolCall.name` is available. Any user attachment with a data URL maps to `inlineData` and any with an uploaded URL/file id maps to `fileData` — both honour the attachment's actual MIME type, so PDFs, audio, and video all pass through. Only attachments lacking both data URL and uploaded URI fall back to text notes. |
 
 All helpers preserve extra provider options you pass (for example `model`, `max_tokens`, `generationConfig`, `tools`) and default OpenAI/Anthropic `stream` to `true`. They insert explicit text fallbacks for unsupported attachments so request mapping failures are visible to the model instead of silently dropping context. Override that text with `unsupportedAttachmentText` when needed.
 
@@ -512,6 +554,25 @@ That tool stream becomes a Chorus message similar to:
 
 For OpenAI Responses API-style streams, common `response.output_text.delta`, `response.reasoning_summary_text.delta`, `response.output_item.added`, and `response.function_call_arguments.delta` events are also recognised.
 
+### Custom reasoning tag pair
+
+The `<think>...</think>` pair is matched case-insensitively by default and tolerates whitespace inside the angle brackets, so DeepSeek-style proxies that emit `<Think>`, `<THINK>`, or `< think >` are split into `reasoning` correctly. To use a different delimiter pair (for example, `<reasoning>...</reasoning>` or `<scratchpad>...</scratchpad>`), pass a `thinkTag` option to either `createOpenAIConnector` or `getConnector('openai', { ... })`:
+
+```ts
+import { createOpenAIConnector, getConnector } from 'react-chorus';
+
+const connector = createOpenAIConnector({
+  thinkTag: { start: '<reasoning>', end: '</reasoning>' },
+});
+
+// Same thing via the string registry:
+const sameConnector = getConnector('openai', {
+  thinkTag: { start: '<reasoning>', end: '</reasoning>' },
+});
+```
+
+Set `thinkTag.caseInsensitive: false` if you need to match the literal casing only. This option only affects the OpenAI connector; Anthropic and Gemini convey reasoning via structured fields, not embedded tags.
+
 ## Anthropic SSE format
 
 The Anthropic Messages API streams server-sent events. The `anthropicConnector` extracts text and thinking/tool-use deltas from content block events and signals completion on `message_stop`:
@@ -560,6 +621,8 @@ import { toGeminiGenerateContentBody } from 'react-chorus/provider-requests';
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY); // keep this server-side
 
 app.post('/api/chat', async (req, res) => {
+  // Chorus POSTs `{ prompt, history }`. `history` already includes the new
+  // user turn — don't also append `req.body.prompt`, or the message goes twice.
   const history = Array.isArray(req.body?.history) ? req.body.history : [];
   const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
@@ -584,10 +647,10 @@ Runnable examples live in the [`/examples`](./examples) directory. They declare 
 
 | Example | Description |
 |---------|-------------|
-| [`examples/basic`](./examples/basic) | Zero-backend demo using a simulated streaming response, local persistence, clear/reset, and a custom error banner — great for local development |
-| [`examples/multi-conversation`](./examples/multi-conversation) | Sidebar-driven local conversations with pinned chats, per-chat persistence, and first-message auto-titles |
-| [`examples/with-next`](./examples/with-next) | Next.js App Router example with a serverless `/api/chat` SSE route handler proxying to OpenAI |
-| [`examples/with-openai`](./examples/with-openai) | Full-stack example: Vite frontend + Express backend proxying to OpenAI |
+| [`examples/basic`](./examples/basic/README.md) | Zero-backend demo using a simulated streaming response, local persistence, clear/reset, and a custom error banner — great for local development |
+| [`examples/multi-conversation`](./examples/multi-conversation/README.md) | Sidebar-driven local conversations with pinned chats, per-chat persistence, and first-message auto-titles |
+| [`examples/with-next`](./examples/with-next/README.md) | Next.js App Router example with a serverless `/api/chat` SSE route handler proxying to OpenAI |
+| [`examples/with-openai`](./examples/with-openai/README.md) | Full-stack example: Vite frontend + Express backend proxying to OpenAI |
 
 ### Running the basic example
 
@@ -750,6 +813,7 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `disabled` | `boolean` | `false` | Disables composer text input, attach/paste/drop ingestion, Send, suggested-prompt fills, retry/clear, and message write actions. If an assistant response is active, Stop remains available so work is not stranded. |
 | `readOnly` | `boolean` | `false` | Keeps transcript read actions such as copy and scrolling available, but prevents compose, attachments, send, edit, regenerate, delete, retry, clear, feedback, and suggested-prompt fills. |
 | `disabledReason` | `string` | — | Explanation shown through the composer placeholder/title and accessible description while `disabled` or `readOnly` is active (for example “Select a conversation first”). |
+| `alwaysShowMessageActions` | `boolean` | `false` | Always render the per-message action buttons (edit/regenerate/copy/feedback/delete) instead of revealing them on hover. Coarse-pointer / `@media (hover: none)` devices get the same always-visible behavior automatically so touch users can discover and tap actions; this prop opts pointer devices in too. |
 | `accept` | `string` | — | Enables attachments and is forwarded to the file-picker `<input accept>`. Paste/drop validation uses the same MIME/extension rules. Omitting the prop hides the attach button and disables paste/drop attachments. |
 | `maxAttachmentBytes` | `number` | — | Reject files larger than this byte limit before reading/uploading them. |
 | `maxAttachments` | `number` | — | Maximum attachments queued in the composer at once. Extra files trigger `onAttachmentError`. |
@@ -784,9 +848,10 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `deserializeMessages` | `(raw: string) => Message<TMeta>[]` | JSON parse + array guard | Optional persistence deserializer/reviver. Use it to validate stored payloads or revive Dates/classes. |
 | `showClearButton` | `boolean` | `false` | Shows a built-in clear/reset conversation button above the input. |
 | `clearLabel` | `string` | `'Clear conversation'` | Label for the built-in clear/reset button. |
+| `confirmClearConversation` | `({ messages, resetToInitialMessages, source, persistenceKey? }) => boolean \| void \| Promise<boolean \| void>` | — | Optional gate for the built-in clear/reset action. Return or resolve `false` to cancel before persistence is flushed. While an async confirmation is pending the clear button is disabled and duplicate clears (button or `ref.clear()`) are ignored. |
 | `onClear` | `(messages: Message<TMeta>[]) => void` | — | Called with the reset message list after the built-in clear action runs. |
 | `resetToInitialMessages` | `boolean` | `false` | When clearing, restore the initial `messages`/`initialMessages` seed instead of saving an empty transcript. |
-| `showJumpToBottomButton` | `boolean` | `true` (`false` in headless exports) | Shows a floating “Jump to latest” button when auto-scroll is paused and new activity arrives. |
+| `showJumpToBottomButton` | `boolean` | `!headless` | Shows the floating “Jump to latest” button when the user scrolls away from the bottom and new activity arrives. Pass `false` to disable it (for example when you own the scroll affordance); the headless exports default `headless={true}` so the button is off by default there. |
 | `headless` | `boolean` | `false` | Strip all default styles and inline style injection. |
 | `renderMessage` | `(message: Message<TMeta>, ctx: RenderMessageContext<TMeta>) => ReactNode` | — | Custom per-message renderer. Return `null` to fall back to default rendering. `ctx` includes `isStreaming`, `messageProps` for scroll targets, `defaultRender(slots?)`, and action callbacks/default action controls. Existing one-argument renderers continue to work. |
 | `markdownProps` | `Omit<MarkdownProps, 'text' \| 'codeTheme' \| 'headless' \| 'streaming'>` | — | Props forwarded to the built-in Markdown renderer for every message, including `sanitizer`, `markedOptions`, `markedExtensions`, and `onCopyError`. |
@@ -953,6 +1018,19 @@ Use the built-in clear button for uncontrolled or persisted chats:
 
 By default, clearing writes an empty conversation. If the chat was seeded with `initialMessages`/legacy `messages`, Chorus persists `[]` even when the adapter supports `removeItem`; that explicit empty transcript prevents welcome messages from resurrecting on reload. If there is no seed, a `removeItem`-capable adapter may delete the key, while adapters without `removeItem` fall back to saving `[]`. Pass `resetToInitialMessages` to restore and persist the seed welcome messages instead. In controlled mode, the same button calls `onChange(resetMessages)` and `onClear(resetMessages)`; keep the canonical list in your state as usual.
 
+Wire `confirmClearConversation` to gate the destructive action — the callback receives `{ messages, resetToInitialMessages, source, persistenceKey? }` and persistence is flushed only after it returns/resolves anything except `false`. While an async confirmation is pending, the clear button is disabled and duplicate clicks (or `ref.clear()` calls) are ignored.
+
+```tsx
+<Chorus
+  persistenceKey="support-chat"
+  showClearButton
+  confirmClearConversation={async ({ messages }) => {
+    if (!messages.length) return true;
+    return window.confirm('Clear this saved conversation? This cannot be undone.');
+  }}
+/>
+```
+
 A storage adapter can be synchronous (like `localStorage`) or Promise-based:
 
 ```ts
@@ -970,7 +1048,6 @@ const conversations = useConversations({ defaultTitle: 'New chat' });
 
 <ConversationList {...conversations} />
 <Chorus
-  key={conversations.activeId ?? 'none'}
   persistenceKey={conversations.activePersistenceKey}
   persistenceStorage={conversations.storage ?? undefined}
   disabled={!conversations.loaded || !conversations.activeId}
@@ -982,6 +1059,8 @@ const conversations = useConversations({ defaultTitle: 'New chat' });
 ```
 
 `useConversations({ indexKey, messageKeyPrefix, storage, onError })` stores a JSON index of `{ id, title, createdAt, updatedAt, pinned, pristine }` records under `indexKey` (default `chorus-conversations-index`) and stores each transcript under `${messageKeyPrefix}${id}`. `pristine` tracks whether `renameFromFirstMessage()` may still auto-title the conversation; explicit renames and successful auto-renames clear it. Selecting a conversation bumps `updatedAt` so recency-sorted lists promote recently visited chats. `deleteConversation(id)` removes the transcript key via `removeItem` when available (or writes `[]` without it). To gate the built-in sidebar delete affordance, pass `confirmDeleteConversation={({ conversation }) => window.confirm('Delete ' + conversation.title + '?')}` to `ConversationList`; returning or resolving `false` cancels before `deleteConversation` updates storage. Index read/write and transcript delete failures surface through `result.error` and `onError(error)` with `error.key`, `error.operation` (`'read' | 'write' | 'delete'`), and `error.conversationId` for transcript deletes. With async storage, `createConversation()` calls made before `loaded` resolves are queued and merged into the loaded index; custom sidebars should still disable New/Rename/Delete controls while `loaded` is false to avoid surprising delayed mutations.
+
+When the default `localStorage` adapter is used, both `useConversations` and `useChorusPersistence` listen for the browser's `storage` event so writes from another tab (a new conversation, a streamed reply, a deletion) are picked up automatically. Cross-tab sync is intentionally limited to the default adapter — if you pass a custom `StorageAdapter` (sessionStorage, IndexedDB, a remote API, etc.), the hooks do not subscribe to `storage` events and that adapter is responsible for its own change notification.
 
 ### Persistence examples
 
@@ -1233,16 +1312,17 @@ const { send, abort, sending } = useChorusStream<MyMeta>(transport, { connector:
 - Non-abort transport, HTTP, connector, and in-band provider errors call `onError` when supplied and reject the returned `send()` promise. This lets README-style `await send(...)` bridges surface the friendly Chorus error banner through the surrounding `onSend` catch path.
 - If `onError` itself throws while handling a stream error, Chorus warns in development and still rejects `send()` with the original stream error. If `onDone` throws after a successful stream, `send()` rejects with that completion callback error and does not call `onError`.
 - `onError` receives raw transport details (including bounded HTTP response body snippets); the built-in UI continues to show only `errorMessage`.
+- A 200 response that contains no SSE `data:` lines (for example a JSON `{"error":"missing key"}` or plain-text body served instead of `text/event-stream`) rejects `send()` with a `ChorusStreamError` whose message names Server-Sent Events, includes the response `Content-Type`, and previews the body — instead of completing silently with no chunks and no error. Truly empty/no-content bodies still resolve.
 - `opts.connector` — `'openai'` | `'anthropic'` | `'gemini'` | `'auto'` | custom `Connector`. Defaults to `'auto'` which handles OpenAI, Gemini, Anthropic JSON, plain-text SSE, reasoning/tool deltas, and in-band `{ error }` payloads.
 - If a connector exposes `createState()`, the hook creates one state object per `send()` and passes it to every `extract(data, state)` call for that stream. Do not store per-stream parser buffers in module globals; use connector state instead.
 
 ### `createFetchSSETransport(url, init?)`
 
-Returns a `Transport` that POSTs to `url` and reads the response as a Server-Sent Events stream. With no `formatBody`, it sends JSON `{ prompt, history }` and defaults `Content-Type: application/json`. With a custom `formatBody`, headers are left alone so FormData/Blob/URLSearchParams can set their own content type; add an explicit JSON Content-Type when your custom serializer returns JSON.
+Returns a `Transport` that POSTs to `url` and reads the response as a Server-Sent Events stream. With no `formatBody`, it sends JSON `{ prompt, history }` and defaults `Content-Type: application/json`. **`history` already includes the latest user turn; `prompt` is a duplicate convenience copy of `history[last].text`.** Server handlers should map `history` directly and ignore `prompt` — appending `prompt` to `history` will send the new user message to the model twice. With a custom `formatBody`, headers are left alone so FormData/Blob/URLSearchParams can set their own content type; add an explicit JSON Content-Type when your custom serializer returns JSON.
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `formatBody` | `(text, history: Message<TMeta>[]) => BodyInit` | `JSON.stringify({ prompt, history })` | Serialise the outgoing request body. Custom serializers do not get an automatic JSON Content-Type. |
+| `formatBody` | `(text, history: Message<TMeta>[]) => BodyInit` | `JSON.stringify({ prompt, history })` | Serialise the outgoing request body. `text` equals `history[last].text` — both arguments describe the same user turn. Custom serializers do not get an automatic JSON Content-Type. |
 | *(any `RequestInit` field)* | | | Forwarded to `fetch` (e.g. `headers`, `credentials`) |
 
 ```ts
@@ -1298,11 +1378,26 @@ Returns a `Transport` that connects over a native WebSocket. Each incoming messa
 | `onClose` | `(code: number, reason: string) => void` | – | Called once for each real WebSocket close transition, with the close code and reason |
 | `onError` | `(event: Event) => void` | – | Called when the WebSocket reports an error |
 | `onMessage` | `(data: string, event: MessageEvent) => void` | – | Observes every decoded WebSocket message; useful for persistent server-pushed updates when no send stream is active |
-| `formatMessage` | `(text, history: Message<TMeta>[]) => string` | `JSON.stringify({ prompt, history })` | Serialise the outgoing request |
+| `formatMessage` | `(text, history: Message<TMeta>[]) => string \| { payload: string; correlationId?: string \| null }` | `JSON.stringify({ prompt, history })` | Serialise the outgoing request. As with the fetch transport, `history` already includes the new user turn and `prompt`/`text` are duplicate copies — backends should consume `history` and ignore `prompt`. Return `{ payload, correlationId }` in persistent mode to register the active stream so `correlate` can route inbound frames to it |
+| `correlate` | `(frame: string) => string \| null \| undefined` | – | Persistent mode only: extract the correlation id from each inbound frame. Non-null ids route the frame to the matching stream; `null`/`undefined` falls through to the legacy broadcast |
 
 Default mode opens a fresh socket per send, then closes it when the response stream ends, the connector reports a done sentinel, or the `AbortSignal` fires. Serializer (`formatMessage`) and `ws.send()` failures reject the transport promise and close that socket, so they surface through `onError` like HTTP/SSE failures. Incoming string, `Blob`, `ArrayBuffer`, and typed-array messages are decoded as text; other message types error the response body instead of silently emitting an empty chunk.
 
-Persistent mode opens a single socket on the first send and keeps it open across sends. The returned transport is still callable as a normal `Transport`, and also exposes `transport.close(code?, reason?)` for explicit cleanup; runtimes with `FinalizationRegistry` also attempt to close the persistent socket when the transport is garbage-collected, but UI code should call `close()` during unmount/dispose rather than relying on GC timing. `onOpen` and `onClose` fire for real socket transitions, not once per send. Because the socket stays open, application/server protocol code is responsible for reconnect/backoff and request/response correlation. If multiple requests or pushed messages can overlap, include request IDs (or similar) in your protocol and filter in a custom connector/`onMessage`. Make sure each response emits a connector-specific done sentinel (or cancel the response body) so `useChorusStream` can finish the current send while the socket remains open.
+Persistent mode opens a single socket on the first send and keeps it open across sends. The returned transport is still callable as a normal `Transport`, and also exposes `transport.close(code?, reason?)` for explicit cleanup; runtimes with `FinalizationRegistry` also attempt to close the persistent socket when the transport is garbage-collected, but UI code should call `close()` during unmount/dispose rather than relying on GC timing. `onOpen` and `onClose` fire for real socket transitions, not once per send. Because the socket stays open, application/server protocol code is responsible for reconnect/backoff and request/response correlation. **If sends can overlap (a second message starting before the first finishes, including the built-in Stop-then-resend flow) every inbound frame is broadcast to every active response stream, which duplicates payloads across assistant messages.** Pair a `formatMessage` that returns `{ payload, correlationId }` with `correlate(frame)` so each frame is dispatched to the request that started it; `correlate` returning `null`/`undefined` falls back to the broadcast (use this for server-pushed updates). The transport logs a one-time dev-mode warning the first time it sees overlapping sends without a `correlate` callback. Make sure each response emits a connector-specific done sentinel (or cancel the response body) so `useChorusStream` can finish the current send while the socket remains open.
+
+```ts
+let nextId = 0;
+const transport = createWebSocketTransport('wss://api.example.com/chat', {
+  persistent: true,
+  formatMessage: (text, history) => {
+    const id = String(++nextId);
+    return { payload: JSON.stringify({ id, prompt: text, history }), correlationId: id };
+  },
+  correlate: (frame) => {
+    try { return (JSON.parse(frame) as { id?: string }).id ?? null; } catch { return null; }
+  },
+});
+```
 
 ### Custom connector
 
@@ -1340,7 +1435,7 @@ const bufferedConnector: Connector<{ buffer: string }> = {
 
 Recommended patterns:
 
-- Keep the default transport body (`{ prompt, history }`) and map `history` safely on your server with `toOpenAIChatCompletionsBody`, `toAnthropicMessagesBody`, or `toGeminiGenerateContentBody`.
+- Keep the default transport body (`{ prompt, history }`) and map `history` safely on your server with `toOpenAIChatCompletionsBody`, `toAnthropicMessagesBody`, or `toGeminiGenerateContentBody`. `history` already includes the latest user turn — `prompt` is a duplicate copy and the provider helpers read `history` only.
 - Or pass a `format*Body` helper to `createFetchSSETransport('/api/chat', { formatBody, headers })` when your own backend expects a provider-shaped JSON body.
 - Keep API keys in that backend proxy. Client-side `formatBody` is for shaping requests to your server, not for calling provider APIs directly with secrets.
 
@@ -1567,6 +1662,8 @@ When neither `renderMessage` nor a custom `MessageBubble` is used, each message 
 
 Each built-in row and `<MessageBubble>` includes a visually hidden `.chorus-sr-only` speaker label (`User message`, `Assistant message`, `System message`, or `Tool message`) so screen readers announce who spoke without changing the visual layout.
 
+`.chorus-actions` is hover-revealed on pointer devices but switches to always-visible under `@media (hover: none), (pointer: coarse)` so touch users can still discover Copy/Edit/Regenerate/Delete/Feedback. Set `alwaysShowMessageActions` on `<Chorus>` (or apply `.chorus--always-show-actions` to the root yourself) to keep actions visible on hover-capable devices too.
+
 Target these classes in your CSS to restyle without a render prop:
 
 ```css
@@ -1621,7 +1718,7 @@ You can compose the UI from smaller pieces:
 import { ChatWindow, ChatInput, ChorusTheme, Markdown } from 'react-chorus';
 ```
 
-- **`<ChatWindow messages={…} typing={…} />`** — renders the scrollable message list with empty-state prompts, a typing indicator, errors, optional jump-to-latest button, and optional `maxRenderedMessages` windowing. It accepts `hiddenRoles?: Role[]` (default `['system', 'tool']`); `showSystemMessages` is deprecated but remains supported as an alias for showing all roles. Pass `markdownSanitizer`, `markdownProps`, `renderError`, or `renderMessage` to customize built-in rendering.
+- **`<ChatWindow messages={…} typing={…} />`** — renders the scrollable message list with empty-state prompts, a typing indicator, errors, the optional floating jump-to-latest button, and optional `maxRenderedMessages` windowing. It accepts `hiddenRoles?: Role[]` (default `['system', 'tool']`); `showSystemMessages` is deprecated but remains supported as an alias for showing all roles. `showJumpToBottomButton?: boolean` defaults to `!headless` and toggles the floating “Jump to latest” button that surfaces when the user scrolls away from the bottom and new activity arrives — pass `false` to disable it and render your own affordance. Pass `markdownSanitizer`, `markdownProps`, `renderError`, or `renderMessage` to customize built-in rendering.
 - **`<ChatInput value onSend onStop placeholder sending />`** — the text input, send/stop button, disabled/read-only states, and optional attachment composer (`accept`, paste/drop, limits, cancellable `uploadAttachment`).
 - **`<ChorusTheme palette={…}>`** — applies theme CSS variables to any subtree.
 - **`<Markdown text={…} codeTheme="dark" />`** — standalone markdown renderer with syntax highlighting and copy buttons. It supports `streaming` to render escaped plain text until finalization, `sanitizer` to provide a custom DOMPurify-compatible sanitizer when SSR needs sanitized raw HTML instead of the built-in no-raw-HTML safe mode, `markedOptions`/`markedExtensions` for per-instance parser customization, and `onCopyError` for clipboard-copy failures.
@@ -1630,6 +1727,8 @@ import { ChatWindow, ChatInput, ChorusTheme, Markdown } from 'react-chorus';
 ### Headless subpath
 
 Import from `react-chorus/headless` when you want semantic markup and behavior without default styling. The headless subpath preserves class names as styling hooks, and its `Chorus`, `ChatWindow`, `MessageBubble`, `ConversationList`, and `Markdown` exports default `headless={true}` so Markdown styles and syntax-highlight theme CSS are not injected unless you explicitly pass `headless={false}`. It re-exports the same public message, attachment, upload, streaming, and persistence types as the root entry point so `ChatInput` handlers can be typed from the subpath alone.
+
+Because `showJumpToBottomButton` defaults to `!headless`, the floating jump button is off on the headless exports. Pass `showJumpToBottomButton={true}` to opt the built-in button back in, or leave it off and render your own jump-to-latest UI from the same "auto-scroll paused" + "has unread activity" signals the built-in button reacts to — track them with a scroll listener on the `ChatWindow` ref (the built-in `useAutoScroll` helper compares `scrollHeight - scrollTop - clientHeight` against a 48 px near-bottom threshold and flags unread activity when a new message arrives while paused).
 
 ```tsx
 import { ChatWindow, ConversationList, Markdown, MessageBubble } from 'react-chorus/headless';

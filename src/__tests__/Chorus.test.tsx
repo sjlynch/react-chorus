@@ -101,6 +101,15 @@ describe('Chorus', () => {
     expect(root.style.getPropertyValue('--chorus-tool-header-bg')).toBe('#777');
   });
 
+  it('adds the chorus--always-show-actions root class when alwaysShowMessageActions is enabled', () => {
+    const { container, rerender } = render(<Chorus />);
+    const root = container.firstElementChild as HTMLElement;
+    expect(root).not.toHaveClass('chorus--always-show-actions');
+
+    rerender(<Chorus alwaysShowMessageActions />);
+    expect(root).toHaveClass('chorus', 'chorus--always-show-actions');
+  });
+
   it('seeds feedback through getMessageFeedback', () => {
     const message: Message<{ storedFeedback: 'down' | null }> = {
       id: 'stored-feedback',
@@ -939,6 +948,24 @@ describe('Chorus', () => {
     await user.click(screen.getByRole('button', { name: /clear conversation/i }));
 
     await waitFor(() => expect(onMessagesChange).toHaveBeenLastCalledWith([], expect.objectContaining({ source: 'persistence', reason: 'clear' })));
+  });
+
+  it('resets composer draft when persistenceKey switches conversations', async () => {
+    const user = userEvent.setup();
+    const storage = makeSyncStorage({
+      'chat:a': JSON.stringify([{ id: 'a1', role: 'assistant', text: 'Conversation A' }]),
+      'chat:b': JSON.stringify([{ id: 'b1', role: 'assistant', text: 'Conversation B' }]),
+    });
+
+    const { rerender } = render(<Chorus persistenceKey="chat:a" persistenceStorage={storage} />);
+
+    const composer = screen.getByRole('textbox', { name: /send a message/i });
+    await user.type(composer, 'unsent draft for A');
+    expect(composer).toHaveValue('unsent draft for A');
+
+    rerender(<Chorus persistenceKey="chat:b" persistenceStorage={storage} />);
+
+    expect(screen.getByRole('textbox', { name: /send a message/i })).toHaveValue('');
   });
 
   it('waits for an empty async persistence load before rendering and saving the seed', async () => {
@@ -2174,6 +2201,100 @@ describe('Chorus', () => {
     await user.click(screen.getByRole('button', { name: /clear conversation/i }));
 
     expect(screen.queryByText('clear me')).not.toBeInTheDocument();
+  });
+
+  it('cancels the built-in clear when confirmClearConversation returns false without touching persistence', async () => {
+    const user = userEvent.setup();
+    const initial: Message[] = [
+      { id: 'u1', role: 'user', text: 'keep me too' },
+      { id: 'a1', role: 'assistant', text: 'preserved reply' },
+    ];
+    const storage = makeSyncStorage({ chat: JSON.stringify(initial) });
+    const setItem = vi.fn(storage.setItem);
+    const removeItem = vi.fn();
+    storage.setItem = setItem;
+    storage.removeItem = removeItem;
+    const onClear = vi.fn();
+    const confirmClearConversation = vi.fn(() => false);
+
+    render(
+      <Chorus
+        persistenceKey="chat"
+        persistenceStorage={storage}
+        confirmClearConversation={confirmClearConversation}
+        onClear={onClear}
+        showClearButton
+      />,
+    );
+
+    expect(await screen.findByText('keep me too')).toBeInTheDocument();
+    setItem.mockClear();
+
+    await user.click(screen.getByRole('button', { name: /clear conversation/i }));
+
+    expect(confirmClearConversation).toHaveBeenCalledWith({
+      messages: initial,
+      resetToInitialMessages: false,
+      source: 'user',
+      persistenceKey: 'chat',
+    });
+    expect(screen.getByText('keep me too')).toBeInTheDocument();
+    expect(screen.getByText('preserved reply')).toBeInTheDocument();
+    expect(onClear).not.toHaveBeenCalled();
+    expect(setItem).not.toHaveBeenCalled();
+    expect(removeItem).not.toHaveBeenCalled();
+    expect(storage.store.chat).toBe(JSON.stringify(initial));
+  });
+
+  it('cancels async confirmClearConversation, disables the clear button while pending, and ignores duplicate clicks', async () => {
+    const user = userEvent.setup();
+    const initial: Message[] = [{ id: 'm1', role: 'assistant', text: 'persist me' }];
+    const storage = makeSyncStorage({ chat: JSON.stringify(initial) });
+    const setItem = vi.fn(storage.setItem);
+    storage.setItem = setItem;
+
+    let pending = deferred<boolean>();
+    const confirmClearConversation = vi.fn(() => pending.promise);
+
+    render(
+      <Chorus
+        persistenceKey="chat"
+        persistenceStorage={storage}
+        confirmClearConversation={confirmClearConversation}
+        showClearButton
+      />,
+    );
+
+    expect(await screen.findByText('persist me')).toBeInTheDocument();
+    setItem.mockClear();
+
+    const button = screen.getByRole('button', { name: /clear conversation/i });
+    await user.click(button);
+    expect(confirmClearConversation).toHaveBeenCalledTimes(1);
+    expect(button).toBeDisabled();
+
+    await user.click(button);
+    expect(confirmClearConversation).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      pending.resolve(false);
+      await pending.promise;
+    });
+
+    await waitFor(() => expect(button).not.toBeDisabled());
+    expect(screen.getByText('persist me')).toBeInTheDocument();
+    expect(setItem).not.toHaveBeenCalled();
+    expect(storage.store.chat).toBe(JSON.stringify(initial));
+
+    pending = deferred<boolean>();
+    await user.click(button);
+    await act(async () => {
+      pending.resolve(true);
+      await pending.promise;
+    });
+
+    await waitFor(() => expect(screen.queryByText('persist me')).not.toBeInTheDocument());
+    await waitFor(() => expect(storage.store.chat).toBe(JSON.stringify([])));
   });
 
   it('can reset to the initialMessages seed when requested', async () => {
