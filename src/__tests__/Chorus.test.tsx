@@ -101,6 +101,15 @@ describe('Chorus', () => {
     expect(root.style.getPropertyValue('--chorus-tool-header-bg')).toBe('#777');
   });
 
+  it('adds the chorus--always-show-actions root class when alwaysShowMessageActions is enabled', () => {
+    const { container, rerender } = render(<Chorus />);
+    const root = container.firstElementChild as HTMLElement;
+    expect(root).not.toHaveClass('chorus--always-show-actions');
+
+    rerender(<Chorus alwaysShowMessageActions />);
+    expect(root).toHaveClass('chorus', 'chorus--always-show-actions');
+  });
+
   it('seeds feedback through getMessageFeedback', () => {
     const message: Message<{ storedFeedback: 'down' | null }> = {
       id: 'stored-feedback',
@@ -939,6 +948,24 @@ describe('Chorus', () => {
     await user.click(screen.getByRole('button', { name: /clear conversation/i }));
 
     await waitFor(() => expect(onMessagesChange).toHaveBeenLastCalledWith([], expect.objectContaining({ source: 'persistence', reason: 'clear' })));
+  });
+
+  it('resets composer draft when persistenceKey switches conversations', async () => {
+    const user = userEvent.setup();
+    const storage = makeSyncStorage({
+      'chat:a': JSON.stringify([{ id: 'a1', role: 'assistant', text: 'Conversation A' }]),
+      'chat:b': JSON.stringify([{ id: 'b1', role: 'assistant', text: 'Conversation B' }]),
+    });
+
+    const { rerender } = render(<Chorus persistenceKey="chat:a" persistenceStorage={storage} />);
+
+    const composer = screen.getByRole('textbox', { name: /send a message/i });
+    await user.type(composer, 'unsent draft for A');
+    expect(composer).toHaveValue('unsent draft for A');
+
+    rerender(<Chorus persistenceKey="chat:b" persistenceStorage={storage} />);
+
+    expect(screen.getByRole('textbox', { name: /send a message/i })).toHaveValue('');
   });
 
   it('waits for an empty async persistence load before rendering and saving the seed', async () => {

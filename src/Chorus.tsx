@@ -5,6 +5,7 @@ import { ChatInput } from './components/ChatInput';
 import { styleVarsFromPalette, type Palette } from './components/ChorusTheme';
 import type { Attachment, AttachmentError, ConnectorName, Message, Role, StorageAdapter, UploadAttachment } from './types';
 import type { Transport } from './hooks/useChorusStream';
+import type { FetchTransportInit } from './hooks/assistant-session/transport';
 import { useChorusPersistence, type DeserializeMessages, type SerializeMessages } from './hooks/useChorusPersistence';
 import { useChorusMessages, type ChorusMessagesChangeContext } from './hooks/useChorusMessages';
 import { useAssistantSession } from './hooks/useAssistantSession';
@@ -14,6 +15,7 @@ import type { MarkdownSanitizer } from './components/Markdown';
 import { isChorusDevMode } from './utils/devMode';
 
 export type { Transport };
+export type { FetchTransportInit };
 export type { Connector };
 export type { ChorusAbortContext, ChorusAbortReason, ChorusAbortSource, ChorusClearConversationContext, ChorusConfirmClearConversation, ChorusConfirmDeleteMessage, ChorusDeleteMessageContext, ChorusFinishContext, ChorusMessagesChangeContext, ChorusOnAbort, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusSendHelpers, ChorusSendPath, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolLoopContext, ChorusToolRegistry };
 
@@ -32,6 +34,12 @@ export interface ChorusRef<TMeta = Record<string, unknown>> {
 
 export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React.HTMLAttributes<HTMLDivElement>, 'onChange' | 'onError' | 'onCopy' | 'onAbort'> {
   accept?: string;
+  /**
+   * Always render the per-message action buttons (edit/regenerate/copy/feedback/delete)
+   * instead of revealing them on hover. Coarse pointers and `(hover: none)` media
+   * already get this behavior automatically; set this to opt in on pointer devices too.
+   */
+  alwaysShowMessageActions?: boolean;
   /** Accessible/button label for the built-in clear action. */
   clearLabel?: string;
   codeBlockTheme?: 'dark' | 'light';
@@ -119,14 +127,15 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
   suggestedPrompts?: string[];
   /** Hidden system prompt. Prepended to transport history; exposed as helpers.systemPrompt on the onSend path. */
   systemPrompt?: string;
-  /** Simple path: URL or Transport function. */
-  transport?: string | Transport<TMeta>;
+  /** Simple path: URL string, `{ url, headers, credentials, ... }` config object, or a custom `Transport` function. */
+  transport?: string | FetchTransportInit<TMeta> | Transport<TMeta>;
   uploadAttachment?: UploadAttachment;
   value?: Message<TMeta>[];
 }
 
 function ChorusInner<TMeta = Record<string, unknown>>({
   accept,
+  alwaysShowMessageActions = false,
   className,
   clearLabel = 'Clear conversation',
   codeBlockTheme = 'dark',
@@ -299,6 +308,13 @@ function ChorusInner<TMeta = Record<string, unknown>>({
   const composerDisabled = disabled || persistenceLoading;
   const resolvedDisabledReason = persistenceLoading ? disabledReason ?? 'Loading saved conversation…' : disabledReason;
 
+  const previousPersistenceKeyRef = React.useRef(builtInPersistenceKey);
+  React.useEffect(() => {
+    if (previousPersistenceKeyRef.current === builtInPersistenceKey) return;
+    previousPersistenceKeyRef.current = builtInPersistenceKey;
+    resetComposer();
+  }, [builtInPersistenceKey, resetComposer]);
+
   const handleInputSend = React.useCallback((attachments: Attachment[] = []) => {
     if (writesDisabled) return false;
     const accepted = session.send(draft, attachments);
@@ -367,7 +383,7 @@ function ChorusInner<TMeta = Record<string, unknown>>({
     <div
       {...rest}
       ref={rootRef}
-      className={["chorus", disabled && "chorus--disabled", readOnly && "chorus--readonly", className].filter(Boolean).join(" ")}
+      className={["chorus", disabled && "chorus--disabled", readOnly && "chorus--readonly", alwaysShowMessageActions && "chorus--always-show-actions", className].filter(Boolean).join(" ")}
       style={{ ...paletteVars, ...style }}
       aria-disabled={writesDisabled ? true : rest['aria-disabled']}
     >
