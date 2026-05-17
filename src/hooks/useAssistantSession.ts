@@ -8,7 +8,7 @@ import { isChorusDevMode } from '../utils/devMode';
 import { createAbortError, isAbortError, toError } from '../utils/errors';
 import { isPromiseLike } from '../utils/async';
 import { createDefaultFetchSSETransport, type FetchTransportInit } from './assistant-session/transport';
-import { cloneHistoryForRetry, createMessageId, dropTrailingAssistant, findLastUserMessage, hasToolOutput, metadataWithToolProvider, normalizeReturnedMessage } from './assistant-session/messageUtils';
+import { cloneHistoryForRetry, createMessageId, dropTrailingAssistant, findLastUserMessage, hasToolOutput, metadataWithToolError, metadataWithToolProvider, normalizeReturnedMessage } from './assistant-session/messageUtils';
 import { warnObserverError } from './assistant-session/observer';
 import { DEFAULT_MAX_TOOL_ITERATIONS, normalizeMaxToolIterations } from './assistant-session/toolLoop';
 
@@ -442,6 +442,14 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     )), { reason: 'assistant' });
   }, [updateSessionMessages]);
 
+  const setToolErrorOutput = React.useCallback((messageId: string, output: unknown) => {
+    updateSessionMessages(prev => prev.map(message => (
+      message.id === messageId && message.role === 'tool'
+        ? { ...message, metadata: metadataWithToolError(message.metadata), toolCall: { ...message.toolCall, output } }
+        : message
+    )), { reason: 'assistant' });
+  }, [updateSessionMessages]);
+
   const createToolCallContext = React.useCallback((message: Message<TMeta>, signal: AbortSignal): ChorusToolCallContext<TMeta> | null => {
     if (message.role !== 'tool') return null;
     const id = message.toolCall.id ?? message.id;
@@ -490,12 +498,12 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
         if (output !== undefined) setToolOutput(currentMessage.id, output);
       } catch (error) {
         if (!signal.aborted && !isAbortError(error) && isAssistantSessionActive(sessionId)) {
-          setToolOutput(currentMessage.id, { error: toError(error).message });
+          setToolErrorOutput(currentMessage.id, { error: toError(error).message });
         }
         throw error;
       }
     }
-  }, [createToolCallContext, isAssistantSessionActive, messagesRef, onToolCallRef, safeNotifyToolCall, setToolOutput, toolsRef]);
+  }, [createToolCallContext, isAssistantSessionActive, messagesRef, onToolCallRef, safeNotifyToolCall, setToolErrorOutput, setToolOutput, toolsRef]);
 
   const finalizeAssistantNow = React.useCallback(() => {
     cancelPending(true);

@@ -22,18 +22,16 @@ function geminiParts<TMeta>(message: Message<TMeta>, options: ProviderMappingOpt
 
   if (message.role === 'user') {
     for (const attachment of message.attachments ?? []) {
-      if (attachment.type.startsWith('image/')) {
-        const dataUrl = dataUrlFromAttachment(attachment);
-        if (dataUrl) {
-          parts.push({ inlineData: { mimeType: attachment.type || dataUrl.mimeType, data: dataUrl.base64 } });
-          continue;
-        }
+      const dataUrl = dataUrlFromAttachment(attachment);
+      if (dataUrl) {
+        parts.push({ inlineData: { mimeType: attachment.type || dataUrl.mimeType, data: dataUrl.base64 } });
+        continue;
+      }
 
-        const fileUri = fileUriFromAttachment(attachment);
-        if (fileUri) {
-          parts.push({ fileData: { mimeType: attachment.type || 'application/octet-stream', fileUri } });
-          continue;
-        }
+      const fileUri = fileUriFromAttachment(attachment);
+      if (fileUri) {
+        parts.push({ fileData: { mimeType: attachment.type || 'application/octet-stream', fileUri } });
+        continue;
       }
 
       parts.push({ text: unsupportedAttachmentText(attachment, message, options) });
