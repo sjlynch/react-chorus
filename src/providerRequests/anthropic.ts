@@ -1,6 +1,6 @@
 import type { Attachment, Message } from '../types';
 import { dataUrlFromAttachment, unsupportedAttachmentText } from './attachments';
-import { metadataString } from './metadata';
+import { metadataBoolean, metadataString } from './metadata';
 import { stripAnthropicOptions } from './options';
 import { messageText, objectToolInput, toolContextText, toolOutputText } from './toolOutput';
 import type { AnthropicMessage, AnthropicMessagesBody, AnthropicMessagesBodyOptions, ProviderMappingOptions } from './types';
@@ -13,6 +13,20 @@ function anthropicToolUseId(message: Message<unknown>) {
     'tool_use_id',
     'providerToolUseId',
   ]);
+}
+
+function anthropicToolResultIsError(message: Message<unknown>) {
+  return metadataBoolean(message, 'anthropic', ['isError', 'is_error'], ['isError', 'is_error']);
+}
+
+function anthropicToolResultBlock(message: Message<unknown>, toolUseId: string) {
+  const block: Record<string, unknown> = {
+    type: 'tool_result',
+    tool_use_id: toolUseId,
+    content: toolOutputText(message),
+  };
+  if (anthropicToolResultIsError(message)) block.is_error = true;
+  return block;
 }
 
 function anthropicToolUseBlock(message: Message<unknown>) {
@@ -97,7 +111,7 @@ function toAnthropicMessage<TMeta>(message: Message<TMeta>, options: ProviderMap
   if (message.role === 'tool') {
     const toolUseId = anthropicToolUseId(message as Message<unknown>);
     if (toolUseId) {
-      return { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content: toolOutputText(message) }] };
+      return { role: 'user', content: [anthropicToolResultBlock(message as Message<unknown>, toolUseId)] };
     }
 
     const text = toolContextText(message);
@@ -139,11 +153,10 @@ export function toAnthropicMessages<TMeta = Record<string, unknown>>(
       appendAnthropicToolUseBlocks(messages, providerTools.map(entry => entry.block));
       messages.push({
         role: 'user',
-        content: providerTools.map(entry => ({
-          type: 'tool_result',
-          tool_use_id: anthropicToolUseId(entry.message as Message<unknown>),
-          content: toolOutputText(entry.message),
-        })),
+        content: providerTools.map(entry => anthropicToolResultBlock(
+          entry.message as Message<unknown>,
+          anthropicToolUseId(entry.message as Message<unknown>) as string,
+        )),
       });
     }
 
