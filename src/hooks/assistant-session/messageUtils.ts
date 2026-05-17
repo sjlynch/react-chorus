@@ -33,6 +33,15 @@ export function metadataWithToolProvider<TMeta>(existing: TMeta | undefined, del
   return Object.keys(metadata).length ? metadata as TMeta : existing;
 }
 
+export function metadataWithToolError<TMeta>(existing: TMeta | undefined): TMeta {
+  const metadata: Record<string, unknown> = isRecord(existing) ? { ...existing } : {};
+  metadata.isError = true;
+  const anthropic = isRecord(metadata.anthropic) ? { ...metadata.anthropic } : {};
+  anthropic.isError = true;
+  metadata.anthropic = anthropic;
+  return metadata as TMeta;
+}
+
 export function hasToolOutput<TMeta>(message: Message<TMeta>) {
   return message.role === 'tool' && Object.prototype.hasOwnProperty.call(message.toolCall, 'output');
 }

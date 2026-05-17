@@ -5,6 +5,7 @@ import { ChatInput } from './components/ChatInput';
 import { styleVarsFromPalette, type Palette } from './components/ChorusTheme';
 import type { Attachment, AttachmentError, ConnectorName, Message, Role, StorageAdapter, UploadAttachment } from './types';
 import type { Transport } from './hooks/useChorusStream';
+import type { FetchTransportInit } from './hooks/assistant-session/transport';
 import { useChorusPersistence, type DeserializeMessages, type SerializeMessages } from './hooks/useChorusPersistence';
 import { useChorusMessages, type ChorusMessagesChangeContext } from './hooks/useChorusMessages';
 import { useAssistantSession } from './hooks/useAssistantSession';
@@ -14,6 +15,7 @@ import type { MarkdownSanitizer } from './components/Markdown';
 import { isChorusDevMode } from './utils/devMode';
 
 export type { Transport };
+export type { FetchTransportInit };
 export type { Connector };
 export type { ChorusAbortContext, ChorusAbortReason, ChorusAbortSource, ChorusConfirmDeleteMessage, ChorusDeleteMessageContext, ChorusFinishContext, ChorusMessagesChangeContext, ChorusOnAbort, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusSendHelpers, ChorusSendPath, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolLoopContext, ChorusToolRegistry };
 
@@ -117,8 +119,8 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
   suggestedPrompts?: string[];
   /** Hidden system prompt. Prepended to transport history; exposed as helpers.systemPrompt on the onSend path. */
   systemPrompt?: string;
-  /** Simple path: URL or Transport function. */
-  transport?: string | Transport<TMeta>;
+  /** Simple path: URL string, `{ url, headers, credentials, ... }` config object, or a custom `Transport` function. */
+  transport?: string | FetchTransportInit<TMeta> | Transport<TMeta>;
   uploadAttachment?: UploadAttachment;
   value?: Message<TMeta>[];
 }
