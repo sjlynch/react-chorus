@@ -7,10 +7,11 @@ import { useLatestRef } from './useLatestRef';
 import { isChorusDevMode } from '../utils/devMode';
 import { createAbortError, isAbortError, toError } from '../utils/errors';
 import { isPromiseLike } from '../utils/async';
-import { createDefaultFetchSSETransport } from './assistant-session/transport';
-import { cloneHistoryForRetry, createMessageId, dropTrailingAssistant, findLastUserMessage, hasToolOutput, metadataWithToolProvider, normalizeReturnedMessage } from './assistant-session/messageUtils';
+import { createDefaultFetchSSETransport, type FetchTransportInit } from './assistant-session/transport';
+import { cloneHistoryForRetry, createMessageId, dropTrailingAssistant, findLastUserMessage, hasToolOutput, metadataWithToolError, metadataWithToolProvider, normalizeReturnedMessage } from './assistant-session/messageUtils';
 import { warnObserverError } from './assistant-session/observer';
 import { DEFAULT_MAX_TOOL_ITERATIONS, normalizeMaxToolIterations } from './assistant-session/toolLoop';
+import type { ChorusToolDefinition, ChorusToolRegistry } from '../tools';
 
 export interface ChorusSendHelpers {
   appendAssistant: (chunk: string) => void;
@@ -48,6 +49,17 @@ export type ChorusConfirmDeleteMessage<TMeta = Record<string, unknown>> = (conte
 
 export type ChorusAbortReason = 'stop' | 'clear' | 'superseded';
 export type ChorusAbortSource = 'user' | 'programmatic';
+
+export interface ChorusClearConversationContext<TMeta = Record<string, unknown>> {
+  messages: Message<TMeta>[];
+  resetToInitialMessages: boolean;
+  source: ChorusAbortSource;
+  persistenceKey?: string;
+}
+
+export type ChorusConfirmClearConversation<TMeta = Record<string, unknown>> = (
+  context: ChorusClearConversationContext<TMeta>,
+) => boolean | void | Promise<boolean | void>;
 export type ChorusSendPath = 'transport' | 'onSend';
 
 export interface ChorusAbortContext<TMeta = Record<string, unknown>> {
@@ -85,18 +97,56 @@ export interface ChorusToolCallContext<TMeta = Record<string, unknown>> {
 
 export type ChorusOnToolCall<TMeta = Record<string, unknown>> = (context: ChorusToolCallContext<TMeta>) => unknown | Promise<unknown>;
 export type ChorusToolHandler<TMeta = Record<string, unknown>> = (input: unknown, context: ChorusToolCallContext<TMeta>) => unknown | Promise<unknown>;
-export type ChorusToolRegistry<TMeta = Record<string, unknown>> = Record<string, ChorusToolHandler<TMeta>>;
+export type { ChorusToolRegistry };
+
+// Inlined to avoid pulling the runtime body of `src/tools.ts` into the
+// assistant-session chunk; the provider-requests subpath imports tools.ts and
+// must stay independent of the session bundle.
+function resolveToolHandlerLocal<TMeta>(
+  registry: ChorusToolRegistry<TMeta> | undefined,
+  name: string,
+): ChorusToolHandler<TMeta> | undefined {
+  if (!registry) return undefined;
+  const entry = Array.isArray(registry)
+    ? registry.find((definition: ChorusToolDefinition<TMeta>) => definition.name === name)
+    : registry[name];
+  if (!entry) return undefined;
+  if (typeof entry === 'function') return entry as ChorusToolHandler<TMeta>;
+  return typeof entry.handler === 'function' ? (entry.handler as ChorusToolHandler<TMeta>) : undefined;
+}
+
+/**
+ * Why a transport stream's tool-loop iteration ended. Hosts that opt in to `autoContinueTools` use this to
+ * distinguish a normal terminal completion from the safety cap firing (`'max-tool-iterations'`), a host veto
+ * (`'tool-loop-veto'`), or an intermediate iteration that will continue (`'tool-loop-continue'`). The
+ * `'max-tool-iterations'` reason is callback-only; Chorus deliberately does not render a default banner so
+ * hosts can choose how to surface or recover from the cap.
+ */
+export type ChorusStreamDoneReason =
+  | 'completed'
+  | 'tool-loop-continue'
+  | 'tool-loop-veto'
+  | 'max-tool-iterations';
 
 export interface ChorusStreamDoneContext<TMeta = Record<string, unknown>> {
   assistantMessage: Message<TMeta> | null;
   toolMessages: ToolMessage<TMeta>[];
   messages: Message<TMeta>[];
   response?: Response;
+  /** Why this stream ended. See {@link ChorusStreamDoneReason}. */
+  reason: ChorusStreamDoneReason;
+  /** Whether Chorus will immediately start another tool-loop continuation after this callback returns. */
+  willContinue: boolean;
+  /** 1-based count of completed tool-loop iterations on this turn (always >= 1). */
+  iteration: number;
+  /** Normalized cap (after defaulting and `Infinity` handling) used to evaluate the loop. */
+  maxToolIterations: number;
 }
 
 export type ChorusOnStreamDone<TMeta = Record<string, unknown>> = (context: ChorusStreamDoneContext<TMeta>) => void;
 
-export interface ChorusToolLoopContext<TMeta = Record<string, unknown>> extends ChorusStreamDoneContext<TMeta> {
+export interface ChorusToolLoopContext<TMeta = Record<string, unknown>>
+  extends Omit<ChorusStreamDoneContext<TMeta>, 'reason' | 'willContinue'> {
   /** Number of completed tool-execution iterations, starting at 1 for the first continuation. */
   iteration: number;
   maxToolIterations: number;
@@ -120,7 +170,7 @@ export interface UseAssistantSessionOptions<TMeta = Record<string, unknown>> {
   messages: Message<TMeta>[];
   updateMessages: (updater: (prev: Message<TMeta>[]) => Message<TMeta>[], options?: UpdateMessagesOptions) => Message<TMeta>[];
   seedMessages: Message<TMeta>[];
-  transport?: string | Transport<TMeta>;
+  transport?: string | FetchTransportInit<TMeta> | Transport<TMeta>;
   systemPrompt?: string;
   connector?: Connector | ConnectorName;
   onSend?: ChorusOnSend<TMeta>;
@@ -138,6 +188,8 @@ export interface UseAssistantSessionOptions<TMeta = Record<string, unknown>> {
   maxToolIterations?: number;
   shouldContinueToolLoop?: ChorusShouldContinueToolLoop<TMeta>;
   confirmDeleteMessage?: ChorusConfirmDeleteMessage<TMeta>;
+  confirmClearConversation?: ChorusConfirmClearConversation<TMeta>;
+  persistenceKey?: string;
   flushPersistence: () => void;
   resetToInitialMessages?: boolean;
   onClear?: (messages: Message<TMeta>[]) => void;
@@ -157,6 +209,7 @@ export interface UseAssistantSessionResult {
   streamRawError: Error | null;
   streamingMessageId: string | null;
   hasStartedAssistant: boolean;
+  clearConfirmationPending: boolean;
 }
 
 export function useAssistantSession<TMeta = Record<string, unknown>>({
@@ -181,6 +234,8 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
   maxToolIterations = DEFAULT_MAX_TOOL_ITERATIONS,
   shouldContinueToolLoop,
   confirmDeleteMessage,
+  confirmClearConversation,
+  persistenceKey,
   flushPersistence,
   resetToInitialMessages = false,
   onClear,
@@ -199,13 +254,18 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
   const maxToolIterationsRef = useLatestRef(maxToolIterations);
   const shouldContinueToolLoopRef = useLatestRef(shouldContinueToolLoop);
   const confirmDeleteMessageRef = useLatestRef(confirmDeleteMessage);
+  const confirmClearConversationRef = useLatestRef(confirmClearConversation);
+  const persistenceKeyRef = useLatestRef(persistenceKey);
+  const resetToInitialMessagesRef = useLatestRef(resetToInitialMessages);
   const onClearRef = useLatestRef(onClear);
   const fallbackErrorMessageRef = useLatestRef(fallbackErrorMessage);
   const systemPromptRef = useLatestRef(systemPrompt);
   const minAssistantDelayMsRef = useLatestRef(minAssistantDelayMs);
   const seedMessagesRef = useLatestRef(seedMessages);
   const pendingDeleteIdsRef = React.useRef(new Set<string>());
+  const clearConfirmationActiveRef = React.useRef(false);
 
+  const [clearConfirmationPending, setClearConfirmationPending] = React.useState(false);
   const [internalSending, setInternalSendingState] = React.useState(false);
   const [transportBusy, setTransportBusyState] = React.useState(false);
   const [streamError, setStreamError] = React.useState<string | null>(null);
@@ -442,6 +502,14 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     )), { reason: 'assistant' });
   }, [updateSessionMessages]);
 
+  const setToolErrorOutput = React.useCallback((messageId: string, output: unknown) => {
+    updateSessionMessages(prev => prev.map(message => (
+      message.id === messageId && message.role === 'tool'
+        ? { ...message, metadata: metadataWithToolError(message.metadata), toolCall: { ...message.toolCall, output } }
+        : message
+    )), { reason: 'assistant' });
+  }, [updateSessionMessages]);
+
   const createToolCallContext = React.useCallback((message: Message<TMeta>, signal: AbortSignal): ChorusToolCallContext<TMeta> | null => {
     if (message.role !== 'tool') return null;
     const id = message.toolCall.id ?? message.id;
@@ -471,7 +539,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
       if (!context) continue;
 
       try {
-        const handler = toolsRef.current?.[context.name];
+        const handler = resolveToolHandlerLocal(toolsRef.current, context.name);
         if (handler) {
           const output = await handler(context.input, context);
           if (!isAssistantSessionActive(sessionId)) return;
@@ -490,12 +558,12 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
         if (output !== undefined) setToolOutput(currentMessage.id, output);
       } catch (error) {
         if (!signal.aborted && !isAbortError(error) && isAssistantSessionActive(sessionId)) {
-          setToolOutput(currentMessage.id, { error: toError(error).message });
+          setToolErrorOutput(currentMessage.id, { error: toError(error).message });
         }
         throw error;
       }
     }
-  }, [createToolCallContext, isAssistantSessionActive, messagesRef, onToolCallRef, safeNotifyToolCall, setToolOutput, toolsRef]);
+  }, [createToolCallContext, isAssistantSessionActive, messagesRef, onToolCallRef, safeNotifyToolCall, setToolErrorOutput, setToolOutput, toolsRef]);
 
   const finalizeAssistantNow = React.useCallback(() => {
     cancelPending(true);
@@ -653,6 +721,9 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
   const resolvedTransport = React.useMemo((): Transport<TMeta> => {
     if (typeof transport === 'string') return createDefaultFetchSSETransport<TMeta>(transport);
     if (typeof transport === 'function') return transport;
+    if (transport && typeof transport === 'object' && typeof transport.url === 'string') {
+      return createDefaultFetchSSETransport<TMeta>(transport);
+    }
     return () => Promise.resolve(new Response(null, { status: 200 }));
   }, [transport]);
 
@@ -721,32 +792,51 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     });
   }, [appendAssistantNow, appendAssistantReasoningNow, appendToolDeltaNow, doStream, historyForTransport, invalidateAssistantSession, isAssistantSessionActive, minAssistantDelayMsRef, removePendingAssistant, safeOnError, setTransportBusy, showStreamError]);
 
-  const shouldContinueAfterTools = React.useCallback(async (
+  interface ToolLoopDecision {
+    reason: ChorusStreamDoneReason;
+    iteration: number;
+    maxToolIterations: number;
+    willContinue: boolean;
+  }
+
+  const decideToolLoopContinuation = React.useCallback(async (
     iteration: number,
     assistantMessage: Message<TMeta> | null,
     toolMessages: ToolMessage<TMeta>[],
     response: Response | undefined,
     signal: AbortSignal,
-  ) => {
-    if (!autoContinueToolsRef.current || !toolMessages.length) return false;
-    if (!toolMessages.every(hasToolOutput)) return false;
-
+  ): Promise<ToolLoopDecision> => {
     const maxToolIterations = normalizeMaxToolIterations(maxToolIterationsRef.current);
-    const nextIteration = iteration + 1;
-    if (nextIteration > maxToolIterations) return false;
+    const completedIteration = iteration + 1;
+
+    if (!autoContinueToolsRef.current || !toolMessages.length || !toolMessages.every(hasToolOutput)) {
+      return { reason: 'completed', iteration: completedIteration, maxToolIterations, willContinue: false };
+    }
+
+    if (completedIteration > maxToolIterations) {
+      return { reason: 'max-tool-iterations', iteration: completedIteration, maxToolIterations, willContinue: false };
+    }
+
     if (signal.aborted) throw createAbortError();
 
-    const shouldContinue = await shouldContinueToolLoopRef.current?.({
+    const userDecision = await shouldContinueToolLoopRef.current?.({
       assistantMessage,
       toolMessages,
       messages: messagesRef.current,
       response,
-      iteration: nextIteration,
+      iteration: completedIteration,
       maxToolIterations,
       signal,
     });
     if (signal.aborted) throw createAbortError();
-    return shouldContinue ?? true;
+
+    const willContinue = userDecision ?? true;
+    return {
+      reason: willContinue ? 'tool-loop-continue' : 'tool-loop-veto',
+      iteration: completedIteration,
+      maxToolIterations,
+      willContinue,
+    };
   }, [autoContinueToolsRef, maxToolIterationsRef, messagesRef, shouldContinueToolLoopRef]);
 
   const finishTransportStream = React.useCallback<FinishTransportStream>(async (sessionId, response, controller, iteration) => {
@@ -768,17 +858,41 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
       }
 
       const toolMessages = getToolMessagesByIds(toolMessageIds);
+
+      let decision: ToolLoopDecision;
+      try {
+        decision = await decideToolLoopContinuation(iteration, assistantMessage, toolMessages, response, controller.signal);
+      } catch (decisionError) {
+        if (!isAbortError(decisionError) && isAssistantSessionActive(sessionId)) {
+          // shouldContinueToolLoop threw. Surface a terminal callback so observers see the
+          // turn end before the error is reported via onError.
+          safeOnStreamDone({
+            assistantMessage,
+            toolMessages,
+            messages: messagesRef.current,
+            response,
+            reason: 'tool-loop-veto',
+            willContinue: false,
+            iteration: iteration + 1,
+            maxToolIterations: normalizeMaxToolIterations(maxToolIterationsRef.current),
+          });
+        }
+        throw decisionError;
+      }
+      if (!isAssistantSessionActive(sessionId)) return;
+
       safeOnStreamDone({
         assistantMessage,
         toolMessages,
         messages: messagesRef.current,
         response,
+        reason: decision.reason,
+        willContinue: decision.willContinue,
+        iteration: decision.iteration,
+        maxToolIterations: decision.maxToolIterations,
       });
 
-      const shouldContinue = await shouldContinueAfterTools(iteration, assistantMessage, toolMessages, response, controller.signal);
-      if (!isAssistantSessionActive(sessionId)) return;
-
-      if (shouldContinue) {
+      if (decision.willContinue) {
         keepTransportBusy = true;
         startTransportStream(sessionId, '', messagesRef.current, controller, iteration + 1);
         return;
@@ -807,7 +921,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
         if (controllerRef.current === controller) controllerRef.current = null;
       }
     }
-  }, [cancelPending, finalizeAssistantNow, flushPersistence, getToolMessagesByIds, invalidateAssistantSession, isAssistantSessionActive, messagesRef, runCompletedToolCalls, safeOnError, safeOnFinish, safeOnStreamDone, setTransportBusy, shouldContinueAfterTools, showStreamError, startTransportStream]);
+  }, [cancelPending, decideToolLoopContinuation, finalizeAssistantNow, flushPersistence, getToolMessagesByIds, invalidateAssistantSession, isAssistantSessionActive, maxToolIterationsRef, messagesRef, runCompletedToolCalls, safeOnError, safeOnFinish, safeOnStreamDone, setTransportBusy, showStreamError, startTransportStream]);
 
   finishTransportStreamRef.current = finishTransportStream;
 
@@ -951,18 +1065,64 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     abortActiveAssistant('stop', source);
   }, [abortActiveAssistant, isBusy]);
 
-  const clear = React.useCallback((source: ChorusAbortSource = 'programmatic') => {
+  const commitClear = React.useCallback((source: ChorusAbortSource) => {
     if (isBusy()) abortActiveAssistant('clear', source);
     clearStreamError();
     lastSubmittedTurnRef.current = null;
-    const next = resetToInitialMessages ? seedMessagesRef.current : [];
+    const reset = resetToInitialMessagesRef.current;
+    const next = reset ? seedMessagesRef.current : [];
     updateSessionMessages(() => next, {
       flushPersistence: true,
-      removePersistenceIfEmpty: !resetToInitialMessages && seedMessagesRef.current.length === 0,
+      removePersistenceIfEmpty: !reset && seedMessagesRef.current.length === 0,
       reason: 'clear',
     });
     onClearRef.current?.(next);
-  }, [abortActiveAssistant, clearStreamError, isBusy, onClearRef, resetToInitialMessages, seedMessagesRef, updateSessionMessages]);
+  }, [abortActiveAssistant, clearStreamError, isBusy, onClearRef, resetToInitialMessagesRef, seedMessagesRef, updateSessionMessages]);
+
+  const clear = React.useCallback((source: ChorusAbortSource = 'programmatic') => {
+    if (clearConfirmationActiveRef.current) return;
+
+    const confirm = confirmClearConversationRef.current;
+    if (!confirm) {
+      commitClear(source);
+      return;
+    }
+
+    const persistenceKeyForContext = persistenceKeyRef.current;
+    const context: ChorusClearConversationContext<TMeta> = {
+      messages: messagesRef.current.slice(),
+      resetToInitialMessages: resetToInitialMessagesRef.current,
+      source,
+      ...(persistenceKeyForContext ? { persistenceKey: persistenceKeyForContext } : {}),
+    };
+
+    let confirmation: boolean | void | Promise<boolean | void>;
+    try {
+      confirmation = confirm(context);
+    } catch (error) {
+      warnObserverError('confirmClearConversation', error);
+      return;
+    }
+
+    if (isPromiseLike<boolean | void>(confirmation)) {
+      clearConfirmationActiveRef.current = true;
+      setClearConfirmationPending(true);
+      Promise.resolve(confirmation)
+        .then(confirmed => {
+          if (confirmed === false) return;
+          commitClear(source);
+        })
+        .catch(error => warnObserverError('confirmClearConversation', error))
+        .finally(() => {
+          clearConfirmationActiveRef.current = false;
+          setClearConfirmationPending(false);
+        });
+      return;
+    }
+
+    if (confirmation === false) return;
+    commitClear(source);
+  }, [commitClear, confirmClearConversationRef, messagesRef, persistenceKeyRef, resetToInitialMessagesRef]);
 
   const handleEdit = React.useCallback((id: string, newText: string) => {
     if (isBusy()) return;
@@ -1046,5 +1206,6 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     streamRawError,
     streamingMessageId,
     hasStartedAssistant: hasStartedAssistantRef.current,
+    clearConfirmationPending,
   };
 }

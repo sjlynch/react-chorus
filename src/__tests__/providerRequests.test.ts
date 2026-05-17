@@ -1,13 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import {
+  defineTool,
   formatAnthropicMessagesBody,
   formatGeminiGenerateContentBody,
   formatOpenAIChatCompletionsBody,
   formatOpenAIResponsesBody,
   toAnthropicMessagesBody,
+  toAnthropicTools,
   toGeminiGenerateContentBody,
+  toGeminiTools,
   toOpenAIChatCompletionsBody,
+  toOpenAIChatCompletionsTools,
   toOpenAIResponsesBody,
+  toOpenAIResponsesTools,
 } from '../providerRequests';
 import type { Message } from '../types';
 
@@ -169,6 +174,54 @@ describe('provider request mappers', () => {
     });
   });
 
+  it('maps uploaded non-image attachments to OpenAI Responses input_file parts', () => {
+    expect(toOpenAIResponsesBody([
+      {
+        id: 'user',
+        role: 'user',
+        text: 'Review docs',
+        attachments: [
+          { name: 'report.pdf', type: 'application/pdf', data: '', id: 'file_abc', size: 1 },
+          { name: 'spec.pdf', type: 'application/pdf', data: '', url: 'https://files.example.com/spec.pdf', size: 1 },
+          { name: 'inline.pdf', type: 'application/pdf', data: 'data:application/pdf;base64,xyz', size: 1 },
+        ],
+      },
+    ]).input).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'input_text', text: 'Review docs' },
+          { type: 'input_file', file_id: 'file_abc' },
+          { type: 'input_file', file_url: 'https://files.example.com/spec.pdf' },
+          { type: 'input_text', text: '[Unsupported attachment omitted: inline.pdf (application/pdf)]' },
+        ],
+      },
+    ]);
+  });
+
+  it('keeps OpenAI Chat Completions image-only when given a non-image attachment', () => {
+    expect(toOpenAIChatCompletionsBody([
+      {
+        id: 'user',
+        role: 'user',
+        text: 'Review docs',
+        attachments: [
+          { name: 'report.pdf', type: 'application/pdf', data: '', id: 'file_abc', size: 1 },
+          { name: 'spec.pdf', type: 'application/pdf', data: '', url: 'https://files.example.com/spec.pdf', size: 1 },
+        ],
+      },
+    ]).messages).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Review docs' },
+          { type: 'text', text: '[Unsupported attachment omitted: report.pdf (application/pdf)]' },
+          { type: 'text', text: '[Unsupported attachment omitted: spec.pdf (application/pdf)]' },
+        ],
+      },
+    ]);
+  });
+
   it('omits non-OpenAI image URI schemes from OpenAI image fields', () => {
     expect(toOpenAIChatCompletionsBody(nonOpenAIUriImageHistory()).messages).toEqual([
       {
@@ -205,7 +258,7 @@ describe('provider request mappers', () => {
           content: [
             { type: 'text', text: 'Describe this' },
             { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'aGVsbG8=' } },
-            { type: 'text', text: '[Unsupported attachment omitted: notes.pdf (application/pdf)]' },
+            { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'abc' } },
           ],
         },
         { role: 'assistant', content: [
@@ -215,6 +268,90 @@ describe('provider request mappers', () => {
         { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: '{\n  "ok": true\n}' }] },
       ],
     });
+  });
+
+  it('falls back to Anthropic text for non-PDF non-image attachments without a data URL', () => {
+    const body = toAnthropicMessagesBody([
+      {
+        id: 'user',
+        role: 'user',
+        text: 'Listen',
+        attachments: [
+          { name: 'audio.mp3', type: 'audio/mpeg', data: '', size: 1 },
+          { name: 'doc.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', data: 'data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,zzz', size: 1 },
+        ],
+      },
+    ]);
+    expect(body.messages).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Listen' },
+          { type: 'text', text: '[Unsupported attachment omitted: audio.mp3 (audio/mpeg)]' },
+          { type: 'text', text: '[Unsupported attachment omitted: doc.docx (application/vnd.openxmlformats-officedocument.wordprocessingml.document)]' },
+        ],
+      },
+    ]);
+  });
+
+  it('flags Anthropic tool_result blocks with is_error: true when the tool message is marked errored', () => {
+    const erroredHistory: Message[] = [
+      { id: 'user', role: 'user', text: 'Use the tool' },
+      { id: 'assistant', role: 'assistant', text: 'Calling.' },
+      {
+        id: 'errored-tool',
+        role: 'tool',
+        text: '',
+        toolCall: { name: 'lookup', input: { q: 'x' }, output: { error: 'boom' } },
+        metadata: { anthropic: { toolUseId: 'toolu_err', isError: true } },
+      },
+    ];
+
+    expect(toAnthropicMessagesBody(erroredHistory, { model: 'claude-sonnet-4-6', max_tokens: 64 }).messages).toEqual([
+      { role: 'user', content: [{ type: 'text', text: 'Use the tool' }] },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'Calling.' },
+          { type: 'tool_use', id: 'toolu_err', name: 'lookup', input: { q: 'x' } },
+        ],
+      },
+      {
+        role: 'user',
+        content: [{
+          type: 'tool_result',
+          tool_use_id: 'toolu_err',
+          content: '{\n  "error": "boom"\n}',
+          is_error: true,
+        }],
+      },
+    ]);
+
+    const rootMetaHistory: Message[] = [
+      {
+        id: 'single-tool',
+        role: 'tool',
+        text: '',
+        toolCall: { name: 'lookup', output: { error: 'fail' } },
+        metadata: { anthropic: { toolUseId: 'toolu_root' }, isError: true },
+      },
+    ];
+
+    expect(toAnthropicMessagesBody(rootMetaHistory).messages).toEqual([
+      {
+        role: 'assistant',
+        content: [{ type: 'tool_use', id: 'toolu_root', name: 'lookup', input: {} }],
+      },
+      {
+        role: 'user',
+        content: [{
+          type: 'tool_result',
+          tool_use_id: 'toolu_root',
+          content: '{\n  "error": "fail"\n}',
+          is_error: true,
+        }],
+      },
+    ]);
   });
 
   it('maps Chorus history to a Gemini generateContent body', () => {
@@ -227,7 +364,7 @@ describe('provider request mappers', () => {
           parts: [
             { text: 'Describe this' },
             { inlineData: { mimeType: 'image/png', data: 'aGVsbG8=' } },
-            { text: '[Unsupported attachment omitted: notes.pdf (application/pdf)]' },
+            { inlineData: { mimeType: 'application/pdf', data: 'abc' } },
           ],
         },
         {
@@ -240,6 +377,48 @@ describe('provider request mappers', () => {
         { role: 'user', parts: [{ functionResponse: { name: 'lookup', response: { ok: true } } }] },
       ],
     });
+  });
+
+  it('maps uploaded non-image Gemini attachments to fileData', () => {
+    expect(toGeminiGenerateContentBody([
+      {
+        id: 'user',
+        role: 'user',
+        text: 'Watch',
+        attachments: [
+          { name: 'clip.mp4', type: 'video/mp4', data: '', url: 'gs://bucket/clip.mp4', size: 1 },
+          { name: 'paper.pdf', type: 'application/pdf', data: '', id: 'files/abc123', size: 1 },
+        ],
+      },
+    ]).contents).toEqual([
+      {
+        role: 'user',
+        parts: [
+          { text: 'Watch' },
+          { fileData: { mimeType: 'video/mp4', fileUri: 'gs://bucket/clip.mp4' } },
+          { fileData: { mimeType: 'application/pdf', fileUri: 'files/abc123' } },
+        ],
+      },
+    ]);
+  });
+
+  it('falls back to Gemini text only when no data URL or uploaded URI is available', () => {
+    expect(toGeminiGenerateContentBody([
+      {
+        id: 'user',
+        role: 'user',
+        text: 'Empty',
+        attachments: [{ name: 'mystery.bin', type: 'application/octet-stream', data: '', size: 0 }],
+      },
+    ]).contents).toEqual([
+      {
+        role: 'user',
+        parts: [
+          { text: 'Empty' },
+          { text: '[Unsupported attachment omitted: mystery.bin (application/octet-stream)]' },
+        ],
+      },
+    ]);
   });
 
   it('groups consecutive Gemini tool messages into one functionCall/functionResponse exchange', () => {
@@ -321,5 +500,168 @@ describe('provider request mappers', () => {
     expect(JSON.parse(String(formatGeminiGenerateContentBody({ generationConfig: { temperature: 0.2 } })('ignored', messages)))).toEqual(
       toGeminiGenerateContentBody(messages, { generationConfig: { temperature: 0.2 } }),
     );
+  });
+});
+
+describe('tool definition serialization', () => {
+  const searchTool = defineTool({
+    name: 'search',
+    description: 'Search the docs',
+    inputSchema: {
+      type: 'object',
+      properties: { q: { type: 'string', description: 'query text' } },
+      required: ['q'],
+    },
+    handler: async (input) => ({ echo: input }),
+  });
+
+  const lookupTool = defineTool({
+    name: 'lookup',
+    handler: async () => 'ok',
+    openai: { strict: true },
+    anthropic: { cache_control: { type: 'ephemeral' } },
+    gemini: { description: 'Gemini-specific description' },
+  });
+
+  it('serializes definitions into OpenAI Chat Completions tool entries', () => {
+    expect(toOpenAIChatCompletionsTools([searchTool, lookupTool])).toEqual([
+      {
+        type: 'function',
+        function: {
+          name: 'search',
+          description: 'Search the docs',
+          parameters: {
+            type: 'object',
+            properties: { q: { type: 'string', description: 'query text' } },
+            required: ['q'],
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'lookup',
+          parameters: { type: 'object', properties: {} },
+          strict: true,
+        },
+      },
+    ]);
+  });
+
+  it('serializes definitions into OpenAI Responses tool entries (flat shape)', () => {
+    expect(toOpenAIResponsesTools([searchTool])).toEqual([
+      {
+        type: 'function',
+        name: 'search',
+        description: 'Search the docs',
+        parameters: {
+          type: 'object',
+          properties: { q: { type: 'string', description: 'query text' } },
+          required: ['q'],
+        },
+      },
+    ]);
+  });
+
+  it('serializes definitions into Anthropic Messages tool entries with input_schema', () => {
+    expect(toAnthropicTools([searchTool, lookupTool])).toEqual([
+      {
+        name: 'search',
+        description: 'Search the docs',
+        input_schema: {
+          type: 'object',
+          properties: { q: { type: 'string', description: 'query text' } },
+          required: ['q'],
+        },
+      },
+      {
+        name: 'lookup',
+        input_schema: { type: 'object', properties: {} },
+        cache_control: { type: 'ephemeral' },
+      },
+    ]);
+  });
+
+  it('wraps definitions in Gemini functionDeclarations', () => {
+    expect(toGeminiTools([searchTool, lookupTool])).toEqual([{
+      functionDeclarations: [
+        {
+          name: 'search',
+          description: 'Search the docs',
+          parameters: {
+            type: 'object',
+            properties: { q: { type: 'string', description: 'query text' } },
+            required: ['q'],
+          },
+        },
+        {
+          name: 'lookup',
+          description: 'Gemini-specific description',
+          parameters: { type: 'object', properties: {} },
+        },
+      ],
+    }]);
+  });
+
+  it('returns an empty array when no definitions are provided', () => {
+    expect(toGeminiTools([])).toEqual([]);
+    expect(toOpenAIChatCompletionsTools([])).toEqual([]);
+    expect(toAnthropicTools([])).toEqual([]);
+  });
+
+  it('flows tool definitions through every body helper as the provider-specific tools field', () => {
+    const tools = [searchTool];
+
+    const chat = toOpenAIChatCompletionsBody([], { model: 'gpt-4o-mini', tools });
+    expect(chat.tools).toEqual(toOpenAIChatCompletionsTools(tools));
+
+    const responses = toOpenAIResponsesBody([], { model: 'gpt-4.1-mini', tools });
+    expect(responses.tools).toEqual(toOpenAIResponsesTools(tools));
+
+    const anthropic = toAnthropicMessagesBody([], { model: 'claude-sonnet-4-6', max_tokens: 256, tools });
+    expect(anthropic.tools).toEqual(toAnthropicTools(tools));
+
+    const gemini = toGeminiGenerateContentBody([], { tools });
+    expect(gemini.tools).toEqual(toGeminiTools(tools));
+  });
+
+  it('treats raw provider-shaped tools as an escape hatch and passes them through', () => {
+    const rawOpenAI = [{ type: 'function', function: { name: 'raw', parameters: {} } }];
+    const chat = toOpenAIChatCompletionsBody([], { tools: rawOpenAI } as Parameters<typeof toOpenAIChatCompletionsBody>[1]);
+    expect(chat.tools).toBe(rawOpenAI);
+
+    const rawAnthropic = [{ name: 'raw', input_schema: { type: 'object' } }];
+    const anthropic = toAnthropicMessagesBody([], { max_tokens: 8, tools: rawAnthropic } as Parameters<typeof toAnthropicMessagesBody>[1]);
+    expect(anthropic.tools).toBe(rawAnthropic);
+
+    const rawGemini = [{ functionDeclarations: [{ name: 'raw' }] }];
+    const gemini = toGeminiGenerateContentBody([], { tools: rawGemini } as Parameters<typeof toGeminiGenerateContentBody>[1]);
+    expect(gemini.tools).toBe(rawGemini);
+  });
+
+  it('accepts a Chorus tools registry record and serializes definition entries by key', () => {
+    const registry = {
+      search: defineTool({
+        name: 'will-be-overridden',
+        description: 'Search the docs',
+        inputSchema: { type: 'object', properties: { q: { type: 'string' } } },
+        handler: async () => null,
+      }),
+    };
+
+    const body = toOpenAIChatCompletionsBody([], { tools: registry });
+    expect(body.tools).toEqual([{
+      type: 'function',
+      function: {
+        name: 'search',
+        description: 'Search the docs',
+        parameters: { type: 'object', properties: { q: { type: 'string' } } },
+      },
+    }]);
+  });
+
+  it('omits tools entirely when the definition array is empty', () => {
+    const body = toOpenAIChatCompletionsBody([], { model: 'gpt-4o-mini', tools: [] });
+    expect(body).not.toHaveProperty('tools');
   });
 });

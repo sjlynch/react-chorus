@@ -3,7 +3,15 @@ import { dataUrlFromAttachment, fileUriFromAttachment, unsupportedAttachmentText
 import { isRecord } from './metadata';
 import { stripGeminiOptions } from './options';
 import { messageText, objectToolInput, safeStringify, toolContextText } from './toolOutput';
-import type { GeminiContent, GeminiGenerateContentBody, GeminiGenerateContentBodyOptions, ProviderMappingOptions } from './types';
+import type {
+  GeminiContent,
+  GeminiFunctionCallPart,
+  GeminiFunctionResponsePart,
+  GeminiGenerateContentBody,
+  GeminiGenerateContentBodyOptions,
+  GeminiPart,
+  ProviderMappingOptions,
+} from './types';
 
 type GeminiToolMessage<TMeta> = { message: ToolMessage<TMeta>; name: string };
 
@@ -15,25 +23,23 @@ function geminiSystemInstruction(history: Message<unknown>[]) {
   return system ? { parts: [{ text: system }] } : undefined;
 }
 
-function geminiParts<TMeta>(message: Message<TMeta>, options: ProviderMappingOptions<TMeta>) {
-  const parts: Array<Record<string, unknown>> = [];
+function geminiParts<TMeta>(message: Message<TMeta>, options: ProviderMappingOptions<TMeta>): GeminiPart[] {
+  const parts: GeminiPart[] = [];
   const text = messageText(message);
   if (text.trim()) parts.push({ text });
 
   if (message.role === 'user') {
     for (const attachment of message.attachments ?? []) {
-      if (attachment.type.startsWith('image/')) {
-        const dataUrl = dataUrlFromAttachment(attachment);
-        if (dataUrl) {
-          parts.push({ inlineData: { mimeType: attachment.type || dataUrl.mimeType, data: dataUrl.base64 } });
-          continue;
-        }
+      const dataUrl = dataUrlFromAttachment(attachment);
+      if (dataUrl) {
+        parts.push({ inlineData: { mimeType: attachment.type || dataUrl.mimeType, data: dataUrl.base64 } });
+        continue;
+      }
 
-        const fileUri = fileUriFromAttachment(attachment);
-        if (fileUri) {
-          parts.push({ fileData: { mimeType: attachment.type || 'application/octet-stream', fileUri } });
-          continue;
-        }
+      const fileUri = fileUriFromAttachment(attachment);
+      if (fileUri) {
+        parts.push({ fileData: { mimeType: attachment.type || 'application/octet-stream', fileUri } });
+        continue;
       }
 
       parts.push({ text: unsupportedAttachmentText(attachment, message, options) });
@@ -43,7 +49,7 @@ function geminiParts<TMeta>(message: Message<TMeta>, options: ProviderMappingOpt
   return parts;
 }
 
-function geminiFunctionResponsePayload(value: unknown) {
+function geminiFunctionResponsePayload(value: unknown): Record<string, unknown> {
   if (isRecord(value)) return value;
   if (typeof value === 'string') return { content: value };
   return { content: safeStringify(value) };
@@ -55,17 +61,17 @@ function geminiToolMessage<TMeta>(message: Message<TMeta>): GeminiToolMessage<TM
   return name ? { message, name } : null;
 }
 
-function geminiFunctionCallPart<TMeta>({ message, name }: GeminiToolMessage<TMeta>) {
+function geminiFunctionCallPart<TMeta>({ message, name }: GeminiToolMessage<TMeta>): GeminiFunctionCallPart {
   return { functionCall: { name, args: objectToolInput(message.toolCall.input) } };
 }
 
-function geminiFunctionResponsePart<TMeta>({ message, name }: GeminiToolMessage<TMeta>) {
+function geminiFunctionResponsePart<TMeta>({ message, name }: GeminiToolMessage<TMeta>): GeminiFunctionResponsePart {
   const text = messageText(message);
   const value = message.toolCall.output ?? (text.trim() ? text : message.toolCall.input);
   return { functionResponse: { name, response: geminiFunctionResponsePayload(value) } };
 }
 
-function appendGeminiFunctionCalls(target: GeminiContent[], parts: Array<Record<string, unknown>>) {
+function appendGeminiFunctionCalls(target: GeminiContent[], parts: GeminiPart[]) {
   if (!parts.length) return;
 
   const last = target[target.length - 1];
@@ -149,17 +155,19 @@ export function toGeminiContents<TMeta = Record<string, unknown>>(
 }
 
 /** Build a Gemini generateContent request body. Use it with a streaming Gemini endpoint and `connector="gemini"`. */
-export function toGeminiGenerateContentBody<TMeta = Record<string, unknown>>(
-  history: Message<TMeta>[],
-  options: GeminiGenerateContentBodyOptions<TMeta> = {},
-): GeminiGenerateContentBody {
-  const bodyOptions = stripGeminiOptions(options);
+export function toGeminiGenerateContentBody<
+  TMeta = Record<string, unknown>,
+  TOptions extends GeminiGenerateContentBodyOptions<TMeta> = GeminiGenerateContentBodyOptions<TMeta>,
+>(history: Message<TMeta>[], options?: TOptions): GeminiGenerateContentBody<TOptions> {
+  const opts = (options ?? {}) as TOptions;
+  const bodyOptions = stripGeminiOptions(opts);
   const systemInstruction = geminiSystemInstruction(history as Message<unknown>[]);
-  return {
+  const body = {
     ...bodyOptions,
     ...(systemInstruction ? { systemInstruction } : {}),
-    contents: toGeminiContents(history, options),
+    contents: toGeminiContents(history, opts),
   };
+  return body as GeminiGenerateContentBody<TOptions>;
 }
 
 /** JSON body formatter for `createFetchSSETransport(..., { formatBody })`. */
