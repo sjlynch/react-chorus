@@ -32,6 +32,13 @@ function isArrayBufferLike(data: unknown): data is ArrayBuffer {
   return typeof data === 'object' && data !== null && typeof (data as ArrayBuffer).byteLength === 'number' && typeof (data as ArrayBuffer).slice === 'function';
 }
 
+export function normalizeFormatMessageResult(
+  result: string | { payload: string; correlationId?: string | null },
+): { payload: string; correlationId: string | null } {
+  if (typeof result === 'string') return { payload: result, correlationId: null };
+  return { payload: result.payload, correlationId: result.correlationId ?? null };
+}
+
 export async function webSocketMessageToText(data: unknown): Promise<string> {
   if (typeof data === 'string') return data;
   if (isArrayBufferLike(data)) return new TextDecoder().decode(data);

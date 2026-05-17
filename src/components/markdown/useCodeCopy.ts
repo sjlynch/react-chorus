@@ -1,8 +1,9 @@
 import React from 'react';
-import { COPY_FAILED_LABEL, COPY_FEEDBACK_DURATION_MS, toClipboardError } from '../../utils/messageCopy';
+import { DEFAULT_CODE_COPY_LABELS } from '../../labels/codeCopy';
+import type { ChorusCodeCopyLabels } from '../../labels/types';
+import { COPY_FEEDBACK_DURATION_MS, toClipboardError } from '../../utils/messageCopy';
 
-export const COPY_LABEL = 'Copy';
-const COPY_SUCCESS_LABEL = 'Copied!';
+export const COPY_LABEL = DEFAULT_CODE_COPY_LABELS.copy;
 
 type ContainerRef = { current: HTMLDivElement | null };
 
@@ -11,7 +12,14 @@ function getCodeCopyText(codeEl: HTMLElement | null) {
   return raw.replace(/\r?\n$/, '');
 }
 
-export function useCodeCopy(containerRef: ContainerRef, onCopyError?: (error: Error) => void) {
+export function useCodeCopy(
+  containerRef: ContainerRef,
+  onCopyError?: (error: Error) => void,
+  labels: ChorusCodeCopyLabels = DEFAULT_CODE_COPY_LABELS,
+) {
+  const labelsRef = React.useRef(labels);
+  labelsRef.current = labels;
+
   React.useEffect(() => {
     const el = containerRef.current;
     if (!el || typeof window === 'undefined' || typeof document === 'undefined' || typeof navigator === 'undefined') return;
@@ -27,7 +35,7 @@ export function useCodeCopy(containerRef: ContainerRef, onCopyError?: (error: Er
       btn.classList.add(className);
 
       const timer = setTimeout(() => {
-        btn.textContent = COPY_LABEL;
+        btn.textContent = labelsRef.current.copy;
         btn.classList.remove(className);
         feedbackTimers.delete(btn);
       }, COPY_FEEDBACK_DURATION_MS);
@@ -41,10 +49,10 @@ export function useCodeCopy(containerRef: ContainerRef, onCopyError?: (error: Er
       try {
         if (typeof navigator.clipboard?.writeText !== 'function') throw new Error('Clipboard API is unavailable');
         await navigator.clipboard.writeText(raw);
-        showCopyFeedback(btn, COPY_SUCCESS_LABEL, 'copied');
+        showCopyFeedback(btn, labelsRef.current.copied, 'copied');
       } catch (error) {
         const clipboardError = toClipboardError(error);
-        showCopyFeedback(btn, COPY_FAILED_LABEL, 'copy-failed');
+        showCopyFeedback(btn, labelsRef.current.failed, 'copy-failed');
         onCopyError?.(clipboardError);
       }
     };

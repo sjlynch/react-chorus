@@ -1,5 +1,6 @@
 import type { CodeTheme } from '../../utils/hljsLoader';
-import { COPY_LABEL } from './useCodeCopy';
+import { DEFAULT_CODE_COPY_LABELS } from '../../labels/codeCopy';
+import type { ChorusCodeCopyLabels } from '../../labels/types';
 
 const VOID_HTML_ELEMENTS = new Set([
   'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta',
@@ -14,15 +15,23 @@ interface HtmlTagMatch {
   selfClosing: boolean;
 }
 
-function copyButtonHtml() {
-  return `<span class="chorus-copy-btn" role="button" aria-label="Copy code" tabindex="0">${COPY_LABEL}</span>`;
+function escapeHtmlAttribute(value: string) {
+  return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function codeBlockWrapperStart(themeClass: string) {
-  return `<div class="chorus-codeblock ${themeClass}">${copyButtonHtml()}`;
+function escapeHtmlText(value: string) {
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function addCodeBlockChromeWithDOM(html: string, themeClass: string) {
+function copyButtonHtml(labels: ChorusCodeCopyLabels) {
+  return `<span class="chorus-copy-btn" role="button" aria-label="${escapeHtmlAttribute(labels.ariaLabel)}" tabindex="0">${escapeHtmlText(labels.copy)}</span>`;
+}
+
+function codeBlockWrapperStart(themeClass: string, labels: ChorusCodeCopyLabels) {
+  return `<div class="chorus-codeblock ${themeClass}">${copyButtonHtml(labels)}`;
+}
+
+function addCodeBlockChromeWithDOM(html: string, themeClass: string, labels: ChorusCodeCopyLabels) {
   if (typeof DOMParser === 'undefined') return undefined;
 
   try {
@@ -38,9 +47,9 @@ function addCodeBlockChromeWithDOM(html: string, themeClass: string) {
       const copyButton = doc.createElement('span');
       copyButton.className = 'chorus-copy-btn';
       copyButton.setAttribute('role', 'button');
-      copyButton.setAttribute('aria-label', 'Copy code');
+      copyButton.setAttribute('aria-label', labels.ariaLabel);
       copyButton.setAttribute('tabindex', '0');
-      copyButton.textContent = COPY_LABEL;
+      copyButton.textContent = labels.copy;
 
       pre.parentNode?.insertBefore(wrapper, pre);
       wrapper.append(copyButton, pre);
@@ -162,7 +171,7 @@ function hasDirectCodeChild(html: string, from: number, to: number) {
   return false;
 }
 
-function addCodeBlockChromeWithServerWalker(html: string, themeClass: string) {
+function addCodeBlockChromeWithServerWalker(html: string, themeClass: string, labels: ChorusCodeCopyLabels) {
   let output = '';
   let cursor = 0;
   let scan = 0;
@@ -179,7 +188,7 @@ function addCodeBlockChromeWithServerWalker(html: string, themeClass: string) {
 
     if (hasDirectCodeChild(html, tag.end + 1, close.start)) {
       output += html.slice(cursor, tag.start);
-      output += codeBlockWrapperStart(themeClass);
+      output += codeBlockWrapperStart(themeClass, labels);
       output += html.slice(tag.start, close.end + 1);
       output += '</div>';
       cursor = close.end + 1;
@@ -192,7 +201,7 @@ function addCodeBlockChromeWithServerWalker(html: string, themeClass: string) {
   return output;
 }
 
-export function addCodeBlockChrome(html: string, codeTheme: CodeTheme) {
+export function addCodeBlockChrome(html: string, codeTheme: CodeTheme, labels: ChorusCodeCopyLabels = DEFAULT_CODE_COPY_LABELS) {
   const themeClass = codeTheme === 'light' ? 'chorus-codeblock-light' : 'chorus-codeblock-dark';
-  return addCodeBlockChromeWithDOM(html, themeClass) ?? addCodeBlockChromeWithServerWalker(html, themeClass);
+  return addCodeBlockChromeWithDOM(html, themeClass, labels) ?? addCodeBlockChromeWithServerWalker(html, themeClass, labels);
 }

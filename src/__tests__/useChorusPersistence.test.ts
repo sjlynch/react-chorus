@@ -440,6 +440,99 @@ describe('useChorusPersistence', () => {
     warn.mockRestore();
   });
 
+  describe('cross-tab sync', () => {
+    function dispatchStorageEvent(key: string, newValue: string | null) {
+      window.dispatchEvent(new StorageEvent('storage', {
+        key,
+        newValue,
+        oldValue: null,
+        storageArea: window.localStorage,
+      }));
+    }
+
+    it('picks up writes from another tab via the storage event', () => {
+      const key = 'chorus-cross-tab-pickup';
+      try {
+        const { result } = renderHook(() => useChorusPersistence(key));
+        expect(result.current.value).toEqual([]);
+
+        const payload = JSON.stringify(MSGS);
+        window.localStorage.setItem(key, payload);
+        act(() => dispatchStorageEvent(key, payload));
+
+        expect(result.current.value).toEqual(MSGS);
+        expect(result.current.hasStoredValue).toBe(true);
+      } finally {
+        window.localStorage.removeItem(key);
+      }
+    });
+
+    it('lets a subsequent write merge with another tab\'s changes rather than stomping them', () => {
+      const key = 'chorus-cross-tab-stomp';
+      try {
+        const tabAMessage: Message = { id: 'a', role: 'user', text: 'from tab A' };
+        const tabBMessage: Message = { id: 'b', role: 'user', text: 'from tab B' };
+
+        const { result } = renderHook(() => useChorusPersistence(key));
+
+        const tabAPayload = JSON.stringify([tabAMessage]);
+        window.localStorage.setItem(key, tabAPayload);
+        act(() => dispatchStorageEvent(key, tabAPayload));
+        expect(result.current.value).toEqual([tabAMessage]);
+
+        const merged = [...result.current.value, tabBMessage];
+        act(() => result.current.onChange(merged));
+
+        expect(JSON.parse(window.localStorage.getItem(key) ?? '[]')).toEqual(merged);
+      } finally {
+        window.localStorage.removeItem(key);
+      }
+    });
+
+    it('clears in-memory state when another tab removes the key', () => {
+      const key = 'chorus-cross-tab-clear';
+      window.localStorage.setItem(key, JSON.stringify(MSGS));
+      try {
+        const { result } = renderHook(() => useChorusPersistence(key));
+        expect(result.current.value).toEqual(MSGS);
+
+        window.localStorage.removeItem(key);
+        act(() => dispatchStorageEvent(key, null));
+
+        expect(result.current.value).toEqual([]);
+        expect(result.current.hasStoredValue).toBe(false);
+      } finally {
+        window.localStorage.removeItem(key);
+      }
+    });
+
+    it('ignores storage events that mirror the current in-memory value (polyfill defense)', () => {
+      const key = 'chorus-cross-tab-mirror';
+      try {
+        const { result } = renderHook(() => useChorusPersistence(key));
+        act(() => result.current.onChange(MSGS));
+        const previousValue = result.current.value;
+
+        act(() => dispatchStorageEvent(key, JSON.stringify(MSGS)));
+
+        expect(result.current.value).toBe(previousValue);
+      } finally {
+        window.localStorage.removeItem(key);
+      }
+    });
+
+    it('does not subscribe when a custom StorageAdapter is supplied', () => {
+      const storage = makeSyncStorage(JSON.stringify(MSGS));
+      const { result } = renderHook(() => useChorusPersistence('key', { storage }));
+      expect(result.current.value).toEqual(MSGS);
+
+      const replacement: Message[] = [{ id: 'z', role: 'user', text: 'foreign' }];
+      act(() => dispatchStorageEvent('key', JSON.stringify(replacement)));
+
+      expect(result.current.value).toEqual(MSGS);
+    });
+  });
+
   it('serializes async writes so newer messages win', async () => {
     const store: Record<string, string> = {};
     const writes: Array<{ value: string; resolve: () => void }> = [];

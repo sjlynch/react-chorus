@@ -1,5 +1,6 @@
 import React from 'react';
 import type { Message, MessageFeedback } from '../types';
+import type { ChorusCodeCopyLabels, ChorusMessageActionLabels, ChorusSpeakerLabels } from '../labels/types';
 import type { MarkdownSanitizer } from './Markdown';
 import { MessageActions, createCopyAction } from './message-row/actions';
 import { MessageBubbleLayout } from './message-row/bubble';
@@ -41,9 +42,13 @@ export interface MessageRowProps<TMeta = Record<string, unknown>> extends Messag
   streaming?: boolean;
   markdownProps?: MessageMarkdownProps;
   markdownSanitizer?: MarkdownSanitizer;
+  messageActionLabels?: ChorusMessageActionLabels;
+  speakerLabels?: ChorusSpeakerLabels;
+  reasoningLabel?: string;
+  codeCopyLabels?: ChorusCodeCopyLabels;
 }
 
-export function MessageRow<TMeta = Record<string, unknown>>({ m, codeTheme, headless, onEdit, onRegenerate, onDelete, onCopy, onFeedback, initialFeedback, streaming = false, markdownProps, markdownSanitizer, before, headerSlot, footerSlot, after }: MessageRowProps<TMeta>) {
+export function MessageRow<TMeta = Record<string, unknown>>({ m, codeTheme, headless, onEdit, onRegenerate, onDelete, onCopy, onFeedback, initialFeedback, streaming = false, markdownProps, markdownSanitizer, messageActionLabels, speakerLabels, reasoningLabel, codeCopyLabels, before, headerSlot, footerSlot, after }: MessageRowProps<TMeta>) {
   const [editing, setEditing] = React.useState(false);
   const copy = createCopyAction(m, onCopy);
   const resolvedInitialFeedback = initialFeedback === undefined ? getInitialMessageFeedback(m) : initialFeedback;
@@ -62,7 +67,7 @@ export function MessageRow<TMeta = Record<string, unknown>>({ m, codeTheme, head
 
   return (
     <div className={`chorus-msg chorus-${m.role}`} data-chorus-message-id={m.id}>
-      <MessageSpeakerLabel role={m.role} />
+      <MessageSpeakerLabel role={m.role} speakers={speakerLabels} />
       {editing && actions.edit ? (
         <InlineMessageEditor
           initialText={m.text ?? ''}
@@ -71,6 +76,7 @@ export function MessageRow<TMeta = Record<string, unknown>>({ m, codeTheme, head
             setEditing(false);
           }}
           onCancel={() => setEditing(false)}
+          labels={messageActionLabels}
         />
       ) : (
         <MessageBubbleLayout
@@ -80,12 +86,14 @@ export function MessageRow<TMeta = Record<string, unknown>>({ m, codeTheme, head
           streaming={streaming}
           markdownProps={markdownProps}
           markdownSanitizer={markdownSanitizer}
+          reasoningLabel={reasoningLabel}
+          codeCopyLabels={codeCopyLabels}
           before={before}
           headerSlot={headerSlot}
           footerSlot={footerSlot}
           after={after}
         >
-          <MessageActions actions={actions} onEditRequested={() => setEditing(true)} />
+          <MessageActions actions={actions} onEditRequested={() => setEditing(true)} labels={messageActionLabels} />
         </MessageBubbleLayout>
       )}
     </div>

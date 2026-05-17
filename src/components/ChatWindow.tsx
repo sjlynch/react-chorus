@@ -1,5 +1,7 @@
 import React from 'react';
 import type { Message, Role } from '../types';
+import { resolveChorusLabels } from '../labels/resolve';
+import type { ChorusLabels, ResolvedChorusLabels } from '../labels/types';
 import { ToolCallBlock } from './ToolCallBlock';
 import { MessageActionControls, MessageRenderStateProvider, MessageRow, MessageSpeakerLabel } from './MessageRow';
 import type { GetMessageFeedback, MessageBubbleSlots, MessageCopyResult, MessageFeedback, MessageMarkdownProps, MessageRenderActions } from './MessageRow';
@@ -97,6 +99,8 @@ export interface ChatWindowProps<TMeta = Record<string, unknown>> extends Omit<R
   suggestedPromptsDisabled?: boolean;
   suggestedPromptsDisabledReason?: string;
   typing?: boolean;
+  /** Localized labels for the transcript, message actions, speakers, tool calls, reasoning, and code copy. Defaults to English. */
+  labels?: ChorusLabels;
 }
 
 function ChatWindowInner<TMeta = Record<string, unknown>>({
@@ -128,10 +132,12 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
   suggestedPrompts,
   suggestedPromptsDisabled = false,
   suggestedPromptsDisabledReason,
+  labels,
   className,
   style,
   ...rest
 }: ChatWindowProps<TMeta>, ref: React.ForwardedRef<HTMLDivElement>) {
+  const resolvedLabels: ResolvedChorusLabels = React.useMemo(() => resolveChorusLabels(labels), [labels]);
   React.useEffect(() => {
     if (!isChorusDevMode() || showSystemMessages === undefined || didWarnShowSystemMessages) return;
     console.warn('[Chorus] `showSystemMessages` is deprecated. Use `hiddenRoles` instead (for example hiddenRoles={[\'system\']} to show tool messages while hiding system prompts).');
@@ -171,7 +177,7 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
       ref={windowRef}
       role="log"
       aria-live="polite"
-      aria-label="Chat transcript"
+      aria-label={resolvedLabels.transcript.ariaLabel}
     >
       {renderedVisible.map(m => {
         const isStreaming = m.id === streamingMessageId;
@@ -181,9 +187,9 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
           if (m.role === 'tool') {
             return (
               <div className="chorus-msg chorus-tool" data-chorus-message-id={m.id}>
-                <MessageSpeakerLabel role={m.role} />
+                <MessageSpeakerLabel role={m.role} speakers={resolvedLabels.speakers} />
                 {slots?.before}
-                <ToolCallBlock toolCall={m.toolCall} />
+                <ToolCallBlock toolCall={m.toolCall} labels={resolvedLabels.toolCall} />
                 {slots?.after}
               </div>
             );
@@ -197,6 +203,10 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
               streaming={isStreaming}
               markdownProps={markdownProps}
               markdownSanitizer={markdownSanitizer}
+              messageActionLabels={resolvedLabels.messageActions}
+              speakerLabels={resolvedLabels.speakers}
+              reasoningLabel={resolvedLabels.reasoning}
+              codeCopyLabels={resolvedLabels.codeCopy}
               onEdit={onEdit}
               onRegenerate={onRegenerate}
               onDelete={onDelete}
@@ -220,7 +230,7 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
           copy: copyAvailable ? () => copyMessage(m) : undefined,
           feedback,
           initialFeedback,
-          defaultRender: () => <MessageActionControls message={m} actions={actions} />,
+          defaultRender: () => <MessageActionControls message={m} actions={actions} labels={resolvedLabels.messageActions} speakerLabels={resolvedLabels.speakers} />,
         };
         const messageProps: RenderMessageRootProps = { 'data-chorus-message-id': m.id };
         const context: RenderMessageContext<TMeta> = { isStreaming, defaultRender, actions, message: m, messageProps };
@@ -242,11 +252,13 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
           onSuggestedPrompt={onSuggestedPrompt}
           disabled={suggestedPromptsDisabled}
           disabledReason={suggestedPromptsDisabledReason}
+          title={resolvedLabels.transcript.emptyStateTitle}
+          ariaLabel={resolvedLabels.transcript.suggestedPromptsAriaLabel}
         />
       )}
 
       {typing &&
-        <div className="chorus-msg chorus-assistant chorus-typing" role="status" aria-label="Assistant is typing">
+        <div className="chorus-msg chorus-assistant chorus-typing" role="status" aria-label={resolvedLabels.transcript.typing}>
           <div className="chorus-bubble" aria-hidden="true"><span className="chorus-dot"></span><span className="chorus-dot"></span><span className="chorus-dot"></span></div>
         </div>
       }
@@ -255,12 +267,12 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
       ) : (
         <div className="chorus-error" role="alert">
           <span className="chorus-error-text">{error}</span>
-          {onRetry && <button type="button" className="chorus-retry-btn" onClick={onRetry}>Retry</button>}
+          {onRetry && <button type="button" className="chorus-retry-btn" onClick={onRetry}>{resolvedLabels.transcript.retry}</button>}
         </div>
       ))}
       {shouldRenderJumpToBottom && (
         <button type="button" className="chorus-jump-to-bottom" onClick={scrollToBottom}>
-          ↓ Jump to latest
+          {resolvedLabels.transcript.jumpToLatest}
         </button>
       )}
       <div ref={bottomRef} className="chorus-scroll-sentinel" aria-hidden="true" />

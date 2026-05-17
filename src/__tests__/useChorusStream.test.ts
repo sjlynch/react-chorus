@@ -764,6 +764,54 @@ describe('useChorusStream', () => {
     expect(onError.mock.calls[0][0].message.length).toBeLessThan(2100);
   });
 
+  it('rejects 200 application/json bodies that contain no SSE data lines and surfaces the error through onError', async () => {
+    const transport = vi.fn<Transport>(() => Promise.resolve(new Response(
+      JSON.stringify({ error: 'missing API key' }),
+      { status: 200, statusText: 'OK', headers: { 'content-type': 'application/json' } },
+    )));
+    const onChunk = vi.fn();
+    const onDone = vi.fn();
+    const onError = vi.fn();
+    const { result } = renderHook(() => useChorusStream(transport));
+
+    await act(async () => {
+      await expect(result.current.send('hello', [], { onChunk, onDone, onError }))
+        .rejects.toThrow(/Server-Sent Events.*`data:` lines/);
+    });
+
+    expect(onChunk).not.toHaveBeenCalled();
+    expect(onDone).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledTimes(1);
+    const surfacedError = onError.mock.calls[0][0];
+    expect(surfacedError.message).toContain('application/json');
+    expect(surfacedError.message).toContain('missing API key');
+    expect(result.current.sending).toBe(false);
+  });
+
+  it('rejects 200 text/plain bodies that contain no SSE data lines and surfaces the error through onError', async () => {
+    const transport = vi.fn<Transport>(() => Promise.resolve(new Response(
+      'hello from the wrong endpoint',
+      { status: 200, statusText: 'OK', headers: { 'content-type': 'text/plain; charset=utf-8' } },
+    )));
+    const onChunk = vi.fn();
+    const onDone = vi.fn();
+    const onError = vi.fn();
+    const { result } = renderHook(() => useChorusStream(transport));
+
+    await act(async () => {
+      await expect(result.current.send('hello', [], { onChunk, onDone, onError }))
+        .rejects.toThrow(/Server-Sent Events/);
+    });
+
+    expect(onChunk).not.toHaveBeenCalled();
+    expect(onDone).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledTimes(1);
+    const surfacedError = onError.mock.calls[0][0];
+    expect(surfacedError.message).toContain('text/plain');
+    expect(surfacedError.message).toContain('hello from the wrong endpoint');
+    expect(result.current.sending).toBe(false);
+  });
+
   it('reports missing response bodies separately', async () => {
     const transport = vi.fn<Transport>(() => Promise.resolve(new Response(null, { status: 200 })));
     const { result } = renderHook(() => useChorusStream(transport));
