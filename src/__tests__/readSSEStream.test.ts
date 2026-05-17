@@ -1,14 +1,15 @@
 import { describe, it, expect } from 'vitest';
 import { readSSEStream } from '../hooks/useChorusStream';
+import { ChorusStreamError } from '../streaming/errors';
 
-function makeResponse(body: string): Response {
+function makeResponse(body: string, init?: ResponseInit): Response {
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       controller.enqueue(new TextEncoder().encode(body));
       controller.close();
     },
   });
-  return new Response(stream);
+  return new Response(stream, init);
 }
 
 function makeChunkedResponse(chunks: string[]): Response {
@@ -155,6 +156,76 @@ describe('readSSEStream', () => {
 
     await expect(promise).rejects.toThrow('Aborted');
     expect(cancelled).toBe(true);
+  });
+
+  it('rejects with a ChorusStreamError that names SSE/data and the Content-Type when a 200 JSON body has no data lines', async () => {
+    const res = makeResponse(JSON.stringify({ error: 'missing API key' }), {
+      status: 200,
+      statusText: 'OK',
+      headers: { 'content-type': 'application/json' },
+    });
+
+    const events: string[] = [];
+    const promise = readSSEStream(res, e => events.push(e));
+
+    await expect(promise).rejects.toBeInstanceOf(ChorusStreamError);
+    await expect(promise).rejects.toThrow(/Server-Sent Events/);
+    await expect(promise).rejects.toThrow(/`data:` lines/);
+    await expect(promise).rejects.toThrow(/application\/json/);
+    await expect(promise).rejects.toThrow(/missing API key/);
+    expect(events).toEqual([]);
+  });
+
+  it('rejects with a ChorusStreamError when a 200 text/plain body has no data lines', async () => {
+    const res = makeResponse('hello from the wrong endpoint', {
+      status: 200,
+      statusText: 'OK',
+      headers: { 'content-type': 'text/plain; charset=utf-8' },
+    });
+
+    const events: string[] = [];
+    const promise = readSSEStream(res, e => events.push(e));
+
+    await expect(promise).rejects.toBeInstanceOf(ChorusStreamError);
+    await expect(promise).rejects.toThrow(/Server-Sent Events/);
+    await expect(promise).rejects.toThrow(/text\/plain/);
+    await expect(promise).rejects.toThrow(/hello from the wrong endpoint/);
+    expect(events).toEqual([]);
+  });
+
+  it('truncates long malformed-body previews in the error message', async () => {
+    const body = 'x'.repeat(2000);
+    const res = makeResponse(body, {
+      status: 200,
+      headers: { 'content-type': 'text/plain' },
+    });
+
+    const promise = readSSEStream(res, () => undefined);
+
+    await expect(promise).rejects.toThrow(/x+…/);
+    await promise.catch((err: Error) => {
+      expect(err.message.length).toBeLessThan(500);
+    });
+  });
+
+  it('resolves silently for an empty body with no events (preserves valid empty streams)', async () => {
+    const empty = new Response(new ReadableStream<Uint8Array>({
+      start(controller) { controller.close(); },
+    }));
+
+    const events: string[] = [];
+    await expect(readSSEStream(empty, e => events.push(e))).resolves.toBeUndefined();
+    expect(events).toEqual([]);
+  });
+
+  it('does not throw a malformed-SSE error for a whitespace-only body', async () => {
+    const res = makeResponse('\n\n\n', {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    });
+    const events: string[] = [];
+    await expect(readSSEStream(res, e => events.push(e))).resolves.toBeUndefined();
+    expect(events).toEqual([]);
   });
 
   it('stops reading and cancels the body when the callback returns false', async () => {

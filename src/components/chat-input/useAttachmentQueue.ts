@@ -30,6 +30,7 @@ export function useAttachmentQueue({
 }: UseAttachmentQueueOptions) {
   const [attachments, setAttachments] = React.useState<Attachment[]>([]);
   const [draggingFiles, setDraggingFiles] = React.useState(false);
+  const [attachmentError, setAttachmentError] = React.useState<AttachmentError | null>(null);
   const attachmentsRef = React.useRef(attachments);
   const dragDepthRef = React.useRef(0);
   const pendingControllersRef = React.useRef<Map<string, AbortController>>(new Map());
@@ -38,6 +39,10 @@ export function useAttachmentQueue({
   React.useEffect(() => {
     attachmentsRef.current = attachments;
   }, [attachments]);
+
+  const dismissAttachmentError = React.useCallback(() => {
+    setAttachmentError(null);
+  }, []);
 
   const abortPendingAttachment = React.useCallback((pendingId: string) => {
     const controller = pendingControllersRef.current.get(pendingId);
@@ -55,6 +60,7 @@ export function useAttachmentQueue({
   const clearAttachmentsAndPendingWork = React.useCallback(() => {
     abortAllPendingAttachments();
     setAttachments([]);
+    setAttachmentError(null);
   }, [abortAllPendingAttachments]);
 
   const clearDragState = React.useCallback(() => {
@@ -75,6 +81,7 @@ export function useAttachmentQueue({
     abortAllPendingAttachments();
     clearDragState();
     setAttachments(prev => prev.filter(att => !isPendingAttachment(att)));
+    setAttachmentError(null);
   }, [abortAllPendingAttachments, clearDragState, composerInactive]);
 
   React.useEffect(() => {
@@ -95,7 +102,7 @@ export function useAttachmentQueue({
     file: File | undefined,
     message: string,
   ) => {
-    onAttachmentError?.({
+    const error: AttachmentError = {
       reason,
       message,
       file,
@@ -103,7 +110,9 @@ export function useAttachmentQueue({
       accept,
       maxAttachmentBytes,
       maxAttachments,
-    });
+    };
+    setAttachmentError(error);
+    onAttachmentError?.(error);
   }, [accept, maxAttachmentBytes, maxAttachments, onAttachmentError]);
 
   const convertFile = React.useCallback(async (file: File, signal: AbortSignal): Promise<Attachment> => {
@@ -122,6 +131,10 @@ export function useAttachmentQueue({
 
     const files = listFiles(incomingFiles);
     if (files.length === 0) return;
+
+    // Start of a fresh user batch — clear any prior error so this batch's outcome
+    // (success or new error) is the one surfaced.
+    setAttachmentError(null);
 
     const acceptedFiles: File[] = [];
     let nextCount = attachmentsRef.current.length;
@@ -231,6 +244,8 @@ export function useAttachmentQueue({
 
   return {
     attachments,
+    attachmentError,
+    dismissAttachmentError,
     draggingFiles,
     hasPendingAttachments: attachments.some(isPendingAttachment),
     hasSendableAttachment: attachments.some(att => !isPendingAttachment(att)),
