@@ -1881,7 +1881,11 @@ Available palette keys: `chatBg`, `chatText`, `border`, `assistantBubbleBg`, `as
 
 ### Reduced motion
 
-The bundled stylesheet honors `@media (prefers-reduced-motion: reduce)`: the attachment-upload spinner and the assistant typing dots stop animating (dots remain visible at full opacity), and non-essential hover/focus transitions on the textarea and message-action buttons are disabled. If you replace `Chorus.css` with your own stylesheet or use the `react-chorus/headless` subpath, you are responsible for providing equivalent reduced-motion handling.
+The bundled stylesheet honors `@media (prefers-reduced-motion: reduce)`: the attachment-upload spinner and the assistant typing dots stop animating (dots remain visible at full opacity), and non-essential hover/focus transitions on the textarea and message-action buttons are disabled. Focus rings remain visible regardless of motion preference. If you replace `Chorus.css` with your own stylesheet or use the `react-chorus/headless` subpath, you are responsible for providing equivalent reduced-motion handling.
+
+### Right-to-left (RTL) locales
+
+The bundled stylesheet uses CSS logical properties (`inset-inline-start` / `inset-inline-end`, `padding-inline-*`, `margin-inline-*`, `text-align: start`) for the composer, sidebar, and tool-call surfaces, so wrapping `<Chorus>` in any ancestor with `dir="rtl"` (or setting `document.documentElement.dir = 'rtl'`) is enough to mirror the layout: the paperclip moves to the visual right, the send button moves to the visual left, textarea padding flips, and conversation list affordances reverse. No new prop is required — Chorus inherits direction from the surrounding DOM. Pair this with `ChorusLabels` to localize the UI strings themselves.
 
 ## Individual Components
 
