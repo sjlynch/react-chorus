@@ -1,0 +1,116 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createDefaultFetchSSETransport } from '../hooks/assistant-session/transport';
+import type { Message } from '../types';
+
+function sentHeaders(options: RequestInit): Headers {
+  return new Headers(options.headers);
+}
+
+describe('createDefaultFetchSSETransport', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn(async () => new Response('', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('string URL form POSTs default JSON body', async () => {
+    const transport = createDefaultFetchSSETransport('/api/chat');
+    const history: Message[] = [{ id: '1', role: 'user', text: 'hi' }];
+
+    await transport('hello', history, new AbortController().signal);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/chat');
+    expect(options.method).toBe('POST');
+    expect(options.body).toBe(JSON.stringify({ prompt: 'hello', history }));
+    expect(sentHeaders(options).get('content-type')).toBe('application/json');
+  });
+
+  it('object form forwards Authorization headers alongside default Content-Type', async () => {
+    const transport = createDefaultFetchSSETransport({
+      url: '/api/chat',
+      headers: { Authorization: 'Bearer token' },
+    });
+
+    await transport('hello', [], new AbortController().signal);
+
+    const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/chat');
+    const headers = sentHeaders(options);
+    expect(headers.get('authorization')).toBe('Bearer token');
+    expect(headers.get('content-type')).toBe('application/json');
+  });
+
+  it('object form forwards credentials: "include" so cookies cross-origin', async () => {
+    const transport = createDefaultFetchSSETransport({
+      url: 'https://api.example.com/chat',
+      credentials: 'include',
+    });
+
+    await transport('hello', [], new AbortController().signal);
+
+    const [, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(options.credentials).toBe('include');
+  });
+
+  it('object form supports custom formatBody and skips default Content-Type', async () => {
+    const formatBody = vi.fn((text: string, history: Message[]) =>
+      JSON.stringify({ latest: text, msgs: history }),
+    );
+    const transport = createDefaultFetchSSETransport({
+      url: '/api/chat',
+      formatBody,
+    });
+    const history: Message[] = [{ id: '1', role: 'user', text: 'hi' }];
+
+    await transport('hello', history, new AbortController().signal);
+
+    expect(formatBody).toHaveBeenCalledWith('hello', history);
+    const [, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(options.body).toBe(JSON.stringify({ latest: 'hello', msgs: history }));
+    expect(sentHeaders(options).has('content-type')).toBe(false);
+  });
+
+  it('object form respects explicit Content-Type override', async () => {
+    const transport = createDefaultFetchSSETransport({
+      url: '/api/chat',
+      headers: { 'Content-Type': 'application/vnd.custom+json' },
+    });
+
+    await transport('hello', [], new AbortController().signal);
+
+    const [, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(sentHeaders(options).get('content-type')).toBe('application/vnd.custom+json');
+  });
+
+  it('object form forwards arbitrary RequestInit fields (cache, mode)', async () => {
+    const transport = createDefaultFetchSSETransport({
+      url: '/api/chat',
+      cache: 'no-store',
+      mode: 'cors',
+    });
+
+    await transport('hello', [], new AbortController().signal);
+
+    const [, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(options.cache).toBe('no-store');
+    expect(options.mode).toBe('cors');
+    expect(options.method).toBe('POST');
+  });
+
+  it('forwards the AbortSignal to fetch', async () => {
+    const transport = createDefaultFetchSSETransport({ url: '/api/chat' });
+    const controller = new AbortController();
+
+    await transport('hello', [], controller.signal);
+
+    const [, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(options.signal).toBe(controller.signal);
+  });
+});
