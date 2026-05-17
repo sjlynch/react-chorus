@@ -140,7 +140,9 @@ describe('Chorus', () => {
     act(() => ref.current?.focus());
     expect(screen.getByRole('textbox')).toHaveFocus();
 
-    act(() => ref.current?.send('hi from ref'));
+    let sendAccepted: boolean | undefined;
+    act(() => { sendAccepted = ref.current?.send('hi from ref'); });
+    expect(sendAccepted).toBe(true);
     await waitFor(() => expect(onSend).toHaveBeenCalledWith('hi from ref', expect.any(Array), expect.any(Object)));
     expect(await screen.findByText('ref reply')).toBeInTheDocument();
     expect(ref.current?.getMessages()).toEqual([
@@ -154,9 +156,80 @@ describe('Chorus', () => {
     expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
 
     act(() => ref.current?.stop());
-    act(() => ref.current?.clear());
+    let clearAccepted: boolean | undefined;
+    act(() => { clearAccepted = ref.current?.clear(); });
+    expect(clearAccepted).toBe(true);
     expect(ref.current?.getMessages()).toEqual([]);
     expect(screen.queryByText('hi from ref')).not.toBeInTheDocument();
+  });
+
+  it('ref.send returns false when the send would silently drop or be rejected', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      // Controlled mode without onChange: dev warning fires and ref.send is a no-op.
+      const controlledRef = React.createRef<ChorusRef>();
+      const controlledOnSend = vi.fn<OnSend>(async () => ({ id: 'a1', role: 'assistant', text: 'reply' }));
+      render(
+        <Chorus
+          ref={controlledRef}
+          value={[]}
+          onSend={controlledOnSend}
+          minAssistantDelayMs={0}
+        />,
+      );
+
+      let accepted: boolean | undefined;
+      act(() => { accepted = controlledRef.current?.send('hello'); });
+      expect(accepted).toBe(false);
+      expect(controlledOnSend).not.toHaveBeenCalled();
+
+      // No transport / no onSend configured: ref.send is also rejected.
+      const noHandlerRef = React.createRef<ChorusRef>();
+      render(<Chorus ref={noHandlerRef} minAssistantDelayMs={0} />);
+      let noHandlerAccepted: boolean | undefined;
+      act(() => { noHandlerAccepted = noHandlerRef.current?.send('hi'); });
+      expect(noHandlerAccepted).toBe(false);
+
+      // Empty text + no attachments: rejected.
+      const emptyRef = React.createRef<ChorusRef>();
+      const emptyOnSend = vi.fn<OnSend>(async () => ({ id: 'a2', role: 'assistant', text: '' }));
+      render(<Chorus ref={emptyRef} onSend={emptyOnSend} minAssistantDelayMs={0} />);
+      let emptyAccepted: boolean | undefined;
+      act(() => { emptyAccepted = emptyRef.current?.send('   '); });
+      expect(emptyAccepted).toBe(false);
+      expect(emptyOnSend).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('ref.send returns true and ref.clear returns true on a successful controlled send', async () => {
+    const ref = React.createRef<ChorusRef>();
+    const onSend = vi.fn<OnSend>(async () => ({ id: 'a1', role: 'assistant', text: 'controlled reply' }));
+
+    function Host() {
+      const [messages, setMessages] = React.useState<Message[]>([]);
+      return (
+        <Chorus
+          ref={ref}
+          value={messages}
+          onChange={setMessages}
+          onSend={onSend}
+          minAssistantDelayMs={0}
+        />
+      );
+    }
+
+    render(<Host />);
+
+    let sendAccepted: boolean | undefined;
+    act(() => { sendAccepted = ref.current?.send('hi controlled'); });
+    expect(sendAccepted).toBe(true);
+    await waitFor(() => expect(onSend).toHaveBeenCalled());
+
+    let clearAccepted: boolean | undefined;
+    act(() => { clearAccepted = ref.current?.clear(); });
+    expect(clearAccepted).toBe(true);
   });
 
   it('scrollToMessage targets custom renderMessage rows that spread messageProps', () => {
@@ -973,7 +1046,12 @@ describe('Chorus', () => {
     await user.click(prompt);
     expect(composer).toHaveValue('');
 
-    act(() => ref.current?.send('imperative send'));
+    let imperativeAccepted: boolean | undefined;
+    act(() => { imperativeAccepted = ref.current?.send('imperative send'); });
+    expect(imperativeAccepted).toBe(false);
+    let imperativeClearAccepted: boolean | undefined;
+    act(() => { imperativeClearAccepted = ref.current?.clear(); });
+    expect(imperativeClearAccepted).toBe(false);
     expect(onSend).not.toHaveBeenCalled();
   });
 

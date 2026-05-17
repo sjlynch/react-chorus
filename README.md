@@ -737,8 +737,8 @@ react-chorus keeps React/ReactDOM as peer dependencies and externalizes runtime 
 
 | Entry | Initial JS | gzip | Notes |
 |-------|------------|------|-------|
-| `react-chorus` (`<Chorus>`) | 159.9 kB | 54.3 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
-| `react-chorus/headless` | 160.3 kB | 54.5 kB | Headless defaults, same behavior surface. |
+| `react-chorus` (`<Chorus>`) | 160.0 kB | 54.4 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
+| `react-chorus/headless` | 160.4 kB | 54.5 kB | Headless defaults, same behavior surface. |
 | `react-chorus` (`useChorusStream`) | 37.1 kB | 12.3 kB | Root hook import; CI fails if it pulls UI, Markdown, or icon dependencies. |
 | `react-chorus` (`Markdown`) | 75.1 kB | 25.4 kB | Standalone Markdown renderer; includes Markdown parsing/sanitization, not chat icons. |
 | `react-chorus` (`ChatWindow`) | 109.9 kB | 37.4 kB | Transcript renderer with Markdown and message action icons, without the composer/widget shell. |
@@ -750,7 +750,7 @@ react-chorus keeps React/ReactDOM as peer dependencies and externalizes runtime 
 
 `highlight.js` is only fetched the first time a fenced code block (` ``` ` or `~~~`) appears in rendered text. The matching GitHub dark/light token-color stylesheet is also injected on demand based on `codeBlockTheme`; code renders immediately as plain text and is re-rendered with syntax highlighting once the chunk arrives. While an assistant message is actively streaming, Chorus renders that growing message as React-escaped plain text and switches to full Markdown parsing/sanitization when the stream finalizes.
 
-The playground has a separate budget because it intentionally bundles a complete demo app. `npm run build:playground` also runs `npm run verify:playground-size`, writes `.cache/react-chorus/playground-bundle-size-report.json`, and checks this paragraph. The current playground initial JS graph is 379.4 kB / 120.9 kB gzip and its largest lazy chunk (highlight.js) is 890.9 kB / 295.7 kB gzip. Vite's chunk warning limit is raised to that documented lazy budget so the playground build stays free of Vite chunk warnings while the budget script tracks regressions.
+The playground has a separate budget because it intentionally bundles a complete demo app. `npm run build:playground` also runs `npm run verify:playground-size`, writes `.cache/react-chorus/playground-bundle-size-report.json`, and checks this paragraph. The current playground initial JS graph is 379.5 kB / 120.9 kB gzip and its largest lazy chunk (highlight.js) is 890.9 kB / 295.7 kB gzip. Vite's chunk warning limit is raised to that documented lazy budget so the playground build stays free of Vite chunk warnings while the budget script tracks regressions.
 
 To refresh the published size claims after dependency or feature changes, run `npm run build`, `npm run verify:bundle-size`, and `npm run build:playground`, then copy the updated values from stdout or the `.cache/react-chorus/*-bundle-size-report.json` files into this section. The verification commands may fail until the README values are updated to match their reports.
 
@@ -965,7 +965,36 @@ export function SupportChat() {
 }
 ```
 
-The ref exposes `send(text, attachments?)`, `stop()`, `clear()`, `focus()`, `getMessages()`, and `scrollToMessage(id)`. `scrollToMessage(id)` returns `true` when it finds a rendered message row and `false` when the id is not currently mounted; check `hiddenRoles`, `maxRenderedMessages`, and custom `renderMessage` implementations that return a fragment/custom component without spreading `ctx.messageProps`. `send()` and `clear()` are no-ops while `<Chorus disabled>`, `<Chorus readOnly>`, or an async built-in persistence load is pending; `stop()` remains available for active responses.
+The ref exposes `send(text, attachments?)`, `stop()`, `clear()`, `focus()`, `getMessages()`, and `scrollToMessage(id)`.
+
+```ts
+interface ChorusRef<TMeta = Record<string, unknown>> {
+  send(text: string, attachments?: Attachment[]): boolean;
+  stop(): void;
+  clear(): boolean;
+  focus(): void;
+  getMessages(): Message<TMeta>[];
+  scrollToMessage(id: string): boolean;
+}
+```
+
+`send()` returns `true` when Chorus accepted the message and started a turn, and `false` when the send was rejected — nothing was appended to the transcript and no transport/onSend call was made. Rejection cases:
+
+- `<Chorus disabled>`, `<Chorus readOnly>`, or an async built-in persistence load is pending.
+- Controlled mode (`value` provided) with no `onChange` prop, so the new message could not be reflected.
+- A send or tool-loop turn is already in flight.
+- The text is empty and no attachments were supplied.
+- Neither `transport` nor `onSend` is configured.
+
+`clear()` returns `true` when the clear path was kicked off and `false` when rejected. Rejection cases:
+
+- `<Chorus disabled>`, `<Chorus readOnly>`, or an async built-in persistence load is pending.
+- A previous `confirmClearConversation` promise is still pending.
+- Controlled mode (`value` provided) with no `onChange` prop.
+
+When `confirmClearConversation` is configured, `true` means the confirmation flow was started — the actual reset still depends on the callback resolving to anything other than `false`.
+
+`scrollToMessage(id)` returns `true` when it finds a rendered message row and `false` when the id is not currently mounted; check `hiddenRoles`, `maxRenderedMessages`, and custom `renderMessage` implementations that return a fragment/custom component without spreading `ctx.messageProps`. `stop()` always remains available for active responses.
 
 ### Disabled and read-only states
 
@@ -1046,6 +1075,14 @@ const conversations = useConversations({ defaultTitle: 'New chat' });
 
 When the default `localStorage` adapter is used, both `useConversations` and `useChorusPersistence` listen for the browser's `storage` event so writes from another tab (a new conversation, a streamed reply, a deletion) are picked up automatically. Cross-tab sync is intentionally limited to the default adapter — if you pass a custom `StorageAdapter` (sessionStorage, IndexedDB, a remote API, etc.), the hooks do not subscribe to `storage` events and that adapter is responsible for its own change notification.
 
+#### `useConversations` storage lifecycle
+
+- **`loaded` transition.** `loaded` is `true` synchronously when the storage adapter returns the index synchronously (e.g. `localStorage`) and `false` while an async `getItem(indexKey)` is still resolving. While `loaded === false`, `conversations` is `[]` and `activeId` is `null`; render a skeleton/spinner instead of the empty state, and disable sidebar New/Rename/Delete controls. Once the index resolves, `loaded` flips to `true` once and stays true for the lifetime of the hook.
+- **Pre-load mutations.** `createConversation()` calls made while `loaded === false` are queued and merged into the loaded index after the async read resolves; the returned id is stable so you can navigate immediately. Other mutations (`selectConversation`, `renameConversation`, `renameFromFirstMessage`, `pinConversation`, `deleteConversation`) are ignored while `loaded === false` to avoid clobbering an in-flight index.
+- **Error routing.** Adapter failures surface as a `ConversationStorageError` on `result.error` and through `onError(error)`. Reads/writes never throw a promise out of the hook. Each error carries `error.key`, `error.operation` (`'read' | 'write' | 'delete'`), and `error.conversationId` (for transcript deletes), plus `error.cause` with the original adapter error. Per-message persistence failures from the active conversation's transcript flow through `<Chorus onPersistenceError>` instead (the wrapping storage adapter only touches index timestamps).
+- **Write ordering.** Index writes triggered by user actions (create/rename/pin/delete) are flushed immediately; selecting a conversation updates `updatedAt` and is debounced ~300 ms so rapid keyboard navigation does not thrash storage. Writes are serialized per-hook: a pending write waits for the previous one to resolve before issuing the next, so concurrent create/delete is safe and the final index always reflects the last action.
+- **`onError` reentry.** `onError` is called synchronously after `result.error` is updated. It is safe to call the hook's actions from inside `onError`, but avoid throwing — a thrown handler is warned in development and ignored.
+
 ### Persistence examples
 
 The basic runnable example enables `persistenceKey`, so it saves to `localStorage` by default. You can swap storage adapters without changing the rest of the chat:
@@ -1093,6 +1130,18 @@ const tokensRef = React.useRef(0);
   }}
 />
 ```
+
+`chunk` is the **incremental** text delta the connector just produced — typically one SSE token, never the running accumulated transcript. Append `chunk` yourself (keyed by `messageId`) if you need the full running text. The delta is the raw connector text **before** Markdown parsing/highlighting — `onChunk` does not see sanitized HTML, code-block chrome, or any rendering side effects.
+
+`onChunk` is called only for assistant `text` deltas; reasoning deltas, tool-call deltas, and provider error frames do not trigger it. Final-turn telemetry is reported separately via `onFinish` (successful completion with an assistant message), `onStreamDone` (every stream end, including tool-only turns), `onAbort` (Stop/clear/superseded), and `onError`.
+
+When you drive `useChorusStream` directly, callbacks fire in this order for a single send:
+
+1. `onStart(firstChunk)` — fires once on the first non-empty text chunk (the same chunk is also delivered to `onChunk`).
+2. `onChunk(chunk)` — fires for every non-empty text chunk in stream order.
+3. `onDone(response?)` or `onError(error)` — exactly one of these after the stream finalizes (an aborted send rejects without calling `onError`).
+
+`onReasoning` and `onToolDelta` interleave with `onChunk` independently. If `minDelayMs`/`minAssistantDelayMs` is non-zero, chunks are buffered until the delay elapses, then flushed in stream order before any are delivered.
 
 ### Completion telemetry with `onFinish`
 
@@ -1413,6 +1462,48 @@ const bufferedConnector: Connector<{ buffer: string }> = {
 };
 ```
 
+**In-band errors.** Connectors can surface a provider error by returning `{ error: string }` (and optionally `errorPayload` with the original frame). Chorus treats that as a stream error: the assistant message is finalized, `streamError` is set, the error banner renders, and `onError` is called with a `ChorusStreamError`. The original provider payload is preserved on `error.errorPayload`/`error.cause` and on `streamRawError` for hosts that want to surface a richer banner via `renderError`.
+
+```ts
+import type { Connector } from 'react-chorus';
+
+const myConnector: Connector = {
+  name: 'my-api',
+  extract(data) {
+    if (data === '[DONE]') return { done: true };
+    const obj = JSON.parse(data);
+    if (obj.error) {
+      return {
+        error: typeof obj.error === 'string' ? obj.error : obj.error.message ?? 'Stream error',
+        errorPayload: obj,
+      };
+    }
+    return obj.token ? { text: obj.token } : null;
+  },
+};
+
+<Chorus
+  transport="/api/chat"
+  connector={myConnector}
+  onError={(err) => {
+    // err is a ChorusStreamError; err.errorPayload is the original frame.
+    console.error('stream failed:', err.message, err.errorPayload);
+  }}
+  renderError={({ error, rawError, retry, dismiss }) => (
+    <div role="alert">
+      <p>{error}</p>
+      {rawError && 'errorPayload' in rawError && rawError.errorPayload ? (
+        <pre>{JSON.stringify(rawError.errorPayload, null, 2)}</pre>
+      ) : null}
+      <button onClick={retry}>Retry</button>
+      <button onClick={dismiss}>Dismiss</button>
+    </div>
+  )}
+/>
+```
+
+The built-in connectors emit `{ error, errorPayload }` the same way when they detect a provider error frame (OpenAI `{ error: { message } }`, Anthropic `{ type: 'error' }`, Gemini blocked finish reasons, etc.), so the same `onError`/`renderError` wiring works for built-in and custom connectors.
+
 ## Serializing multimodal and tool-call history
 
 `Message` is react-chorus' UI/storage shape. Provider APIs have stricter role and content schemas, so do not blindly send every item as `{ role: m.role, content: m.text }`: `tool` messages often need provider-specific IDs, system prompts may be top-level fields, and attachments need multimodal content parts.
@@ -1589,7 +1680,52 @@ The block shows the tool name in a header. Clicking expands it to reveal the inp
 
 ### Custom renderer via `renderMessage`
 
-Supply a `renderMessage` render-prop to take full control of how any message is displayed. Return `null` to fall back to the default renderer for that message. The second argument exposes rendering context: `ctx.isStreaming`, `ctx.messageProps`, `ctx.defaultRender(slots?)`, and `ctx.actions` (`edit(newText)`, `regenerate()`, `delete()`, `copy()`, `feedback('up' | 'down')`, `initialFeedback`, plus `ctx.actions.defaultRender()` for the built-in action controls). Repeating the current `initialFeedback` variant is a no-op.
+Supply a `renderMessage` render-prop to take full control of how any message is displayed. Return `null` to fall back to the default renderer for that message. The second argument is a `RenderMessageContext`:
+
+```ts
+interface RenderMessageContext<TMeta = Record<string, unknown>> {
+  /** The message currently being rendered. */
+  message: Message<TMeta>;
+  /** True while this message is the active streaming assistant turn. */
+  isStreaming: boolean;
+  /** Calls the default Chorus renderer for this message; pass optional slots to decorate the bubble. */
+  defaultRender: (slots?: MessageBubbleSlots) => React.ReactNode;
+  /** Spread on a custom row root so `ChorusRef.scrollToMessage(id)` can target it. */
+  messageProps: RenderMessageRootProps; // { 'data-chorus-message-id': string }
+  /** Built-in actions (edit/regenerate/copy/delete/feedback) plus their default-rendered controls. */
+  actions: MessageRenderActions;
+}
+
+interface MessageRenderActions {
+  /** Per-action availability flags reflecting current Chorus state (disabled/read-only, role, sending). */
+  canEdit: boolean;
+  canRegenerate: boolean;
+  canDelete: boolean;
+  edit?: (newText: string) => void;
+  regenerate?: () => void;
+  delete?: () => void;
+  /** Returns boolean | void | Promise<boolean | void>; built-in controls show "Copy failed" on explicit false. */
+  copy?: () => MessageCopyResult;
+  feedback?: (variant: MessageFeedback) => void;
+  /** Current persisted feedback selection used to seed the built-in thumb state. */
+  initialFeedback?: MessageFeedback | null;
+  /** Renders the built-in action controls (Copy/Edit/Regenerate/Delete/Feedback) for this message. */
+  defaultRender: () => React.ReactNode;
+}
+
+interface MessageBubbleSlots {
+  before?: React.ReactNode;       // before the bubble (avatars, etc.)
+  headerSlot?: React.ReactNode;   // inside .chorus-msg-content, above .chorus-bubble
+  footerSlot?: React.ReactNode;   // inside .chorus-msg-content, below .chorus-bubble
+  after?: React.ReactNode;        // after the bubble
+}
+
+interface RenderMessageRootProps {
+  'data-chorus-message-id': string;
+}
+```
+
+`edit`, `regenerate`, `delete`, and `feedback` are only set when those actions are available for the message and the current Chorus state — for example `edit` is omitted while the chat is disabled/read-only or for non-user messages. Repeating the current `initialFeedback` variant is a no-op. `actions.defaultRender()` renders the built-in control row exactly as `defaultRender()` would.
 
 For fully custom DOM rows, spread `ctx.messageProps` on the outer element you want `ChorusRef.scrollToMessage(id)` to target. Chorus automatically adds those props to a single DOM element returned directly from `renderMessage`, but spread them yourself when returning a fragment or custom component. Built-in `ctx.defaultRender()` and `<MessageBubble>` already include a scroll target.
 
@@ -1775,6 +1911,37 @@ import { ChatWindow, ConversationList, Markdown, MessageBubble } from 'react-cho
 <ConversationList {...conversations} />
 <Markdown text="**unstyled**" />
 ```
+
+The full set of named exports available from `react-chorus/headless`:
+
+Components (default `headless={true}`):
+
+- `Chorus`, `ChorusHeadless` — `<Chorus>` with `headless` defaulting to true; both names refer to the same component.
+- `ChatWindow` — transcript with `headless` default true so Markdown styling is not injected.
+- `MessageBubble` — single message bubble with `headless` default true.
+- `ConversationList` — sidebar with `headless` default true.
+- `Markdown` — Markdown renderer with `headless` default true (no `<style>` tag, no highlight.js theme).
+
+Pass-through components and theming (re-exported from the root barrel):
+
+- `ChatInput`, `ToolCallBlock`, `ChorusTheme`.
+
+Hooks:
+
+- `useChorusStream` — core SSE streaming hook for the simple `transport` path.
+- `useChorusPersistence` — read/write a single transcript through a `StorageAdapter`.
+- `useConversations` — conversation index + per-conversation transcript storage.
+
+Helpers and constants:
+
+- `createFetchSSETransport`, `createWebSocketTransport` — transport factories.
+- `defineTool` — typed tool definition for `<Chorus tools>` + provider request helpers.
+- `getConnector`, `autoConnector`, `openaiConnector`, `createOpenAIConnector`, `anthropicConnector`, `geminiConnector` — built-in connectors.
+- `formatAnthropicMessagesBody`, `formatGeminiGenerateContentBody`, `formatOpenAIChatCompletionsBody`, `formatOpenAIResponsesBody`, `toAnthropicMessages`, `toAnthropicMessagesBody`, `toAnthropicTools`, `toGeminiContents`, `toGeminiGenerateContentBody`, `toGeminiTools`, `toOpenAIChatCompletionsBody`, `toOpenAIChatCompletionsMessages`, `toOpenAIChatCompletionsTools`, `toOpenAIResponsesBody`, `toOpenAIResponsesInput`, `toOpenAIResponsesTools` — provider request mappers.
+- `ChorusStreamError` — error class thrown by `useChorusStream` and the transport path.
+- `DEFAULT_CHORUS_LABELS`, `resolveChorusLabels` — built-in localization helpers.
+
+Types: every public type re-exported from the root barrel is also importable from `react-chorus/headless` — including `Message`, `AnyChorusMessage`, `UserMessage`, `AssistantMessage`, `SystemMessage`, `ToolMessage`, `Role`, `ToolCall`, `Attachment`, `AttachmentError`, `AttachmentErrorReason`, `AttachmentSource`, `AttachmentUploadResult`, `UploadAttachment`, `UploadAttachmentOptions`, `StorageAdapter`, `ConnectorName`, `Connector`, `ConnectorResult`, `ConnectorToolDelta`, `Transport`, `FetchSSETransportOptions`, `FetchTransportInit`, `WebSocketTransport`, `WebSocketTransportOptions`, `SendCallbacks`, `StreamOptions`, `ChorusProps` (aliased to `ChorusHeadlessProps`), `ChorusRef`, `ChorusSendHelpers`, `ChorusSendPath`, `ChorusOnSend`, `ChorusOnFinish`, `ChorusOnAbort`, `ChorusOnStreamDone`, `ChorusOnToolCall`, `ChorusOnToolDelta`, `ChorusAbortContext`, `ChorusAbortReason`, `ChorusAbortSource`, `ChorusFinishContext`, `ChorusStreamDoneContext`, `ChorusStreamDoneReason`, `ChorusToolCallContext`, `ChorusToolDeltaContext`, `ChorusToolLoopContext`, `ChorusToolRegistry`, `ChorusConfirmClearConversation`, `ChorusClearConversationContext`, `ChorusConfirmDeleteMessage`, `ChorusDeleteMessageContext`, `ChorusShouldContinueToolLoop`, `ChorusMessagesChangeContext`, `ChorusToolDefinition`, `RenderErrorContext`, `RenderMessageContext`, `RenderMessageRootProps`, `MessageBubbleProps`, `MessageBubbleSlots`, `MessageMarkdownProps`, `MessageRenderActions`, `MessageCopyResult`, `MessageFeedback`, `GetMessageFeedback`, `ChatInputProps`, `ChatWindowProps`, `ConversationListProps`, `ConfirmDeleteConversation`, `ConfirmDeleteConversationContext`, `ConversationStorageError`, `ConversationStorageOperation`, `ConversationSummary`, `RenameFromFirstMessageOptions`, `UseConversationsOptions`, `UseConversationsResult`, `ChorusPersistenceError`, `PersistenceOperation`, `PersistenceWriteOptions`, `SerializeMessages`, `DeserializeMessages`, `UseChorusPersistenceOptions`, `UseChorusPersistenceResult`, `RenderAttachmentErrorContext`, `Palette`, `MarkdownProps`, `MarkdownSanitizer`, all `ChorusLabels` sub-shapes, and every provider request type (`AnthropicMessagesBody`, `AnthropicTool`, `OpenAIChatCompletionsBody`, `GeminiGenerateContentBody`, etc.).
 
 ## Message Shape
 
