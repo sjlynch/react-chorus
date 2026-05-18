@@ -1,94 +1,38 @@
 import React from 'react';
-import type { Message, StorageAdapter } from '../types';
+import type { Message } from '../types';
 import { useLatestRef } from './useLatestRef';
-import { isPromiseLike } from '../utils/async';
 import { createPersistenceError, isPersistenceError, warnPersistenceError } from './persistence/errors';
-import { defaultDeserializeMessages, defaultSerializeMessages, emptyState, stateFromRaw, type PersistenceState } from './persistence/messageCodec';
+import { useLocalStorageSync } from './persistence/localStorageSync';
+import { defaultDeserializeMessages, defaultSerializeMessages, type PersistenceState } from './persistence/messageCodec';
+import { usePageLifecycleFlush } from './persistence/pageLifecycle';
+import { type PendingPreloadChange } from './persistence/preloadReplay';
+import {
+  initializePersistenceState,
+  resolveStorage,
+  usePersistenceReadLifecycle,
+  type InitialSyncRead,
+  type PendingRead,
+} from './persistence/readLifecycle';
+import type {
+  ChorusPersistenceError,
+  DeserializeMessages,
+  PersistenceOperation,
+  PersistenceWriteOptions,
+  SerializeMessages,
+  UseChorusPersistenceOptions,
+  UseChorusPersistenceResult,
+} from './persistence/types';
 import { usePersistenceWriteQueue } from './persistence/writeQueue';
 
-export type SerializeMessages<TMeta = Record<string, unknown>> = (messages: Message<TMeta>[]) => string;
-export type DeserializeMessages<TMeta = Record<string, unknown>> = (raw: string) => Message<TMeta>[];
-export type PersistenceOperation = 'read' | 'deserialize' | 'write' | 'remove';
-
-export interface ChorusPersistenceError extends Error {
-  key: string;
-  operation: PersistenceOperation;
-  cause?: unknown;
-}
-
-export interface UseChorusPersistenceOptions<TMeta = Record<string, unknown>> {
-  storage?: StorageAdapter | null;
-  /** Debounce storage writes by this many milliseconds. Defaults to 0 for immediate writes. */
-  writeDebounceMs?: number;
-  /** Called when a persistence read, deserialization, write, or remove operation fails. */
-  onError?: (error: ChorusPersistenceError) => void;
-  /** Override message serialization. Defaults to JSON.stringify(messages). */
-  serializeMessages?: SerializeMessages<TMeta>;
-  /**
-   * Override message deserialization. Defaults to JSON.parse followed by validating
-   * each entry against the public Message contract: entries with missing/empty id,
-   * unknown role, wrong-typed text, missing/invalid toolCall on tool messages, or
-   * attachments on roles that do not support them are dropped (with a dev warning).
-   * Custom deserializers are responsible for their own validation; the hook still
-   * applies an array guard to whatever they return.
-   */
-  deserializeMessages?: DeserializeMessages<TMeta>;
-}
-
-export interface PersistenceWriteOptions {
-  /** Flush this update to storage immediately instead of waiting for the debounce window. */
-  flush?: boolean;
-  /** Remove the storage key when this write is an empty message list and removeItem is available. */
-  removeIfEmpty?: boolean;
-}
-
-export interface UseChorusPersistenceResult<TMeta = Record<string, unknown>> {
-  value: Message<TMeta>[];
-  onChange: (messages: Message<TMeta>[], options?: PersistenceWriteOptions) => void;
-  /** Flushes the latest debounced write, if one is pending. */
-  flush: () => void;
-  /** Last persistence error, if any. Cleared after the latest successful read or write for the current source. */
-  error: ChorusPersistenceError | null;
-  /** True once the current key/storage pair has completed its initial read. */
-  loaded: boolean;
-  /** True when storage already had a value for the key, or this hook has written one. */
-  hasStoredValue: boolean;
-  /** False when the key is empty or storage is unavailable. */
-  canPersist: boolean;
-}
-
-interface PendingRead {
-  key: string;
-  storage: StorageAdapter;
-  promise: Promise<string | null>;
-  writeVersion: number;
-}
-
-interface InitialSyncRead {
-  key: string;
-  storage: StorageAdapter;
-}
-
-interface PendingPreloadChange<TMeta = Record<string, unknown>> {
-  key: string;
-  storage: StorageAdapter;
-  messages: Message<TMeta>[];
-  options?: PersistenceWriteOptions;
-}
-
-function resolveDefaultStorage(): StorageAdapter | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    return window.localStorage;
-  } catch {
-    return null;
-  }
-}
-
-function resolveStorage<TMeta>(options?: UseChorusPersistenceOptions<TMeta>): StorageAdapter | null {
-  if (options?.storage !== undefined) return options.storage;
-  return resolveDefaultStorage();
-}
+export type {
+  ChorusPersistenceError,
+  DeserializeMessages,
+  PersistenceOperation,
+  PersistenceWriteOptions,
+  SerializeMessages,
+  UseChorusPersistenceOptions,
+  UseChorusPersistenceResult,
+} from './persistence/types';
 
 /**
  * Persists Chorus messages to a storage adapter (defaults to localStorage).
@@ -137,32 +81,15 @@ export function useChorusPersistence<TMeta = Record<string, unknown>>(
   const deserializeMessagesRef = React.useRef<DeserializeMessages<TMeta>>(deserializeMessages);
   deserializeMessagesRef.current = deserializeMessages;
 
-  const [state, setState] = React.useState<PersistenceState<TMeta>>(() => {
-    if (!key || !storage) return emptyState<TMeta>(key, storage, true);
-
-    try {
-      const raw = storage.getItem(key);
-      if (isPromiseLike<string | null>(raw)) {
-        const promise = Promise.resolve(raw);
-        promise.catch(() => {});
-        initialAsyncReadRef.current = {
-          key,
-          storage,
-          promise,
-          writeVersion: writeVersionRef.current,
-        };
-        return emptyState<TMeta>(key, storage, false);
-      }
-      initialSyncReadRef.current = { key, storage };
-      const parsed = stateFromRaw<TMeta>(key, storage, raw, deserializeMessages);
-      initialErrorRef.current = parsed.error;
-      return parsed.state;
-    } catch (readError) {
-      initialSyncReadRef.current = { key, storage };
-      initialErrorRef.current = createPersistenceError(key, 'read', readError);
-      return emptyState<TMeta>(key, storage, true);
-    }
-  });
+  const [state, setState] = React.useState<PersistenceState<TMeta>>(() => initializePersistenceState<TMeta>(
+    key,
+    storage,
+    deserializeMessages,
+    writeVersionRef,
+    initialAsyncReadRef,
+    initialSyncReadRef,
+    initialErrorRef,
+  ));
   const [error, setError] = React.useState<ChorusPersistenceError | null>(() => initialErrorRef.current);
   const stateRef = React.useRef(state);
   stateRef.current = state;
@@ -215,168 +142,34 @@ export function useChorusPersistence<TMeta = Record<string, unknown>>(
     flush();
   }, [key, storage, flush]);
 
-  React.useEffect(() => {
-    if (typeof window === 'undefined' || typeof document === 'undefined') return undefined;
+  usePageLifecycleFlush(flushForPageLifecycle);
 
-    const handlePageHide = () => flushForPageLifecycle();
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') flushForPageLifecycle();
-    };
+  useLocalStorageSync(
+    key,
+    storage,
+    stateRef,
+    setState,
+    setError,
+    writeVersionRef,
+    serializeMessagesRef,
+    deserializeMessagesRef,
+    reportPersistenceError,
+  );
 
-    window.addEventListener('pagehide', handlePageHide);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => {
-      window.removeEventListener('pagehide', handlePageHide);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, [flushForPageLifecycle]);
-
-  // Cross-tab sync: pick up message writes from other tabs sharing the same
-  // localStorage. Skipped for custom StorageAdapter values — async/remote
-  // adapters are responsible for their own change notification.
-  React.useEffect(() => {
-    if (typeof window === 'undefined' || !key) return undefined;
-    let localStorageRef: Storage | null;
-    try {
-      localStorageRef = window.localStorage;
-    } catch {
-      return undefined;
-    }
-    if (storage !== localStorageRef) return undefined;
-
-    const handleStorage = (event: StorageEvent) => {
-      if (event.storageArea && event.storageArea !== localStorageRef) return;
-      if (event.key !== key) return;
-
-      // Defensive against same-tab polyfills: skip if the event mirrors what
-      // we already have in memory.
-      if (event.newValue !== null) {
-        try {
-          const currentSerialized = serializeMessagesRef.current(stateRef.current.value);
-          if (event.newValue === currentSerialized) return;
-        } catch {
-          // fall through and apply the event
-        }
-      } else if (stateRef.current.value.length === 0 && !stateRef.current.hasStoredValue) {
-        return;
-      }
-
-      const parsed = stateFromRaw<TMeta>(key, storage, event.newValue, deserializeMessagesRef.current);
-      if (parsed.error) {
-        reportPersistenceError(parsed.error, 'deserialize', key);
-        return;
-      }
-      writeVersionRef.current += 1;
-      stateRef.current = parsed.state;
-      setState(parsed.state);
-      setError(null);
-    };
-
-    window.addEventListener('storage', handleStorage);
-    return () => window.removeEventListener('storage', handleStorage);
-  }, [key, reportPersistenceError, storage]);
-
-  React.useEffect(() => {
-    let cancelled = false;
-    const pendingPreloadChange = pendingPreloadChangeRef.current;
-    if (pendingPreloadChange && (pendingPreloadChange.key !== key || pendingPreloadChange.storage !== storage)) {
-      pendingPreloadChangeRef.current = null;
-    }
-
-    const applyRead = (raw: string | null, writeVersion: number) => {
-      if (!cancelled && writeVersionRef.current === writeVersion) {
-        const parsed = stateFromRaw<TMeta>(key, storage, raw, deserializeMessagesRef.current);
-        const pendingPreloadChange = pendingPreloadChangeRef.current;
-
-        if (pendingPreloadChange?.key === key && pendingPreloadChange.storage === storage) {
-          pendingPreloadChangeRef.current = null;
-          if (!parsed.error && raw === null) {
-            const nextVersion = writeVersionRef.current + 1;
-            writeVersionRef.current = nextVersion;
-            const nextState = { key, storage, value: pendingPreloadChange.messages, loaded: true, hasStoredValue: true };
-            stateRef.current = nextState;
-            setState(nextState);
-            setError(null);
-            queueWrite(
-              pendingPreloadChange.messages,
-              nextVersion,
-              Boolean(pendingPreloadChange.options?.flush),
-              Boolean(pendingPreloadChange.options?.removeIfEmpty),
-            );
-            return;
-          }
-        }
-
-        stateRef.current = parsed.state;
-        setState(parsed.state);
-        if (parsed.error) reportPersistenceError(parsed.error, 'deserialize', key);
-        else setError(null);
-      }
-    };
-
-    const applyReadError = (readError: unknown, writeVersion: number) => {
-      if (!cancelled && writeVersionRef.current === writeVersion) {
-        const pendingPreloadChange = pendingPreloadChangeRef.current;
-        if (pendingPreloadChange?.key === key && pendingPreloadChange.storage === storage) pendingPreloadChangeRef.current = null;
-        const nextState = emptyState<TMeta>(key, storage, true);
-        stateRef.current = nextState;
-        setState(nextState);
-        reportPersistenceError(readError, 'read', key);
-      }
-    };
-
-    if (!key || !storage) {
-      const nextState = emptyState<TMeta>(key, storage, true);
-      stateRef.current = nextState;
-      setState(nextState);
-      return () => { cancelled = true; };
-    }
-
-    const initialSyncRead = initialSyncReadRef.current;
-    if (initialSyncRead?.key === key && initialSyncRead.storage === storage) {
-      initialSyncReadRef.current = null;
-      return () => { cancelled = true; };
-    }
-
-    const pendingInitialRead = initialAsyncReadRef.current;
-    if (pendingInitialRead?.key === key && pendingInitialRead.storage === storage) {
-      initialAsyncReadRef.current = null;
-      setState(prev => {
-        if (writeVersionRef.current !== pendingInitialRead.writeVersion) return prev;
-        const nextState = emptyState<TMeta>(key, storage, false);
-        stateRef.current = nextState;
-        return nextState;
-      });
-      pendingInitialRead.promise
-        .then(raw => applyRead(raw, pendingInitialRead.writeVersion))
-        .catch(readError => applyReadError(readError, pendingInitialRead.writeVersion));
-      return () => { cancelled = true; };
-    }
-
-    const writeVersion = writeVersionRef.current;
-    try {
-      const raw = storage.getItem(key);
-      if (isPromiseLike<string | null>(raw)) {
-        const promise = Promise.resolve(raw);
-        promise.catch(() => {});
-        setState(prev => {
-          if (writeVersionRef.current !== writeVersion) return prev;
-          const nextState = emptyState<TMeta>(key, storage, false);
-          stateRef.current = nextState;
-          return nextState;
-        });
-        promise
-          .then(str => applyRead(str, writeVersion))
-          .catch(readError => applyReadError(readError, writeVersion));
-      } else {
-        applyRead(raw, writeVersion);
-      }
-    } catch (readError) {
-      applyReadError(readError, writeVersion);
-    }
-
-    return () => { cancelled = true; };
-  }, [key, storage, deserializeMessagesRef, queueWrite, reportPersistenceError]);
+  usePersistenceReadLifecycle(
+    key,
+    storage,
+    writeVersionRef,
+    stateRef,
+    setState,
+    setError,
+    initialAsyncReadRef,
+    initialSyncReadRef,
+    pendingPreloadChangeRef,
+    deserializeMessagesRef,
+    queueWrite,
+    reportPersistenceError,
+  );
 
   const onChange = React.useCallback((messages: Message<TMeta>[], writeOptions?: PersistenceWriteOptions) => {
     const k = keyRef.current;
