@@ -853,7 +853,7 @@ react-chorus keeps React/ReactDOM as peer dependencies and externalizes runtime 
 | `react-chorus` (`ConversationList`) | 5.7 kB | 2.1 kB | Conversation sidebar component only; no Markdown/icon graph. |
 | `react-chorus/transport` | 5.3 kB | 2.3 kB | Transport factories only; no React/UI/Markdown runtime. |
 | `react-chorus/provider-requests` | 9.8 kB | 2.9 kB | Provider request mappers and tool serializers; no React/UI/Markdown runtime. |
-| `react-chorus/server` | 0.6 kB | 0.4 kB | SSE framing helpers for proxy routes (headers, encode/format, [DONE], error envelope); no React/UI runtime. |
+| `react-chorus/server` | 0.7 kB | 0.4 kB | SSE framing helpers for proxy routes (headers, encode/format, [DONE], error envelope); no React/UI runtime. |
 | Lazy `highlight.js` runtime | 891.4 kB | 295.9 kB | Async code-fence chunk, never part of initial JS. |
 
 `highlight.js` is only fetched the first time a fenced code block (` ``` ` or `~~~`) appears in rendered text. The matching GitHub dark/light token-color stylesheet is also injected on demand based on `codeBlockTheme`; code renders immediately as plain text and is re-rendered with syntax highlighting once the chunk arrives. While an assistant message is actively streaming, Chorus renders that growing message as React-escaped plain text and switches to full Markdown parsing/sanitization when the stream finalizes.
