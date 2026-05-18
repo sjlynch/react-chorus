@@ -11,11 +11,13 @@
 - `assistantBuffer.ts` — `useAssistantBuffer` owns the RAF-buffered text/reasoning queues, pending-assistant/tool refs, and `startAssistant` / `append*Now` / `finalizeAssistantNow` / `resetStreamState` / `resetPendingAssistantState` mutators.
 - `toolExecution.ts` — `useToolExecution` builds the tool message mutators (`appendToolDeltaNow`, `setToolOutput`, `setToolErrorOutput`), `createToolCallContext`, and the `runCompletedToolCalls` loop. The chunk-isolated `resolveToolHandlerLocal` helper lives here too — see the comment on the function.
 - `sessionHelpers.ts` — `createSessionHelpers` plain factory that returns the `ChorusSendHelpers` exposed to `onSend`, including `minAssistantDelayMs` buffering and auto-finalize logic.
+- `onSendLifecycle.ts` — `startOnSendLifecycle` owns the custom `onSend` branch once the facade selects it: abort-controller setup, `createSessionHelpers`, returned-message normalization, auto-finalize warnings, non-abort error handling, and cleanup.
 - `transportLifecycle.ts` — `useTransportLifecycle` owns `historyForTransport`, `startTransportStream`, `decideToolLoopContinuation`, and the internal `finishTransportStream` that runs queued tool calls and continues or releases the loop.
+- `sessionCommands.ts` — `useSessionCommands` builds the user-facing `send` / `retry` / `stop` / `clear` / `handleEdit` / `handleRegenerate` / `handleDelete` callbacks from refs and lifecycle callbacks supplied by the facade.
 - `toolLoop.ts` — `maxToolIterations` normalization (`Infinity` is the explicit unlimited sentinel) and defaults.
 - `transport.ts` — string-URL transport shortcut. It intentionally mirrors the default fetch SSE request locally to keep transport-only bundles isolated.
 
-The facade owns React lifecycle wiring (state setters, refs, `useChorusStream` integration) and the user-facing send/retry/stop/clear/edit/regenerate/delete handlers; the submodules above hold the work each handler delegates to.
+The facade owns React lifecycle wiring (state setters, refs, `useChorusStream` integration) and delegates provider-specific lifecycles plus user-facing command handlers to the submodules above.
 
 ## `useChorusStream`
 
