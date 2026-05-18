@@ -1,4 +1,4 @@
-import type { ChorusPersistenceError, PersistenceOperation } from '../useChorusPersistence';
+import type { ChorusPersistenceError, PersistenceOperation } from './types';
 import { toError } from '../../utils/errors';
 import { warnInDev } from '../../utils/warnings';
 

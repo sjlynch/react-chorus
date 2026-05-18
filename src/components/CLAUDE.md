@@ -6,10 +6,14 @@ Message list and auto-scroll container. It filters roles via `hiddenRoles` (defa
 
 Helper map:
 
+- `chat-window/types.ts` — public `ChatWindowProps`, `RenderErrorContext`, `RenderMessageRootProps`, and `RenderMessageContext` contracts re-exported by `ChatWindow.tsx`.
 - `chat-window/activityKey.ts` — `stringActivityKey` plus attachment/message/visible activity fingerprints for auto-scroll and unread detection.
+- `chat-window/messageWindowing.ts` — deprecated `showSystemMessages`/`hiddenRoles` resolution, visible-message filtering, and `maxRenderedMessages` normalization/windowing.
+- `chat-window/MessageList.tsx` — visible message mapping, `renderMessage` context/slot handling, default tool/message rows, and action/copy/feedback wiring.
+- `chat-window/TranscriptStatusRows.tsx` — custom/default empty state, typing indicator, error row, and jump-to-bottom button.
 - `chat-window/useAutoScroll.ts` — scroll container ref, near-bottom tracking, unread/jump-to-bottom state, and imperative scroll-to-bottom behavior.
 - `chat-window/feedback.ts` — per-message feedback override state and cleanup as messages leave the transcript.
-- `chat-window/rendering.tsx` — default empty-state prompt UI and `renderMessage` root-prop attachment.
+- `chat-window/rendering.tsx` — default suggested-prompt UI and `renderMessage` root-prop attachment.
 
 ## `MessageRow`
 

@@ -46,7 +46,7 @@ function libraryManualChunks(id: string) {
   if (normalizedId.endsWith('/src/streaming/createFetchSSETransport.ts') || normalizedId.endsWith('/src/streaming/createWebSocketTransport.ts') || normalizedId.includes('/src/streaming/websocket/')) return 'transport-core';
   if (normalizedId.endsWith('/src/hooks/useChorusPersistence.ts') || normalizedId.includes('/src/hooks/persistence/')) return 'persistence';
   if (normalizedId.endsWith('/src/hooks/useConversations.ts') || normalizedId.includes('/src/hooks/conversations/')) return 'conversations';
-  if (normalizedId.endsWith('/src/components/Markdown.tsx') || normalizedId.endsWith('/src/utils/hljsLoader.ts') || normalizedId.endsWith('/src/utils/markdownNormalizer.ts')) return 'markdown';
+  if (normalizedId.endsWith('/src/components/Markdown.tsx') || normalizedId.endsWith('/src/utils/hljsLoader.ts') || normalizedId.includes('/src/utils/hljs/') || normalizedId.endsWith('/src/utils/markdownNormalizer.ts')) return 'markdown';
   if (normalizedId.endsWith('/src/components/ChatInput.tsx') || normalizedId.includes('/src/components/chat-input/') || normalizedId.endsWith('/src/utils/attachmentPreview.ts')) return 'chat-input';
   if (normalizedId.endsWith('/src/components/ConversationList.tsx') || normalizedId.endsWith('/src/components/ChorusTheme.tsx')) return 'conversation-list';
   if (normalizedId.endsWith('/src/hooks/useAssistantSession.ts') || normalizedId.includes('/src/hooks/assistant-session/') || normalizedId.endsWith('/src/hooks/useChorusMessages.ts') || normalizedId.endsWith('/src/hooks/useRAFQueue.ts')) return 'chorus-session';

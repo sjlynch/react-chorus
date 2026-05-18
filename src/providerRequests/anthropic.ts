@@ -3,6 +3,7 @@ import { dataUrlFromAttachment, unsupportedAttachmentText } from './attachments'
 import { metadataBoolean, metadataString } from './metadata';
 import { stripAnthropicOptions } from './options';
 import { messageText, objectToolInput, toolContextText, toolOutputText } from './toolOutput';
+import type { ProviderMappingOptions } from './types/common';
 import type {
   AnthropicContentBlock,
   AnthropicDocumentBlock,
@@ -12,8 +13,7 @@ import type {
   AnthropicMessagesBodyOptions,
   AnthropicToolResultBlock,
   AnthropicToolUseBlock,
-  ProviderMappingOptions,
-} from './types';
+} from './types/anthropic';
 
 function anthropicToolUseId(message: Message<unknown>) {
   return metadataString(message, 'anthropic', ['toolUseId', 'tool_use_id'], [

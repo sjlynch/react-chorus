@@ -3,6 +3,7 @@ import { dataUrlFromAttachment, fileUriFromAttachment, unsupportedAttachmentText
 import { isRecord } from './metadata';
 import { stripGeminiOptions } from './options';
 import { messageText, objectToolInput, safeStringify, toolContextText } from './toolOutput';
+import type { ProviderMappingOptions } from './types/common';
 import type {
   GeminiContent,
   GeminiFunctionCallPart,
@@ -10,8 +11,7 @@ import type {
   GeminiGenerateContentBody,
   GeminiGenerateContentBodyOptions,
   GeminiPart,
-  ProviderMappingOptions,
-} from './types';
+} from './types/gemini';
 
 type GeminiToolMessage<TMeta> = { message: ToolMessage<TMeta>; name: string };
 
