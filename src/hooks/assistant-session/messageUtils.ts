@@ -63,7 +63,8 @@ export function cloneHistoryForRetry<TMeta>(history: Message<TMeta>[]): Message<
 
 export function findLastUserMessage<TMeta>(history: Message<TMeta>[]) {
   for (let i = history.length - 1; i >= 0; i -= 1) {
-    if (history[i].role === 'user') return history[i];
+    const message = history[i];
+    if (message && message.role === 'user') return message;
   }
   return null;
 }

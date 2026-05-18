@@ -9,7 +9,7 @@ import {
   type ThinkTagSplitterState,
 } from './openai/thinkTagSplitter';
 
-export type { Connector, ConnectorResult, ConnectorToolDelta } from './types';
+export type { Connector, ConnectorResult, ConnectorToolDelta, ConnectorWarning } from './types';
 export type { ThinkTagSplitterOptions } from './openai/thinkTagSplitter';
 
 export interface OpenAIConnectorOptions {
@@ -25,6 +25,8 @@ export interface OpenAIConnectorOptions {
 export interface OpenAIConnectorState {
   chatToolCallIds: Map<string, string>;
   responseToolCallIds: Map<string, string>;
+  /** Accumulated refusal text across `response.refusal.delta` events, keyed by item_id (or '' fallback). */
+  responseRefusalText: Map<string, string>;
   thinkState: ThinkTagSplitterState;
   thinkOptions: ThinkTagSplitterOptions;
 }
@@ -33,6 +35,7 @@ export function createOpenAIConnectorState(options: OpenAIConnectorOptions = {})
   return {
     chatToolCallIds: new Map<string, string>(),
     responseToolCallIds: new Map<string, string>(),
+    responseRefusalText: new Map<string, string>(),
     thinkState: createThinkTagSplitterState(),
     thinkOptions: options.thinkTag ?? {},
   };
@@ -41,6 +44,7 @@ export function createOpenAIConnectorState(options: OpenAIConnectorOptions = {})
 function resetOpenAIState(state: OpenAIConnectorState) {
   state.chatToolCallIds.clear();
   state.responseToolCallIds.clear();
+  state.responseRefusalText.clear();
   createThinkTagSplitter(state.thinkState, state.thinkOptions).reset();
 }
 

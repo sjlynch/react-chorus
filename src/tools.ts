@@ -87,6 +87,7 @@ export function toToolDefinitionList<TMeta>(
 
   const out: ChorusToolDefinition<TMeta>[] = [];
   for (const [name, entry] of Object.entries(registry)) {
+    if (!name) continue;
     if (!entry || typeof entry === 'function') continue;
     if (typeof entry.handler !== 'function') continue;
     out.push({ ...entry, name });

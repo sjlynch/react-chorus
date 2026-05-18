@@ -62,6 +62,44 @@ describe('formatSSEEvent / encodeSSEEvent', () => {
   });
 });
 
+describe('formatSSEEvent rejects non-serializable payloads', () => {
+  // Without an explicit guard, JSON.stringify returns undefined for these and
+  // buildDataLines blows up on `.replace` of undefined — see LATTICE bug for
+  // why proxy authors hit this while debugging (e.g. `chunk.choices?.[0]?.delta?.content`
+  // resolving to undefined).
+  it('throws a clear TypeError when payload is undefined', () => {
+    expect(() => formatSSEEvent(undefined)).toThrow(TypeError);
+    expect(() => formatSSEEvent(undefined)).toThrow(/JSON-serializable/);
+  });
+
+  it('throws a clear TypeError when payload is a function', () => {
+    expect(() => formatSSEEvent(() => 1)).toThrow(/JSON-serializable/);
+  });
+
+  it('throws a clear TypeError when payload is a symbol', () => {
+    expect(() => formatSSEEvent(Symbol('x'))).toThrow(/JSON-serializable/);
+  });
+
+  it('encodeSSEEvent surfaces the same TypeError for undefined payloads', () => {
+    expect(() => encodeSSEEvent(undefined)).toThrow(/JSON-serializable/);
+  });
+
+  // BigInt and circular structures rely on the native JSON.stringify errors —
+  // these messages are already specific enough that wrapping them would just
+  // add noise, so we let them propagate. These tests pin that behavior.
+  it('propagates the native JSON.stringify error for BigInt payloads', () => {
+    expect(() => formatSSEEvent(1n)).toThrow(TypeError);
+    expect(() => formatSSEEvent(1n)).toThrow(/BigInt/);
+  });
+
+  it('propagates the native JSON.stringify error for circular structures', () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    expect(() => formatSSEEvent(circular)).toThrow(TypeError);
+    expect(() => formatSSEEvent(circular)).toThrow(/circular/i);
+  });
+});
+
 describe('multiline string payloads', () => {
   it('emits one `data:` line per line of the value per the SSE spec', () => {
     const formatted = formatSSEEvent('first line\nsecond line\nthird line');
@@ -126,5 +164,15 @@ describe('formatSSEError / encodeSSEError', () => {
   it('encodeSSEError matches formatSSEError byte-for-byte', () => {
     const error = new Error('nope');
     expect(decoder.decode(encodeSSEError(error))).toBe(formatSSEError(error));
+  });
+
+  // formatSSEError must stay safe even for the payloads that now throw from
+  // formatSSEEvent — it always wraps the value into a string `error` field, so
+  // the inner JSON.stringify never returns undefined.
+  it('stays safe for undefined / function / symbol / bigint errors', () => {
+    expect(formatSSEError(undefined)).toBe(`data: ${JSON.stringify({ error: 'undefined' })}\n\n`);
+    expect(formatSSEError(() => 1)).toMatch(/^data: \{"error":".+"\}\n\n$/);
+    expect(formatSSEError(Symbol('boom'))).toBe(`data: ${JSON.stringify({ error: 'Symbol(boom)' })}\n\n`);
+    expect(formatSSEError(1n)).toBe(`data: ${JSON.stringify({ error: '1' })}\n\n`);
   });
 });

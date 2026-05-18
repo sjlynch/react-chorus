@@ -1296,6 +1296,34 @@ describe('Chorus', () => {
     expect(screen.queryByRole('log')).toBeInTheDocument();
   });
 
+  it('renders without crashing when persisted storage contains a malformed tool message', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const onPersistenceError = vi.fn();
+      // Corrupted tool message with no toolCall — pre-fix this would render a visible
+      // tool row and crash ToolCallBlock when it dereferenced m.toolCall.
+      const storage = makeSyncStorage({
+        chat: JSON.stringify([
+          { id: 'bad-tool', role: 'tool', text: '' },
+          { id: 'good', role: 'user', text: 'after the bad one' },
+        ]),
+      });
+
+      expect(() => render(
+        <Chorus persistenceKey="chat" persistenceStorage={storage} onPersistenceError={onPersistenceError} />,
+      )).not.toThrow();
+
+      await waitFor(() => expect(screen.getByText('after the bad one')).toBeInTheDocument());
+      expect(onPersistenceError).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('Dropped 1 invalid persisted message'),
+        expect.any(Array),
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('does not read ignored built-in persistence in controlled mode', async () => {
     const onPersistenceError = vi.fn();
     const storage: StorageAdapter = {
@@ -2215,7 +2243,7 @@ describe('Chorus', () => {
       })],
     }));
     expect(screen.getAllByText('describe this')).toHaveLength(1);
-    await waitFor(() => expect(screen.getAllByAltText('photo.png')).toHaveLength(1));
+    await waitFor(() => expect(screen.getAllByAltText('Attached image: photo.png')).toHaveLength(1));
   });
 
   it('removes a failed partial transport response before retrying', async () => {

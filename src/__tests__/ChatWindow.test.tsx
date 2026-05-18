@@ -230,8 +230,39 @@ describe('ChatWindow', () => {
       attachments: [{ name: 'photo.png', type: 'image/png', data: 'data:image/png;base64,abc', size: 3 }],
     }]} />);
 
-    expect(screen.getByAltText('photo.png')).toBeInTheDocument();
+    expect(screen.getByAltText('Attached image: photo.png')).toBeInTheDocument();
     expect(container.querySelector('.chorus-user .chorus-bubble')).toBeInTheDocument();
+  });
+
+  it('prefers Attachment.alt for the image alt attribute when provided', () => {
+    render(<ChatWindow messages={[{
+      id: 'u-alt',
+      role: 'user',
+      text: '',
+      attachments: [{
+        name: 'photo.png',
+        type: 'image/png',
+        data: 'data:image/png;base64,abc',
+        size: 3,
+        alt: 'A red bicycle leaning on a fence',
+      }],
+    }]} />);
+
+    expect(screen.getByAltText('A red bicycle leaning on a fence')).toBeInTheDocument();
+    expect(screen.queryByAltText('Attached image: photo.png')).not.toBeInTheDocument();
+  });
+
+  it('uses the localized fallback alt label when Attachment.alt is missing', () => {
+    render(<ChatWindow
+      messages={[{
+        id: 'u-fallback',
+        role: 'user',
+        text: '',
+        attachments: [{ name: 'photo.png', type: 'image/png', data: 'data:image/png;base64,abc', size: 3 }],
+      }]}
+      labels={{ attachments: { imageFallbackAlt: (name) => `Image jointe : ${name}` } }}
+    />);
+    expect(screen.getByAltText('Image jointe : photo.png')).toBeInTheDocument();
   });
 
   it('preserves a bubble for normal assistant text', () => {
@@ -845,9 +876,9 @@ describe('ChatWindow', () => {
 
     const { container } = render(<MessageBubble message={message} />);
 
-    expect(screen.getByAltText('photo.png')).toHaveAttribute('src', 'data:image/png;base64,abc');
-    expect(screen.getByAltText('photo.png')).toHaveAttribute('loading', 'lazy');
-    expect(screen.getByAltText('photo.png')).toHaveAttribute('decoding', 'async');
+    expect(screen.getByAltText('Attached image: photo.png')).toHaveAttribute('src', 'data:image/png;base64,abc');
+    expect(screen.getByAltText('Attached image: photo.png')).toHaveAttribute('loading', 'lazy');
+    expect(screen.getByAltText('Attached image: photo.png')).toHaveAttribute('decoding', 'async');
     expect(screen.getByText('notes.txt')).toBeInTheDocument();
     expect(container.querySelector('.chorus-msg-attachments')).toBeInTheDocument();
   });

@@ -533,6 +533,151 @@ describe('useChorusPersistence', () => {
     });
   });
 
+  describe('default deserializer validation', () => {
+    it('drops persisted tool messages that lack a valid toolCall and warns in dev', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const malformed = [{ id: 'bad', role: 'tool', text: '' }];
+        const storage = makeSyncStorage(JSON.stringify(malformed));
+        const { result } = renderHook(() => useChorusPersistence('key', { storage }));
+
+        expect(result.current.value).toEqual([]);
+        expect(result.current.error).toBeNull();
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringContaining('Dropped 1 invalid persisted message'),
+          expect.arrayContaining([
+            expect.objectContaining({ index: 0, reason: expect.stringContaining('toolCall') }),
+          ]),
+        );
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('keeps valid persisted messages and drops invalid neighbors', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const payload = [
+          MSG,
+          { id: '', role: 'user', text: 'no id' },
+          { role: 'user', text: 'missing id field' },
+          { id: 'x', role: 'wizard', text: 'bad role' },
+          { id: 'y', role: 'assistant' },
+          { id: 'tool-1', role: 'tool', toolCall: { name: 'lookup', input: { q: 'a' } } },
+          { id: 'tool-2', role: 'tool', toolCall: {} },
+          { id: 'tool-3', role: 'tool' },
+          MSGS[1],
+        ];
+        const storage = makeSyncStorage(JSON.stringify(payload));
+        const { result } = renderHook(() => useChorusPersistence('key', { storage }));
+
+        expect(result.current.value).toEqual([
+          MSG,
+          { id: 'tool-1', role: 'tool', toolCall: { name: 'lookup', input: { q: 'a' } } },
+          MSGS[1],
+        ]);
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringContaining('Dropped 6 invalid persisted messages'),
+          expect.any(Array),
+        );
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('drops persisted entries that are not plain objects', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const storage = makeSyncStorage(JSON.stringify([null, 'not-a-message', 42, MSG]));
+        const { result } = renderHook(() => useChorusPersistence('key', { storage }));
+
+        expect(result.current.value).toEqual([MSG]);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('drops attachments on roles that do not support them', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const payload = [
+          {
+            id: 'sys',
+            role: 'system',
+            text: 'rules',
+            attachments: [{ name: 'a', type: 'text/plain', data: 'data:,a', size: 1 }],
+          },
+          {
+            id: 'tool',
+            role: 'tool',
+            toolCall: { name: 'lookup' },
+            attachments: [{ name: 'a', type: 'text/plain', data: 'data:,a', size: 1 }],
+          },
+          MSG,
+        ];
+        const storage = makeSyncStorage(JSON.stringify(payload));
+        const { result } = renderHook(() => useChorusPersistence('key', { storage }));
+
+        expect(result.current.value).toEqual([MSG]);
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringContaining('Dropped 2 invalid persisted messages'),
+          expect.arrayContaining([
+            expect.objectContaining({ reason: expect.stringContaining('attachments') }),
+          ]),
+        );
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('drops user/assistant messages with non-string text', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const payload = [
+          { id: 'a', role: 'user', text: 42 },
+          { id: 'b', role: 'assistant' },
+          MSG,
+        ];
+        const storage = makeSyncStorage(JSON.stringify(payload));
+        const { result } = renderHook(() => useChorusPersistence('key', { storage }));
+
+        expect(result.current.value).toEqual([MSG]);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('accepts a valid tool message and preserves its toolCall fields', () => {
+      const toolMessage = {
+        id: 't-1',
+        role: 'tool',
+        text: '',
+        toolCall: { id: 'call_123', name: 'web_search', input: { q: 'hi' }, output: 'result' },
+      };
+      const storage = makeSyncStorage(JSON.stringify([toolMessage]));
+      const { result } = renderHook(() => useChorusPersistence('key', { storage }));
+
+      expect(result.current.value).toEqual([toolMessage]);
+    });
+
+    it('returns an empty array (not a deserialize error) for a corrupted payload', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const onError = vi.fn();
+        const storage = makeSyncStorage(JSON.stringify([{ id: 'bad', role: 'tool', text: '' }]));
+        const { result } = renderHook(() => useChorusPersistence('key', { storage, onError }));
+
+        await act(async () => { await Promise.resolve(); });
+
+        expect(result.current.value).toEqual([]);
+        expect(result.current.error).toBeNull();
+        expect(onError).not.toHaveBeenCalled();
+      } finally {
+        warn.mockRestore();
+      }
+    });
+  });
+
   it('serializes async writes so newer messages win', async () => {
     const store: Record<string, string> = {};
     const writes: Array<{ value: string; resolve: () => void }> = [];

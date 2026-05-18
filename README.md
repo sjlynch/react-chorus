@@ -845,20 +845,20 @@ react-chorus keeps React/ReactDOM as peer dependencies and externalizes runtime 
 
 | Entry | Initial JS | gzip | Notes |
 |-------|------------|------|-------|
-| `react-chorus` (`<Chorus>`) | 163.9 kB | 55.3 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
-| `react-chorus/headless` | 164.3 kB | 55.5 kB | Headless defaults, same behavior surface. |
-| `react-chorus` (`useChorusStream`) | 40.5 kB | 13.1 kB | Root hook import; CI fails if it pulls UI, Markdown, or icon dependencies. |
+| `react-chorus` (`<Chorus>`) | 170.6 kB | 57.3 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
+| `react-chorus/headless` | 170.9 kB | 57.5 kB | Headless defaults, same behavior surface. |
+| `react-chorus` (`useChorusStream`) | 42.7 kB | 13.7 kB | Root hook import; CI fails if it pulls UI, Markdown, or icon dependencies. |
 | `react-chorus` (`Markdown`) | 75.1 kB | 25.4 kB | Standalone Markdown renderer; includes Markdown parsing/sanitization, not chat icons. |
-| `react-chorus` (`ChatWindow`) | 110.4 kB | 37.5 kB | Transcript renderer with Markdown and message action icons, without the composer/widget shell. |
-| `react-chorus` (`ConversationList`) | 5.7 kB | 2.1 kB | Conversation sidebar component only; no Markdown/icon graph. |
+| `react-chorus` (`ChatWindow`) | 113.1 kB | 38.4 kB | Transcript renderer with Markdown and message action icons, without the composer/widget shell. |
+| `react-chorus` (`ConversationList`) | 6.0 kB | 2.2 kB | Conversation sidebar component only; no Markdown/icon graph. |
 | `react-chorus/transport` | 5.3 kB | 2.3 kB | Transport factories only; no React/UI/Markdown runtime. |
-| `react-chorus/provider-requests` | 9.8 kB | 2.9 kB | Provider request mappers and tool serializers; no React/UI/Markdown runtime. |
-| `react-chorus/server` | 0.6 kB | 0.4 kB | SSE framing helpers for proxy routes (headers, encode/format, [DONE], error envelope); no React/UI runtime. |
+| `react-chorus/provider-requests` | 9.9 kB | 2.9 kB | Provider request mappers and tool serializers; no React/UI/Markdown runtime. |
+| `react-chorus/server` | 0.7 kB | 0.4 kB | SSE framing helpers for proxy routes (headers, encode/format, [DONE], error envelope); no React/UI runtime. |
 | Lazy `highlight.js` runtime | 891.4 kB | 295.9 kB | Async code-fence chunk, never part of initial JS. |
 
 `highlight.js` is only fetched the first time a fenced code block (` ``` ` or `~~~`) appears in rendered text. The matching GitHub dark/light token-color stylesheet is also injected on demand based on `codeBlockTheme`; code renders immediately as plain text and is re-rendered with syntax highlighting once the chunk arrives. While an assistant message is actively streaming, Chorus renders that growing message as React-escaped plain text and switches to full Markdown parsing/sanitization when the stream finalizes.
 
-The playground has a separate budget because it intentionally bundles a complete demo app. `npm run build:playground` also runs `npm run verify:playground-size`, writes `.cache/react-chorus/playground-bundle-size-report.json`, and checks this paragraph. The current playground initial JS graph is 383.5 kB / 121.9 kB gzip and its largest lazy chunk (highlight.js) is 890.9 kB / 295.7 kB gzip. Vite's chunk warning limit is raised to that documented lazy budget so the playground build stays free of Vite chunk warnings while the budget script tracks regressions.
+The playground has a separate budget because it intentionally bundles a complete demo app. `npm run build:playground` also runs `npm run verify:playground-size`, writes `.cache/react-chorus/playground-bundle-size-report.json`, and checks this paragraph. The current playground initial JS graph is 390.2 kB / 123.9 kB gzip and its largest lazy chunk (highlight.js) is 890.9 kB / 295.7 kB gzip. Vite's chunk warning limit is raised to that documented lazy budget so the playground build stays free of Vite chunk warnings while the budget script tracks regressions.
 
 To refresh the published size claims after dependency or feature changes, run `npm run build`, `npm run verify:bundle-size`, and `npm run build:playground`, then copy the updated values from stdout or the `.cache/react-chorus/*-bundle-size-report.json` files into this section. The verification commands may fail until the README values are updated to match their reports.
 
@@ -1011,13 +1011,33 @@ const fr: ChorusLabels = {
     pinAriaLabel: (title, pinned) => `${pinned ? 'Désépingler' : 'Épingler'} ${title}`,
     deleteAriaLabel: title => `Supprimer ${title}`,
   },
+  attachments: {
+    readingStatus: name => `Lecture de ${name}`,
+    uploadingStatus: name => `Envoi de ${name}`,
+    completedAnnouncement: name => `${name} prêt`,
+    failedAnnouncement: name => `Échec : ${name}`,
+    removeAttachment: name => `Retirer ${name}`,
+    dismissError: "Fermer l'erreur",
+    describeImage: 'Décrire cette image',
+    describeImageInputAriaLabel: name => `Description de ${name}`,
+    describeImagePlaceholder: 'Décrivez cette image',
+    imageFallbackAlt: name => `Image jointe : ${name}`,
+    unsupportedTypeError: ({ name, accept }) =>
+      `${name} n'est pas accepté${accept ? ` (${accept})` : ''}.`,
+    tooLargeError: ({ name, size, limit }) => `${name} (${size}) dépasse la limite ${limit}.`,
+    tooManyError: ({ name, max }) => `Limite ${max} pour ${name}.`,
+    readFailedError: ({ name, detail }) => `Lecture impossible de ${name} : ${detail}`,
+    uploadFailedError: ({ name, detail }) => `Envoi impossible de ${name} : ${detail}`,
+  },
   clearConversation: 'Effacer la conversation',
 };
 
 <Chorus transport="/api/chat" labels={fr} />;
 ```
 
-Labels are deep-merged with the defaults, so you only need to override the strings you actually want to change. `resolveChorusLabels(partial)` is exported when you want to compute the resolved set yourself (for storybook fixtures, `<ChatWindow>` outside of `<Chorus>`, or fully custom shells).
+Labels are deep-merged with the defaults, so you only need to override the strings you actually want to change. **Partial overrides only:** `undefined`, `null`, and empty-string values fall back to the English default so a loose i18n catalog cannot accidentally erase a UI label. Pass a non-empty whitespace string (e.g. `' '`) when you genuinely want a visually empty value. `resolveChorusLabels(partial)` is exported when you want to compute the resolved set yourself (for storybook fixtures, `<ChatWindow>` outside of `<Chorus>`, or fully custom shells).
+
+The `attachments` slice localizes the attachment composer end-to-end: chip remove-button labels, the pending read/upload polite-live status text and `aria-busy` chips, the polite-live completion announcements that confirm "attached" / "failed" after a pending chip resolves, the dismiss-error button, the "describe this image" affordance (visible next to image chips so users can supply alt text before sending), validation/read/upload error messages with `{name, accept, size, limit, max, detail}` interpolation, and the role-hinted image fallback alt rendered in the transcript when `Attachment.alt` is absent.
 
 ### `helpers` (passed to `onSend`)
 
@@ -1364,6 +1384,10 @@ Upload/transform files before they enter message history:
 If you return only `url` or `id`, Chorus normalizes `attachment.data` to that value for backwards compatibility. Your backend should still prefer explicit `url`/`id` fields when present.
 
 All accepted files first appear as pending attachment chips while they are read as data URLs or processed by `uploadAttachment`, and Send is disabled until every pending chip resolves. Removing a pending chip aborts its `AbortSignal`; late FileReader/upload completions are ignored and do not re-add the file. Read failures call `onAttachmentError` with `reason: 'read-failed'`; upload failures call `reason: 'upload-failed'`; user-initiated aborts are silent.
+
+**Accessibility:** pending chips set `aria-busy="true"` and expose a polite live-region "Reading/Uploading {name}" status so screen-reader users hear the upload in progress. When a pending attachment resolves, the composer emits a separate polite live-region announcement ("{name} attached" / "{name} failed to attach") so completion is heard even though the spinner has been removed. All of these strings flow through `labels.attachments` for localization.
+
+**Image alt text.** `Attachment.alt` is an optional human-authored description used as the image `alt` when the message renders in the transcript. When `alt` is omitted, the renderer falls back to a role-hinted label (`Attached image: {name}` by default, localizable via `labels.attachments.imageFallbackAlt`) rather than the bare filename. Image attachment chips in the composer expose an inline "Describe this image" affordance that captures alt text before send; the typed value flows into the `Attachment.alt` passed to `onSend`. Custom upload flows can also set `alt` themselves before returning the attachment from `uploadAttachment`.
 
 ### Hiding or showing tool calls
 

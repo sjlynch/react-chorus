@@ -140,6 +140,10 @@ export function useChorusStream<TMeta = Record<string, unknown>>(transport: Tran
       const toolDeltas = out.toolDeltas?.length ? out.toolDeltas : out.toolDelta ? [out.toolDelta] : [];
       for (const toolDelta of toolDeltas) delayedChunks.handleToolDelta(accumulateToolDelta(toolDelta));
 
+      // Non-fatal connector signals (truncation, safety ratings, telemetry events). Logged in
+      // dev so they're discoverable; not yet routed to a typed callback. Stream keeps flowing.
+      if (out.warning) warnInDev(`[Chorus] connector warning (${out.warning.code}): ${out.warning.message}`, out.warning.payload);
+
       const connectorError = connectorErrorFromResult(out);
       if (connectorError) throw connectorError;
       return Boolean(out.done);
