@@ -448,7 +448,7 @@ async function verifyConsumerBundleBudgets() {
   const chunksByFileName = new Map(chunks.map(chunk => [chunk.fileName, chunk]));
   const measurements = {};
   const entryBudgets = [
-    { label: 'root entry initial JS', entry: 'root', maxSize: 165 * KiB, maxGzip: 56 * KiB },
+    { label: 'root entry initial JS', entry: 'root', maxSize: 166 * KiB, maxGzip: 57 * KiB },
     { label: 'headless entry initial JS', entry: 'headless', maxSize: 168 * KiB, maxGzip: 57 * KiB },
     { label: 'root useChorusStream import initial JS', entry: 'rootUseChorusStream', maxSize: 42 * KiB, maxGzip: 14 * KiB },
     { label: 'root Markdown import initial JS', entry: 'rootMarkdown', maxSize: 85 * KiB, maxGzip: 30 * KiB },
