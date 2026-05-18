@@ -2,6 +2,7 @@ import type { Message } from '../../types';
 import { openAIImageUrlFromAttachment, unsupportedAttachmentText } from '../attachments';
 import { stripOpenAIResponsesOptions } from '../options';
 import { compactJSONString, messageText, toolContextText, toolOutputText } from '../toolOutput';
+import type { ProviderMappingOptions } from '../types/common';
 import type {
   OpenAIResponsesAssistantInputItem,
   OpenAIResponsesBody,
@@ -14,8 +15,7 @@ import type {
   OpenAIResponsesOutputTextPart,
   OpenAIResponsesSystemInputItem,
   OpenAIResponsesUserInputItem,
-  ProviderMappingOptions,
-} from '../types';
+} from '../types/openaiResponses';
 import { openAIToolCallId } from './shared';
 
 function openAIResponsesFunctionCall(message: Message<unknown>): OpenAIResponsesFunctionCallInputItem | null {

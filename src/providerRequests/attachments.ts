@@ -1,5 +1,5 @@
 import type { Attachment, Message } from '../types';
-import type { ProviderMappingOptions } from './types';
+import type { ProviderMappingOptions } from './types/common';
 
 function defaultUnsupportedAttachmentText(attachment: Attachment): string {
   const name = attachment.name || 'attachment';

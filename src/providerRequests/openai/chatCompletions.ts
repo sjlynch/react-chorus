@@ -3,6 +3,7 @@ import { openAIImageUrlFromAttachment, unsupportedAttachmentText } from '../atta
 import { hasOwn, isRecord, metadataArray, nonEmptyString } from '../metadata';
 import { stripOpenAIChatOptions } from '../options';
 import { compactJSONString, messageText, toolContextText, toolOutputText } from '../toolOutput';
+import type { ProviderMappingOptions } from '../types/common';
 import type {
   OpenAIChatCompletionsAssistantMessage,
   OpenAIChatCompletionsBody,
@@ -10,8 +11,7 @@ import type {
   OpenAIChatCompletionsMessage,
   OpenAIChatCompletionsToolCall,
   OpenAIChatCompletionsUserContentPart,
-  ProviderMappingOptions,
-} from '../types';
+} from '../types/openaiChat';
 import { openAIToolCallId } from './shared';
 
 function openAIAssistantToolCalls(message: Message<unknown>): OpenAIChatCompletionsToolCall[] | null {

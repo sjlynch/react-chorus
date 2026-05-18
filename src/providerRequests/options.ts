@@ -1,11 +1,9 @@
 import { toToolDefinitionList } from '../tools';
-import type { ProviderToolsOption } from './types';
-import type {
-  AnthropicMessagesBodyOptions,
-  GeminiGenerateContentBodyOptions,
-  OpenAIChatCompletionsBodyOptions,
-  OpenAIResponsesBodyOptions,
-} from './types';
+import type { ProviderToolsOption } from './types/common';
+import type { AnthropicMessagesBodyOptions } from './types/anthropic';
+import type { GeminiGenerateContentBodyOptions } from './types/gemini';
+import type { OpenAIChatCompletionsBodyOptions } from './types/openaiChat';
+import type { OpenAIResponsesBodyOptions } from './types/openaiResponses';
 import {
   toAnthropicTools,
   toGeminiTools,
