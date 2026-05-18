@@ -6,7 +6,7 @@
 
 ## `devMode.ts`
 
-`isChorusDevMode()` is the shared dev-warning gate for modules that can import this util. `ChatWindow.tsx` intentionally keeps a local duplicate to avoid coupling hook-only chunks to ChatWindow code, and `ConversationList.tsx` inlines the same gate inside `warnDeleteConfirmationError` for the same reason (the shared helper would pull the assistant-session chunk into ConversationList's graph). Keep new diagnostics behind one of these gates and, when inlining, mirror the explanatory comment so a future reader knows the duplication is deliberate.
+`isChorusDevMode()` is the shared dev-warning gate for modules that can import this util. `ChatWindow.tsx` intentionally keeps a local duplicate to avoid coupling hook-only chunks to ChatWindow code, and `components/conversation-list/useDeleteConversationConfirmation.ts` inlines the same gate inside `warnDeleteConfirmationError` for the same reason (the shared helper would pull the assistant-session chunk into ConversationList's graph). Keep new diagnostics behind one of these gates and, when inlining, mirror the explanatory comment so a future reader knows the duplication is deliberate.
 
 ## `hljsLoader.ts`
 
