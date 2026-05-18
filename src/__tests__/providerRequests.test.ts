@@ -246,6 +246,59 @@ describe('provider request mappers', () => {
     ]);
   });
 
+  it('falls back to text for image attachments whose data URL has an empty base64 payload', () => {
+    const emptyDataHistory = (): Message[] => [
+      {
+        id: 'user',
+        role: 'user',
+        text: 'Describe',
+        attachments: [
+          { name: 'stub.png', type: 'image/png', data: 'data:image/png;base64,', size: 0 },
+        ],
+      },
+    ];
+
+    expect(toOpenAIChatCompletionsBody(emptyDataHistory()).messages).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Describe' },
+          { type: 'text', text: '[Unsupported attachment omitted: stub.png (image/png)]' },
+        ],
+      },
+    ]);
+
+    expect(toOpenAIResponsesBody(emptyDataHistory()).input).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'input_text', text: 'Describe' },
+          { type: 'input_text', text: '[Unsupported attachment omitted: stub.png (image/png)]' },
+        ],
+      },
+    ]);
+
+    expect(toAnthropicMessagesBody(emptyDataHistory()).messages).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Describe' },
+          { type: 'text', text: '[Unsupported attachment omitted: stub.png (image/png)]' },
+        ],
+      },
+    ]);
+
+    expect(toGeminiGenerateContentBody(emptyDataHistory()).contents).toEqual([
+      {
+        role: 'user',
+        parts: [
+          { text: 'Describe' },
+          { text: '[Unsupported attachment omitted: stub.png (image/png)]' },
+        ],
+      },
+    ]);
+  });
+
   it('maps Chorus history to an Anthropic Messages body', () => {
     expect(toAnthropicMessagesBody(history(), { model: 'claude-sonnet-4-6', max_tokens: 512 })).toEqual({
       model: 'claude-sonnet-4-6',
