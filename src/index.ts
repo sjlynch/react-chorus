@@ -128,7 +128,7 @@ export type { ChorusToolDefinition } from './tools';
 export { Markdown } from './components/Markdown';
 export type { MarkdownProps, MarkdownSanitizer } from './components/Markdown';
 
-export type { Connector, ConnectorResult, ConnectorToolDelta } from './connectors/connectors';
+export type { Connector, ConnectorResult, ConnectorToolDelta, ConnectorWarning } from './connectors/connectors';
 export { getConnector, autoConnector } from './connectors/connectors';
 export { openaiConnector, createOpenAIConnector } from './connectors/openai';
 export type { OpenAIConnectorOptions, ThinkTagSplitterOptions } from './connectors/openai';
