@@ -1,6 +1,6 @@
 import React from 'react';
 import type { StorageAdapter } from '../../types';
-import type { ConversationStorageOperation, ConversationSummary } from '../useConversations';
+import type { ConversationStorageOperation, ConversationSummary } from './types';
 import { isPromiseLike } from '../../utils/async';
 import { serializeConversationIndex } from './indexCodec';
 

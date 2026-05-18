@@ -1,5 +1,5 @@
 import type { Message, StorageAdapter } from '../../types';
-import type { ConversationStorageError, ConversationSummary, RenameFromFirstMessageOptions } from '../useConversations';
+import type { ConversationStorageError, ConversationSummary, RenameFromFirstMessageOptions } from './types';
 import { warnInDev } from '../../utils/warnings';
 import { createConversationStorageError } from './storageErrors';
 

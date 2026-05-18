@@ -1,4 +1,4 @@
-import type { ConversationStorageError, ConversationStorageOperation } from '../useConversations';
+import type { ConversationStorageError, ConversationStorageOperation } from './types';
 import { toError } from '../../utils/errors';
 
 export function createConversationStorageError(
