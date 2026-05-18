@@ -717,6 +717,61 @@ describe('ChatWindow', () => {
     expect(screen.queryAllByTestId('markdown').map(el => el.textContent)).not.toContain('Hello');
   });
 
+  for (const variant of [
+    { name: 'default row', renderMessage: undefined },
+    { name: 'renderMessage action controls', renderMessage: readmeMessageRenderer },
+  ] as const) {
+    it(`restores focus to the Edit button after Escape in the ${variant.name}`, async () => {
+      const user = userEvent.setup();
+      render(<ChatWindow messages={[USER_MSG]} onEdit={vi.fn()} renderMessage={variant.renderMessage} />);
+
+      await user.click(screen.getByRole('button', { name: 'Edit' }));
+      await user.keyboard('{Escape}');
+
+      expect(screen.queryByRole('textbox', { name: 'Edit message' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Edit' })).toHaveFocus();
+    });
+
+    it(`restores focus to the Edit button after Cancel click in the ${variant.name}`, async () => {
+      const user = userEvent.setup();
+      render(<ChatWindow messages={[USER_MSG]} onEdit={vi.fn()} renderMessage={variant.renderMessage} />);
+
+      await user.click(screen.getByRole('button', { name: 'Edit' }));
+      await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+      expect(screen.queryByRole('textbox', { name: 'Edit message' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Edit' })).toHaveFocus();
+    });
+  }
+
+  it('exposes ctx.isEditing so custom rows can hide their own content while the editor is active', async () => {
+    const user = userEvent.setup();
+    render(
+      <ChatWindow
+        messages={[USER_MSG]}
+        onEdit={vi.fn()}
+        renderMessage={(msg, ctx) => (
+          <div {...ctx.messageProps}>
+            {!ctx.isEditing && <p data-testid="custom-text">{msg.text}</p>}
+            {ctx.actions.defaultRender()}
+          </div>
+        )}
+      />
+    );
+
+    expect(screen.getByTestId('custom-text')).toHaveTextContent('Hello');
+
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+
+    expect(screen.queryByTestId('custom-text')).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Edit message' })).toHaveValue('Hello');
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.getByTestId('custom-text')).toHaveTextContent('Hello');
+    expect(screen.getByRole('button', { name: 'Edit' })).toHaveFocus();
+  });
+
   it('MessageBubble preserves the default row layout when used from renderMessage', () => {
     const { container } = render(
       <ChatWindow
