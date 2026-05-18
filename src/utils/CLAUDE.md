@@ -6,11 +6,11 @@
 
 ## `devMode.ts`
 
-`isChorusDevMode()` is the shared dev-warning gate for modules that can import this util. `ChatWindow.tsx` intentionally keeps a local duplicate to avoid coupling hook-only chunks to ChatWindow code, and `ConversationList.tsx` inlines the same gate inside `warnDeleteConfirmationError` for the same reason (the shared helper would pull the assistant-session chunk into ConversationList's graph). Keep new diagnostics behind one of these gates and, when inlining, mirror the explanatory comment so a future reader knows the duplication is deliberate.
+`isChorusDevMode()` is the shared dev-warning gate for modules that can import this util. `ChatWindow.tsx` intentionally keeps a local duplicate to avoid coupling hook-only chunks to ChatWindow code, and `components/conversation-list/useDeleteConversationConfirmation.ts` inlines the same gate inside `warnDeleteConfirmationError` for the same reason (the shared helper would pull the assistant-session chunk into ConversationList's graph). Keep new diagnostics behind one of these gates and, when inlining, mirror the explanatory comment so a future reader knows the duplication is deliberate.
 
-## `hljsLoader.ts`
+## `hljsLoader.ts` and `hljs/`
 
-Lazy-loads `highlight.js` and scoped light/dark theme CSS for finalized Markdown code fences. `getHljs()` and `loadHljsTheme()` use module-level promises plus DOM id checks so concurrent renders share one import/injected style; if changing failure handling, keep highlighting optional and retryable instead of blocking plain Markdown rendering.
+`hljsLoader.ts` is the compatibility facade for the focused `hljs/` modules. They lazy-load `highlight.js` and scoped light/dark theme CSS for finalized Markdown code fences; `getHljs()` and `loadHljsTheme()` use module-level promises plus DOM id checks so concurrent renders share one import/injected style. If changing failure handling, keep highlighting optional and retryable instead of blocking plain Markdown rendering, and see `hljs/CLAUDE.md` before editing CSS scoping.
 
 ## `markdownNormalizer.ts`
 
