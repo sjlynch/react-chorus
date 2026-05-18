@@ -2,7 +2,10 @@
 
 Provider-specific request-body mapping lives in this folder:
 
-- `openai.ts` — Chat Completions and Responses message/input serialization.
+- `openai.ts` — thin facade re-exporting the public Chat Completions and Responses helpers from `openai/`.
+- `openai/chatCompletions.ts` — Chat Completions message serialization (`toOpenAIChatCompletionsMessages`, `toOpenAIChatCompletionsBody`, `formatOpenAIChatCompletionsBody`).
+- `openai/responses.ts` — Responses API input serialization (`toOpenAIResponsesInput`, `toOpenAIResponsesBody`, `formatOpenAIResponsesBody`).
+- `openai/shared.ts` — small cross-cut helpers (e.g. `openAIToolCallId`) reused by both paths.
 - `anthropic.ts` — Messages API system/message/tool-use serialization.
 - `gemini.ts` — GenerateContent contents, multimodal parts, and functionCall/functionResponse history.
 - `attachments.ts`, `metadata.ts`, `toolOutput.ts`, and `options.ts` — shared helpers for attachment fallbacks, provider metadata aliases, tool output rendering, and option stripping.
