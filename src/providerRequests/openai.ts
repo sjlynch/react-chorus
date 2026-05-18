@@ -123,7 +123,7 @@ function openAIChatUserContent<TMeta>(
 
   if (!parts.length) return null;
   const single = parts[0];
-  return parts.length === 1 && single.type === 'text' ? single.text : parts;
+  return parts.length === 1 && single && single.type === 'text' ? single.text : parts;
 }
 
 function toOpenAIChatCompletionsMessage<TMeta>(
@@ -258,6 +258,7 @@ export function toOpenAIChatCompletionsMessages<TMeta = Record<string, unknown>>
 
   for (let i = 0; i < history.length; i += 1) {
     const message = history[i];
+    if (!message) continue;
     if (message.role !== 'tool') {
       const mapped = toOpenAIChatCompletionsMessage(message, options);
       if (mapped) messages.push(mapped);
@@ -265,8 +266,10 @@ export function toOpenAIChatCompletionsMessages<TMeta = Record<string, unknown>>
     }
 
     const group: Message<TMeta>[] = [];
-    while (i < history.length && history[i].role === 'tool') {
-      group.push(history[i]);
+    while (i < history.length) {
+      const next = history[i];
+      if (!next || next.role !== 'tool') break;
+      group.push(next);
       i += 1;
     }
     i -= 1;
@@ -326,6 +329,7 @@ export function toOpenAIResponsesInput<TMeta = Record<string, unknown>>(
 
   for (let i = 0; i < history.length; i += 1) {
     const message = history[i];
+    if (!message) continue;
     if (message.role !== 'tool') {
       const mapped = toOpenAIResponsesInputItem(message, options);
       if (mapped) input.push(mapped);
@@ -333,8 +337,10 @@ export function toOpenAIResponsesInput<TMeta = Record<string, unknown>>(
     }
 
     const group: Message<TMeta>[] = [];
-    while (i < history.length && history[i].role === 'tool') {
-      group.push(history[i]);
+    while (i < history.length) {
+      const next = history[i];
+      if (!next || next.role !== 'tool') break;
+      group.push(next);
       i += 1;
     }
     i -= 1;
