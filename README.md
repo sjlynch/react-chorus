@@ -868,9 +868,9 @@ react-chorus keeps React/ReactDOM as peer dependencies and externalizes runtime 
 
 | Entry | Initial JS | gzip | Notes |
 |-------|------------|------|-------|
-| `react-chorus` (`<Chorus>`) | 170.9 kB | 57.5 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
-| `react-chorus/headless` | 171.3 kB | 57.6 kB | Headless defaults, same behavior surface. |
-| `react-chorus` (`useChorusStream`) | 43.0 kB | 13.9 kB | Root hook import; CI fails if it pulls UI, Markdown, or icon dependencies. |
+| `react-chorus` (`<Chorus>`) | 171.3 kB | 57.6 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
+| `react-chorus/headless` | 171.6 kB | 57.8 kB | Headless defaults, same behavior surface. |
+| `react-chorus` (`useChorusStream`) | 43.4 kB | 14.0 kB | Root hook import; CI fails if it pulls UI, Markdown, or icon dependencies. |
 | `react-chorus` (`Markdown`) | 75.1 kB | 25.4 kB | Standalone Markdown renderer; includes Markdown parsing/sanitization, not chat icons. |
 | `react-chorus` (`ChatWindow`) | 113.1 kB | 38.4 kB | Transcript renderer with Markdown and message action icons, without the composer/widget shell. |
 | `react-chorus` (`ConversationList`) | 6.0 kB | 2.2 kB | Conversation sidebar component only; no Markdown/icon graph. |
