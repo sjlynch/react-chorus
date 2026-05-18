@@ -11,41 +11,7 @@ function createAbortError(message: string) {
   return error;
 }
 
-export interface PendingAttachmentWork {
-  file: File;
-  pendingId: string;
-  controller: AbortController;
-  operation: 'read' | 'upload';
-  placeholder: Attachment;
-}
-
-export function formatBytes(bytes: number) {
-  if (!Number.isFinite(bytes)) return String(bytes);
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ['KB', 'MB', 'GB'];
-  let size = bytes / 1024;
-  let unit = units[0];
-  for (let i = 1; i < units.length && size >= 1024; i += 1) {
-    size /= 1024;
-    unit = units[i];
-  }
-  return `${size.toFixed(size >= 10 ? 0 : 1)} ${unit}`;
-}
-
-export function matchesAccept(file: File, accept: string) {
-  const rules = accept.split(',').map(rule => rule.trim().toLowerCase()).filter(Boolean);
-  if (rules.length === 0) return true;
-
-  const name = file.name.toLowerCase();
-  const type = file.type.toLowerCase();
-
-  return rules.some(rule => {
-    if (rule === '*/*') return true;
-    if (rule.startsWith('.')) return name.endsWith(rule);
-    if (rule.endsWith('/*')) return type.startsWith(rule.slice(0, -1));
-    return type === rule;
-  });
-}
+export type PendingAttachmentOperation = 'read' | 'upload';
 
 export function readFileAsDataURL(file: File, signal: AbortSignal) {
   return new Promise<string>((resolve, reject) => {
@@ -126,7 +92,7 @@ export function isPendingAttachment(att: Attachment) {
   return att.metadata?.status === PENDING_ATTACHMENT_STATUS && typeof att.metadata?.pendingId === 'string';
 }
 
-export function createPendingAttachment(file: File, pendingId: string, operation: PendingAttachmentWork['operation']): Attachment {
+export function createPendingAttachment(file: File, pendingId: string, operation: PendingAttachmentOperation): Attachment {
   return {
     name: file.name,
     type: file.type,

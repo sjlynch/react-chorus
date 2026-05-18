@@ -29,13 +29,11 @@ Submodule map:
 
 Textarea plus send/stop button and optional file attachment UI (`accept` enables attach). Enter sends, Shift+Enter inserts a newline, and attached files are read as data URLs by default. `onSend` may return `false` to veto a send; attachment chips and textarea height are only cleared after an accepted send.
 
-Attachment internals live in `components/chat-input/`:
+Composer and attachment internals live in `components/chat-input/`; see `components/chat-input/CLAUDE.md` for the full submodule map. Key split points:
 
-- `attachmentUtils.ts` — accept/size/file-transfer helpers, pending attachment metadata, FileReader/default upload conversion helpers.
-- `useAttachmentQueue.ts` — cancellable read/upload queue, reset/disabled/unmount aborts, drag state, validation, and error reporting.
-- `AttachmentChips.tsx` — chip/thumbnail/spinner/remove-button rendering.
-
-`resizeTextarea()` remains in `ChatInput.tsx`: on change it resets height to `auto`, then sets `min(scrollHeight, 160px)`; CSS also caps growth with `max-height`, and height resets after accepted sends.
+- `types.ts` preserves the public `ChatInputProps` and `RenderAttachmentErrorContext` contracts re-exported by `ChatInput.tsx`.
+- `useComposerTextarea.ts`, `useChatInputSend.ts`, and `useFileIngestionHandlers.ts` own textarea/focus, send acceptance/reset, and picker/paste/drag/drop dispatch respectively.
+- `useAttachmentQueue.ts` remains the facade for `ChatInput`, delegating validation to `attachmentValidation.ts`, pending read/upload work to `attachmentPendingWork.ts`, and drag depth to `useAttachmentDragState.ts`.
 
 ## `Markdown`
 
