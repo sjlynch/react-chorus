@@ -171,6 +171,7 @@ function dataStreamProtocolResult(state: AiSdkConnectorState, data: string): Con
   const match = DATA_STREAM_PREFIX_PATTERN.exec(data);
   if (!match) return null;
   const [, prefix, rest] = match;
+  if (prefix === undefined || rest === undefined) return null;
   let parsed: unknown;
   try {
     parsed = JSON.parse(rest);

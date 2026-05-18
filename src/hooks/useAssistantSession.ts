@@ -1130,7 +1130,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     const idx = currentMessages.findIndex(m => m.id === id);
     if (idx === -1) return;
     const currentMessage = currentMessages[idx];
-    if (currentMessage.role !== 'user') return;
+    if (!currentMessage || currentMessage.role !== 'user') return;
     const edited: Message<TMeta> = { ...currentMessage, text: newText };
     const next = updateSessionMessages(prev => [...prev.slice(0, idx), edited], { flushPersistence: true, reason: 'edit' });
     triggerAssistant(newText, next);
@@ -1142,10 +1142,10 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     const idx = currentMessages.findIndex(m => m.id === id);
     if (idx === -1) return;
     let userIdx = idx - 1;
-    while (userIdx >= 0 && currentMessages[userIdx].role !== 'user') userIdx -= 1;
+    while (userIdx >= 0 && currentMessages[userIdx]?.role !== 'user') userIdx -= 1;
     if (userIdx < 0) return;
     const userMsg = currentMessages[userIdx];
-    if (userMsg.role !== 'user') return;
+    if (!userMsg || userMsg.role !== 'user') return;
     const next = updateSessionMessages(prev => {
       const history = streamError ? dropTrailingAssistant(prev) : prev;
       return history.slice(0, userIdx + 1);

@@ -158,6 +158,58 @@ describe('openaiConnector', () => {
     });
   });
 
+  it('falls back to array position when tool_call.index is missing so parallel calls do not collide', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const state = openaiConnector.createState?.();
+      const data = JSON.stringify({
+        model: 'together/glm-4',
+        choices: [{
+          index: 0,
+          delta: { tool_calls: [
+            { id: 'call_a', function: { name: 'search', arguments: '{"q":"react"}' } },
+            { id: 'call_b', function: { name: 'lookup', arguments: '{"id":1}' } },
+          ] },
+        }],
+      });
+
+      const result = openaiConnector.extract(data, state);
+      expect(result?.toolDeltas).toEqual([
+        { id: 'call_a', name: 'search', input: '{"q":"react"}', provider: 'openai', providerId: 'call_a' },
+        { id: 'call_b', name: 'lookup', input: '{"id":1}', provider: 'openai', providerId: 'call_b' },
+      ]);
+      expect(result?.toolDeltas?.[0]?.id).not.toBe(result?.toolDeltas?.[1]?.id);
+      expect(warn).toHaveBeenCalled();
+      const warned = warn.mock.calls.some(call => String(call[0]).includes('together/glm-4'));
+      expect(warned).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('falls back to array position so generated tool ids are distinct when both id and index are missing', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const state = openaiConnector.createState?.();
+      const data = JSON.stringify({
+        choices: [{
+          index: 0,
+          delta: { tool_calls: [
+            { function: { name: 'search', arguments: '{"q":"react"}' } },
+            { function: { name: 'lookup', arguments: '{"id":1}' } },
+          ] },
+        }],
+      });
+
+      const result = openaiConnector.extract(data, state);
+      const ids = result?.toolDeltas?.map(d => d.id) ?? [];
+      expect(ids).toHaveLength(2);
+      expect(ids[0]).not.toBe(ids[1]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('extracts mixed text and multiple tool deltas', () => {
     const data = JSON.stringify({
       choices: [{
@@ -230,6 +282,65 @@ describe('createOpenAIConnector', () => {
     const connector = createOpenAIConnector({ thinkTag: { caseInsensitive: false } });
     const data = JSON.stringify({ choices: [{ index: 0, delta: { content: '<Think>plan</Think>answer' } }] });
     expect(connector.extract(data)).toEqual({ text: '<Think>plan</Think>answer' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// openaiConnector — Responses API event coverage
+// ---------------------------------------------------------------------------
+
+describe('openaiConnector (Responses API)', () => {
+  it('returns null for response.created (start telemetry, no payload)', () => {
+    const data = JSON.stringify({ type: 'response.created', response: { id: 'resp_1' } });
+    expect(openaiConnector.extract(data)).toBeNull();
+  });
+
+  it('returns null for response.output_item.started (lifecycle marker)', () => {
+    const data = JSON.stringify({ type: 'response.output_item.started', output_index: 0 });
+    expect(openaiConnector.extract(data)).toBeNull();
+  });
+
+  it('surfaces response.error as a connector error with the original payload', () => {
+    const payload = { type: 'response.error', code: 'rate_limited', message: 'too many requests' };
+    expect(openaiConnector.extract(JSON.stringify(payload))).toEqual({
+      error: 'too many requests',
+      errorPayload: payload,
+    });
+  });
+
+  it('accumulates refusal deltas and emits a connector error on response.refusal.done', () => {
+    const state = openaiConnector.createState?.();
+    const added = JSON.stringify({ type: 'response.refusal.added', item_id: 'msg_1', output_index: 0 });
+    const delta1 = JSON.stringify({ type: 'response.refusal.delta', item_id: 'msg_1', output_index: 0, delta: "I can't " });
+    const delta2 = JSON.stringify({ type: 'response.refusal.delta', item_id: 'msg_1', output_index: 0, delta: 'help with that.' });
+    const donePayload = { type: 'response.refusal.done', item_id: 'msg_1', output_index: 0 };
+
+    expect(state).toBeDefined();
+    expect(openaiConnector.extract(added, state)).toBeNull();
+    expect(openaiConnector.extract(delta1, state)).toBeNull();
+    expect(openaiConnector.extract(delta2, state)).toBeNull();
+    expect(openaiConnector.extract(JSON.stringify(donePayload), state)).toEqual({
+      error: "I can't help with that.",
+      errorPayload: donePayload,
+    });
+  });
+
+  it('prefers the explicit refusal text from response.refusal.done over accumulated deltas', () => {
+    const state = openaiConnector.createState?.();
+    openaiConnector.extract(JSON.stringify({ type: 'response.refusal.delta', item_id: 'msg_1', delta: 'partial' }), state);
+    const donePayload = { type: 'response.refusal.done', item_id: 'msg_1', refusal: 'final refusal text' };
+    expect(openaiConnector.extract(JSON.stringify(donePayload), state)).toEqual({
+      error: 'final refusal text',
+      errorPayload: donePayload,
+    });
+  });
+
+  it('emits a generic refusal message when neither delta nor refusal field is present', () => {
+    const donePayload = { type: 'response.refusal.done', item_id: 'msg_1' };
+    expect(openaiConnector.extract(JSON.stringify(donePayload))).toEqual({
+      error: 'OpenAI model refused to respond',
+      errorPayload: donePayload,
+    });
   });
 });
 
@@ -312,6 +423,60 @@ describe('anthropicConnector', () => {
   it('returns an in-band error payload', () => {
     const payload = { type: 'error', error: { message: 'anthropic failed' } };
     expect(anthropicConnector.extract(JSON.stringify(payload))).toEqual({ error: 'anthropic failed', errorPayload: payload });
+  });
+
+  it('surfaces message_delta.stop_reason=end_turn as metadata only', () => {
+    const data = JSON.stringify({
+      type: 'message_delta',
+      delta: { stop_reason: 'end_turn', stop_sequence: null },
+      usage: { output_tokens: 7 },
+    });
+    expect(anthropicConnector.extract(data)).toEqual({ metadata: { stopReason: 'end_turn' } });
+  });
+
+  it('surfaces message_delta.stop_reason=stop_sequence including the matched sequence', () => {
+    const data = JSON.stringify({
+      type: 'message_delta',
+      delta: { stop_reason: 'stop_sequence', stop_sequence: '<<END>>' },
+    });
+    expect(anthropicConnector.extract(data)).toEqual({
+      metadata: { stopReason: 'stop_sequence', stopSequence: '<<END>>' },
+    });
+  });
+
+  it('surfaces message_delta.stop_reason=max_tokens as a non-fatal truncation warning', () => {
+    const payload = {
+      type: 'message_delta',
+      delta: { stop_reason: 'max_tokens', stop_sequence: null },
+    };
+    const data = JSON.stringify(payload);
+    const result = anthropicConnector.extract(data);
+    expect(result).toEqual({
+      metadata: { stopReason: 'max_tokens' },
+      warning: {
+        code: 'truncated',
+        message: 'Anthropic response truncated by max_tokens',
+        payload,
+      },
+    });
+  });
+
+  it('surfaces message_delta.stop_reason=refusal as a connector error', () => {
+    const payload = {
+      type: 'message_delta',
+      delta: { stop_reason: 'refusal', stop_sequence: null },
+    };
+    const data = JSON.stringify(payload);
+    expect(anthropicConnector.extract(data)).toEqual({
+      error: 'Anthropic model refused to respond',
+      errorPayload: payload,
+      metadata: { stopReason: 'refusal' },
+    });
+  });
+
+  it('returns null for message_delta without a stop_reason', () => {
+    const data = JSON.stringify({ type: 'message_delta', delta: { stop_sequence: null }, usage: { output_tokens: 1 } });
+    expect(anthropicConnector.extract(data)).toBeNull();
   });
 });
 
@@ -412,11 +577,77 @@ describe('geminiConnector', () => {
   });
 
   it('returns an error for blocked SAFETY with no text', () => {
+    const safetyRatings = [{ category: 'HARM_CATEGORY_DANGEROUS_CONTENT' }];
     const payload = {
-      candidates: [{ finishReason: 'SAFETY', content: { parts: [] }, safetyRatings: [{ category: 'HARM_CATEGORY_DANGEROUS_CONTENT' }] }],
+      candidates: [{ finishReason: 'SAFETY', content: { parts: [] }, safetyRatings }],
     };
     expect(geminiConnector.extract(JSON.stringify(payload))).toEqual({
       error: 'Gemini response was blocked and returned no text (finishReason: SAFETY)',
+      errorPayload: payload,
+      metadata: { safetyRatings },
+    });
+  });
+
+  it('folds the worst safetyRatings category into the blocked-finish-reason error message', () => {
+    const safetyRatings = [
+      { category: 'HARM_CATEGORY_HARASSMENT', probability: 'LOW' },
+      { category: 'HARM_CATEGORY_HATE_SPEECH', probability: 'HIGH' },
+      { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', probability: 'NEGLIGIBLE' },
+    ];
+    const payload = {
+      candidates: [{ finishReason: 'SAFETY', content: { parts: [] }, safetyRatings }],
+    };
+    expect(geminiConnector.extract(JSON.stringify(payload))).toEqual({
+      error: 'Gemini response was blocked and returned no text (finishReason: SAFETY) (worst category: HARM_CATEGORY_HATE_SPEECH)',
+      errorPayload: payload,
+      metadata: { safetyRatings },
+    });
+  });
+
+  it('treats a rating with blocked: true as the worst category regardless of probability', () => {
+    const safetyRatings = [
+      { category: 'HARM_CATEGORY_HARASSMENT', probability: 'HIGH' },
+      { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', probability: 'LOW', blocked: true },
+    ];
+    const payload = {
+      candidates: [{ finishReason: 'SAFETY', content: { parts: [] }, safetyRatings }],
+    };
+    expect(geminiConnector.extract(JSON.stringify(payload))).toEqual({
+      error: 'Gemini response was blocked and returned no text (finishReason: SAFETY) (worst category: HARM_CATEGORY_SEXUALLY_EXPLICIT)',
+      errorPayload: payload,
+      metadata: { safetyRatings },
+    });
+  });
+
+  it('attaches safetyRatings as metadata on an unblocked candidate so diagnostics survive', () => {
+    const safetyRatings = [{ category: 'HARM_CATEGORY_HATE_SPEECH', probability: 'NEGLIGIBLE' }];
+    const data = JSON.stringify({
+      candidates: [{ content: { parts: [{ text: 'hi' }] }, safetyRatings }],
+    });
+    expect(geminiConnector.extract(data)).toEqual({
+      text: 'hi',
+      metadata: { safetyRatings },
+    });
+  });
+
+  it('surfaces promptFeedback.blockReason as an error even when candidates is empty', () => {
+    const payload = {
+      candidates: [],
+      promptFeedback: {
+        blockReason: 'SAFETY',
+        safetyRatings: [{ category: 'HARM_CATEGORY_HATE_SPEECH', probability: 'HIGH' }],
+      },
+    };
+    expect(geminiConnector.extract(JSON.stringify(payload))).toEqual({
+      error: 'Gemini blocked the prompt (blockReason: SAFETY, worst category: HARM_CATEGORY_HATE_SPEECH)',
+      errorPayload: payload,
+    });
+  });
+
+  it('surfaces promptFeedback.blockReason as an error when candidates is missing entirely', () => {
+    const payload = { promptFeedback: { blockReason: 'OTHER' } };
+    expect(geminiConnector.extract(JSON.stringify(payload))).toEqual({
+      error: 'Gemini blocked the prompt (blockReason: OTHER)',
       errorPayload: payload,
     });
   });

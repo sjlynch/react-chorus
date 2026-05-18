@@ -6,7 +6,7 @@ import { geminiConnector } from './gemini';
 import { aiSdkConnector, isAiSdkFrameType } from './aiSdk';
 import { extractErrorMessage } from './error';
 
-export type { Connector, ConnectorResult, ConnectorToolDelta } from './types';
+export type { Connector, ConnectorResult, ConnectorToolDelta, ConnectorWarning } from './types';
 export { anthropicConnector } from './anthropic';
 export { geminiConnector } from './gemini';
 export { aiSdkConnector } from './aiSdk';

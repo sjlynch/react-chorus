@@ -1,10 +1,21 @@
 import React from 'react';
 import type { Attachment, AttachmentError, AttachmentErrorReason, AttachmentSource, UploadAttachment } from '../../types';
+import { DEFAULT_ATTACHMENT_LABELS } from '../../labels/attachments';
+import type { ChorusAttachmentLabels } from '../../labels/types';
 import { createPendingAttachment, createPendingAttachmentId, formatBytes, getPendingAttachmentId, isPendingAttachment, listFiles, matchesAccept, normalizeAttachment, readFileAsDataURL, type PendingAttachmentWork } from './attachmentUtils';
 
 // Local to keep attachment UI from owning shared hook/transport utility chunks.
 function isAbortError(error: unknown) {
   return typeof error === 'object' && error !== null && 'name' in error && (error as { name?: unknown }).name === 'AbortError';
+}
+
+export interface AttachmentAnnouncement {
+  /** Stable id used as the announcement key (mirrors pending chip ids when applicable). */
+  id: string;
+  /** Type of announcement so callers can vary tone/role if desired. */
+  kind: 'completed' | 'failed';
+  /** Localized text to render inside a polite live region. */
+  message: string;
 }
 
 export interface UseAttachmentQueueOptions {
@@ -16,6 +27,7 @@ export interface UseAttachmentQueueOptions {
   uploadAttachment?: UploadAttachment;
   canIngestFiles: boolean;
   composerInactive: boolean;
+  labels?: ChorusAttachmentLabels;
 }
 
 export function useAttachmentQueue({
@@ -27,14 +39,20 @@ export function useAttachmentQueue({
   uploadAttachment,
   canIngestFiles,
   composerInactive,
+  labels = DEFAULT_ATTACHMENT_LABELS,
 }: UseAttachmentQueueOptions) {
   const [attachments, setAttachments] = React.useState<Attachment[]>([]);
   const [draggingFiles, setDraggingFiles] = React.useState(false);
   const [attachmentError, setAttachmentError] = React.useState<AttachmentError | null>(null);
+  const [announcement, setAnnouncement] = React.useState<AttachmentAnnouncement | null>(null);
   const attachmentsRef = React.useRef(attachments);
   const dragDepthRef = React.useRef(0);
   const pendingControllersRef = React.useRef<Map<string, AbortController>>(new Map());
   const previousResetKeyRef = React.useRef(resetKey);
+  // Latest labels are tracked via a ref so async completion handlers always use the freshest
+  // localized text without re-creating handleFiles each render.
+  const labelsRef = React.useRef(labels);
+  React.useEffect(() => { labelsRef.current = labels; }, [labels]);
 
   React.useEffect(() => {
     attachmentsRef.current = attachments;
@@ -61,6 +79,7 @@ export function useAttachmentQueue({
     abortAllPendingAttachments();
     setAttachments([]);
     setAttachmentError(null);
+    setAnnouncement(null);
   }, [abortAllPendingAttachments]);
 
   const clearDragState = React.useCallback(() => {
@@ -138,6 +157,7 @@ export function useAttachmentQueue({
 
     const acceptedFiles: File[] = [];
     let nextCount = attachmentsRef.current.length;
+    const activeLabels = labelsRef.current;
 
     for (const file of files) {
       if (!matchesAccept(file, accept ?? '')) {
@@ -145,7 +165,7 @@ export function useAttachmentQueue({
           'unsupported-type',
           source,
           file,
-          `${file.name} is not an accepted attachment type${accept ? ` (${accept})` : ''}.`,
+          activeLabels.unsupportedTypeError({ name: file.name, accept }),
         );
         continue;
       }
@@ -155,7 +175,11 @@ export function useAttachmentQueue({
           'too-large',
           source,
           file,
-          `${file.name} is ${formatBytes(file.size)}; the limit is ${formatBytes(maxAttachmentBytes)}.`,
+          activeLabels.tooLargeError({
+            name: file.name,
+            size: formatBytes(file.size),
+            limit: formatBytes(maxAttachmentBytes),
+          }),
         );
         continue;
       }
@@ -165,7 +189,7 @@ export function useAttachmentQueue({
           'too-many',
           source,
           file,
-          `Only ${maxAttachments} attachment${maxAttachments === 1 ? '' : 's'} allowed. Remove an attachment before adding ${file.name}.`,
+          activeLabels.tooManyError({ name: file.name, max: maxAttachments }),
         );
         continue;
       }
@@ -205,13 +229,26 @@ export function useAttachmentQueue({
           });
           return replaced ? next : prev;
         });
+        setAnnouncement({
+          id: pendingId,
+          kind: 'completed',
+          message: labelsRef.current.completedAnnouncement(file.name),
+        });
       } catch (error) {
         const wasCancelled = controller.signal.aborted || isAbortError(error);
         if (!wasCancelled) {
           const detail = error instanceof Error ? error.message : String(error);
           const reason = uploadAttachment ? 'upload-failed' : 'read-failed';
-          const verb = uploadAttachment ? 'uploaded' : 'read';
-          reportAttachmentError(reason, source, file, `${file.name} could not be ${verb}: ${detail}`);
+          const errorLabels = labelsRef.current;
+          const message = uploadAttachment
+            ? errorLabels.uploadFailedError({ name: file.name, detail })
+            : errorLabels.readFailedError({ name: file.name, detail });
+          reportAttachmentError(reason, source, file, message);
+          setAnnouncement({
+            id: pendingId,
+            kind: 'failed',
+            message: errorLabels.failedAnnouncement(file.name),
+          });
         }
         setAttachments(prev => prev.filter(att => getPendingAttachmentId(att) !== pendingId));
       } finally {
@@ -227,6 +264,16 @@ export function useAttachmentQueue({
     if (pendingId) abortPendingAttachment(pendingId);
     setAttachments(prev => prev.filter((_, i) => i !== idx));
   }, [abortPendingAttachment, composerInactive]);
+
+  const updateAttachmentAlt = React.useCallback((idx: number, alt: string) => {
+    if (composerInactive) return;
+    setAttachments(prev => prev.map((att, i) => {
+      if (i !== idx) return att;
+      const next: Attachment = alt.length > 0 ? { ...att, alt } : { ...att };
+      if (alt.length === 0) delete next.alt;
+      return next;
+    }));
+  }, [composerInactive]);
 
   const markDragEnter = React.useCallback(() => {
     dragDepthRef.current += 1;
@@ -245,6 +292,7 @@ export function useAttachmentQueue({
   return {
     attachments,
     attachmentError,
+    announcement,
     dismissAttachmentError,
     draggingFiles,
     hasPendingAttachments: attachments.some(isPendingAttachment),
@@ -256,5 +304,6 @@ export function useAttachmentQueue({
     markDragLeave,
     markDragOver,
     removeAttachment,
+    updateAttachmentAlt,
   };
 }

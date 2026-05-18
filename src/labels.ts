@@ -5,6 +5,11 @@
 // consumers a single import path for the full API.
 
 export type {
+  ChorusAttachmentFailureContext,
+  ChorusAttachmentLabels,
+  ChorusAttachmentTooLargeContext,
+  ChorusAttachmentTooManyContext,
+  ChorusAttachmentUnsupportedTypeContext,
   ChorusCodeCopyLabels,
   ChorusComposerLabels,
   ChorusConversationListLabels,
@@ -16,6 +21,7 @@ export type {
   ResolvedChorusLabels,
 } from './labels/types';
 
+export { DEFAULT_ATTACHMENT_LABELS } from './labels/attachments';
 export { DEFAULT_COMPOSER_LABELS } from './labels/composer';
 export { DEFAULT_TRANSCRIPT_LABELS } from './labels/transcript';
 export { DEFAULT_MESSAGE_ACTION_LABELS } from './labels/messageActions';

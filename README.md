@@ -132,7 +132,7 @@ The string shorthand has no place to hang an `Authorization` header or `credenti
 />
 ```
 
-`headers`, `credentials`, `cache`, `mode`, `referrer`, and the other [`RequestInit`](https://developer.mozilla.org/docs/Web/API/RequestInit) fields are forwarded straight to `fetch`. Chorus reserves `body`, `method`, and `signal` (the body is `JSON.stringify({ prompt, history })` by default — pass a `formatBody` to override). Annotate the config with `FetchTransportInit` if you want to extract it into a reusable constant.
+`headers`, `credentials`, `cache`, `mode`, `referrer`, and the other [`RequestInit`](https://developer.mozilla.org/docs/Web/API/RequestInit) fields are forwarded straight to `fetch`. Chorus reserves `body`, `method`, and `signal` (the body is `JSON.stringify({ prompt, history })` by default — pass a `formatBody` to override). Caller headers always win: if you set a `Content-Type` header, the transport will not override it, so overriding it without also overriding `formatBody` will send JSON bytes under the wrong media type. To use the default JSON body and a custom `Content-Type`, override `formatBody` as well. Annotate the config with `FetchTransportInit` if you want to extract it into a reusable constant.
 
 Seed an uncontrolled chat with a welcome message and include a hidden system prompt in every transport request:
 
@@ -384,7 +384,7 @@ import { createFetchSSETransport, createWebSocketTransport } from 'react-chorus/
 
 ```js
 // server.js  —  npm install ws @anthropic-ai/sdk react-chorus
-import { WebSocketServer } from 'ws';
+import { WebSocket, WebSocketServer } from 'ws';
 import Anthropic from '@anthropic-ai/sdk';
 import { toAnthropicMessagesBody } from 'react-chorus/provider-requests';
 
@@ -397,31 +397,54 @@ wss.on('connection', (ws) => {
     // includes the new user turn; ignore `prompt` to avoid sending it twice.
     const { history = [] } = JSON.parse(raw.toString());
 
+    // Cancel the upstream Anthropic stream if the browser disconnects or
+    // hits Stop — otherwise the SDK keeps draining tokens (and billing) to
+    // a socket that nobody is listening on.
+    const controller = new AbortController();
+    const cancel = () => controller.abort();
+    ws.on('close', cancel);
+    ws.on('error', cancel);
+
+    const safeSend = (payload) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(payload));
+      }
+    };
+
     try {
       const stream = await client.messages.stream(
         toAnthropicMessagesBody(Array.isArray(history) ? history : [], {
           model: 'claude-sonnet-4-6',
           max_tokens: 1024,
         }),
+        { signal: controller.signal },
       );
 
       // Forward raw Anthropic SDK events verbatim — the front-end
       // `anthropic` connector parses `content_block_delta` / `message_stop`
       // directly, so no server-side reshaping is needed.
       for await (const event of stream) {
-        ws.send(JSON.stringify(event));
+        if (controller.signal.aborted) break;
+        safeSend(event);
       }
       // `client.messages.stream` already emits a `message_stop` event,
       // which the anthropic connector treats as the done sentinel. The
       // react-chorus WebSocket transport opens a fresh socket per send and
       // closes it client-side after that sentinel is processed.
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      ws.send(JSON.stringify({ error: message }));
+      if (!controller.signal.aborted) {
+        const message = err instanceof Error ? err.message : String(err);
+        safeSend({ error: message });
+      }
+    } finally {
+      ws.off('close', cancel);
+      ws.off('error', cancel);
     }
   });
 });
 ```
+
+Like the Express/OpenAI and Next.js App Router examples above, the backend cancels its upstream provider stream as soon as the client disconnects or stops. Without this, the Anthropic SDK keeps draining tokens to a closed socket — the server is billed for output that no UI is rendering, and the loop can sit on a half-open socket until the OS times it out. The `AbortController` is created per message, threaded into `client.messages.stream(..., { signal })`, and tripped by `'close'` / `'error'` listeners that are removed when the stream finishes. Every `ws.send` is guarded by `readyState === WebSocket.OPEN` so a late event after disconnect cannot throw.
 
 The front-end pairs this with `connector: 'anthropic'` (see the React snippet above) so it reads `content_block_delta` / `message_stop` events out of each WebSocket frame the same way it would over an SSE stream.
 
@@ -845,20 +868,20 @@ react-chorus keeps React/ReactDOM as peer dependencies and externalizes runtime 
 
 | Entry | Initial JS | gzip | Notes |
 |-------|------------|------|-------|
-| `react-chorus` (`<Chorus>`) | 163.8 kB | 55.3 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
-| `react-chorus/headless` | 164.1 kB | 55.5 kB | Headless defaults, same behavior surface. |
-| `react-chorus` (`useChorusStream`) | 40.9 kB | 13.2 kB | Root hook import; CI fails if it pulls UI, Markdown, or icon dependencies. |
+| `react-chorus` (`<Chorus>`) | 170.9 kB | 57.5 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
+| `react-chorus/headless` | 171.3 kB | 57.6 kB | Headless defaults, same behavior surface. |
+| `react-chorus` (`useChorusStream`) | 43.0 kB | 13.9 kB | Root hook import; CI fails if it pulls UI, Markdown, or icon dependencies. |
 | `react-chorus` (`Markdown`) | 75.1 kB | 25.4 kB | Standalone Markdown renderer; includes Markdown parsing/sanitization, not chat icons. |
-| `react-chorus` (`ChatWindow`) | 109.9 kB | 37.4 kB | Transcript renderer with Markdown and message action icons, without the composer/widget shell. |
-| `react-chorus` (`ConversationList`) | 5.7 kB | 2.1 kB | Conversation sidebar component only; no Markdown/icon graph. |
+| `react-chorus` (`ChatWindow`) | 113.1 kB | 38.4 kB | Transcript renderer with Markdown and message action icons, without the composer/widget shell. |
+| `react-chorus` (`ConversationList`) | 6.0 kB | 2.2 kB | Conversation sidebar component only; no Markdown/icon graph. |
 | `react-chorus/transport` | 5.3 kB | 2.3 kB | Transport factories only; no React/UI/Markdown runtime. |
-| `react-chorus/provider-requests` | 9.8 kB | 2.9 kB | Provider request mappers and tool serializers; no React/UI/Markdown runtime. |
-| `react-chorus/server` | 0.6 kB | 0.4 kB | SSE framing helpers for proxy routes (headers, encode/format, [DONE], error envelope); no React/UI runtime. |
+| `react-chorus/provider-requests` | 9.9 kB | 2.9 kB | Provider request mappers and tool serializers; no React/UI/Markdown runtime. |
+| `react-chorus/server` | 0.7 kB | 0.4 kB | SSE framing helpers for proxy routes (headers, encode/format, [DONE], error envelope); no React/UI runtime. |
 | Lazy `highlight.js` runtime | 891.4 kB | 295.9 kB | Async code-fence chunk, never part of initial JS. |
 
 `highlight.js` is only fetched the first time a fenced code block (` ``` ` or `~~~`) appears in rendered text. The matching GitHub dark/light token-color stylesheet is also injected on demand based on `codeBlockTheme`; code renders immediately as plain text and is re-rendered with syntax highlighting once the chunk arrives. While an assistant message is actively streaming, Chorus renders that growing message as React-escaped plain text and switches to full Markdown parsing/sanitization when the stream finalizes.
 
-The playground has a separate budget because it intentionally bundles a complete demo app. `npm run build:playground` also runs `npm run verify:playground-size`, writes `.cache/react-chorus/playground-bundle-size-report.json`, and checks this paragraph. The current playground initial JS graph is 383.3 kB / 121.9 kB gzip and its largest lazy chunk (highlight.js) is 890.9 kB / 295.7 kB gzip. Vite's chunk warning limit is raised to that documented lazy budget so the playground build stays free of Vite chunk warnings while the budget script tracks regressions.
+The playground has a separate budget because it intentionally bundles a complete demo app. `npm run build:playground` also runs `npm run verify:playground-size`, writes `.cache/react-chorus/playground-bundle-size-report.json`, and checks this paragraph. The current playground initial JS graph is 390.5 kB / 124.1 kB gzip and its largest lazy chunk (highlight.js) is 890.9 kB / 295.7 kB gzip. Vite's chunk warning limit is raised to that documented lazy budget so the playground build stays free of Vite chunk warnings while the budget script tracks regressions.
 
 To refresh the published size claims after dependency or feature changes, run `npm run build`, `npm run verify:bundle-size`, and `npm run build:playground`, then copy the updated values from stdout or the `.cache/react-chorus/*-bundle-size-report.json` files into this section. The verification commands may fail until the README values are updated to match their reports.
 
@@ -869,6 +892,38 @@ To refresh the published size claims after dependency or feature changes, run `n
 If your SSR app wants to allow sanitized raw HTML, create an isomorphic DOMPurify instance (for example with your framework's DOM/window or jsdom on the server) and pass it to the standalone renderer: `<Markdown sanitizer={purify} />` or `<Markdown sanitizer={(html) => purify.sanitize(html)} />`. The built-in chat renderer accepts the same customization via `<Chorus markdownSanitizer={purify} />` / `<ChatWindow markdownSanitizer={purify} />`, or through `markdownProps={{ sanitizer: purify }}`. You can also pass `markedOptions` and `markedExtensions` directly to `<Markdown>` or via `markdownProps` to adjust parsing and register marked extensions without mutating marked's global singleton.
 
 Code-block copy buttons flash `Copied!` on success and `Copy failed` when the Clipboard API rejects. Pass `<Markdown onCopyError={(error) => ...} />` — or `markdownProps={{ onCopyError }}` on `<Chorus>` / `<ChatWindow>` — to show your own toast or fallback alert.
+
+## Security and CSP
+
+react-chorus is designed to run under a strict Content-Security-Policy. Concretely:
+
+- **No inline scripts.** The library never injects `<script>` tags, never uses `eval` / `new Function`, and DOMPurify is the underlying-API-only build that runs entirely on DOM nodes. `script-src 'self'` (no `'unsafe-inline'`, no `'unsafe-eval'`) is sufficient — DOMPurify does **not** require `'unsafe-eval'`.
+- **`highlight.js` is a dynamic `import()`.** It is shipped as a regular script chunk loaded from your own origin (or wherever your bundler emits assets), so `script-src 'self'` already covers it. If you serve bundles from a CDN, add that origin to `script-src`. The chunk is only fetched the first time a fenced code block appears in rendered text — apps that never render fenced code never download it.
+- **Sanitized HTML is rendered, not executed.** Markdown is parsed, the resulting HTML is sanitized with DOMPurify (or the SSR no-raw-HTML fallback described above), and only then mounted via `dangerouslySetInnerHTML`. DOMPurify strips `<script>`, `on*` handlers, and unsafe URL protocols; Markdown-emitted `<a>` / `<img>` URLs are restricted to safe protocols.
+- **`style-src 'unsafe-inline'` is only needed if you allow sanitized `style=""`.** Out of the box, DOMPurify keeps `style` attributes on whitelisted tags, so any Markdown-rendered element may carry inline styles that survive sanitization. If you remove the `style` attribute from your sanitizer's allowed list (e.g. `<Markdown sanitizer={(html) => purify.sanitize(html, { FORBID_ATTR: ['style'] })} />`), no inline styles are emitted and `style-src 'self'` is enough. Code-fence syntax-highlight colors come from a stylesheet, not inline `style` attributes.
+- **`connect-src` is whatever you POST/upgrade to.** Chorus only talks to the URL you give `transport`, so list your own API origin (and any WebSocket origin) under `connect-src`.
+
+A minimal safe CSP for an app embedding `<Chorus />` that talks to a same-origin `/api/chat` proxy:
+
+```
+default-src 'self';
+script-src 'self';
+style-src 'self';
+img-src 'self' data: blob:;
+font-src 'self';
+connect-src 'self';
+worker-src 'self';
+frame-ancestors 'none';
+base-uri 'self';
+object-src 'none';
+```
+
+Notes for tightening or relaxing this baseline:
+
+- Add `data:` / `blob:` to `img-src` if you accept image attachments (the composer previews dropped/pasted files as `blob:` URLs, and image data URLs can show up in rendered Markdown).
+- Add your provider origin(s) to `connect-src` only if the browser talks directly to a provider; the recommended `react-chorus/server` proxy pattern keeps `connect-src 'self'`.
+- Add a WebSocket origin (e.g. `connect-src 'self' wss://api.example.com`) when using `createWebSocketTransport` against a different host.
+- If you must allow user-authored inline styles, add `'unsafe-inline'` to `style-src`. Prefer the `FORBID_ATTR: ['style']` sanitizer config above and keep `style-src 'self'`.
 
 ## API
 
@@ -945,7 +1000,7 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `resetToInitialMessages` | `boolean` | `false` | When clearing, restore the initial `messages`/`initialMessages` seed instead of saving an empty transcript. |
 | `showJumpToBottomButton` | `boolean` | `!headless` | Shows the floating “Jump to latest” button when the user scrolls away from the bottom and new activity arrives. Pass `false` to disable it (for example when you own the scroll affordance); the headless exports default `headless={true}` so the button is off by default there. |
 | `headless` | `boolean` | `false` | Strip all default styles and inline style injection. |
-| `renderMessage` | `(message: Message<TMeta>, ctx: RenderMessageContext<TMeta>) => ReactNode` | — | Custom per-message renderer. Return `null` to fall back to default rendering. `ctx` includes `isStreaming`, `messageProps` for scroll targets, `defaultRender(slots?)`, and action callbacks/default action controls. Existing one-argument renderers continue to work. |
+| `renderMessage` | `(message: Message<TMeta>, ctx: RenderMessageContext<TMeta>) => ReactNode` | — | Custom per-message renderer. Return `null` to fall back to default rendering. `ctx` includes `isStreaming`, `isEditing` (true while the built-in inline editor is active — gate your own content on it so the editor replaces the row), `messageProps` for scroll targets, `defaultRender(slots?)`, and action callbacks/default action controls. Existing one-argument renderers continue to work. |
 | `markdownProps` | `Omit<MarkdownProps, 'text' \| 'codeTheme' \| 'headless' \| 'streaming'>` | — | Props forwarded to the built-in Markdown renderer for every message, including `sanitizer`, `markedOptions`, `markedExtensions`, and `onCopyError`. |
 | `markdownSanitizer` | `MarkdownSanitizer` | — | Convenience alias for `markdownProps.sanitizer`; takes precedence when both are provided. |
 | `hiddenRoles` | `Role[]` | `['system']` | Message roles hidden from the transcript. Tool calls are visible by default in `<Chorus>`; pass `['system', 'tool']` to hide them, or `[]` to show all roles. `<Chorus>` accepts `hiddenRoles` only — `showSystemMessages` exists on `<ChatWindow>` for backwards compatibility. |
@@ -1011,13 +1066,33 @@ const fr: ChorusLabels = {
     pinAriaLabel: (title, pinned) => `${pinned ? 'Désépingler' : 'Épingler'} ${title}`,
     deleteAriaLabel: title => `Supprimer ${title}`,
   },
+  attachments: {
+    readingStatus: name => `Lecture de ${name}`,
+    uploadingStatus: name => `Envoi de ${name}`,
+    completedAnnouncement: name => `${name} prêt`,
+    failedAnnouncement: name => `Échec : ${name}`,
+    removeAttachment: name => `Retirer ${name}`,
+    dismissError: "Fermer l'erreur",
+    describeImage: 'Décrire cette image',
+    describeImageInputAriaLabel: name => `Description de ${name}`,
+    describeImagePlaceholder: 'Décrivez cette image',
+    imageFallbackAlt: name => `Image jointe : ${name}`,
+    unsupportedTypeError: ({ name, accept }) =>
+      `${name} n'est pas accepté${accept ? ` (${accept})` : ''}.`,
+    tooLargeError: ({ name, size, limit }) => `${name} (${size}) dépasse la limite ${limit}.`,
+    tooManyError: ({ name, max }) => `Limite ${max} pour ${name}.`,
+    readFailedError: ({ name, detail }) => `Lecture impossible de ${name} : ${detail}`,
+    uploadFailedError: ({ name, detail }) => `Envoi impossible de ${name} : ${detail}`,
+  },
   clearConversation: 'Effacer la conversation',
 };
 
 <Chorus transport="/api/chat" labels={fr} />;
 ```
 
-Labels are deep-merged with the defaults, so you only need to override the strings you actually want to change. `resolveChorusLabels(partial)` is exported when you want to compute the resolved set yourself (for storybook fixtures, `<ChatWindow>` outside of `<Chorus>`, or fully custom shells).
+Labels are deep-merged with the defaults, so you only need to override the strings you actually want to change. **Partial overrides only:** `undefined`, `null`, and empty-string values fall back to the English default so a loose i18n catalog cannot accidentally erase a UI label. Pass a non-empty whitespace string (e.g. `' '`) when you genuinely want a visually empty value. `resolveChorusLabels(partial)` is exported when you want to compute the resolved set yourself (for storybook fixtures, `<ChatWindow>` outside of `<Chorus>`, or fully custom shells).
+
+The `attachments` slice localizes the attachment composer end-to-end: chip remove-button labels, the pending read/upload polite-live status text and `aria-busy` chips, the polite-live completion announcements that confirm "attached" / "failed" after a pending chip resolves, the dismiss-error button, the "describe this image" affordance (visible next to image chips so users can supply alt text before sending), validation/read/upload error messages with `{name, accept, size, limit, max, detail}` interpolation, and the role-hinted image fallback alt rendered in the transcript when `Attachment.alt` is absent.
 
 ### `helpers` (passed to `onSend`)
 
@@ -1364,6 +1439,10 @@ Upload/transform files before they enter message history:
 If you return only `url` or `id`, Chorus normalizes `attachment.data` to that value for backwards compatibility. Your backend should still prefer explicit `url`/`id` fields when present.
 
 All accepted files first appear as pending attachment chips while they are read as data URLs or processed by `uploadAttachment`, and Send is disabled until every pending chip resolves. Removing a pending chip aborts its `AbortSignal`; late FileReader/upload completions are ignored and do not re-add the file. Read failures call `onAttachmentError` with `reason: 'read-failed'`; upload failures call `reason: 'upload-failed'`; user-initiated aborts are silent.
+
+**Accessibility:** pending chips set `aria-busy="true"` and expose a polite live-region "Reading/Uploading {name}" status so screen-reader users hear the upload in progress. When a pending attachment resolves, the composer emits a separate polite live-region announcement ("{name} attached" / "{name} failed to attach") so completion is heard even though the spinner has been removed. All of these strings flow through `labels.attachments` for localization.
+
+**Image alt text.** `Attachment.alt` is an optional human-authored description used as the image `alt` when the message renders in the transcript. When `alt` is omitted, the renderer falls back to a role-hinted label (`Attached image: {name}` by default, localizable via `labels.attachments.imageFallbackAlt`) rather than the bare filename. Image attachment chips in the composer expose an inline "Describe this image" affordance that captures alt text before send; the typed value flows into the `Attachment.alt` passed to `onSend`. Custom upload flows can also set `alt` themselves before returning the attachment from `uploadAttachment`.
 
 ### Hiding or showing tool calls
 
@@ -1796,6 +1875,13 @@ interface RenderMessageContext<TMeta = Record<string, unknown>> {
   message: Message<TMeta>;
   /** True while this message is the active streaming assistant turn. */
   isStreaming: boolean;
+  /**
+   * True while this message's built-in inline editor is active (the Edit button has been clicked
+   * and Save/Cancel has not yet fired). Skip rendering your own bubble/content when this is true
+   * so the inline editor rendered by `ctx.actions.defaultRender()` replaces the row instead of
+   * sitting alongside the original content.
+   */
+  isEditing: boolean;
   /** Calls the default Chorus renderer for this message; pass optional slots to decorate the bubble. */
   defaultRender: (slots?: MessageBubbleSlots) => React.ReactNode;
   /** Spread on a custom row root so `ChorusRef.scrollToMessage(id)` can target it. */
@@ -1834,6 +1920,22 @@ interface RenderMessageRootProps {
 ```
 
 `edit`, `regenerate`, `delete`, and `feedback` are only set when those actions are available for the message and the current Chorus state — for example `edit` is omitted while the chat is disabled/read-only or for non-user messages. Repeating the current `initialFeedback` variant is a no-op. `actions.defaultRender()` renders the built-in control row exactly as `defaultRender()` would.
+
+#### Editing inside a custom row
+
+`ctx.actions.defaultRender()` swaps the action row out for the built-in inline editor while editing is active, then restores keyboard focus to the originating Edit button after Save or Cancel (including Escape). To keep that contract working in a custom row, the renderer needs to hide its own bubble/content while editing so the editor replaces the original message instead of rendering alongside it:
+
+- The exported `<MessageBubble>` already opts in automatically — it reads `ctx.isEditing` from context and returns `null` while its own message is being edited, so the README pattern (`<MessageBubble />` + `ctx.actions.defaultRender()`) needs no extra wiring.
+- Custom DOM rows should gate their content on `ctx.isEditing`, e.g. `{!ctx.isEditing && <MyBubble message={msg} />}`. While `ctx.isEditing` is true, render only `ctx.actions.defaultRender()` (or your own editor) for that message.
+
+```tsx
+renderMessage={(msg, ctx) => (
+  <div {...ctx.messageProps} className="my-row">
+    {!ctx.isEditing && <MyBubble message={msg} streaming={ctx.isStreaming} />}
+    {ctx.actions.defaultRender()}
+  </div>
+)}
+```
 
 For fully custom DOM rows, spread `ctx.messageProps` on the outer element you want `ChorusRef.scrollToMessage(id)` to target. Chorus automatically adds those props to a single DOM element returned directly from `renderMessage`, but spread them yourself when returning a fragment or custom component. Built-in `ctx.defaultRender()` and `<MessageBubble>` already include a scroll target.
 
@@ -2171,6 +2273,26 @@ The same generic flows through public components and hooks:
 ```
 
 The generic `Message` declaration shape is a minor semver-level type declaration change while remaining source-compatible.
+
+## Migration and Upgrading
+
+This section is the canonical place to look up breaking changes and deprecations release-over-release. The matching changelog entries live in [`CHANGELOG.md`](./CHANGELOG.md) — anything labelled "Deprecation candidate" there is documented here with a concrete migration path before it ships as a breaking change.
+
+### Unreleased — deprecation candidates
+
+#### Default transport body will drop the `prompt` field
+
+**Status:** still emitted today; planned removal in the next major.
+
+**What ships today.** `createFetchSSETransport`, `createWebSocketTransport`, and `createDefaultFetchSSETransport` all POST/send the body `{ prompt, history }` by default, where `prompt` equals `history[history.length - 1].text`. It is a convenience duplicate of the latest user turn — useful for very small toy backends, redundant for everything else. Every example backend in this repo (`examples/with-openai/server`, `examples/with-next`, the Express/Next.js/Gemini/WebSocket snippets in this README) already reads `history` only and explicitly ignores `prompt`.
+
+**What changes in the next major.** The default request body will be `{ history }` — `prompt` will no longer be present, and the inline comments warning backends not to re-append `body.prompt` will be removed. The `formatBody` override remains the supported escape hatch for any backend that still wants a separate field.
+
+**How to migrate, ahead of the major.** On the server, read `history` (always present today and after the change) and never re-append `req.body.prompt` / `frame.prompt` — the latest user text is `history[history.length - 1].text`. On the client, if you need a custom body shape, pass `formatBody: (text, history) => JSON.stringify({ text, history })` to the transport you're constructing instead of relying on the default. After the major lands, callers reading `req.body.prompt` will see `undefined` and silently send an empty turn to the model, so do this work now if you haven't already.
+
+**Why now.** Bodies have been documented as `{ prompt, history }` since 0.x and a handful of toy backends still echo `prompt`. Keeping the duplicate field on the wire indefinitely is a permanent footgun (the "message sent twice" failure mode that every backend snippet currently warns about) — the deprecation candidate makes the breaking change explicit so apps can move to `{ history }` on their own schedule before the major lands.
+
+> Tracked under the [`[Unreleased]` → Deprecation candidates (future major)](./CHANGELOG.md#deprecation-candidates-future-major) section of the changelog.
 
 ## Development and release
 

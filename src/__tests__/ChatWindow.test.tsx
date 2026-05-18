@@ -230,8 +230,39 @@ describe('ChatWindow', () => {
       attachments: [{ name: 'photo.png', type: 'image/png', data: 'data:image/png;base64,abc', size: 3 }],
     }]} />);
 
-    expect(screen.getByAltText('photo.png')).toBeInTheDocument();
+    expect(screen.getByAltText('Attached image: photo.png')).toBeInTheDocument();
     expect(container.querySelector('.chorus-user .chorus-bubble')).toBeInTheDocument();
+  });
+
+  it('prefers Attachment.alt for the image alt attribute when provided', () => {
+    render(<ChatWindow messages={[{
+      id: 'u-alt',
+      role: 'user',
+      text: '',
+      attachments: [{
+        name: 'photo.png',
+        type: 'image/png',
+        data: 'data:image/png;base64,abc',
+        size: 3,
+        alt: 'A red bicycle leaning on a fence',
+      }],
+    }]} />);
+
+    expect(screen.getByAltText('A red bicycle leaning on a fence')).toBeInTheDocument();
+    expect(screen.queryByAltText('Attached image: photo.png')).not.toBeInTheDocument();
+  });
+
+  it('uses the localized fallback alt label when Attachment.alt is missing', () => {
+    render(<ChatWindow
+      messages={[{
+        id: 'u-fallback',
+        role: 'user',
+        text: '',
+        attachments: [{ name: 'photo.png', type: 'image/png', data: 'data:image/png;base64,abc', size: 3 }],
+      }]}
+      labels={{ attachments: { imageFallbackAlt: (name) => `Image jointe : ${name}` } }}
+    />);
+    expect(screen.getByAltText('Image jointe : photo.png')).toBeInTheDocument();
   });
 
   it('preserves a bubble for normal assistant text', () => {
@@ -717,6 +748,61 @@ describe('ChatWindow', () => {
     expect(screen.queryAllByTestId('markdown').map(el => el.textContent)).not.toContain('Hello');
   });
 
+  for (const variant of [
+    { name: 'default row', renderMessage: undefined },
+    { name: 'renderMessage action controls', renderMessage: readmeMessageRenderer },
+  ] as const) {
+    it(`restores focus to the Edit button after Escape in the ${variant.name}`, async () => {
+      const user = userEvent.setup();
+      render(<ChatWindow messages={[USER_MSG]} onEdit={vi.fn()} renderMessage={variant.renderMessage} />);
+
+      await user.click(screen.getByRole('button', { name: 'Edit' }));
+      await user.keyboard('{Escape}');
+
+      expect(screen.queryByRole('textbox', { name: 'Edit message' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Edit' })).toHaveFocus();
+    });
+
+    it(`restores focus to the Edit button after Cancel click in the ${variant.name}`, async () => {
+      const user = userEvent.setup();
+      render(<ChatWindow messages={[USER_MSG]} onEdit={vi.fn()} renderMessage={variant.renderMessage} />);
+
+      await user.click(screen.getByRole('button', { name: 'Edit' }));
+      await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+      expect(screen.queryByRole('textbox', { name: 'Edit message' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Edit' })).toHaveFocus();
+    });
+  }
+
+  it('exposes ctx.isEditing so custom rows can hide their own content while the editor is active', async () => {
+    const user = userEvent.setup();
+    render(
+      <ChatWindow
+        messages={[USER_MSG]}
+        onEdit={vi.fn()}
+        renderMessage={(msg, ctx) => (
+          <div {...ctx.messageProps}>
+            {!ctx.isEditing && <p data-testid="custom-text">{msg.text}</p>}
+            {ctx.actions.defaultRender()}
+          </div>
+        )}
+      />
+    );
+
+    expect(screen.getByTestId('custom-text')).toHaveTextContent('Hello');
+
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+
+    expect(screen.queryByTestId('custom-text')).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Edit message' })).toHaveValue('Hello');
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.getByTestId('custom-text')).toHaveTextContent('Hello');
+    expect(screen.getByRole('button', { name: 'Edit' })).toHaveFocus();
+  });
+
   it('MessageBubble preserves the default row layout when used from renderMessage', () => {
     const { container } = render(
       <ChatWindow
@@ -790,9 +876,9 @@ describe('ChatWindow', () => {
 
     const { container } = render(<MessageBubble message={message} />);
 
-    expect(screen.getByAltText('photo.png')).toHaveAttribute('src', 'data:image/png;base64,abc');
-    expect(screen.getByAltText('photo.png')).toHaveAttribute('loading', 'lazy');
-    expect(screen.getByAltText('photo.png')).toHaveAttribute('decoding', 'async');
+    expect(screen.getByAltText('Attached image: photo.png')).toHaveAttribute('src', 'data:image/png;base64,abc');
+    expect(screen.getByAltText('Attached image: photo.png')).toHaveAttribute('loading', 'lazy');
+    expect(screen.getByAltText('Attached image: photo.png')).toHaveAttribute('decoding', 'async');
     expect(screen.getByText('notes.txt')).toBeInTheDocument();
     expect(container.querySelector('.chorus-msg-attachments')).toBeInTheDocument();
   });
