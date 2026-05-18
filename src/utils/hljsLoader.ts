@@ -115,7 +115,7 @@ function scopeCssRules(css: string, scope: string): string {
 }
 
 function shouldScopeAtRuleBlock(prelude: string) {
-  const atRuleName = prelude.match(/^@([\w-]+)/)?.[1].toLowerCase();
+  const atRuleName = prelude.match(/^@([\w-]+)/)?.[1]?.toLowerCase();
   return atRuleName ? NESTING_AT_RULES.has(atRuleName) : false;
 }
 

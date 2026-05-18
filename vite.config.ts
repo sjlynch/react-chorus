@@ -76,6 +76,11 @@ export default defineConfig({
   },
   build: {
     copyPublicDir: false,
+    // External `.map` files let consumer stack traces (and devtools) point at
+    // the original TS sources instead of the minified published output. Maps
+    // are shipped alongside the JS in `dist/` and excluded from gzip budgets
+    // (`scripts/verify-bundle-size.mjs` only measures .js/.cjs).
+    sourcemap: true,
     lib: {
       entry: {
         'react-chorus': path.resolve(__dirname, 'src/index.ts'),

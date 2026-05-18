@@ -1,5 +1,6 @@
 import type { ConnectorResult, ConnectorToolDelta } from '../types';
 import type { OpenAIConnectorState } from '../openai';
+import { warnOnceInDev } from '../../utils/warnings';
 import { appendField, appendToolDelta, collectTextFragments, hasOwn, hasToolDelta, mergeResult } from './shared';
 import { createThinkTagSplitter } from './thinkTagSplitter';
 
@@ -31,10 +32,23 @@ function extractReasoningFromDelta(delta: Record<string, unknown>) {
   ].map(collectTextFragments).find(Boolean) ?? '';
 }
 
-function extractChatToolDelta(choiceKey: string, rawToolCall: unknown, state: OpenAIConnectorState): ConnectorToolDelta | null {
+function extractChatToolDelta(
+  choiceKey: string,
+  rawToolCall: unknown,
+  arrayPosition: number,
+  providerLabel: string,
+  state: OpenAIConnectorState,
+): ConnectorToolDelta | null {
   if (!rawToolCall || typeof rawToolCall !== 'object') return null;
   const toolCall = rawToolCall as Record<string, unknown>;
-  const rawIndex = typeof toolCall.index === 'number' || typeof toolCall.index === 'string' ? String(toolCall.index) : '0';
+  const hasIndex = typeof toolCall.index === 'number' || typeof toolCall.index === 'string';
+  if (!hasIndex) {
+    warnOnceInDev(
+      `openai-chat-tool-call-missing-index:${providerLabel}`,
+      `[react-chorus] OpenAI Chat Completions tool_call delta from "${providerLabel}" is missing required "index" field; falling back to array position. Parallel tool_calls may merge if this provider repeats the omission.`,
+    );
+  }
+  const rawIndex = hasIndex ? String(toolCall.index) : String(arrayPosition);
   const key = `${choiceKey}:${rawIndex}`;
   const explicitId = typeof toolCall.id === 'string' && toolCall.id ? toolCall.id : undefined;
   if (explicitId) state.chatToolCallIds.set(key, explicitId);
@@ -77,8 +91,11 @@ export function extractChatCompletionEvent(obj: Record<string, unknown>, state: 
   const toolCalls = delta.tool_calls;
   if (Array.isArray(toolCalls)) {
     const choiceKey = getChoiceKey(choice, arrayIndex);
-    for (const toolCall of toolCalls) {
-      const toolDelta = extractChatToolDelta(choiceKey, toolCall, state);
+    const providerLabel = typeof obj.model === 'string' && obj.model
+      ? obj.model
+      : 'unknown OpenAI-compatible provider';
+    for (let i = 0; i < toolCalls.length; i++) {
+      const toolDelta = extractChatToolDelta(choiceKey, toolCalls[i], i, providerLabel, state);
       if (toolDelta) appendToolDelta(result, toolDelta);
     }
   }

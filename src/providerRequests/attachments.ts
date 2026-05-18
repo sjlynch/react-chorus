@@ -16,13 +16,15 @@ export function unsupportedAttachmentText<TMeta>(
 }
 
 function parseDataUrl(value: string): { mimeType: string; base64: string } | null {
-  const match = /^data:([^;,]+)?(?:;[^,]*)?;base64,(.*)$/i.exec(value);
+  const match = /^data:([^;,]+)?(?:;[^,]*)?;base64,(.+)$/i.exec(value);
   if (!match) return null;
-  return { mimeType: match[1] || 'application/octet-stream', base64: match[2] || '' };
+  return { mimeType: match[1] || 'application/octet-stream', base64: match[2] };
 }
 
 function isOpenAIImageUrl(value: string) {
-  return /^(data:|https?:\/\/)/i.test(value);
+  if (/^https?:\/\//i.test(value)) return true;
+  if (value.startsWith('data:')) return parseDataUrl(value) !== null;
+  return false;
 }
 
 export function openAIImageUrlFromAttachment(attachment: Attachment) {

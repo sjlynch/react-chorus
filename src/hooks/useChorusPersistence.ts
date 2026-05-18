@@ -24,7 +24,14 @@ export interface UseChorusPersistenceOptions<TMeta = Record<string, unknown>> {
   onError?: (error: ChorusPersistenceError) => void;
   /** Override message serialization. Defaults to JSON.stringify(messages). */
   serializeMessages?: SerializeMessages<TMeta>;
-  /** Override message deserialization. Defaults to JSON.parse with an array guard. */
+  /**
+   * Override message deserialization. Defaults to JSON.parse followed by validating
+   * each entry against the public Message contract: entries with missing/empty id,
+   * unknown role, wrong-typed text, missing/invalid toolCall on tool messages, or
+   * attachments on roles that do not support them are dropped (with a dev warning).
+   * Custom deserializers are responsible for their own validation; the hook still
+   * applies an array guard to whatever they return.
+   */
   deserializeMessages?: DeserializeMessages<TMeta>;
 }
 
