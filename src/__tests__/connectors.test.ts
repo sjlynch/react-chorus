@@ -158,6 +158,58 @@ describe('openaiConnector', () => {
     });
   });
 
+  it('falls back to array position when tool_call.index is missing so parallel calls do not collide', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const state = openaiConnector.createState?.();
+      const data = JSON.stringify({
+        model: 'together/glm-4',
+        choices: [{
+          index: 0,
+          delta: { tool_calls: [
+            { id: 'call_a', function: { name: 'search', arguments: '{"q":"react"}' } },
+            { id: 'call_b', function: { name: 'lookup', arguments: '{"id":1}' } },
+          ] },
+        }],
+      });
+
+      const result = openaiConnector.extract(data, state);
+      expect(result?.toolDeltas).toEqual([
+        { id: 'call_a', name: 'search', input: '{"q":"react"}', provider: 'openai', providerId: 'call_a' },
+        { id: 'call_b', name: 'lookup', input: '{"id":1}', provider: 'openai', providerId: 'call_b' },
+      ]);
+      expect(result?.toolDeltas?.[0]?.id).not.toBe(result?.toolDeltas?.[1]?.id);
+      expect(warn).toHaveBeenCalled();
+      const warned = warn.mock.calls.some(call => String(call[0]).includes('together/glm-4'));
+      expect(warned).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('falls back to array position so generated tool ids are distinct when both id and index are missing', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const state = openaiConnector.createState?.();
+      const data = JSON.stringify({
+        choices: [{
+          index: 0,
+          delta: { tool_calls: [
+            { function: { name: 'search', arguments: '{"q":"react"}' } },
+            { function: { name: 'lookup', arguments: '{"id":1}' } },
+          ] },
+        }],
+      });
+
+      const result = openaiConnector.extract(data, state);
+      const ids = result?.toolDeltas?.map(d => d.id) ?? [];
+      expect(ids).toHaveLength(2);
+      expect(ids[0]).not.toBe(ids[1]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('extracts mixed text and multiple tool deltas', () => {
     const data = JSON.stringify({
       choices: [{
