@@ -10,6 +10,9 @@ const REQUIRED_NODE_RANGE = '>=20';
 const SKIPPED_DIRECTORIES = new Set(['node_modules', 'dist', '.next', '.vite']);
 const npmBin = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const viteLargeChunkWarningPattern = /Some chunks are larger than \d+(?:\.\d+)? kB after minification/i;
+const REACT_RUNTIME_PACKAGES = ['react', 'react-dom'];
+const REACT_TYPE_PACKAGES = ['@types/react', '@types/react-dom'];
+const REACT_ALL_PACKAGES = [...REACT_RUNTIME_PACKAGES, ...REACT_TYPE_PACKAGES];
 
 function toRelative(cwd, filePath) {
   return path.relative(cwd, filePath).replace(/\\/g, '/');
@@ -54,7 +57,144 @@ export async function findExamplePackages({ cwd = rootDir } = {}) {
   return packages.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
 }
 
-export async function findExampleMetadataProblems({ cwd = rootDir } = {}) {
+function findDeclaredVersion(pkg, depName) {
+  return pkg.dependencies?.[depName] ?? pkg.devDependencies?.[depName] ?? null;
+}
+
+function extractMajor(rangeString) {
+  if (typeof rangeString !== 'string') return null;
+  const match = rangeString.match(/\d+/);
+  return match ? Number(match[0]) : null;
+}
+
+export function parsePeerMajors(rangeString) {
+  if (typeof rangeString !== 'string') return [];
+  const majors = new Set();
+  for (const alternative of rangeString.split('||')) {
+    const match = alternative.trim().match(/\d+/);
+    if (match) majors.add(Number(match[0]));
+  }
+  return Array.from(majors).sort((a, b) => a - b);
+}
+
+async function readRootPeerMajors(cwd) {
+  const rootPkgPath = path.join(cwd, 'package.json');
+  const rootPkg = JSON.parse(await fs.readFile(rootPkgPath, 'utf8'));
+  const reactPeer = rootPkg.peerDependencies?.react;
+  if (typeof reactPeer !== 'string') {
+    throw new Error('Root package.json must declare peerDependencies.react.');
+  }
+  const majors = parsePeerMajors(reactPeer);
+  if (majors.length === 0) {
+    throw new Error(`Root peerDependencies.react ("${reactPeer}") has no parseable major versions.`);
+  }
+  return { range: reactPeer, majors };
+}
+
+export function findExampleReactProblems({ records, peerMajors }) {
+  const problems = [];
+  const warnings = [];
+  const coverage = new Map();
+  const observed = new Map();
+
+  for (const record of records) {
+    if (!record.pkg) continue;
+    const hasReact = findDeclaredVersion(record.pkg, 'react');
+    if (!hasReact) continue;
+
+    const declared = {};
+    const missing = [];
+    for (const depName of REACT_ALL_PACKAGES) {
+      const version = findDeclaredVersion(record.pkg, depName);
+      if (version == null) {
+        missing.push(depName);
+      } else {
+        declared[depName] = version;
+      }
+    }
+
+    if (missing.length > 0) {
+      problems.push(
+        `${record.relativePath} declares react but is missing ${missing.join(', ')}; examples must pin all of ${REACT_ALL_PACKAGES.join(', ')} so peer compatibility is exercised end-to-end.`,
+      );
+      continue;
+    }
+
+    const majors = Object.fromEntries(
+      Object.entries(declared).map(([name, version]) => [name, extractMajor(version)]),
+    );
+    const unparseable = Object.entries(majors).filter(([, major]) => major == null);
+    if (unparseable.length > 0) {
+      problems.push(
+        `${record.relativePath} has unparseable React-family version range(s): ${unparseable
+          .map(([name]) => `${name}=${declared[name]}`)
+          .join(', ')}.`,
+      );
+      continue;
+    }
+
+    const distinctMajors = Array.from(new Set(Object.values(majors)));
+    if (distinctMajors.length > 1) {
+      const detail = REACT_ALL_PACKAGES.map((name) => `${name}@${declared[name]}`).join(', ');
+      problems.push(
+        `${record.relativePath} mixes React majors across ${detail}; runtime and @types/react majors must match.`,
+      );
+      continue;
+    }
+
+    const major = distinctMajors[0];
+    if (!peerMajors.includes(major)) {
+      problems.push(
+        `${record.relativePath} declares react ${declared.react} (major ${major}) which does not intersect the root peerDependencies.react range (allowed majors: ${peerMajors.join(', ')}).`,
+      );
+      continue;
+    }
+
+    if (!coverage.has(major)) coverage.set(major, []);
+    coverage.get(major).push(record.relativePath);
+
+    for (const depName of REACT_ALL_PACKAGES) {
+      if (!observed.has(depName)) observed.set(depName, new Map());
+      const byVersion = observed.get(depName);
+      const version = declared[depName];
+      if (!byVersion.has(version)) byVersion.set(version, []);
+      byVersion.get(version).push(record.relativePath);
+    }
+  }
+
+  for (const major of peerMajors) {
+    if (!coverage.has(major)) {
+      problems.push(
+        `No example exercises React major ${major} from the root peerDependencies.react range; add or retain at least one example pinned to ^${major}.`,
+      );
+    }
+  }
+
+  for (const [depName, byVersion] of observed) {
+    const versionsByMajor = new Map();
+    for (const [version, examples] of byVersion) {
+      const major = extractMajor(version);
+      if (!versionsByMajor.has(major)) versionsByMajor.set(major, new Map());
+      versionsByMajor.get(major).set(version, examples);
+    }
+    for (const [major, versions] of versionsByMajor) {
+      if (versions.size > 1) {
+        const detail = Array.from(versions, ([version, examples]) => `${version} (${examples.join(', ')})`).join(' vs ');
+        warnings.push(
+          `${depName} drifts across examples on React ${major}: ${detail}. Consider aligning the minor/patch range.`,
+        );
+      }
+    }
+  }
+
+  return { problems, warnings };
+}
+
+export async function findExampleMetadataProblems({
+  cwd = rootDir,
+  logger = null,
+  checkReactCompat = true,
+} = {}) {
   const packages = await findExamplePackages({ cwd });
   const problems = [];
 
@@ -67,6 +207,18 @@ export async function findExampleMetadataProblems({ cwd = rootDir } = {}) {
 
     if (record.pkg.engines?.node !== REQUIRED_NODE_RANGE) {
       problems.push(`${record.relativePath} must declare engines.node "${REQUIRED_NODE_RANGE}".`);
+    }
+  }
+
+  if (checkReactCompat) {
+    const peer = await readRootPeerMajors(cwd);
+    const reactCheck = findExampleReactProblems({ records: packages, peerMajors: peer.majors });
+    problems.push(...reactCheck.problems);
+
+    if (logger && reactCheck.warnings.length > 0) {
+      for (const warning of reactCheck.warnings) {
+        logger.warn(`Warning: ${warning}`);
+      }
     }
   }
 
@@ -187,7 +339,7 @@ export async function runExampleBuilds({ cwd = rootDir, logger = console } = {})
 }
 
 export async function runCheckExampleMetadata({ cwd = rootDir, logger = console } = {}) {
-  const metadataProblems = await findExampleMetadataProblems({ cwd });
+  const metadataProblems = await findExampleMetadataProblems({ cwd, logger });
   const buildProblems = metadataProblems.length === 0 ? await runExampleBuilds({ cwd, logger }) : [];
   const problems = [...metadataProblems, ...buildProblems];
 
