@@ -5,7 +5,7 @@ import { DEFAULT_MESSAGE_ACTION_LABELS } from '../../labels/messageActions';
 import type { ChorusMessageActionLabels, ChorusSpeakerLabels } from '../../labels/types';
 import { COPY_FEEDBACK_DURATION_MS, canWriteTextToClipboard, writeTextToClipboard } from '../../utils/messageCopy';
 import { InlineMessageEditor } from './InlineMessageEditor';
-import { useActionEditing } from './renderState';
+import { useActionEditing, useReturnFocusAfterEditing } from './renderState';
 import { MessageSpeakerLabel } from './speaker';
 import type { MessageCopyResult, MessageRenderActions } from './types';
 
@@ -21,9 +21,10 @@ export interface MessageActionsProps {
   actions: MessageRenderActions;
   onEditRequested: () => void;
   labels?: ChorusMessageActionLabels;
+  editButtonRef?: React.Ref<HTMLButtonElement>;
 }
 
-export function MessageActions({ actions, onEditRequested, labels = DEFAULT_MESSAGE_ACTION_LABELS }: MessageActionsProps) {
+export function MessageActions({ actions, onEditRequested, labels = DEFAULT_MESSAGE_ACTION_LABELS, editButtonRef }: MessageActionsProps) {
   const initialFeedback = actions.initialFeedback ?? null;
   const [selectedFeedback, setSelectedFeedback] = React.useState<MessageFeedback | null>(initialFeedback);
   const selectedFeedbackRef = React.useRef<MessageFeedback | null>(initialFeedback);
@@ -72,7 +73,7 @@ export function MessageActions({ actions, onEditRequested, labels = DEFAULT_MESS
   return (
     <div className="chorus-actions">
       {actions.canEdit && actions.edit && (
-        <button type="button" className="chorus-action-btn" onClick={onEditRequested} title={labels.edit} aria-label={labels.edit}><Pencil size={13} /></button>
+        <button ref={editButtonRef} type="button" className="chorus-action-btn" onClick={onEditRequested} title={labels.edit} aria-label={labels.edit}><Pencil size={13} /></button>
       )}
       {actions.canRegenerate && actions.regenerate && (
         <button type="button" className="chorus-action-btn" onClick={actions.regenerate} title={labels.regenerate} aria-label={labels.regenerate}><RefreshCw size={13} /></button>
@@ -108,6 +109,7 @@ export interface MessageActionControlsProps<TMeta> {
 
 export function MessageActionControls<TMeta = Record<string, unknown>>({ message, actions, labels = DEFAULT_MESSAGE_ACTION_LABELS, speakerLabels }: MessageActionControlsProps<TMeta>) {
   const [editing, setEditing] = useActionEditing(message.id);
+  const editButtonRef = useReturnFocusAfterEditing<HTMLButtonElement>(editing);
   const hasActions = hasRenderableActions(actions);
 
   if (!hasActions) return null;
@@ -132,7 +134,7 @@ export function MessageActionControls<TMeta = Record<string, unknown>>({ message
   return (
     <div className={`chorus-render-actions chorus-${message.role}`}>
       <div className="chorus-msg-content">
-        <MessageActions actions={actions} onEditRequested={() => setEditing(true)} labels={labels} />
+        <MessageActions actions={actions} onEditRequested={() => setEditing(true)} labels={labels} editButtonRef={editButtonRef} />
       </div>
     </div>
   );

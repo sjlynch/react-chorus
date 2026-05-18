@@ -6,7 +6,8 @@ import type {
   UploadAttachment,
 } from '../types';
 import { DEFAULT_COMPOSER_LABELS } from '../labels/composer';
-import type { ChorusComposerLabels } from '../labels/types';
+import { DEFAULT_ATTACHMENT_LABELS } from '../labels/attachments';
+import type { ChorusAttachmentLabels, ChorusComposerLabels } from '../labels/types';
 import { AttachmentChips } from './chat-input/AttachmentChips';
 import { filesFromTransfer, isPendingAttachment, transferHasFiles } from './chat-input/attachmentUtils';
 import { useAttachmentQueue } from './chat-input/useAttachmentQueue';
@@ -64,6 +65,11 @@ export interface ChatInputProps extends Omit<React.HTMLAttributes<HTMLDivElement
    * and `disabledReason` props take precedence over `labels` when both are provided.
    */
   labels?: ChorusComposerLabels;
+  /**
+   * Localized labels for attachment chips, validation/read/upload error messages, and
+   * polite live-region status/completion announcements. Defaults to English.
+   */
+  attachmentLabels?: ChorusAttachmentLabels;
 }
 
 export const ChatInput = React.forwardRef<HTMLDivElement, ChatInputProps>(function ChatInput({
@@ -84,6 +90,7 @@ export const ChatInput = React.forwardRef<HTMLDivElement, ChatInputProps>(functi
   renderAttachmentError,
   uploadAttachment,
   labels = DEFAULT_COMPOSER_LABELS,
+  attachmentLabels = DEFAULT_ATTACHMENT_LABELS,
   className,
   style,
   onPaste: onPasteProp,
@@ -103,6 +110,7 @@ export const ChatInput = React.forwardRef<HTMLDivElement, ChatInputProps>(functi
   const {
     attachments,
     attachmentError,
+    announcement,
     dismissAttachmentError,
     draggingFiles,
     hasPendingAttachments,
@@ -114,6 +122,7 @@ export const ChatInput = React.forwardRef<HTMLDivElement, ChatInputProps>(functi
     markDragLeave,
     markDragOver,
     removeAttachment,
+    updateAttachmentAlt,
   } = useAttachmentQueue({
     resetKey,
     accept,
@@ -123,6 +132,7 @@ export const ChatInput = React.forwardRef<HTMLDivElement, ChatInputProps>(functi
     uploadAttachment,
     canIngestFiles,
     composerInactive,
+    labels: attachmentLabels,
   });
 
   React.useEffect(() => {
@@ -294,8 +304,8 @@ export const ChatInput = React.forwardRef<HTMLDivElement, ChatInputProps>(functi
             type="button"
             className="chorus-attachment-error-dismiss"
             onClick={dismissAttachmentError}
-            aria-label="Dismiss attachment error"
-            title="Dismiss"
+            aria-label={attachmentLabels.dismissError}
+            title={attachmentLabels.dismissError}
           >
             <X size={14} strokeWidth={2} />
           </button>
@@ -318,7 +328,21 @@ export const ChatInput = React.forwardRef<HTMLDivElement, ChatInputProps>(functi
       title={inactiveReason ?? rest.title}
     >
       {inactiveReason && <span id={reasonId} className="chorus-sr-only">{inactiveReason}</span>}
-      <AttachmentChips attachments={attachments} disabled={composerInactive} onRemove={removeAttachment} />
+      <AttachmentChips
+        attachments={attachments}
+        disabled={composerInactive}
+        onRemove={removeAttachment}
+        labels={attachmentLabels}
+        onAltChange={canIngestFiles ? updateAttachmentAlt : undefined}
+      />
+      <span
+        className="chorus-sr-only"
+        aria-live="polite"
+        aria-atomic="true"
+        data-testid="chorus-attachment-announcer"
+      >
+        {announcement?.message ?? ''}
+      </span>
       {attachmentErrorNode}
       <div className={`chorus-input-row${showAttachBtn ? ' chorus-input-row--has-attach' : ''}`}>
         {showAttachBtn && (

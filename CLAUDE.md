@@ -30,8 +30,13 @@ react-chorus is a composable React chat UI library with batteries-included messa
 ## Commands
 
 - Tests: `npm test`
+- Coverage: `npm run test:coverage` (enforces thresholds — see below)
 - Dev playground: `npm run dev`
 - Build: `npm run build`
+
+## Coverage thresholds
+
+`vitest.config.ts` sets v8 coverage thresholds that `npm run test:coverage` (and therefore `prepublishOnly`) enforces. Current floors: `statements: 82`, `branches: 73`, `functions: 87`, `lines: 86`. They are intentionally a couple of points below measured coverage at the time they were introduced so the gate catches regressions without flapping on small natural drift. To raise them, run `npm run test:coverage`, take the new percentages from the `Coverage summary` block, subtract ~1–2pp of headroom, and bump the values in `vitest.config.ts` — do this as its own commit so reviewers can see the new floor. Don't lower a threshold to make a failing run pass; investigate the regression instead.
 
 ## CI gate (run before pushing)
 

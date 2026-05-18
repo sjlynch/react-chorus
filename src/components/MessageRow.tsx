@@ -1,11 +1,12 @@
 import React from 'react';
 import type { Message, MessageFeedback } from '../types';
-import type { ChorusCodeCopyLabels, ChorusMessageActionLabels, ChorusSpeakerLabels } from '../labels/types';
+import type { ChorusAttachmentLabels, ChorusCodeCopyLabels, ChorusMessageActionLabels, ChorusSpeakerLabels } from '../labels/types';
 import type { MarkdownSanitizer } from './Markdown';
 import { MessageActions, createCopyAction } from './message-row/actions';
 import { MessageBubbleLayout } from './message-row/bubble';
 import { getInitialMessageFeedback } from './message-row/feedback';
 import { InlineMessageEditor } from './message-row/InlineMessageEditor';
+import { useReturnFocusAfterEditing } from './message-row/renderState';
 import { MessageSpeakerLabel } from './message-row/speaker';
 import type { MessageBubbleSlots, MessageCopyResult, MessageMarkdownProps, MessageRenderActions } from './message-row/types';
 
@@ -46,10 +47,12 @@ export interface MessageRowProps<TMeta = Record<string, unknown>> extends Messag
   speakerLabels?: ChorusSpeakerLabels;
   reasoningLabel?: string;
   codeCopyLabels?: ChorusCodeCopyLabels;
+  attachmentLabels?: ChorusAttachmentLabels;
 }
 
-export function MessageRow<TMeta = Record<string, unknown>>({ m, codeTheme, headless, onEdit, onRegenerate, onDelete, onCopy, onFeedback, initialFeedback, streaming = false, markdownProps, markdownSanitizer, messageActionLabels, speakerLabels, reasoningLabel, codeCopyLabels, before, headerSlot, footerSlot, after }: MessageRowProps<TMeta>) {
+export function MessageRow<TMeta = Record<string, unknown>>({ m, codeTheme, headless, onEdit, onRegenerate, onDelete, onCopy, onFeedback, initialFeedback, streaming = false, markdownProps, markdownSanitizer, messageActionLabels, speakerLabels, reasoningLabel, codeCopyLabels, attachmentLabels, before, headerSlot, footerSlot, after }: MessageRowProps<TMeta>) {
   const [editing, setEditing] = React.useState(false);
+  const editButtonRef = useReturnFocusAfterEditing<HTMLButtonElement>(editing);
   const copy = createCopyAction(m, onCopy);
   const resolvedInitialFeedback = initialFeedback === undefined ? getInitialMessageFeedback(m) : initialFeedback;
   const actions: MessageRenderActions = {
@@ -88,12 +91,13 @@ export function MessageRow<TMeta = Record<string, unknown>>({ m, codeTheme, head
           markdownSanitizer={markdownSanitizer}
           reasoningLabel={reasoningLabel}
           codeCopyLabels={codeCopyLabels}
+          attachmentLabels={attachmentLabels}
           before={before}
           headerSlot={headerSlot}
           footerSlot={footerSlot}
           after={after}
         >
-          <MessageActions actions={actions} onEditRequested={() => setEditing(true)} labels={messageActionLabels} />
+          <MessageActions actions={actions} onEditRequested={() => setEditing(true)} labels={messageActionLabels} editButtonRef={editButtonRef} />
         </MessageBubbleLayout>
       )}
     </div>

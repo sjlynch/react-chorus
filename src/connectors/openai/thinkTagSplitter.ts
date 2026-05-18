@@ -35,7 +35,9 @@ function compileTag(tag: string, caseInsensitive: boolean): CompiledTag {
   const m = tag.match(/^<(\/?)\s*([^<>/\s][^<>\s]*)\s*>$/);
   if (m) {
     const [, slash, name] = m;
-    return { literal: tag, regex: new RegExp(`<${slash}\\s*${escapeRegex(name)}\\s*>`, flags) };
+    if (name !== undefined) {
+      return { literal: tag, regex: new RegExp(`<${slash ?? ''}\\s*${escapeRegex(name)}\\s*>`, flags) };
+    }
   }
   return { literal: tag, regex: new RegExp(escapeRegex(tag), flags) };
 }

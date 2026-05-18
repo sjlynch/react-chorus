@@ -143,6 +143,7 @@ export function toAnthropicMessages<TMeta = Record<string, unknown>>(
 
   for (let i = 0; i < history.length; i += 1) {
     const message = history[i];
+    if (!message) continue;
     if (message.role !== 'tool') {
       const mapped = toAnthropicMessage(message, options);
       if (mapped) messages.push(mapped);
@@ -150,8 +151,10 @@ export function toAnthropicMessages<TMeta = Record<string, unknown>>(
     }
 
     const group: Message<TMeta>[] = [];
-    while (i < history.length && history[i].role === 'tool') {
-      group.push(history[i]);
+    while (i < history.length) {
+      const next = history[i];
+      if (!next || next.role !== 'tool') break;
+      group.push(next);
       i += 1;
     }
     i -= 1;
