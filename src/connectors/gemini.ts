@@ -54,10 +54,43 @@ function isDoneFinishReason(finishReason: unknown): finishReason is string {
   return typeof finishReason === 'string' && NORMAL_FINISH_REASONS.has(finishReason);
 }
 
-function geminiBlockedMessage(finishReason: string, hasText: boolean) {
-  return hasText
+function geminiBlockedMessage(finishReason: string, hasText: boolean, worstCategory?: string) {
+  const base = hasText
     ? `Gemini response ended with blocked finishReason: ${finishReason}`
     : `Gemini response was blocked and returned no text (finishReason: ${finishReason})`;
+  return worstCategory ? `${base} (worst category: ${worstCategory})` : base;
+}
+
+const SAFETY_PROBABILITY_RANK: Record<string, number> = {
+  NEGLIGIBLE: 0,
+  LOW: 1,
+  MEDIUM: 2,
+  HIGH: 3,
+};
+
+/**
+ * Pick the highest-severity safety rating from a `candidate.safetyRatings` array. Returns the
+ * category string of the rating with the largest `probability` (or the first `blocked: true`
+ * rating, which trumps probability). Used to enrich blocked-finish-reason error messages.
+ */
+function findWorstSafetyCategory(safetyRatings: unknown): string | undefined {
+  if (!Array.isArray(safetyRatings) || safetyRatings.length === 0) return undefined;
+  let worstCategory: string | undefined;
+  let worstRank = -1;
+  for (const rating of safetyRatings) {
+    if (!rating || typeof rating !== 'object') continue;
+    const r = rating as Record<string, unknown>;
+    const category = typeof r.category === 'string' ? r.category : undefined;
+    if (!category) continue;
+    if (r.blocked === true) return category;
+    const probability = typeof r.probability === 'string' ? r.probability : undefined;
+    const rank = probability ? SAFETY_PROBABILITY_RANK[probability] ?? -1 : -1;
+    if (rank > worstRank) {
+      worstRank = rank;
+      worstCategory = category;
+    }
+  }
+  return worstCategory;
 }
 
 function extractFunctionCallToolDelta(part: Record<string, unknown>, candidateKey: string, partIndex: number): ConnectorToolDelta | null {
@@ -97,7 +130,25 @@ export const geminiConnector: Connector = {
       const obj = JSON.parse(data);
       const error = extractErrorMessage(obj);
       if (error) return { error, errorPayload: obj };
-      if (!obj || !Array.isArray(obj.candidates) || obj.candidates.length === 0) return null;
+      if (!obj || typeof obj !== 'object') return null;
+
+      // promptFeedback fires when Gemini blocks the *prompt itself* before any candidate is
+      // produced; today `candidates` may be empty/missing in that case. Surface it as an error
+      // so the UI can show the user that the request was rejected upstream.
+      const promptFeedback = (obj as Record<string, unknown>).promptFeedback;
+      if (promptFeedback && typeof promptFeedback === 'object') {
+        const feedback = promptFeedback as Record<string, unknown>;
+        const blockReason = typeof feedback.blockReason === 'string' ? feedback.blockReason : '';
+        if (blockReason) {
+          const worstCategory = findWorstSafetyCategory(feedback.safetyRatings);
+          const message = worstCategory
+            ? `Gemini blocked the prompt (blockReason: ${blockReason}, worst category: ${worstCategory})`
+            : `Gemini blocked the prompt (blockReason: ${blockReason})`;
+          return { error: message, errorPayload: obj };
+        }
+      }
+
+      if (!Array.isArray(obj.candidates) || obj.candidates.length === 0) return null;
 
       const { candidate, arrayIndex } = selectedCandidate(obj.candidates);
       if (!candidate || typeof candidate !== 'object') return null;
@@ -121,6 +172,12 @@ export const geminiConnector: Connector = {
         });
       }
 
+      const safetyRatings = candidateObj.safetyRatings;
+      const worstSafetyCategory = findWorstSafetyCategory(safetyRatings);
+      if (Array.isArray(safetyRatings) && safetyRatings.length > 0) {
+        result.metadata = { ...(result.metadata ?? {}), safetyRatings };
+      }
+
       const finishReason = candidateObj.finishReason;
       if (isUnspecifiedFinishReason(finishReason)) {
         return {
@@ -133,14 +190,14 @@ export const geminiConnector: Connector = {
       if (isBlockingFinishReason(finishReason)) {
         return {
           ...result,
-          error: geminiBlockedMessage(finishReason, Boolean(result.text || result.reasoning)),
+          error: geminiBlockedMessage(finishReason, Boolean(result.text || result.reasoning), worstSafetyCategory),
           errorPayload: obj,
         };
       }
 
       if (isDoneFinishReason(finishReason)) result.done = true;
 
-      if (result.text || result.reasoning || hasToolDelta(result) || result.done || result.error) return result;
+      if (result.text || result.reasoning || hasToolDelta(result) || result.done || result.error || result.metadata) return result;
       return null;
     } catch {
       return null;

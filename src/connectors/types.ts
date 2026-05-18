@@ -13,6 +13,20 @@ export interface ConnectorToolDelta {
   generated?: boolean;
 }
 
+/**
+ * Non-fatal connector signal that the stream should keep flowing but a consumer may want to
+ * surface (e.g. truncation, safety ratings, telemetry events). Unlike `error`, a warning does
+ * not abort the stream.
+ */
+export interface ConnectorWarning {
+  /** Stable machine-readable identifier (e.g. `'truncated'`, `'safety-ratings'`, `'response-created'`). */
+  code: string;
+  /** Short human-readable description. */
+  message: string;
+  /** Original provider payload that produced the warning, when available. */
+  payload?: unknown;
+}
+
 export interface ConnectorResult {
   text?: string;
   reasoning?: string;
@@ -22,6 +36,14 @@ export interface ConnectorResult {
   error?: string;
   /** Original provider payload that produced an in-band connector error, when available. */
   errorPayload?: unknown;
+  /** Non-fatal connector warning (truncation, safety, refusal-coming, telemetry). Stream continues. */
+  warning?: ConnectorWarning;
+  /**
+   * Free-form provider metadata surfaced alongside text/reasoning (e.g. Anthropic `stop_reason`,
+   * Gemini `safetyRatings`, OpenAI `response.id`). Consumers may persist or log this; the
+   * pipeline itself only forwards it to callbacks.
+   */
+  metadata?: Record<string, unknown>;
 }
 
 // `any` here is deliberate: lets `Connector<SomeState>` flow into APIs typed as
