@@ -384,7 +384,7 @@ import { createFetchSSETransport, createWebSocketTransport } from 'react-chorus/
 
 ```js
 // server.js  —  npm install ws @anthropic-ai/sdk react-chorus
-import { WebSocketServer } from 'ws';
+import { WebSocket, WebSocketServer } from 'ws';
 import Anthropic from '@anthropic-ai/sdk';
 import { toAnthropicMessagesBody } from 'react-chorus/provider-requests';
 
@@ -397,31 +397,54 @@ wss.on('connection', (ws) => {
     // includes the new user turn; ignore `prompt` to avoid sending it twice.
     const { history = [] } = JSON.parse(raw.toString());
 
+    // Cancel the upstream Anthropic stream if the browser disconnects or
+    // hits Stop — otherwise the SDK keeps draining tokens (and billing) to
+    // a socket that nobody is listening on.
+    const controller = new AbortController();
+    const cancel = () => controller.abort();
+    ws.on('close', cancel);
+    ws.on('error', cancel);
+
+    const safeSend = (payload) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(payload));
+      }
+    };
+
     try {
       const stream = await client.messages.stream(
         toAnthropicMessagesBody(Array.isArray(history) ? history : [], {
           model: 'claude-sonnet-4-6',
           max_tokens: 1024,
         }),
+        { signal: controller.signal },
       );
 
       // Forward raw Anthropic SDK events verbatim — the front-end
       // `anthropic` connector parses `content_block_delta` / `message_stop`
       // directly, so no server-side reshaping is needed.
       for await (const event of stream) {
-        ws.send(JSON.stringify(event));
+        if (controller.signal.aborted) break;
+        safeSend(event);
       }
       // `client.messages.stream` already emits a `message_stop` event,
       // which the anthropic connector treats as the done sentinel. The
       // react-chorus WebSocket transport opens a fresh socket per send and
       // closes it client-side after that sentinel is processed.
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      ws.send(JSON.stringify({ error: message }));
+      if (!controller.signal.aborted) {
+        const message = err instanceof Error ? err.message : String(err);
+        safeSend({ error: message });
+      }
+    } finally {
+      ws.off('close', cancel);
+      ws.off('error', cancel);
     }
   });
 });
 ```
+
+Like the Express/OpenAI and Next.js App Router examples above, the backend cancels its upstream provider stream as soon as the client disconnects or stops. Without this, the Anthropic SDK keeps draining tokens to a closed socket — the server is billed for output that no UI is rendering, and the loop can sit on a half-open socket until the OS times it out. The `AbortController` is created per message, threaded into `client.messages.stream(..., { signal })`, and tripped by `'close'` / `'error'` listeners that are removed when the stream finishes. Every `ws.send` is guarded by `readyState === WebSocket.OPEN` so a late event after disconnect cannot throw.
 
 The front-end pairs this with `connector: 'anthropic'` (see the React snippet above) so it reads `content_block_delta` / `message_stop` events out of each WebSocket frame the same way it would over an SSE stream.
 
@@ -869,6 +892,38 @@ To refresh the published size claims after dependency or feature changes, run `n
 If your SSR app wants to allow sanitized raw HTML, create an isomorphic DOMPurify instance (for example with your framework's DOM/window or jsdom on the server) and pass it to the standalone renderer: `<Markdown sanitizer={purify} />` or `<Markdown sanitizer={(html) => purify.sanitize(html)} />`. The built-in chat renderer accepts the same customization via `<Chorus markdownSanitizer={purify} />` / `<ChatWindow markdownSanitizer={purify} />`, or through `markdownProps={{ sanitizer: purify }}`. You can also pass `markedOptions` and `markedExtensions` directly to `<Markdown>` or via `markdownProps` to adjust parsing and register marked extensions without mutating marked's global singleton.
 
 Code-block copy buttons flash `Copied!` on success and `Copy failed` when the Clipboard API rejects. Pass `<Markdown onCopyError={(error) => ...} />` — or `markdownProps={{ onCopyError }}` on `<Chorus>` / `<ChatWindow>` — to show your own toast or fallback alert.
+
+## Security and CSP
+
+react-chorus is designed to run under a strict Content-Security-Policy. Concretely:
+
+- **No inline scripts.** The library never injects `<script>` tags, never uses `eval` / `new Function`, and DOMPurify is the underlying-API-only build that runs entirely on DOM nodes. `script-src 'self'` (no `'unsafe-inline'`, no `'unsafe-eval'`) is sufficient — DOMPurify does **not** require `'unsafe-eval'`.
+- **`highlight.js` is a dynamic `import()`.** It is shipped as a regular script chunk loaded from your own origin (or wherever your bundler emits assets), so `script-src 'self'` already covers it. If you serve bundles from a CDN, add that origin to `script-src`. The chunk is only fetched the first time a fenced code block appears in rendered text — apps that never render fenced code never download it.
+- **Sanitized HTML is rendered, not executed.** Markdown is parsed, the resulting HTML is sanitized with DOMPurify (or the SSR no-raw-HTML fallback described above), and only then mounted via `dangerouslySetInnerHTML`. DOMPurify strips `<script>`, `on*` handlers, and unsafe URL protocols; Markdown-emitted `<a>` / `<img>` URLs are restricted to safe protocols.
+- **`style-src 'unsafe-inline'` is only needed if you allow sanitized `style=""`.** Out of the box, DOMPurify keeps `style` attributes on whitelisted tags, so any Markdown-rendered element may carry inline styles that survive sanitization. If you remove the `style` attribute from your sanitizer's allowed list (e.g. `<Markdown sanitizer={(html) => purify.sanitize(html, { FORBID_ATTR: ['style'] })} />`), no inline styles are emitted and `style-src 'self'` is enough. Code-fence syntax-highlight colors come from a stylesheet, not inline `style` attributes.
+- **`connect-src` is whatever you POST/upgrade to.** Chorus only talks to the URL you give `transport`, so list your own API origin (and any WebSocket origin) under `connect-src`.
+
+A minimal safe CSP for an app embedding `<Chorus />` that talks to a same-origin `/api/chat` proxy:
+
+```
+default-src 'self';
+script-src 'self';
+style-src 'self';
+img-src 'self' data: blob:;
+font-src 'self';
+connect-src 'self';
+worker-src 'self';
+frame-ancestors 'none';
+base-uri 'self';
+object-src 'none';
+```
+
+Notes for tightening or relaxing this baseline:
+
+- Add `data:` / `blob:` to `img-src` if you accept image attachments (the composer previews dropped/pasted files as `blob:` URLs, and image data URLs can show up in rendered Markdown).
+- Add your provider origin(s) to `connect-src` only if the browser talks directly to a provider; the recommended `react-chorus/server` proxy pattern keeps `connect-src 'self'`.
+- Add a WebSocket origin (e.g. `connect-src 'self' wss://api.example.com`) when using `createWebSocketTransport` against a different host.
+- If you must allow user-authored inline styles, add `'unsafe-inline'` to `style-src`. Prefer the `FORBID_ATTR: ['style']` sanitizer config above and keep `style-src 'self'`.
 
 ## API
 
@@ -2171,6 +2226,26 @@ The same generic flows through public components and hooks:
 ```
 
 The generic `Message` declaration shape is a minor semver-level type declaration change while remaining source-compatible.
+
+## Migration and Upgrading
+
+This section is the canonical place to look up breaking changes and deprecations release-over-release. The matching changelog entries live in [`CHANGELOG.md`](./CHANGELOG.md) — anything labelled "Deprecation candidate" there is documented here with a concrete migration path before it ships as a breaking change.
+
+### Unreleased — deprecation candidates
+
+#### Default transport body will drop the `prompt` field
+
+**Status:** still emitted today; planned removal in the next major.
+
+**What ships today.** `createFetchSSETransport`, `createWebSocketTransport`, and `createDefaultFetchSSETransport` all POST/send the body `{ prompt, history }` by default, where `prompt` equals `history[history.length - 1].text`. It is a convenience duplicate of the latest user turn — useful for very small toy backends, redundant for everything else. Every example backend in this repo (`examples/with-openai/server`, `examples/with-next`, the Express/Next.js/Gemini/WebSocket snippets in this README) already reads `history` only and explicitly ignores `prompt`.
+
+**What changes in the next major.** The default request body will be `{ history }` — `prompt` will no longer be present, and the inline comments warning backends not to re-append `body.prompt` will be removed. The `formatBody` override remains the supported escape hatch for any backend that still wants a separate field.
+
+**How to migrate, ahead of the major.** On the server, read `history` (always present today and after the change) and never re-append `req.body.prompt` / `frame.prompt` — the latest user text is `history[history.length - 1].text`. On the client, if you need a custom body shape, pass `formatBody: (text, history) => JSON.stringify({ text, history })` to the transport you're constructing instead of relying on the default. After the major lands, callers reading `req.body.prompt` will see `undefined` and silently send an empty turn to the model, so do this work now if you haven't already.
+
+**Why now.** Bodies have been documented as `{ prompt, history }` since 0.x and a handful of toy backends still echo `prompt`. Keeping the duplicate field on the wire indefinitely is a permanent footgun (the "message sent twice" failure mode that every backend snippet currently warns about) — the deprecation candidate makes the breaking change explicit so apps can move to `{ history }` on their own schedule before the major lands.
+
+> Tracked under the [`[Unreleased]` → Deprecation candidates (future major)](./CHANGELOG.md#deprecation-candidates-future-major) section of the changelog.
 
 ## Development and release
 
