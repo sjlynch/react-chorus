@@ -11,9 +11,26 @@ function extractResponseToolId(obj: Record<string, unknown>) {
   return outputIndex ? `openai-response-output-${outputIndex}` : '';
 }
 
+/**
+ * Response events we deliberately ignore (lifecycle signals with no useful UI payload).
+ * Documented here so future readers don't think they were forgotten:
+ *  - `response.created` — start-of-stream telemetry; no text yet.
+ *  - `response.output_item.started` — item lifecycle marker preceding `.added`.
+ */
+const IGNORED_RESPONSE_EVENT_TYPES = new Set([
+  'response.created',
+  'response.output_item.started',
+]);
+
+function refusalKey(obj: Record<string, unknown>) {
+  return stringFromUnknown(obj.item_id) || stringFromUnknown(obj.output_index) || '';
+}
+
 export function extractOpenAIResponseEvent(obj: Record<string, unknown>, state: OpenAIConnectorState): ConnectorResult | null {
   const type = typeof obj.type === 'string' ? obj.type : '';
   const result: ConnectorResult = {};
+
+  if (IGNORED_RESPONSE_EVENT_TYPES.has(type)) return null;
 
   if (type === 'response.completed') {
     mergeResult(result, createThinkTagSplitter(state.thinkState, state.thinkOptions).flush());
@@ -24,6 +41,31 @@ export function extractOpenAIResponseEvent(obj: Record<string, unknown>, state: 
   if (type === 'response.failed') {
     const error = extractErrorMessage(obj) || collectTextFragments(obj.response) || 'OpenAI response failed';
     return { error, errorPayload: obj };
+  }
+
+  // Inline (non-terminal in the protocol, but terminal for our UI) error event.
+  if (type === 'response.error') {
+    const error = extractErrorMessage(obj) || stringFromUnknown(obj.message) || stringFromUnknown(obj.code) || 'OpenAI response error';
+    return { error, errorPayload: obj };
+  }
+
+  if (type === 'response.refusal.added') {
+    state.responseRefusalText.set(refusalKey(obj), '');
+    return null;
+  }
+
+  if (type === 'response.refusal.delta') {
+    const key = refusalKey(obj);
+    const delta = stringFromUnknown(obj.delta);
+    if (delta) state.responseRefusalText.set(key, (state.responseRefusalText.get(key) ?? '') + delta);
+    return null;
+  }
+
+  if (type === 'response.refusal.done') {
+    const key = refusalKey(obj);
+    const finalText = stringFromUnknown(obj.refusal) || state.responseRefusalText.get(key) || 'OpenAI model refused to respond';
+    state.responseRefusalText.delete(key);
+    return { error: finalText, errorPayload: obj };
   }
 
   if (type === 'response.output_text.delta') {
