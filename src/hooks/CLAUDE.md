@@ -40,8 +40,12 @@ The facade keeps storage resolution, initial sync/async read coordination, pre-l
 
 ## `useConversations`
 
-Conversation index persistence is split into:
+Conversation index persistence is split into focused helpers (see `conversations/CLAUDE.md` for invariants):
 
+- `conversations/types.ts` — public conversation/result/options/storage error types re-exported by the facade.
+- `conversations/storageSource.ts` and `conversations/indexReadLifecycle.ts` — default storage/key setup and sync/async index read orchestration.
+- `conversations/lifecycle.ts` and `conversations/crossTabSync.ts` — page/unmount flushes and localStorage cross-tab sync.
+- `conversations/actions.ts` — create/select/rename/delete/pin callbacks plus transcript deletion.
 - `conversations/indexCodec.ts` — index parsing/migration, title derivation, active-id selection.
 - `conversations/storageErrors.ts` — storage error normalization.
 - `conversations/indexWriteQueue.ts` — debounced/serialized index writes.
