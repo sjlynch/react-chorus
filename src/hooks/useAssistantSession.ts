@@ -5,21 +5,19 @@ import type { ConnectorName } from '../types';
 import { useChorusStream, type Transport } from './useChorusStream';
 import { useLatestRef } from './useLatestRef';
 import { isChorusDevMode } from '../utils/devMode';
-import { isAbortError } from '../utils/errors';
-import { isPromiseLike } from '../utils/async';
 import { createDefaultFetchSSETransport, type FetchTransportInit } from './assistant-session/transport';
-import { cloneHistoryForRetry, createMessageId, dropTrailingAssistant, findLastUserMessage, normalizeReturnedMessage } from './assistant-session/messageUtils';
-import { warnObserverError } from './assistant-session/observer';
+import { cloneHistoryForRetry, findLastUserMessage } from './assistant-session/messageUtils';
 import { DEFAULT_MAX_TOOL_ITERATIONS } from './assistant-session/toolLoop';
 import { createObserverCallbacks } from './assistant-session/observerCallbacks';
 import { useAssistantBuffer } from './assistant-session/assistantBuffer';
 import { useToolExecution } from './assistant-session/toolExecution';
-import { createSessionHelpers } from './assistant-session/sessionHelpers';
+import { startOnSendLifecycle } from './assistant-session/onSendLifecycle';
+import { useSessionCommands } from './assistant-session/sessionCommands';
 import { useTransportLifecycle, type DoStream } from './assistant-session/transportLifecycle';
 import type { ChorusToolRegistry } from '../tools';
 import type {
+  ChorusAbortReason,
   ChorusAbortSource,
-  ChorusClearConversationContext,
   ChorusConfirmClearConversation,
   ChorusConfirmDeleteMessage,
   ChorusFinishContext,
@@ -359,7 +357,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
   });
   const { startTransportStream } = transportLifecycle;
 
-  const abortActiveAssistant = React.useCallback((reason: import('./assistant-session/types').ChorusAbortReason, source: ChorusAbortSource) => {
+  const abortActiveAssistant = React.useCallback((reason: ChorusAbortReason, source: ChorusAbortSource) => {
     const path = activeSendPathRef.current ?? (transportRef.current ? 'transport' : 'onSend');
 
     invalidateAssistantSession();
@@ -410,232 +408,54 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
       return;
     }
 
-    controllerRef.current?.abort();
-    const controller = new AbortController();
-    controllerRef.current = controller;
-    activeSendPathRef.current = 'onSend';
-    setInternalSending(true);
-    clearStreamError();
-    resetStreamState();
-
-    const startedAt = Date.now();
-    const sessionHelpers = createSessionHelpers<TMeta>({
+    startOnSendLifecycle<TMeta>({
+      controllerRef,
+      activeSendPathRef,
+      minAssistantDelayMsRef,
+      systemPromptRef,
+      hasStartedAssistantRef,
+      setInternalSending,
+      clearStreamError,
+      resetStreamState,
       appendAssistantNow,
       appendAssistantReasoningNow,
       appendToolDeltaNow,
       completeActiveSession,
       isAssistantSessionActive,
-      minAssistantDelayMsRef,
-      systemPromptRef,
-      hasStartedAssistantRef,
-    }, sessionId, controller.signal, startedAt);
-
-    void (async () => {
-      try {
-        const res = await currentOnSend(text, history, sessionHelpers.helpers);
-        if (!isAssistantSessionActive(sessionId)) return;
-
-        if (res && typeof res === 'object' && !hasStartedAssistantRef.current && !sessionHelpers.hasPendingAssistant()) {
-          const wait = Math.max(0, minAssistantDelayMsRef.current - (Date.now() - startedAt));
-          if (wait) await new Promise(r => setTimeout(r, wait));
-          if (!isAssistantSessionActive(sessionId)) return;
-
-          const returnedMessage = res as Partial<Message<TMeta>>;
-          const normalizedMessage = normalizeReturnedMessage(returnedMessage);
-          updateSessionMessages(prev => prev.concat(normalizedMessage), { reason: 'assistant' });
-          completeActiveSession(sessionId, { reason: 'returned-message', message: normalizedMessage });
-        }
-
-        if (isAssistantSessionActive(sessionId) && sessionHelpers.hasAssistantOutput() && !sessionHelpers.wasFinalizeRequested()) {
-          if (isChorusDevMode()) {
-            console.warn('[Chorus] `onSend` appended assistant chunks but resolved without calling `helpers.finalizeAssistant()`. Chorus finalized the assistant automatically to avoid leaving the conversation in a sending state.');
-          }
-          sessionHelpers.autoFinalizeAssistant();
-        }
-      } catch (e: unknown) {
-        if (isAssistantSessionActive(sessionId)) {
-          removePendingAssistant();
-          invalidateAssistantSession(sessionId);
-          setInternalSending(false);
-          if (controllerRef.current === controller) controllerRef.current = null;
-
-          if (!isAbortError(e)) {
-            const error = e instanceof Error ? e : new Error(String(e));
-            observers.safeOnError(error);
-            showStreamError(error);
-          }
-        }
-      } finally {
-        if (isAssistantSessionActive(sessionId) && !hasStartedAssistantRef.current && !sessionHelpers.hasPendingAssistant()) {
-          completeActiveSession(sessionId);
-        }
-        if (controllerRef.current === controller && !isAssistantSessionActive(sessionId)) controllerRef.current = null;
-      }
-    })();
+      invalidateAssistantSession,
+      removePendingAssistant,
+      updateSessionMessages,
+      observers,
+      showStreamError,
+      sessionId,
+      text,
+      history,
+      onSend: currentOnSend,
+    });
   }, [abortActiveAssistant, appendAssistantNow, appendAssistantReasoningNow, appendToolDeltaNow, beginAssistantSession, clearStreamError, completeActiveSession, hasStartedAssistantRef, invalidateAssistantSession, isAssistantSessionActive, messagesRef, minAssistantDelayMsRef, observers, onSendRef, rememberSubmittedTurn, removePendingAssistant, resetStreamState, setInternalSending, setTransportBusy, showStreamError, startTransportStream, systemPromptRef, transportRef, updateSessionMessages, warnMissingResponseHandler]);
 
-  const send = React.useCallback((rawText: string, attachments: Attachment[] = []) => {
-    if (isBusy()) return false;
-    const text = rawText.trim();
-    if (!text && !attachments.length) return false;
-    if (!transportRef.current && !onSendRef.current) {
-      warnMissingResponseHandler();
-      return false;
-    }
-
-    const next = updateSessionMessages(prev => prev.concat({
-      id: createMessageId(),
-      role: 'user',
-      text,
-      attachments: attachments.length > 0 ? attachments : undefined,
-    }), { reason: 'send' });
-    triggerAssistant(text, next);
-    return true;
-  }, [isBusy, onSendRef, transportRef, triggerAssistant, updateSessionMessages, warnMissingResponseHandler]);
-
-  const retry = React.useCallback(() => {
-    const submitted = lastSubmittedTurnRef.current;
-    if (!submitted || isBusy()) return;
-    const retryHistory = cloneHistoryForRetry(submitted.history);
-    if (streamError) {
-      updateSessionMessages(() => retryHistory, { flushPersistence: true, reason: 'retry' });
-    }
-    triggerAssistant(submitted.text, retryHistory);
-  }, [isBusy, streamError, triggerAssistant, updateSessionMessages]);
-
-  const stop = React.useCallback((source: ChorusAbortSource = 'programmatic') => {
-    if (!isBusy()) return;
-    abortActiveAssistant('stop', source);
-  }, [abortActiveAssistant, isBusy]);
-
-  const commitClear = React.useCallback((source: ChorusAbortSource) => {
-    if (isBusy()) abortActiveAssistant('clear', source);
-    clearStreamError();
-    lastSubmittedTurnRef.current = null;
-    const reset = resetToInitialMessagesRef.current;
-    const next = reset ? seedMessagesRef.current : [];
-    updateSessionMessages(() => next, {
-      flushPersistence: true,
-      removePersistenceIfEmpty: !reset && seedMessagesRef.current.length === 0,
-      reason: 'clear',
-    });
-    onClearRef.current?.(next);
-  }, [abortActiveAssistant, clearStreamError, isBusy, onClearRef, resetToInitialMessagesRef, seedMessagesRef, updateSessionMessages]);
-
-  const clear = React.useCallback((source: ChorusAbortSource = 'programmatic') => {
-    if (clearConfirmationActiveRef.current) return;
-
-    const confirm = confirmClearConversationRef.current;
-    if (!confirm) {
-      commitClear(source);
-      return;
-    }
-
-    const persistenceKeyForContext = persistenceKeyRef.current;
-    const context: ChorusClearConversationContext<TMeta> = {
-      messages: messagesRef.current.slice(),
-      resetToInitialMessages: resetToInitialMessagesRef.current,
-      source,
-      ...(persistenceKeyForContext ? { persistenceKey: persistenceKeyForContext } : {}),
-    };
-
-    let confirmation: boolean | void | Promise<boolean | void>;
-    try {
-      confirmation = confirm(context);
-    } catch (error) {
-      warnObserverError('confirmClearConversation', error);
-      return;
-    }
-
-    if (isPromiseLike<boolean | void>(confirmation)) {
-      clearConfirmationActiveRef.current = true;
-      setClearConfirmationPending(true);
-      Promise.resolve(confirmation)
-        .then(confirmed => {
-          if (confirmed === false) return;
-          commitClear(source);
-        })
-        .catch(error => warnObserverError('confirmClearConversation', error))
-        .finally(() => {
-          clearConfirmationActiveRef.current = false;
-          setClearConfirmationPending(false);
-        });
-      return;
-    }
-
-    if (confirmation === false) return;
-    commitClear(source);
-  }, [commitClear, confirmClearConversationRef, messagesRef, persistenceKeyRef, resetToInitialMessagesRef]);
-
-  const handleEdit = React.useCallback((id: string, newText: string) => {
-    if (isBusy()) return;
-    const currentMessages = messagesRef.current;
-    const idx = currentMessages.findIndex(m => m.id === id);
-    if (idx === -1) return;
-    const currentMessage = currentMessages[idx];
-    if (!currentMessage || currentMessage.role !== 'user') return;
-    const edited: Message<TMeta> = { ...currentMessage, text: newText };
-    const next = updateSessionMessages(prev => [...prev.slice(0, idx), edited], { flushPersistence: true, reason: 'edit' });
-    triggerAssistant(newText, next);
-  }, [isBusy, messagesRef, triggerAssistant, updateSessionMessages]);
-
-  const handleRegenerate = React.useCallback((id: string) => {
-    if (isBusy()) return;
-    const currentMessages = messagesRef.current;
-    const idx = currentMessages.findIndex(m => m.id === id);
-    if (idx === -1) return;
-    let userIdx = idx - 1;
-    while (userIdx >= 0 && currentMessages[userIdx]?.role !== 'user') userIdx -= 1;
-    if (userIdx < 0) return;
-    const userMsg = currentMessages[userIdx];
-    if (!userMsg || userMsg.role !== 'user') return;
-    const next = updateSessionMessages(prev => {
-      const history = streamError ? dropTrailingAssistant(prev) : prev;
-      return history.slice(0, userIdx + 1);
-    }, { flushPersistence: true, reason: 'regenerate' });
-    triggerAssistant(userMsg.text, next);
-  }, [isBusy, messagesRef, streamError, triggerAssistant, updateSessionMessages]);
-
-  const handleDelete = React.useCallback((id: string) => {
-    if (isBusy()) return;
-    if (pendingDeleteIdsRef.current.has(id)) return;
-
-    const currentMessages = messagesRef.current;
-    const message = currentMessages.find(m => m.id === id);
-    if (!message) return;
-
-    const commitDelete = () => {
-      updateSessionMessages(prev => prev.filter(m => m.id !== id), { flushPersistence: true, reason: 'delete' });
-    };
-
-    let confirmation: boolean | void | Promise<boolean | void>;
-    try {
-      confirmation = confirmDeleteMessageRef.current?.({ message, messages: currentMessages.slice() });
-    } catch (error) {
-      warnObserverError('confirmDeleteMessage', error);
-      return;
-    }
-
-    if (isPromiseLike<boolean | void>(confirmation)) {
-      pendingDeleteIdsRef.current.add(id);
-      Promise.resolve(confirmation)
-        .then(confirmed => {
-          if (confirmed === false) return;
-          // A send may have started while the confirmation was pending; deleting
-          // the active streaming message (or its context) would orphan pending state.
-          if (isBusy()) return;
-          commitDelete();
-        })
-        .catch(error => warnObserverError('confirmDeleteMessage', error))
-        .finally(() => {
-          pendingDeleteIdsRef.current.delete(id);
-        });
-      return;
-    }
-
-    if (confirmation === false) return;
-    commitDelete();
-  }, [confirmDeleteMessageRef, isBusy, messagesRef, updateSessionMessages]);
+  const { send, retry, stop, clear, handleEdit, handleRegenerate, handleDelete } = useSessionCommands<TMeta>({
+    messagesRef,
+    transportRef,
+    onSendRef,
+    lastSubmittedTurnRef,
+    pendingDeleteIdsRef,
+    clearConfirmationActiveRef,
+    confirmDeleteMessageRef,
+    confirmClearConversationRef,
+    persistenceKeyRef,
+    resetToInitialMessagesRef,
+    seedMessagesRef,
+    onClearRef,
+    streamError,
+    isBusy,
+    abortActiveAssistant,
+    clearStreamError,
+    triggerAssistant,
+    updateSessionMessages,
+    warnMissingResponseHandler,
+    setClearConfirmationPending,
+  });
 
   // Reference unused vars to satisfy linters when buffer exposes more than this facade needs.
   void cancelPending;

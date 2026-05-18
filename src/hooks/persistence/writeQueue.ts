@@ -1,6 +1,6 @@
 import React from 'react';
 import type { Message, StorageAdapter } from '../../types';
-import type { PersistenceOperation, SerializeMessages } from '../useChorusPersistence';
+import type { PersistenceOperation, SerializeMessages } from './types';
 import { isPromiseLike } from '../../utils/async';
 
 interface PendingWrite {
