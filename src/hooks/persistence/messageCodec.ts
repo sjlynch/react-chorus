@@ -1,5 +1,5 @@
 import type { Attachment, Message, Role, StorageAdapter, ToolCall } from '../../types';
-import type { ChorusPersistenceError, DeserializeMessages } from '../useChorusPersistence';
+import type { ChorusPersistenceError, DeserializeMessages } from './types';
 import { warnInDev } from '../../utils/warnings';
 import { createPersistenceError } from './errors';
 
