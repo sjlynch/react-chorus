@@ -12,6 +12,7 @@
     "declaration": true,
     "outDir": "dist/types",
     "strict": true,
+    "noUncheckedIndexedAccess": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "erasableSyntaxOnly": true,
