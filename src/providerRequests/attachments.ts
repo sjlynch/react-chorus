@@ -17,7 +17,7 @@ export function unsupportedAttachmentText<TMeta>(
 
 function parseDataUrl(value: string): { mimeType: string; base64: string } | null {
   const match = /^data:([^;,]+)?(?:;[^,]*)?;base64,(.+)$/i.exec(value);
-  if (!match) return null;
+  if (!match || !match[2]) return null;
   return { mimeType: match[1] || 'application/octet-stream', base64: match[2] };
 }
 
