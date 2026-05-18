@@ -4,6 +4,13 @@ import type { MarkdownProps } from '../Markdown';
 
 export type MessageMarkdownProps = Omit<MarkdownProps, 'text' | 'codeTheme' | 'headless' | 'streaming'>;
 
+export type {
+  ChorusCodeCopyLabels,
+  ChorusMessageActionLabels,
+  ChorusSpeakerLabels,
+  ChorusToolCallLabels,
+} from '../../labels/types';
+
 export interface MessageBubbleSlots {
   before?: ReactNode;
   headerSlot?: ReactNode;

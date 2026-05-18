@@ -1,12 +1,12 @@
 import type { Message } from '../../types';
-import type { WebSocketTransport, WebSocketTransportOptions } from '../createWebSocketTransport';
+import type { FormatMessageResult, WebSocketTransport, WebSocketTransportOptions } from '../createWebSocketTransport';
 import { createManagedResponseStream } from './managedResponseStream';
-import { createAbortError, createClosedBeforeOpenError, encodeSSEDataEvent, safeCloseSocket, toError, webSocketMessageToText } from './shared';
+import { createAbortError, createClosedBeforeOpenError, encodeSSEDataEvent, normalizeFormatMessageResult, safeCloseSocket, toError, webSocketMessageToText } from './shared';
 
 export function createTransientWebSocketTransport<TMeta = Record<string, unknown>>(
   url: string,
   opts: WebSocketTransportOptions<TMeta> | undefined,
-  formatMessage: (text: string, history: Message<TMeta>[]) => string,
+  formatMessage: (text: string, history: Message<TMeta>[]) => FormatMessageResult,
 ): WebSocketTransport<TMeta> {
   const activeSockets = new Set<WebSocket>();
   const encoder = new TextEncoder();
@@ -58,7 +58,7 @@ export function createTransientWebSocketTransport<TMeta = Record<string, unknown
       ws.onopen = () => {
         if (signal.aborted) { safeCloseCurrentSocket(); return; }
         try {
-          ws.send(formatMessage(text, history));
+          ws.send(normalizeFormatMessageResult(formatMessage(text, history)).payload);
         } catch (error) {
           fail(error);
           return;

@@ -1,13 +1,20 @@
 import React from 'react';
-import { ArrowUp, Paperclip } from 'lucide-react';
+import { ArrowUp, Paperclip, X } from 'lucide-react';
 import type {
   Attachment,
   AttachmentError,
   UploadAttachment,
 } from '../types';
+import { DEFAULT_COMPOSER_LABELS } from '../labels/composer';
+import type { ChorusComposerLabels } from '../labels/types';
 import { AttachmentChips } from './chat-input/AttachmentChips';
 import { filesFromTransfer, isPendingAttachment, transferHasFiles } from './chat-input/attachmentUtils';
 import { useAttachmentQueue } from './chat-input/useAttachmentQueue';
+
+export interface RenderAttachmentErrorContext {
+  error: AttachmentError;
+  dismiss: () => void;
+}
 
 const MAX_HEIGHT = 160;
 
@@ -37,8 +44,26 @@ export interface ChatInputProps extends Omit<React.HTMLAttributes<HTMLDivElement
   accept?: string;
   maxAttachmentBytes?: number;
   maxAttachments?: number;
+  /**
+   * Observes attachment validation, read, and upload failures. The built-in
+   * composer also renders an accessible error region for these failures; pass
+   * `renderAttachmentError` to replace that default UI.
+   */
   onAttachmentError?: (error: AttachmentError) => void;
+  /**
+   * Replaces the built-in attachment error region. When omitted, the composer
+   * renders a default polite-live alert below the chips with a dismiss button.
+   * Pass `null` to suppress the default UI entirely (e.g. when the host has
+   * already wired its own surface via `onAttachmentError`).
+   */
+  renderAttachmentError?: ((context: RenderAttachmentErrorContext) => React.ReactNode) | null;
   uploadAttachment?: UploadAttachment;
+  /**
+   * Localized labels for the composer (placeholder, aria-labels, attach/send/stop, and
+   * disabled/read-only fallback reasons). Defaults to English; the existing `placeholder`
+   * and `disabledReason` props take precedence over `labels` when both are provided.
+   */
+  labels?: ChorusComposerLabels;
 }
 
 export const ChatInput = React.forwardRef<HTMLDivElement, ChatInputProps>(function ChatInput({
@@ -56,7 +81,9 @@ export const ChatInput = React.forwardRef<HTMLDivElement, ChatInputProps>(functi
   maxAttachmentBytes,
   maxAttachments,
   onAttachmentError,
+  renderAttachmentError,
   uploadAttachment,
+  labels = DEFAULT_COMPOSER_LABELS,
   className,
   style,
   onPaste: onPasteProp,
@@ -75,6 +102,8 @@ export const ChatInput = React.forwardRef<HTMLDivElement, ChatInputProps>(functi
   const canIngestFiles = showAttachBtn && !composerInactive;
   const {
     attachments,
+    attachmentError,
+    dismissAttachmentError,
     draggingFiles,
     hasPendingAttachments,
     hasSendableAttachment,
@@ -116,8 +145,10 @@ export const ChatInput = React.forwardRef<HTMLDivElement, ChatInputProps>(functi
 
   const canSend = !composerInactive && (value.trim().length > 0 || hasSendableAttachment) && !hasPendingAttachments;
   const stopAvailable = Boolean(sending && onStop);
-  const inactiveReason = disabledReason || (readOnly ? 'Composer is read-only.' : disabled ? 'Composer is disabled.' : undefined);
-  const placeholderText = inactiveReason || placeholder || 'Send a message';
+  const inactiveReason = disabledReason || (readOnly ? labels.readOnlyReason : disabled ? labels.disabledReason : undefined);
+  const placeholderText = inactiveReason || placeholder || labels.placeholder;
+  const textareaAriaLabel = placeholder || labels.ariaLabel;
+  const sendActionLabel = sending ? labels.stop : labels.send;
 
   const resizeTextarea = () => {
     const el = textareaRef.current;
@@ -249,6 +280,29 @@ export const ChatInput = React.forwardRef<HTMLDivElement, ChatInputProps>(functi
     className,
   ].filter(Boolean).join(' ');
 
+  const attachmentErrorNode = attachmentError && renderAttachmentError !== null
+    ? (renderAttachmentError
+      ? renderAttachmentError({ error: attachmentError, dismiss: dismissAttachmentError })
+      : (
+        <div
+          className="chorus-attachment-error"
+          role="alert"
+          aria-live="polite"
+        >
+          <span className="chorus-attachment-error-text">{attachmentError.message}</span>
+          <button
+            type="button"
+            className="chorus-attachment-error-dismiss"
+            onClick={dismissAttachmentError}
+            aria-label="Dismiss attachment error"
+            title="Dismiss"
+          >
+            <X size={14} strokeWidth={2} />
+          </button>
+        </div>
+      ))
+    : null;
+
   return (
     <div
       {...rest}
@@ -265,12 +319,13 @@ export const ChatInput = React.forwardRef<HTMLDivElement, ChatInputProps>(functi
     >
       {inactiveReason && <span id={reasonId} className="chorus-sr-only">{inactiveReason}</span>}
       <AttachmentChips attachments={attachments} disabled={composerInactive} onRemove={removeAttachment} />
+      {attachmentErrorNode}
       <div className={`chorus-input-row${showAttachBtn ? ' chorus-input-row--has-attach' : ''}`}>
         {showAttachBtn && (
           <input ref={fileInputRef} type="file" accept={accept} multiple style={{ display: 'none' }} onChange={onFileInputChange} disabled={!canIngestFiles} />
         )}
         {showAttachBtn && (
-          <button type="button" className="chorus-attach" onClick={() => { if (canIngestFiles) fileInputRef.current?.click(); }} aria-label="Attach file" title="Attach file" disabled={!canIngestFiles} aria-disabled={!canIngestFiles}>
+          <button type="button" className="chorus-attach" onClick={() => { if (canIngestFiles) fileInputRef.current?.click(); }} aria-label={labels.attachFile} title={labels.attachFile} disabled={!canIngestFiles} aria-disabled={!canIngestFiles}>
             <Paperclip size={18} strokeWidth={2} />
           </button>
         )}
@@ -280,13 +335,13 @@ export const ChatInput = React.forwardRef<HTMLDivElement, ChatInputProps>(functi
           onChange={handleChange}
           onKeyDown={onKeyDown}
           placeholder={placeholderText}
-          aria-label={placeholder || 'Send a message'}
+          aria-label={textareaAriaLabel}
           aria-describedby={inactiveReason ? reasonId : undefined}
           disabled={disabled}
           readOnly={readOnly || disabled}
           aria-readonly={readOnly || disabled ? true : undefined}
         />
-        <button type="button" className="chorus-send" onClick={handleClick} aria-label={sending ? 'Stop' : 'Send'} title={sending ? 'Stop' : 'Send'} disabled={sending ? !stopAvailable : !canSend}>
+        <button type="button" className="chorus-send" onClick={handleClick} aria-label={sendActionLabel} title={sendActionLabel} disabled={sending ? !stopAvailable : !canSend}>
           {sending ? <span className="chorus-stop-fill" /> : <ArrowUp size={18} strokeWidth={2} />}
         </button>
       </div>

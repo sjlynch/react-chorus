@@ -5,7 +5,14 @@ export interface FetchSSETransportOptions<TMeta = Record<string, unknown>> exten
   /**
    * Serialize the outgoing request body.
    * Defaults to `JSON.stringify({ prompt, history })` for backwards compatibility.
-   * `history` includes the current user turn; `prompt` is a convenience copy.
+   *
+   * IMPORTANT: `history` already contains the latest user turn — `prompt` is a
+   * convenience copy of `history[history.length - 1].text`, not the next message
+   * to append. Server handlers should map `history` directly (e.g. via
+   * `toOpenAIChatCompletionsBody`) and ignore `prompt`; appending `prompt` to
+   * `history` server-side will send the latest user turn to the model twice.
+   * The duplicated field is kept for backwards compatibility and may be removed
+   * in a future major; new backends should rely on `history` only.
    *
    * When omitted, the transport adds `Content-Type: application/json` unless the
    * caller supplied an explicit Content-Type header. When provided, set headers

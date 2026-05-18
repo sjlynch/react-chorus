@@ -4,7 +4,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event';
 import { Chorus, type ChorusOnSend, type ChorusProps, type ChorusRef, type ChorusSendHelpers, type Transport } from '../Chorus';
 import { useChorusStream } from '../hooks/useChorusStream';
-import { toAnthropicMessagesBody, toOpenAIChatCompletionsBody } from '../providerRequests';
+import { defineTool, toAnthropicMessagesBody, toOpenAIChatCompletionsBody } from '../providerRequests';
 import type { Message, StorageAdapter } from '../types';
 
 type OnSend = ChorusOnSend;
@@ -101,6 +101,15 @@ describe('Chorus', () => {
     expect(root.style.getPropertyValue('--chorus-tool-header-bg')).toBe('#777');
   });
 
+  it('adds the chorus--always-show-actions root class when alwaysShowMessageActions is enabled', () => {
+    const { container, rerender } = render(<Chorus />);
+    const root = container.firstElementChild as HTMLElement;
+    expect(root).not.toHaveClass('chorus--always-show-actions');
+
+    rerender(<Chorus alwaysShowMessageActions />);
+    expect(root).toHaveClass('chorus', 'chorus--always-show-actions');
+  });
+
   it('seeds feedback through getMessageFeedback', () => {
     const message: Message<{ storedFeedback: 'down' | null }> = {
       id: 'stored-feedback',
@@ -131,7 +140,9 @@ describe('Chorus', () => {
     act(() => ref.current?.focus());
     expect(screen.getByRole('textbox')).toHaveFocus();
 
-    act(() => ref.current?.send('hi from ref'));
+    let sendAccepted: boolean | undefined;
+    act(() => { sendAccepted = ref.current?.send('hi from ref'); });
+    expect(sendAccepted).toBe(true);
     await waitFor(() => expect(onSend).toHaveBeenCalledWith('hi from ref', expect.any(Array), expect.any(Object)));
     expect(await screen.findByText('ref reply')).toBeInTheDocument();
     expect(ref.current?.getMessages()).toEqual([
@@ -145,9 +156,80 @@ describe('Chorus', () => {
     expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
 
     act(() => ref.current?.stop());
-    act(() => ref.current?.clear());
+    let clearAccepted: boolean | undefined;
+    act(() => { clearAccepted = ref.current?.clear(); });
+    expect(clearAccepted).toBe(true);
     expect(ref.current?.getMessages()).toEqual([]);
     expect(screen.queryByText('hi from ref')).not.toBeInTheDocument();
+  });
+
+  it('ref.send returns false when the send would silently drop or be rejected', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      // Controlled mode without onChange: dev warning fires and ref.send is a no-op.
+      const controlledRef = React.createRef<ChorusRef>();
+      const controlledOnSend = vi.fn<OnSend>(async () => ({ id: 'a1', role: 'assistant', text: 'reply' }));
+      render(
+        <Chorus
+          ref={controlledRef}
+          value={[]}
+          onSend={controlledOnSend}
+          minAssistantDelayMs={0}
+        />,
+      );
+
+      let accepted: boolean | undefined;
+      act(() => { accepted = controlledRef.current?.send('hello'); });
+      expect(accepted).toBe(false);
+      expect(controlledOnSend).not.toHaveBeenCalled();
+
+      // No transport / no onSend configured: ref.send is also rejected.
+      const noHandlerRef = React.createRef<ChorusRef>();
+      render(<Chorus ref={noHandlerRef} minAssistantDelayMs={0} />);
+      let noHandlerAccepted: boolean | undefined;
+      act(() => { noHandlerAccepted = noHandlerRef.current?.send('hi'); });
+      expect(noHandlerAccepted).toBe(false);
+
+      // Empty text + no attachments: rejected.
+      const emptyRef = React.createRef<ChorusRef>();
+      const emptyOnSend = vi.fn<OnSend>(async () => ({ id: 'a2', role: 'assistant', text: '' }));
+      render(<Chorus ref={emptyRef} onSend={emptyOnSend} minAssistantDelayMs={0} />);
+      let emptyAccepted: boolean | undefined;
+      act(() => { emptyAccepted = emptyRef.current?.send('   '); });
+      expect(emptyAccepted).toBe(false);
+      expect(emptyOnSend).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('ref.send returns true and ref.clear returns true on a successful controlled send', async () => {
+    const ref = React.createRef<ChorusRef>();
+    const onSend = vi.fn<OnSend>(async () => ({ id: 'a1', role: 'assistant', text: 'controlled reply' }));
+
+    function Host() {
+      const [messages, setMessages] = React.useState<Message[]>([]);
+      return (
+        <Chorus
+          ref={ref}
+          value={messages}
+          onChange={setMessages}
+          onSend={onSend}
+          minAssistantDelayMs={0}
+        />
+      );
+    }
+
+    render(<Host />);
+
+    let sendAccepted: boolean | undefined;
+    act(() => { sendAccepted = ref.current?.send('hi controlled'); });
+    expect(sendAccepted).toBe(true);
+    await waitFor(() => expect(onSend).toHaveBeenCalled());
+
+    let clearAccepted: boolean | undefined;
+    act(() => { clearAccepted = ref.current?.clear(); });
+    expect(clearAccepted).toBe(true);
   });
 
   it('scrollToMessage targets custom renderMessage rows that spread messageProps', () => {
@@ -332,6 +414,30 @@ describe('Chorus', () => {
     const toolButton = screen.getByRole('button', { name: /search/i });
     await user.click(toolButton);
     expect(screen.getByText(/first result/)).toBeInTheDocument();
+  });
+
+  it('routes a streamed tool call to the matching defineTool entry in a tools array', async () => {
+    const user = userEvent.setup();
+    const handler = vi.fn(async () => ({ results: ['from array'] }));
+    const searchTool = defineTool({
+      name: 'search',
+      description: 'Search the docs',
+      inputSchema: { type: 'object', properties: { q: { type: 'string' } }, required: ['q'] },
+      handler,
+    });
+    const transport = vi.fn<Transport>(async () => sseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_arr', function: { name: 'search', arguments: '{"q":"chorus"}' } }] } }] }),
+      JSON.stringify({ choices: [{ index: 0, delta: { content: 'done' } }] }),
+      '[DONE]',
+    ]));
+
+    render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} tools={[searchTool]} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'go');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    await waitFor(() => expect(handler).toHaveBeenCalledWith({ q: 'chorus' }, expect.objectContaining({ id: 'call_arr', name: 'search' })));
+    expect(await screen.findByText('done')).toBeInTheDocument();
   });
 
   it('renders and executes every parallel tool call in one provider chunk', async () => {
@@ -524,12 +630,13 @@ describe('Chorus', () => {
   it('stops automatic tool loops at maxToolIterations', async () => {
     const user = userEvent.setup();
     const search = vi.fn(async () => ({ ok: true }));
+    const onStreamDone = vi.fn();
     const transport = vi.fn<Transport>(async () => sseResponse([
       JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: transport.mock.calls.length - 1, id: `call_${transport.mock.calls.length}`, function: { name: 'search', arguments: '{}' } }] } }] }),
       '[DONE]',
     ]));
 
-    render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} autoContinueTools maxToolIterations={1} tools={{ search }} />);
+    render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} autoContinueTools maxToolIterations={1} tools={{ search }} onStreamDone={onStreamDone} />);
 
     await user.type(screen.getByPlaceholderText('Send a message'), 'loop');
     await user.click(screen.getByRole('button', { name: /send/i }));
@@ -538,6 +645,103 @@ describe('Chorus', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument());
     expect(search).toHaveBeenCalledTimes(2);
     expect(transport).toHaveBeenCalledTimes(2);
+    expect(onStreamDone).toHaveBeenCalledTimes(2);
+    expect(onStreamDone).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      reason: 'tool-loop-continue',
+      willContinue: true,
+      iteration: 1,
+      maxToolIterations: 1,
+    }));
+    expect(onStreamDone).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      reason: 'max-tool-iterations',
+      willContinue: false,
+      iteration: 2,
+      maxToolIterations: 1,
+    }));
+  });
+
+  it('reports max-tool-iterations on the very first tool batch when maxToolIterations is 0', async () => {
+    const user = userEvent.setup();
+    const search = vi.fn(async () => ({ ok: true }));
+    const onStreamDone = vi.fn();
+    const transport = vi.fn<Transport>(async () => sseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'search', arguments: '{}' } }] } }] }),
+      '[DONE]',
+    ]));
+
+    render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} autoContinueTools maxToolIterations={0} tools={{ search }} onStreamDone={onStreamDone} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'loop');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    await waitFor(() => expect(search).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument());
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(onStreamDone).toHaveBeenCalledTimes(1);
+    expect(onStreamDone).toHaveBeenCalledWith(expect.objectContaining({
+      reason: 'max-tool-iterations',
+      willContinue: false,
+      iteration: 1,
+      maxToolIterations: 0,
+      toolMessages: [expect.objectContaining({ toolCall: expect.objectContaining({ id: 'call_1' }) })],
+    }));
+  });
+
+  it('reports completed when a transport stream ends with no auto-continue tool calls', async () => {
+    const user = userEvent.setup();
+    const onStreamDone = vi.fn();
+    const transport = vi.fn<Transport>(async () => sseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { content: 'hi there' } }] }),
+      '[DONE]',
+    ]));
+
+    render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} onStreamDone={onStreamDone} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'hello');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    await screen.findByText('hi there');
+    expect(onStreamDone).toHaveBeenCalledTimes(1);
+    expect(onStreamDone).toHaveBeenCalledWith(expect.objectContaining({
+      reason: 'completed',
+      willContinue: false,
+      iteration: 1,
+      maxToolIterations: 4,
+    }));
+  });
+
+  it('reports tool-loop-veto when shouldContinueToolLoop returns false', async () => {
+    const user = userEvent.setup();
+    const search = vi.fn(async () => ({ ok: true }));
+    const onStreamDone = vi.fn();
+    const transport = vi.fn<Transport>(async () => sseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'search', arguments: '{}' } }] } }] }),
+      '[DONE]',
+    ]));
+
+    render(<Chorus
+      transport={transport}
+      connector="openai"
+      minAssistantDelayMs={0}
+      autoContinueTools
+      tools={{ search }}
+      shouldContinueToolLoop={() => false}
+      onStreamDone={onStreamDone}
+    />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'veto');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    await waitFor(() => expect(search).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument());
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(onStreamDone).toHaveBeenCalledTimes(1);
+    expect(onStreamDone).toHaveBeenCalledWith(expect.objectContaining({
+      reason: 'tool-loop-veto',
+      willContinue: false,
+      iteration: 1,
+      maxToolIterations: 4,
+    }));
   });
 
   it('treats maxToolIterations={Infinity} as an explicit unlimited cap', async () => {
@@ -842,7 +1046,12 @@ describe('Chorus', () => {
     await user.click(prompt);
     expect(composer).toHaveValue('');
 
-    act(() => ref.current?.send('imperative send'));
+    let imperativeAccepted: boolean | undefined;
+    act(() => { imperativeAccepted = ref.current?.send('imperative send'); });
+    expect(imperativeAccepted).toBe(false);
+    let imperativeClearAccepted: boolean | undefined;
+    act(() => { imperativeClearAccepted = ref.current?.clear(); });
+    expect(imperativeClearAccepted).toBe(false);
     expect(onSend).not.toHaveBeenCalled();
   });
 
@@ -939,6 +1148,24 @@ describe('Chorus', () => {
     await user.click(screen.getByRole('button', { name: /clear conversation/i }));
 
     await waitFor(() => expect(onMessagesChange).toHaveBeenLastCalledWith([], expect.objectContaining({ source: 'persistence', reason: 'clear' })));
+  });
+
+  it('resets composer draft when persistenceKey switches conversations', async () => {
+    const user = userEvent.setup();
+    const storage = makeSyncStorage({
+      'chat:a': JSON.stringify([{ id: 'a1', role: 'assistant', text: 'Conversation A' }]),
+      'chat:b': JSON.stringify([{ id: 'b1', role: 'assistant', text: 'Conversation B' }]),
+    });
+
+    const { rerender } = render(<Chorus persistenceKey="chat:a" persistenceStorage={storage} />);
+
+    const composer = screen.getByRole('textbox', { name: /send a message/i });
+    await user.type(composer, 'unsent draft for A');
+    expect(composer).toHaveValue('unsent draft for A');
+
+    rerender(<Chorus persistenceKey="chat:b" persistenceStorage={storage} />);
+
+    expect(screen.getByRole('textbox', { name: /send a message/i })).toHaveValue('');
   });
 
   it('waits for an empty async persistence load before rendering and saving the seed', async () => {
@@ -2159,6 +2386,113 @@ describe('Chorus', () => {
     expect(setItem).not.toHaveBeenCalled();
   });
 
+  it('hides the built-in Delete action on prior messages while a send is streaming', async () => {
+    const user = userEvent.setup();
+    const initial: Message[] = [
+      { id: 'u1', role: 'user', text: 'prior turn' },
+      { id: 'a1', role: 'assistant', text: 'prior reply' },
+    ];
+    const pending = deferred<void>();
+    const onSend = vi.fn<OnSend>((_text, _messages, helpers) => {
+      helpers.appendAssistant('streaming…');
+      return pending.promise;
+    });
+
+    render(<Chorus messages={initial} onSend={onSend} minAssistantDelayMs={0} />);
+
+    // Delete buttons present in the idle state.
+    expect(screen.getAllByTitle('Delete')).toHaveLength(2);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'next');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByText('streaming…')).toBeInTheDocument();
+
+    // No Delete buttons anywhere while sending.
+    expect(screen.queryAllByTitle('Delete')).toHaveLength(0);
+
+    pending.resolve();
+  });
+
+  it('keeps the streaming assistant message intact when delete is suppressed during a send', async () => {
+    const user = userEvent.setup();
+    let helpers!: OnSendHelpers;
+    const pending = deferred<void>();
+    const onFinish = vi.fn();
+    const onSend = vi.fn<OnSend>((_text, _messages, h) => {
+      helpers = h;
+      h.appendAssistant('partial');
+      return pending.promise;
+    });
+
+    render(<Chorus onSend={onSend} minAssistantDelayMs={0} onFinish={onFinish} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'go');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    // First token rendered into a streaming assistant message; Delete is suppressed.
+    expect(await screen.findByText('partial')).toBeInTheDocument();
+    expect(screen.queryAllByTitle('Delete')).toHaveLength(0);
+
+    // Subsequent chunks still land in the streaming message (no orphaned pending state).
+    act(() => { helpers.appendAssistant(' done'); });
+    act(() => { helpers.finalizeAssistant(); });
+    pending.resolve();
+
+    await waitFor(() => expect(onFinish).toHaveBeenCalledOnce());
+    expect(onFinish.mock.calls[0][0]).toEqual(expect.objectContaining({
+      reason: 'done',
+      message: expect.objectContaining({ role: 'assistant', text: 'partial done' }),
+    }));
+    expect(screen.getByText('partial done')).toBeInTheDocument();
+  });
+
+  it('does not commit an async confirmDeleteMessage that resolves after a send has started', async () => {
+    const user = userEvent.setup();
+    const initial: Message[] = [
+      { id: 'u1', role: 'user', text: 'protect me' },
+      { id: 'a1', role: 'assistant', text: 'i stay' },
+    ];
+    const confirmation = deferred<boolean>();
+    const confirmDeleteMessage = vi.fn(() => confirmation.promise);
+    const sendPending = deferred<void>();
+    const onSend = vi.fn<OnSend>((_text, _messages, helpers) => {
+      helpers.appendAssistant('streaming…');
+      return sendPending.promise;
+    });
+
+    render(
+      <Chorus
+        messages={initial}
+        confirmDeleteMessage={confirmDeleteMessage}
+        onSend={onSend}
+        minAssistantDelayMs={0}
+      />
+    );
+
+    // Open the async confirmation while still idle.
+    await user.click(screen.getAllByTitle('Delete')[0]);
+    await waitFor(() => expect(confirmDeleteMessage).toHaveBeenCalledOnce());
+
+    // Start a send while the confirmation is still pending.
+    await user.type(screen.getByPlaceholderText('Send a message'), 'next');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+    expect(await screen.findByText('streaming…')).toBeInTheDocument();
+
+    // Confirmation resolves true — but the delete must NOT commit, because a send
+    // is in flight and removing prior context would diverge the transcript from
+    // the history that produced the active response.
+    await act(async () => {
+      confirmation.resolve(true);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText('protect me')).toBeInTheDocument();
+    expect(screen.getByText('i stay')).toBeInTheDocument();
+
+    sendPending.resolve();
+  });
+
   it('clears uncontrolled messages from the built-in clear button', async () => {
     const user = userEvent.setup();
 
@@ -2174,6 +2508,100 @@ describe('Chorus', () => {
     await user.click(screen.getByRole('button', { name: /clear conversation/i }));
 
     expect(screen.queryByText('clear me')).not.toBeInTheDocument();
+  });
+
+  it('cancels the built-in clear when confirmClearConversation returns false without touching persistence', async () => {
+    const user = userEvent.setup();
+    const initial: Message[] = [
+      { id: 'u1', role: 'user', text: 'keep me too' },
+      { id: 'a1', role: 'assistant', text: 'preserved reply' },
+    ];
+    const storage = makeSyncStorage({ chat: JSON.stringify(initial) });
+    const setItem = vi.fn(storage.setItem);
+    const removeItem = vi.fn();
+    storage.setItem = setItem;
+    storage.removeItem = removeItem;
+    const onClear = vi.fn();
+    const confirmClearConversation = vi.fn(() => false);
+
+    render(
+      <Chorus
+        persistenceKey="chat"
+        persistenceStorage={storage}
+        confirmClearConversation={confirmClearConversation}
+        onClear={onClear}
+        showClearButton
+      />,
+    );
+
+    expect(await screen.findByText('keep me too')).toBeInTheDocument();
+    setItem.mockClear();
+
+    await user.click(screen.getByRole('button', { name: /clear conversation/i }));
+
+    expect(confirmClearConversation).toHaveBeenCalledWith({
+      messages: initial,
+      resetToInitialMessages: false,
+      source: 'user',
+      persistenceKey: 'chat',
+    });
+    expect(screen.getByText('keep me too')).toBeInTheDocument();
+    expect(screen.getByText('preserved reply')).toBeInTheDocument();
+    expect(onClear).not.toHaveBeenCalled();
+    expect(setItem).not.toHaveBeenCalled();
+    expect(removeItem).not.toHaveBeenCalled();
+    expect(storage.store.chat).toBe(JSON.stringify(initial));
+  });
+
+  it('cancels async confirmClearConversation, disables the clear button while pending, and ignores duplicate clicks', async () => {
+    const user = userEvent.setup();
+    const initial: Message[] = [{ id: 'm1', role: 'assistant', text: 'persist me' }];
+    const storage = makeSyncStorage({ chat: JSON.stringify(initial) });
+    const setItem = vi.fn(storage.setItem);
+    storage.setItem = setItem;
+
+    let pending = deferred<boolean>();
+    const confirmClearConversation = vi.fn(() => pending.promise);
+
+    render(
+      <Chorus
+        persistenceKey="chat"
+        persistenceStorage={storage}
+        confirmClearConversation={confirmClearConversation}
+        showClearButton
+      />,
+    );
+
+    expect(await screen.findByText('persist me')).toBeInTheDocument();
+    setItem.mockClear();
+
+    const button = screen.getByRole('button', { name: /clear conversation/i });
+    await user.click(button);
+    expect(confirmClearConversation).toHaveBeenCalledTimes(1);
+    expect(button).toBeDisabled();
+
+    await user.click(button);
+    expect(confirmClearConversation).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      pending.resolve(false);
+      await pending.promise;
+    });
+
+    await waitFor(() => expect(button).not.toBeDisabled());
+    expect(screen.getByText('persist me')).toBeInTheDocument();
+    expect(setItem).not.toHaveBeenCalled();
+    expect(storage.store.chat).toBe(JSON.stringify(initial));
+
+    pending = deferred<boolean>();
+    await user.click(button);
+    await act(async () => {
+      pending.resolve(true);
+      await pending.promise;
+    });
+
+    await waitFor(() => expect(screen.queryByText('persist me')).not.toBeInTheDocument());
+    await waitFor(() => expect(storage.store.chat).toBe(JSON.stringify([])));
   });
 
   it('can reset to the initialMessages seed when requested', async () => {

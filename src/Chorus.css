@@ -38,22 +38,25 @@
 
 /* Multi-conversation sidebar */
 .chorus-conversation-list { display: flex; flex-direction: column; gap: 8px; min-width: 220px; padding: 10px; background: var(--chorus-chat-bg, #161616); color: var(--chorus-chat-text, #f3f4f6); border: 1px solid var(--chorus-border, #2a2a2a); border-radius: 12px; }
-.chorus-conversation-new { width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--chorus-border, #2a2a2a); background: var(--chorus-input-bg, #1a1a1a); color: var(--chorus-input-text, #f3f4f6); cursor: pointer; text-align: left; }
+.chorus-conversation-new { width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--chorus-border, #2a2a2a); background: var(--chorus-input-bg, #1a1a1a); color: var(--chorus-input-text, #f3f4f6); cursor: pointer; text-align: start; }
 .chorus-conversation-new:hover { background: var(--chorus-action-hover-bg, rgba(255,255,255,0.15)); color: var(--chorus-action-hover-text, #eee); }
+.chorus-conversation-new:focus-visible { outline: 2px solid var(--chorus-send-bg, #ffffff); outline-offset: 2px; }
 .chorus-conversation-items { display: flex; flex-direction: column; gap: 6px; }
 .chorus-conversation-empty { padding: 12px 8px; color: var(--chorus-action-text, #a3a3a3); font-size: 13px; }
 .chorus-conversation-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px; align-items: center; border-radius: 8px; border: 1px solid transparent; }
 .chorus-conversation-item--active { border-color: var(--chorus-border, #2a2a2a); background: var(--chorus-action-hover-bg, rgba(255,255,255,0.1)); }
 .chorus-conversation-item--pinned:not(.chorus-conversation-item--active) { border-color: var(--chorus-border, #2a2a2a); }
-.chorus-conversation-select { min-width: 0; padding: 8px; border: none; border-radius: 8px; background: transparent; color: inherit; cursor: pointer; text-align: left; }
+.chorus-conversation-select { min-width: 0; padding: 8px; border: none; border-radius: 8px; background: transparent; color: inherit; cursor: pointer; text-align: start; }
 .chorus-conversation-select:hover { background: var(--chorus-action-hover-bg, rgba(255,255,255,0.15)); color: var(--chorus-action-hover-text, #eee); }
+.chorus-conversation-select:focus-visible { outline: 2px solid var(--chorus-send-bg, #ffffff); outline-offset: -2px; }
 .chorus-conversation-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
-.chorus-conversation-pin-indicator { margin-right: 4px; color: var(--chorus-send-bg, #ffffff); }
+.chorus-conversation-pin-indicator { margin-inline-end: 4px; color: var(--chorus-send-bg, #ffffff); }
 .chorus-conversation-time { display: block; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--chorus-action-text, #a3a3a3); font-size: 11px; }
-.chorus-conversation-actions { display: flex; gap: 2px; padding-right: 4px; }
+.chorus-conversation-actions { display: flex; gap: 2px; padding-inline-end: 4px; }
 .chorus-conversation-action { padding: 4px 6px; border: none; border-radius: 6px; background: transparent; color: var(--chorus-action-text, #a3a3a3); cursor: pointer; font-size: 12px; }
 .chorus-conversation-pin[aria-pressed="true"] { color: var(--chorus-send-bg, #ffffff); }
 .chorus-conversation-action:hover { background: var(--chorus-action-hover-bg, rgba(255,255,255,0.15)); color: var(--chorus-action-hover-text, #eee); }
+.chorus-conversation-action:focus-visible { outline: 2px solid var(--chorus-send-bg, #ffffff); outline-offset: 1px; }
 .chorus-conversation-rename { grid-column: 1 / -1; display: flex; gap: 4px; padding: 4px; }
 .chorus-conversation-rename-input { min-width: 0; flex: 1; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--chorus-input-border, #333333); background: var(--chorus-input-bg, #1a1a1a); color: var(--chorus-input-text, #f3f4f6); }
 .chorus-conversation-rename-input:focus { outline: none; border-color: var(--chorus-send-bg, #ffffff); box-shadow: 0 0 0 3px var(--chorus-focus-ring, rgba(255,255,255,0.2)); }
@@ -62,25 +65,28 @@
 .chorus-clear-row { display: flex; justify-content: flex-end; margin-top: 8px; }
 .chorus-clear-btn { font-size: 12px; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--chorus-border, #2a2a2a); background: transparent; color: var(--chorus-action-text, #a3a3a3); cursor: pointer; }
 .chorus-clear-btn:hover:not(:disabled) { background: var(--chorus-action-hover-bg, rgba(255,255,255,0.15)); color: var(--chorus-action-hover-text, #eee); }
+.chorus-clear-btn:focus-visible { outline: 2px solid var(--chorus-send-bg, #ffffff); outline-offset: 2px; }
 .chorus-clear-btn:disabled { opacity: .5; cursor: default; }
 .chorus-input { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; background: var(--chorus-input-area-bg, transparent); }
 .chorus-input--disabled, .chorus-input--readonly { opacity: .85; }
 .chorus-input-row { position: relative; display: flex; align-items: center; }
-.chorus-input-row textarea { width: 100%; min-height: 44px; max-height: 160px; padding: 12px 50px 12px 14px; border-radius: 12px; border: 1px solid var(--chorus-input-border, #333333); background: var(--chorus-input-bg, #1a1a1a); color: var(--chorus-input-text, #f3f4f6); outline: none; resize: none; overflow: hidden; line-height: 1.4; transition: border-color 0.15s, box-shadow 0.15s; }
+.chorus-input-row textarea { width: 100%; min-height: 44px; max-height: 160px; padding-block: 12px; padding-inline-start: 14px; padding-inline-end: 50px; border-radius: 12px; border: 1px solid var(--chorus-input-border, #333333); background: var(--chorus-input-bg, #1a1a1a); color: var(--chorus-input-text, #f3f4f6); outline: none; resize: none; overflow: hidden; line-height: 1.4; transition: border-color 0.15s, box-shadow 0.15s; }
 .chorus-input--dragging .chorus-input-row textarea { border-color: var(--chorus-send-bg, #ffffff); box-shadow: 0 0 0 3px var(--chorus-focus-ring, rgba(255,255,255,0.2)); }
 .chorus-input-row textarea::placeholder { color: #a3a3a3; }
 .chorus-input-row textarea:focus { border-color: var(--chorus-send-bg, #ffffff); box-shadow: 0 0 0 3px var(--chorus-focus-ring, rgba(255,255,255,0.2)); }
 .chorus-input-row textarea:disabled { cursor: not-allowed; }
-.chorus-input-row--has-attach textarea { padding-left: 44px; }
+.chorus-input-row--has-attach textarea { padding-inline-start: 44px; }
 
-/* Attach button (paperclip, left side) */
-.chorus-attach { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); width: 28px; height: 28px; padding: 0; border: none; background: transparent; color: var(--chorus-input-text, #f3f4f6); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; z-index: 2; opacity: .6; border-radius: 6px; }
+/* Attach button (paperclip, inline-start side — flips for RTL) */
+.chorus-attach { position: absolute; inset-inline-start: 8px; top: 50%; transform: translateY(-50%); width: 28px; height: 28px; padding: 0; border: none; background: transparent; color: var(--chorus-input-text, #f3f4f6); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; z-index: 2; opacity: .6; border-radius: 6px; }
 .chorus-attach:hover:not(:disabled) { opacity: 1; background: rgba(255,255,255,.1); }
+.chorus-attach:focus-visible { opacity: 1; outline: 2px solid var(--chorus-send-bg, #ffffff); outline-offset: 2px; }
 .chorus-attach:disabled { opacity: .35; cursor: default; }
 .chorus-attach svg { width: 18px; height: 18px; display: block; }
 
-/* Send/Stop button (white circle, black icon) */
-.chorus-send { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); width: 36px; height: 36px; padding: 0; line-height: 0; border-radius: 9999px; border: none; background: var(--chorus-send-bg, #ffffff); color: var(--chorus-send-text, #111111); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; z-index: 2; }
+/* Send/Stop button (white circle, black icon — inline-end flips for RTL) */
+.chorus-send { position: absolute; inset-inline-end: 8px; top: 50%; transform: translateY(-50%); width: 36px; height: 36px; padding: 0; line-height: 0; border-radius: 9999px; border: none; background: var(--chorus-send-bg, #ffffff); color: var(--chorus-send-text, #111111); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; z-index: 2; }
+.chorus-send:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--chorus-focus-ring, rgba(255,255,255,0.45)); }
 .chorus-send:disabled { opacity: .5; cursor: default; }
 .chorus-send svg { width: 18px; height: 18px; display: block; color: inherit; }
 .chorus-stop-fill { width: 18px; height: 18px; background: currentColor; border-radius: 2px; display: block; }
@@ -94,7 +100,15 @@
 .chorus-attachment-name { font-size: 12px; color: var(--chorus-input-text, #f3f4f6); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px; }
 .chorus-attachment-remove { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; padding: 0; border: none; background: rgba(255,255,255,.15); color: var(--chorus-input-text, #f3f4f6); border-radius: 9999px; cursor: pointer; flex-shrink: 0; }
 .chorus-attachment-remove:hover:not(:disabled) { background: rgba(255,255,255,.3); }
+.chorus-attachment-remove:focus-visible { outline: 2px solid var(--chorus-send-bg, #ffffff); outline-offset: 2px; }
 @keyframes chorus-attachment-spin { to { transform: rotate(360deg); } }
+
+/* Inline attachment error (validation / read / upload failures) */
+.chorus-attachment-error { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; background: var(--chorus-error-bg, rgba(220, 38, 38, 0.15)); border: 1px solid var(--chorus-error-border, rgba(220, 38, 38, 0.4)); }
+.chorus-attachment-error-text { font-size: 12px; color: var(--chorus-error-text, #fca5a5); flex: 1; line-height: 1.4; }
+.chorus-attachment-error-dismiss { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 0; border: none; border-radius: 9999px; background: transparent; color: var(--chorus-error-text, #fca5a5); cursor: pointer; flex-shrink: 0; }
+.chorus-attachment-error-dismiss:hover { background: var(--chorus-error-bg, rgba(220, 38, 38, 0.15)); }
+.chorus-attachment-error-dismiss:focus-visible { outline: 2px solid var(--chorus-error-text, #fca5a5); outline-offset: 2px; }
 
 /* Message content wrapper (stacks reasoning + bubble + actions vertically) */
 .chorus-msg-content { display: flex; flex-direction: column; max-width: 80%; }
@@ -113,8 +127,15 @@
 .chorus-actions { display: flex; gap: 2px; padding: 2px 2px 0; opacity: 0; pointer-events: none; transition: opacity 0.15s; }
 .chorus-msg:hover .chorus-actions, .chorus-msg:focus-within .chorus-actions { opacity: 1; pointer-events: auto; }
 .chorus-msg:hover + .chorus-render-actions .chorus-actions, .chorus-render-actions:hover .chorus-actions, .chorus-render-actions:focus-within .chorus-actions { opacity: 1; pointer-events: auto; }
+/* Touch/coarse-pointer devices have no reliable hover — keep actions visible so they remain discoverable and tappable. */
+@media (hover: none), (pointer: coarse) {
+  .chorus-actions { opacity: 1; pointer-events: auto; transition: none; }
+}
+/* Opt-in via the alwaysShowMessageActions prop (Chorus adds .chorus--always-show-actions on the root). */
+.chorus--always-show-actions .chorus-actions { opacity: 1; pointer-events: auto; transition: none; }
 .chorus-action-btn { display: inline-flex; align-items: center; justify-content: center; padding: 3px 5px; border: none; border-radius: 6px; background: transparent; color: var(--chorus-action-text, #888); cursor: pointer; transition: background 0.15s, color 0.15s; line-height: 0; }
 .chorus-action-btn:hover, .chorus-action-btn--active { background: var(--chorus-action-hover-bg, rgba(255,255,255,0.15)); color: var(--chorus-action-hover-text, #eee); }
+.chorus-action-btn:focus-visible { outline: 2px solid var(--chorus-send-bg, #ffffff); outline-offset: 1px; }
 .chorus-action-btn--copy-failed { background: var(--chorus-error-bg, rgba(220, 38, 38, 0.15)); color: var(--chorus-error-text, #fca5a5); line-height: 1; white-space: nowrap; }
 
 /* Inline message editing */
@@ -127,8 +148,9 @@
 /* Tool call blocks */
 .chorus-tool { justify-content: flex-start; }
 .chorus-tool-call { width: 100%; border: 1px solid var(--chorus-tool-border, #2a2a2a); border-radius: 8px; overflow: hidden; font-size: 13px; }
-.chorus-tool-call-header { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 12px; background: var(--chorus-tool-header-bg, #1a1a1a); color: var(--chorus-tool-header-text, #a3a3a3); border: none; cursor: pointer; text-align: left; }
+.chorus-tool-call-header { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 12px; background: var(--chorus-tool-header-bg, #1a1a1a); color: var(--chorus-tool-header-text, #a3a3a3); border: none; cursor: pointer; text-align: start; }
 .chorus-tool-call-header:hover:not(:disabled) { background: var(--chorus-tool-header-hover, #222222); }
+.chorus-tool-call-header:focus-visible { outline: 2px solid var(--chorus-send-bg, #ffffff); outline-offset: -2px; }
 .chorus-tool-call-header:disabled { cursor: default; }
 .chorus-tool-call-name { flex: 1; font-family: monospace; font-weight: 600; color: var(--chorus-tool-name-text, #e6edf3); }
 .chorus-tool-call-chevron { font-size: 10px; }
@@ -149,3 +171,14 @@
 .chorus-error-text { font-size: 13px; color: var(--chorus-error-text, #fca5a5); flex: 1; }
 .chorus-retry-btn { font-size: 12px; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--chorus-error-border, rgba(220, 38, 38, 0.4)); background: transparent; color: var(--chorus-error-text, #fca5a5); cursor: pointer; white-space: nowrap; }
 .chorus-retry-btn:hover { background: var(--chorus-error-bg, rgba(220, 38, 38, 0.15)); opacity: 0.8; }
+
+/* Respect prefers-reduced-motion: replace continuous loops with static states
+   and drop non-essential hover/focus transitions in the chorus widget. */
+@media (prefers-reduced-motion: reduce) {
+  .chorus-attachment-spinner { animation: none; }
+  .chorus-dot { animation: none; opacity: 1; }
+  .chorus-dot:nth-child(2), .chorus-dot:nth-child(3) { animation-delay: 0s; }
+  .chorus-input-row textarea,
+  .chorus-actions,
+  .chorus-action-btn { transition: none; }
+}

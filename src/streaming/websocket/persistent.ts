@@ -1,7 +1,19 @@
 import type { Message } from '../../types';
-import type { WebSocketTransport, WebSocketTransportOptions } from '../createWebSocketTransport';
+import type { FormatMessageResult, WebSocketTransport, WebSocketTransportOptions } from '../createWebSocketTransport';
 import { createManagedResponseStream, type ManagedResponseStream } from './managedResponseStream';
-import { createAbortError, createClosedBeforeOpenError, encodeSSEDataEvent, safeCloseSocket, toError, webSocketMessageToText } from './shared';
+import { createAbortError, createClosedBeforeOpenError, encodeSSEDataEvent, normalizeFormatMessageResult, safeCloseSocket, toError, webSocketMessageToText } from './shared';
+
+// Local duplicate of `isChorusDevMode` from `src/utils/devMode.ts`. Importing
+// the shared helper here would bundle the transport-only subpath with the
+// session/utils chunk and blow its tight size budget (the README documents this
+// subpath at a few kB). Same trade-off the CLAUDE.md notes for ChatWindow.
+function isPersistentWebSocketDevMode(): boolean {
+  try {
+    return typeof process !== 'undefined' && typeof process.env !== 'undefined' && process.env.NODE_ENV !== 'production';
+  } catch {
+    return false;
+  }
+}
 
 type OpenWaiter = {
   resolve: (ws: WebSocket) => void;
@@ -17,13 +29,15 @@ const webSocketTransportFinalizer = typeof FinalizationRegistry === 'undefined'
 export function createPersistentWebSocketTransport<TMeta = Record<string, unknown>>(
   url: string,
   opts: WebSocketTransportOptions<TMeta> | undefined,
-  formatMessage: (text: string, history: Message<TMeta>[]) => string,
+  formatMessage: (text: string, history: Message<TMeta>[]) => FormatMessageResult,
 ): WebSocketTransport<TMeta> {
   const activeStreams = new Set<ManagedResponseStream>();
+  const streamCorrelationIds = new Map<ManagedResponseStream, string>();
   const openWaiters = new Set<OpenWaiter>();
   const encoder = new TextEncoder();
   let socket: WebSocket | null = null;
   let socketState: 'idle' | 'connecting' | 'open' | 'closed' = 'idle';
+  let warnedAboutOverlap = false;
 
   const removeOpenWaiter = (waiter: OpenWaiter) => {
     openWaiters.delete(waiter);
@@ -44,16 +58,21 @@ export function createPersistentWebSocketTransport<TMeta = Record<string, unknow
     }
   };
 
+  const removeActiveStream = (stream: ManagedResponseStream) => {
+    activeStreams.delete(stream);
+    streamCorrelationIds.delete(stream);
+  };
+
   const closeActiveStreams = () => {
     for (const stream of Array.from(activeStreams)) {
-      activeStreams.delete(stream);
+      removeActiveStream(stream);
       stream.close();
     }
   };
 
   const errorActiveStreams = (error: unknown) => {
     for (const stream of Array.from(activeStreams)) {
-      activeStreams.delete(stream);
+      removeActiveStream(stream);
       stream.error(error);
     }
   };
@@ -98,6 +117,18 @@ export function createPersistentWebSocketTransport<TMeta = Record<string, unknow
         opts?.onMessage?.(data, event);
         if (!activeStreams.size) return;
         const chunk = encoder.encode(encodeSSEDataEvent(data));
+
+        if (opts?.correlate) {
+          let id: string | null | undefined;
+          try { id = opts.correlate(data); } catch { id = null; }
+          if (id != null) {
+            for (const [stream, cid] of streamCorrelationIds) {
+              if (cid === id && activeStreams.has(stream)) stream.enqueue(chunk);
+            }
+            return;
+          }
+        }
+
         for (const stream of Array.from(activeStreams)) stream.enqueue(chunk);
       }).catch(error => handleSocketFailure(ws, error));
     };
@@ -158,7 +189,7 @@ export function createPersistentWebSocketTransport<TMeta = Record<string, unknow
 
       const cleanupStream = () => {
         signal.removeEventListener('abort', onAbort);
-        activeStreams.delete(responseStream);
+        removeActiveStream(responseStream);
       };
 
       const settleReject = (error: unknown) => {
@@ -182,6 +213,13 @@ export function createPersistentWebSocketTransport<TMeta = Record<string, unknow
         settleReject(createAbortError());
       }
 
+      if (activeStreams.size > 0 && !opts?.correlate && !warnedAboutOverlap && isPersistentWebSocketDevMode()) {
+        warnedAboutOverlap = true;
+        console.warn(
+          '[react-chorus] createWebSocketTransport: a second send started on a persistent WebSocket while a previous response was still streaming. Without a `correlate` callback every inbound frame is broadcast to every active response stream, so the same payload will be duplicated into every active assistant message. Provide `correlate` (and have `formatMessage` return `{ payload, correlationId }`) so inbound frames are routed only to the request that started them. This warning fires once per transport instance.',
+        );
+      }
+
       responseStream.setCleanup(cleanupStream);
       activeStreams.add(responseStream);
       signal.addEventListener('abort', onAbort, { once: true });
@@ -189,7 +227,10 @@ export function createPersistentWebSocketTransport<TMeta = Record<string, unknow
       try {
         void waitForOpenSocket(signal).then(ws => {
           if (signal.aborted) throw createAbortError();
-          const payload = formatMessage(text, history);
+          const { payload, correlationId } = normalizeFormatMessageResult(formatMessage(text, history));
+          if (correlationId != null && activeStreams.has(responseStream)) {
+            streamCorrelationIds.set(responseStream, correlationId);
+          }
           try {
             ws.send(payload);
           } catch (error) {
