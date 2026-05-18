@@ -1,14 +1,20 @@
 import React from 'react';
 import type { Attachment, Message } from '../../types';
+import { DEFAULT_ATTACHMENT_LABELS } from '../../labels/attachments';
 import { DEFAULT_REASONING_LABEL } from '../../labels/reasoning';
-import type { ChorusCodeCopyLabels, ChorusSpeakerLabels } from '../../labels/types';
+import type { ChorusAttachmentLabels, ChorusCodeCopyLabels, ChorusSpeakerLabels } from '../../labels/types';
 import { getAttachmentPreviewSource } from '../../utils/attachmentPreview';
 import { Markdown, type MarkdownSanitizer } from '../Markdown';
 import { MessageRenderStateContext } from './renderState';
 import { MessageSpeakerLabel } from './speaker';
 import type { MessageBubbleSlots, MessageMarkdownProps } from './types';
 
-export function MessageAttachments({ attachments }: { attachments?: Attachment[] }) {
+export function resolveAttachmentImageAlt(att: Attachment, labels: ChorusAttachmentLabels = DEFAULT_ATTACHMENT_LABELS): string {
+  if (typeof att.alt === 'string' && att.alt.length > 0) return att.alt;
+  return labels.imageFallbackAlt(att.name);
+}
+
+export function MessageAttachments({ attachments, attachmentLabels = DEFAULT_ATTACHMENT_LABELS }: { attachments?: Attachment[]; attachmentLabels?: ChorusAttachmentLabels }) {
   if (!attachments || attachments.length === 0) return null;
 
   return (
@@ -16,7 +22,7 @@ export function MessageAttachments({ attachments }: { attachments?: Attachment[]
       {attachments.map((att, i) => {
         const previewSource = getAttachmentPreviewSource(att);
         return att.type.startsWith('image/') && previewSource
-          ? <img key={i} src={previewSource} alt={att.name} className="chorus-msg-img" loading="lazy" decoding="async" />
+          ? <img key={i} src={previewSource} alt={resolveAttachmentImageAlt(att, attachmentLabels)} className="chorus-msg-img" loading="lazy" decoding="async" />
           : <span key={i} className="chorus-msg-file">{att.name}</span>;
       })}
     </div>
@@ -56,10 +62,11 @@ export interface MessageBubbleLayoutProps<TMeta = Record<string, unknown>> exten
   markdownSanitizer?: MarkdownSanitizer;
   reasoningLabel?: string;
   codeCopyLabels?: ChorusCodeCopyLabels;
+  attachmentLabels?: ChorusAttachmentLabels;
   children?: React.ReactNode;
 }
 
-export function MessageBubbleLayout<TMeta = Record<string, unknown>>({ message, codeTheme, headless, streaming = false, markdownProps, markdownSanitizer, reasoningLabel, codeCopyLabels, before, headerSlot, footerSlot, after, children }: MessageBubbleLayoutProps<TMeta>) {
+export function MessageBubbleLayout<TMeta = Record<string, unknown>>({ message, codeTheme, headless, streaming = false, markdownProps, markdownSanitizer, reasoningLabel, codeCopyLabels, attachmentLabels, before, headerSlot, footerSlot, after, children }: MessageBubbleLayoutProps<TMeta>) {
   const text = message.text ?? '';
   const hasAttachments = Boolean(message.attachments?.length);
   const hasBubbleText = text.trim().length > 0;
@@ -73,7 +80,7 @@ export function MessageBubbleLayout<TMeta = Record<string, unknown>>({ message, 
         <MessageReasoning reasoning={message.reasoning} codeTheme={codeTheme} headless={headless} streaming={streaming} markdownProps={markdownProps} markdownSanitizer={markdownSanitizer} reasoningLabel={reasoningLabel} codeCopyLabels={codeCopyLabels} />
         {shouldRenderBubble && (
           <div className="chorus-bubble">
-            <MessageAttachments attachments={message.attachments} />
+            <MessageAttachments attachments={message.attachments} attachmentLabels={attachmentLabels} />
             {hasBubbleText && <Markdown {...markdownProps} text={text} codeTheme={codeTheme} headless={headless} streaming={streaming} sanitizer={markdownSanitizer ?? markdownProps?.sanitizer} codeCopyLabels={codeCopyLabels ?? markdownProps?.codeCopyLabels} />}
           </div>
         )}
@@ -97,9 +104,10 @@ export interface MessageBubbleProps<TMeta = Record<string, unknown>> extends Mes
   reasoningLabel?: string;
   codeCopyLabels?: ChorusCodeCopyLabels;
   speakerLabels?: ChorusSpeakerLabels;
+  attachmentLabels?: ChorusAttachmentLabels;
 }
 
-export function MessageBubble<TMeta = Record<string, unknown>>({ message, className, style, codeTheme = 'dark', headless, streaming = false, markdownProps, markdownSanitizer, reasoningLabel, codeCopyLabels, speakerLabels, before, headerSlot, footerSlot, after }: MessageBubbleProps<TMeta>) {
+export function MessageBubble<TMeta = Record<string, unknown>>({ message, className, style, codeTheme = 'dark', headless, streaming = false, markdownProps, markdownSanitizer, reasoningLabel, codeCopyLabels, speakerLabels, attachmentLabels, before, headerSlot, footerSlot, after }: MessageBubbleProps<TMeta>) {
   const renderState = React.useContext(MessageRenderStateContext);
   if (renderState?.messageId === message.id && renderState.isEditing) return null;
 
@@ -116,6 +124,7 @@ export function MessageBubble<TMeta = Record<string, unknown>>({ message, classN
         markdownSanitizer={markdownSanitizer}
         reasoningLabel={reasoningLabel}
         codeCopyLabels={codeCopyLabels}
+        attachmentLabels={attachmentLabels}
         before={before}
         headerSlot={headerSlot}
         footerSlot={footerSlot}

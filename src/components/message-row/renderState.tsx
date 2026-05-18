@@ -25,3 +25,15 @@ export function useActionEditing(messageId: string) {
 
   return [localEditing, setLocalEditing] as const;
 }
+
+// Focus the returned ref when `isEditing` transitions from true → false, so cancelling the
+// inline editor returns focus to the originating Edit button instead of leaving it on <body>.
+export function useReturnFocusAfterEditing<T extends HTMLElement>(isEditing: boolean) {
+  const ref = React.useRef<T>(null);
+  const wasEditingRef = React.useRef(false);
+  React.useEffect(() => {
+    if (wasEditingRef.current && !isEditing) ref.current?.focus();
+    wasEditingRef.current = isEditing;
+  }, [isEditing]);
+  return ref;
+}

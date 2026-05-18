@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ConversationList } from '../components/ConversationList';
 import type { ConversationSummary } from '../hooks/useConversations';
@@ -162,6 +162,82 @@ describe('ConversationList', () => {
     expect(renameConversation).not.toHaveBeenCalled();
     expect(deleteConversation).not.toHaveBeenCalled();
     expect(pinConversation).not.toHaveBeenCalled();
+  });
+
+  it('auto-focuses and selects the rename input when entering rename mode', () => {
+    render(
+      <ConversationList
+        conversations={CONVERSATIONS}
+        activeId="a"
+        renameConversation={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /rename support chat/i }));
+    const input = screen.getByLabelText(/rename support chat/i) as HTMLInputElement;
+    expect(input).toHaveFocus();
+    expect(input.selectionStart).toBe(0);
+    expect(input.selectionEnd).toBe(input.value.length);
+  });
+
+  it('disables the Save button and skips renameConversation when the trimmed draft is empty', () => {
+    const renameConversation = vi.fn();
+    render(
+      <ConversationList
+        conversations={CONVERSATIONS}
+        activeId="a"
+        renameConversation={renameConversation}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /rename support chat/i }));
+    const input = screen.getByLabelText(/rename support chat/i);
+    const saveButton = screen.getByRole('button', { name: /save/i });
+
+    expect(saveButton).not.toBeDisabled();
+    expect(input).not.toHaveAttribute('aria-invalid');
+
+    fireEvent.change(input, { target: { value: '   ' } });
+    expect(saveButton).toBeDisabled();
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+
+    fireEvent.submit(input.closest('form')!);
+    expect(renameConversation).not.toHaveBeenCalled();
+    // Form remains in rename mode so user can correct the input.
+    expect(screen.getByLabelText(/rename support chat/i)).toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: 'Trimmed title' } });
+    expect(saveButton).not.toBeDisabled();
+    fireEvent.click(saveButton);
+    expect(renameConversation).toHaveBeenCalledWith('a', 'Trimmed title');
+  });
+
+  it('clears rename mode when the conversation disappears from the list underneath it', () => {
+    const renameConversation = vi.fn();
+    const { rerender } = render(
+      <ConversationList
+        conversations={CONVERSATIONS}
+        activeId="a"
+        renameConversation={renameConversation}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /rename support chat/i }));
+    expect(screen.getByLabelText(/rename support chat/i)).toBeInTheDocument();
+
+    act(() => {
+      rerender(
+        <ConversationList
+          conversations={CONVERSATIONS.filter(c => c.id !== 'a')}
+          activeId={null}
+          renameConversation={renameConversation}
+        />,
+      );
+    });
+
+    expect(screen.queryByLabelText(/rename support chat/i)).toBeNull();
+    expect(screen.queryByRole('button', { name: /^save$/i })).toBeNull();
+    expect(renameConversation).not.toHaveBeenCalled();
   });
 
   it('renders pinned conversations first, toggles pinning, and formats timestamps', async () => {

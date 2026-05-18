@@ -55,8 +55,12 @@ export interface ToolCallBlockProps {
 export function ToolCallBlock({ toolCall, labels = DEFAULT_TOOL_CALL_LABELS }: ToolCallBlockProps) {
   const [open, setOpen] = React.useState(false);
   const bodyId = React.useId();
-  const hasInput = hasOwn(toolCall, 'input');
-  const hasOutput = hasOwn(toolCall, 'output');
+  // Defensive: persisted/custom message arrays may bypass the validating default
+  // deserializer and produce a tool-role message without a `toolCall`. Render an
+  // empty placeholder rather than throwing inside hasOwn.
+  const safeToolCall: ToolCall = toolCall ?? { name: '' };
+  const hasInput = hasOwn(safeToolCall, 'input');
+  const hasOutput = hasOwn(safeToolCall, 'output');
   const hasBody = hasInput || hasOutput;
 
   return (
@@ -69,7 +73,7 @@ export function ToolCallBlock({ toolCall, labels = DEFAULT_TOOL_CALL_LABELS }: T
         aria-controls={hasBody ? bodyId : undefined}
         disabled={!hasBody}
       >
-        <span className="chorus-tool-call-name">{toolCall.name}</span>
+        <span className="chorus-tool-call-name">{safeToolCall.name}</span>
         {hasBody && <span className="chorus-tool-call-chevron" aria-hidden="true">{open ? '▲' : '▼'}</span>}
       </button>
       {hasBody && (
@@ -79,13 +83,13 @@ export function ToolCallBlock({ toolCall, labels = DEFAULT_TOOL_CALL_LABELS }: T
               {hasInput && (
                 <div className="chorus-tool-call-section">
                   <div className="chorus-tool-call-label">{labels.input}</div>
-                  <pre className="chorus-tool-call-pre">{fmt(toolCall.input)}</pre>
+                  <pre className="chorus-tool-call-pre">{fmt(safeToolCall.input)}</pre>
                 </div>
               )}
               {hasOutput && (
                 <div className="chorus-tool-call-section">
                   <div className="chorus-tool-call-label">{labels.output}</div>
-                  <pre className="chorus-tool-call-pre">{fmt(toolCall.output)}</pre>
+                  <pre className="chorus-tool-call-pre">{fmt(safeToolCall.output)}</pre>
                 </div>
               )}
             </>

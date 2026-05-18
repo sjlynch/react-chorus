@@ -111,6 +111,89 @@ describe('resolveChorusLabels', () => {
     expect(resolved.composer.send).toBe(DEFAULT_CHORUS_LABELS.composer.send);
     expect(resolved.composer.stop).toBe('Halt');
   });
+
+  describe('partial override resilience', () => {
+    it('treats null section keys as "keep the default" without erasing labels', () => {
+      // Cast through unknown because the public type bans `null` at the slot level, but real-world
+      // i18n catalogs sometimes emit it for missing translations — the resolver must still ignore it.
+      const overrides = {
+        composer: { send: null, stop: 'Halt' },
+        reasoning: null,
+        clearConversation: null,
+      } as unknown as ChorusLabels;
+      const resolved = resolveChorusLabels(overrides);
+      expect(resolved.composer.send).toBe(DEFAULT_CHORUS_LABELS.composer.send);
+      expect(resolved.composer.stop).toBe('Halt');
+      expect(resolved.reasoning).toBe(DEFAULT_CHORUS_LABELS.reasoning);
+      expect(resolved.clearConversation).toBe(DEFAULT_CHORUS_LABELS.clearConversation);
+    });
+
+    it('treats empty-string overrides as "keep the default" — both nested and top-level', () => {
+      const resolved = resolveChorusLabels({
+        composer: { send: '', stop: '', attachFile: 'Joindre' },
+        transcript: { typing: '', retry: 'Réessayer' },
+        messageActions: { copy: '' },
+        speakers: { user: '' },
+        toolCall: { input: '' },
+        codeCopy: { copy: '' },
+        conversationList: { newConversation: '' },
+        attachments: { dismissError: '', describeImage: 'Décrire' },
+        reasoning: '',
+        clearConversation: '',
+      });
+      expect(resolved.composer.send).toBe(DEFAULT_CHORUS_LABELS.composer.send);
+      expect(resolved.composer.stop).toBe(DEFAULT_CHORUS_LABELS.composer.stop);
+      expect(resolved.composer.attachFile).toBe('Joindre');
+      expect(resolved.transcript.typing).toBe(DEFAULT_CHORUS_LABELS.transcript.typing);
+      expect(resolved.transcript.retry).toBe('Réessayer');
+      expect(resolved.messageActions.copy).toBe(DEFAULT_CHORUS_LABELS.messageActions.copy);
+      expect(resolved.speakers.user).toBe(DEFAULT_CHORUS_LABELS.speakers.user);
+      expect(resolved.toolCall.input).toBe(DEFAULT_CHORUS_LABELS.toolCall.input);
+      expect(resolved.codeCopy.copy).toBe(DEFAULT_CHORUS_LABELS.codeCopy.copy);
+      expect(resolved.conversationList.newConversation).toBe(DEFAULT_CHORUS_LABELS.conversationList.newConversation);
+      expect(resolved.attachments.dismissError).toBe(DEFAULT_CHORUS_LABELS.attachments.dismissError);
+      expect(resolved.attachments.describeImage).toBe('Décrire');
+      expect(resolved.reasoning).toBe(DEFAULT_CHORUS_LABELS.reasoning);
+      expect(resolved.clearConversation).toBe(DEFAULT_CHORUS_LABELS.clearConversation);
+    });
+
+    it('lets meaningful overrides win while preserving other keys in the same section', () => {
+      const resolved = resolveChorusLabels({
+        composer: { send: 'Envoyer', stop: '' },
+        attachments: {
+          completedAnnouncement: (name) => `${name} prêt`,
+          dismissError: 'Fermer',
+        },
+      });
+      expect(resolved.composer.send).toBe('Envoyer');
+      expect(resolved.composer.stop).toBe(DEFAULT_CHORUS_LABELS.composer.stop);
+      expect(resolved.composer.placeholder).toBe(DEFAULT_CHORUS_LABELS.composer.placeholder);
+      expect(resolved.attachments.completedAnnouncement('photo.png')).toBe('photo.png prêt');
+      expect(resolved.attachments.dismissError).toBe('Fermer');
+      expect(resolved.attachments.readingStatus).toBe(DEFAULT_CHORUS_LABELS.attachments.readingStatus);
+    });
+  });
+
+  describe('attachment label defaults', () => {
+    it('formats validation messages with name/accept/size/count interpolation', () => {
+      const a = DEFAULT_CHORUS_LABELS.attachments;
+      expect(a.unsupportedTypeError({ name: 'notes.txt', accept: 'image/*' }))
+        .toBe('notes.txt is not an accepted attachment type (image/*).');
+      expect(a.unsupportedTypeError({ name: 'notes.txt' }))
+        .toBe('notes.txt is not an accepted attachment type.');
+      expect(a.tooLargeError({ name: 'big.png', size: '10 MB', limit: '2 MB' }))
+        .toBe('big.png is 10 MB; the limit is 2 MB.');
+      expect(a.tooManyError({ name: 'extra.png', max: 1 }))
+        .toBe('Only 1 attachment allowed. Remove an attachment before adding extra.png.');
+      expect(a.tooManyError({ name: 'extra.png', max: 3 }))
+        .toBe('Only 3 attachments allowed. Remove an attachment before adding extra.png.');
+      expect(a.readFailedError({ name: 'broken.png', detail: 'disk unavailable' }))
+        .toBe('broken.png could not be read: disk unavailable');
+      expect(a.uploadFailedError({ name: 'broken.png', detail: 'network down' }))
+        .toBe('broken.png could not be uploaded: network down');
+      expect(a.imageFallbackAlt('photo.png')).toBe('Attached image: photo.png');
+    });
+  });
 });
 
 describe('ChatInput labels', () => {
