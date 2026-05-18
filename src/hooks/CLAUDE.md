@@ -4,12 +4,18 @@
 
 `useAssistantSession.ts` remains the public facade for the built-in Chorus send lifecycle. Internal helpers live in `hooks/assistant-session/`:
 
+- `types.ts` — public context/handler types and internal `UpdateMessagesOptions` / `UpdateSessionMessages` / `SubmittedUserTurn` aliases. The facade re-exports the public names so consumers continue importing from `useAssistantSession`.
 - `messageUtils.ts` — message IDs, retry cloning, returned-message normalization, tool metadata helpers.
-- `observer.ts` — guarded observer warning helpers.
+- `observer.ts` — guarded observer warning helper (`warnObserverError`).
+- `observerCallbacks.ts` — `createObserverCallbacks` factory for the `safeOn*` try/catch wrappers around host observers.
+- `assistantBuffer.ts` — `useAssistantBuffer` owns the RAF-buffered text/reasoning queues, pending-assistant/tool refs, and `startAssistant` / `append*Now` / `finalizeAssistantNow` / `resetStreamState` / `resetPendingAssistantState` mutators.
+- `toolExecution.ts` — `useToolExecution` builds the tool message mutators (`appendToolDeltaNow`, `setToolOutput`, `setToolErrorOutput`), `createToolCallContext`, and the `runCompletedToolCalls` loop. The chunk-isolated `resolveToolHandlerLocal` helper lives here too — see the comment on the function.
+- `sessionHelpers.ts` — `createSessionHelpers` plain factory that returns the `ChorusSendHelpers` exposed to `onSend`, including `minAssistantDelayMs` buffering and auto-finalize logic.
+- `transportLifecycle.ts` — `useTransportLifecycle` owns `historyForTransport`, `startTransportStream`, `decideToolLoopContinuation`, and the internal `finishTransportStream` that runs queued tool calls and continues or releases the loop.
 - `toolLoop.ts` — `maxToolIterations` normalization (`Infinity` is the explicit unlimited sentinel) and defaults.
 - `transport.ts` — string-URL transport shortcut. It intentionally mirrors the default fetch SSE request locally to keep transport-only bundles isolated.
 
-The facade owns React lifecycle wiring: send/retry/stop/clear/edit/regenerate/delete, assistant buffering, transport/onSend orchestration, abort callbacks, and tool execution.
+The facade owns React lifecycle wiring (state setters, refs, `useChorusStream` integration) and the user-facing send/retry/stop/clear/edit/regenerate/delete handlers; the submodules above hold the work each handler delegates to.
 
 ## `useChorusStream`
 

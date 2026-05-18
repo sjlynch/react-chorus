@@ -19,7 +19,9 @@ export interface RenderAttachmentErrorContext {
 
 const MAX_HEIGHT = 160;
 
-// Local to keep shared hook/transport utility chunks out of the UI bundle graph.
+// Inlined — importing `utils/async` puts ChatInput on a shared chunk with the
+// assistant-session hook tree and inflates the ChatInput bundle-size number
+// tracked in the README "Current numbers" table.
 function isPromiseLike<T>(value: unknown): value is PromiseLike<T> {
   return typeof value === 'object'
     && value !== null

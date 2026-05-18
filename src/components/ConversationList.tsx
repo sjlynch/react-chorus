@@ -60,6 +60,9 @@ function defaultFormatTimestamp(timestamp: string) {
   }
 }
 
+// Inlined — importing `utils/async` would put ConversationList on a shared
+// chunk with the assistant-session hook tree and inflate the ConversationList
+// bundle-size number tracked in the README "Current numbers" table.
 function isPromiseLike<T>(value: unknown): value is PromiseLike<T> {
   return typeof value === 'object'
     && value !== null
