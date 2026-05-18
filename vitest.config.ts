@@ -7,5 +7,14 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./src/__tests__/setup.ts'],
     globals: true,
+    coverage: {
+      provider: 'v8',
+      thresholds: {
+        statements: 82,
+        branches: 73,
+        functions: 87,
+        lines: 86,
+      },
+    },
   },
 });

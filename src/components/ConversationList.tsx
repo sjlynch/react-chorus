@@ -116,6 +116,8 @@ export function ConversationList({
   const [draftTitle, setDraftTitle] = React.useState('');
   const [pendingDeleteIds, setPendingDeleteIds] = React.useState<ReadonlySet<string>>(() => new Set());
   const mountedRef = React.useRef(true);
+  const renameInputRef = React.useRef<HTMLInputElement>(null);
+  const isDraftEmpty = draftTitle.trim().length === 0;
   const paletteVars = React.useMemo(() => (headless ? {} : styleVarsFromPalette(palette)), [headless, palette]);
   const orderedConversations = React.useMemo(() => sortedConversations(conversations), [conversations]);
   const interactionsDisabled = !loaded;
@@ -132,6 +134,21 @@ export function ConversationList({
       mountedRef.current = false;
     };
   }, []);
+
+  React.useEffect(() => {
+    if (!editingId) return;
+    const input = renameInputRef.current;
+    if (!input) return;
+    input.focus();
+    input.select();
+  }, [editingId]);
+
+  React.useEffect(() => {
+    if (editingId && !conversations.some(c => c.id === editingId)) {
+      setEditingId(null);
+      setDraftTitle('');
+    }
+  }, [conversations, editingId]);
 
   const setDeletePending = React.useCallback((id: string, pending: boolean) => {
     if (!mountedRef.current) return;
@@ -155,7 +172,11 @@ export function ConversationList({
 
   const submitRename = (id: string) => {
     const trimmed = draftTitle.trim();
-    if (trimmed) renameConversation?.(id, trimmed);
+    if (!trimmed) {
+      renameInputRef.current?.focus();
+      return;
+    }
+    renameConversation?.(id, trimmed);
     cancelRename();
   };
 
@@ -214,15 +235,24 @@ export function ConversationList({
                   }}
                 >
                   <input
+                    ref={renameInputRef}
                     className="chorus-conversation-rename-input"
                     aria-label={labels.renameAriaLabel(conversation.title)}
+                    aria-invalid={isDraftEmpty || undefined}
                     value={draftTitle}
                     onChange={event => setDraftTitle(event.target.value)}
                     onKeyDown={event => {
                       if (event.key === 'Escape') cancelRename();
                     }}
                   />
-                  <button type="submit" className="chorus-conversation-action">{labels.save}</button>
+                  <button
+                    type="submit"
+                    className="chorus-conversation-action"
+                    disabled={isDraftEmpty}
+                    aria-disabled={isDraftEmpty || undefined}
+                  >
+                    {labels.save}
+                  </button>
                   <button type="button" className="chorus-conversation-action" onClick={cancelRename}>{labels.cancel}</button>
                 </form>
               ) : (
