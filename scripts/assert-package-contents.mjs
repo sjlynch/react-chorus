@@ -25,6 +25,38 @@ export const forbiddenEntries = [
   },
 ];
 
+// External sourcemaps must ship alongside every code-bearing published chunk
+// so consumer stack traces map back to source. Pure barrel entries
+// (`react-chorus.es.js`, `react-chorus-transport.es.js`,
+// `provider-requests.es.js`) are single-line re-exports — Rolldown skips
+// emitting maps for those because there is no source position to preserve;
+// the real implementations live in the hashed chunks below and those carry
+// the maps.
+//
+// Hash suffixes change between builds, so each required entry is matched by
+// prefix + format suffix instead of an exact filename. The check both fails
+// CI on a `sourcemap: false` regression and surfaces a missing map for a
+// chunk that was renamed or split.
+export const requiredSourcemapPrefixes = [
+  // Named entries that contain real code (not pure re-export barrels).
+  { prefix: 'dist/react-chorus-headless', suffixes: ['.es.js.map', '.cjs.map'] },
+  { prefix: 'dist/react-chorus-server', suffixes: ['.es.js.map', '.cjs.map'] },
+  // Hashed implementation chunks shared by multiple entries. Stack traces
+  // from consumer code land in these files, so the maps here are what
+  // actually power the DX win this check guards.
+  { prefix: 'dist/chorus-session-', suffixes: ['.js.map', '.cjs.map'] },
+  { prefix: 'dist/ChatWindow-', suffixes: ['.js.map', '.cjs.map'] },
+  { prefix: 'dist/chat-input-', suffixes: ['.js.map', '.cjs.map'] },
+  { prefix: 'dist/markdown-', suffixes: ['.js.map', '.cjs.map'] },
+  { prefix: 'dist/conversation-list-', suffixes: ['.js.map', '.cjs.map'] },
+  { prefix: 'dist/conversations-', suffixes: ['.js.map', '.cjs.map'] },
+  { prefix: 'dist/persistence-', suffixes: ['.js.map', '.cjs.map'] },
+  { prefix: 'dist/providerRequests-', suffixes: ['.js.map', '.cjs.map'] },
+  { prefix: 'dist/transport-core-', suffixes: ['.js.map', '.cjs.map'] },
+  { prefix: 'dist/tools-', suffixes: ['.js.map', '.cjs.map'] },
+  { prefix: 'dist/src-', suffixes: ['.cjs.map'] },
+];
+
 export function normalizePackedFilePath(file) {
   const filePath = typeof file === 'string' ? file : file.path;
   return filePath.replace(/\\/g, '/').replace(/^\.\//, '');
@@ -41,6 +73,18 @@ export function findForbiddenFiles(packedFiles, entries = forbiddenEntries) {
     const entry = entries.find(({ pattern }) => pattern.test(normalizedPath));
     return entry ? [{ filePath: normalizedPath, label: entry.label }] : [];
   });
+}
+
+export function findMissingRequired(packedFiles, required = requiredSourcemapPrefixes) {
+  const normalized = packedFiles.map(normalizePackedFilePath);
+  const missing = [];
+  for (const { prefix, suffixes } of required) {
+    for (const suffix of suffixes) {
+      const found = normalized.some((file) => file.startsWith(prefix) && file.endsWith(suffix));
+      if (!found) missing.push(`${prefix}*${suffix}`);
+    }
+  }
+  return missing;
 }
 
 function execFileAsync(execFileImpl, file, args, options) {
@@ -77,16 +121,32 @@ export async function runAssertPackageContents({
   }
 
   const forbiddenFiles = findForbiddenFiles(packedFiles);
+  const missingRequired = findMissingRequired(packedFiles);
 
+  let hasError = false;
   if (forbiddenFiles.length > 0) {
+    hasError = true;
     logger.error('Unexpected internal files would be included in the npm package:');
     for (const { filePath, label } of forbiddenFiles) {
       logger.error(`- ${filePath}${label ? ` (${label})` : ''}`);
     }
-    return 1;
   }
 
-  logger.log(`Package contents OK (${packedFiles.length} files checked).`);
+  if (missingRequired.length > 0) {
+    hasError = true;
+    logger.error('Required sourcemap files are missing from the npm package (set `build.sourcemap: true` in vite.config.ts):');
+    for (const filePath of missingRequired) {
+      logger.error(`- ${filePath}`);
+    }
+  }
+
+  if (hasError) return 1;
+
+  const requiredCount = requiredSourcemapPrefixes.reduce(
+    (sum, entry) => sum + entry.suffixes.length,
+    0,
+  );
+  logger.log(`Package contents OK (${packedFiles.length} files checked, ${requiredCount} required sourcemaps present).`);
   return 0;
 }
 

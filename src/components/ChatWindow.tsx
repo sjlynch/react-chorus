@@ -3,7 +3,7 @@ import type { Message, Role } from '../types';
 import { resolveChorusLabels } from '../labels/resolve';
 import type { ChorusLabels, ResolvedChorusLabels } from '../labels/types';
 import { ToolCallBlock } from './ToolCallBlock';
-import { MessageActionControls, MessageRenderStateProvider, MessageRow, MessageSpeakerLabel } from './MessageRow';
+import { MessageActionControls, MessageRenderStateContext, MessageRenderStateProvider, MessageRow, MessageSpeakerLabel } from './MessageRow';
 import type { GetMessageFeedback, MessageBubbleSlots, MessageCopyResult, MessageFeedback, MessageMarkdownProps, MessageRenderActions } from './MessageRow';
 import type { MarkdownSanitizer } from './Markdown';
 import { canWriteTextToClipboard, writeTextToClipboard } from '../utils/messageCopy';
@@ -50,6 +50,11 @@ export interface RenderMessageRootProps {
 
 export interface RenderMessageContext<TMeta = Record<string, unknown>> {
   isStreaming: boolean;
+  /**
+   * True while this message's built-in inline editor is active. Skip rendering your own bubble/content
+   * when true so the editor replaces the row instead of rendering alongside the original content.
+   */
+  isEditing: boolean;
   defaultRender: (slots?: MessageBubbleSlots) => React.ReactNode;
   actions: MessageRenderActions;
   message: Message<TMeta>;
@@ -101,6 +106,26 @@ export interface ChatWindowProps<TMeta = Record<string, unknown>> extends Omit<R
   typing?: boolean;
   /** Localized labels for the transcript, message actions, speakers, tool calls, reasoning, and code copy. Defaults to English. */
   labels?: ChorusLabels;
+}
+
+interface MessageRenderSlotProps<TMeta> {
+  message: Message<TMeta>;
+  isStreaming: boolean;
+  defaultRender: (slots?: MessageBubbleSlots) => React.ReactNode;
+  actions: MessageRenderActions;
+  messageProps: RenderMessageRootProps;
+  renderMessage?: (message: Message<TMeta>, context: RenderMessageContext<TMeta>) => React.ReactNode;
+}
+
+function MessageRenderSlot<TMeta>({ message, isStreaming, defaultRender, actions, messageProps, renderMessage }: MessageRenderSlotProps<TMeta>) {
+  const renderState = React.useContext(MessageRenderStateContext);
+  const isEditing = renderState?.messageId === message.id ? renderState.isEditing : false;
+  if (!renderMessage) return <>{defaultRender()}</>;
+
+  const context: RenderMessageContext<TMeta> = { isStreaming, isEditing, defaultRender, actions, message, messageProps };
+  const custom = renderMessage(message, context);
+  if (custom == null) return <>{defaultRender()}</>;
+  return <>{attachMessageRootProps(custom, messageProps)}</>;
 }
 
 function ChatWindowInner<TMeta = Record<string, unknown>>({
@@ -207,6 +232,7 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
               speakerLabels={resolvedLabels.speakers}
               reasoningLabel={resolvedLabels.reasoning}
               codeCopyLabels={resolvedLabels.codeCopy}
+              attachmentLabels={resolvedLabels.attachments}
               onEdit={onEdit}
               onRegenerate={onRegenerate}
               onDelete={onDelete}
@@ -233,12 +259,17 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
           defaultRender: () => <MessageActionControls message={m} actions={actions} labels={resolvedLabels.messageActions} speakerLabels={resolvedLabels.speakers} />,
         };
         const messageProps: RenderMessageRootProps = { 'data-chorus-message-id': m.id };
-        const context: RenderMessageContext<TMeta> = { isStreaming, defaultRender, actions, message: m, messageProps };
-        const custom = renderMessage?.(m, context);
 
         return (
           <MessageRenderStateProvider key={m.id} messageId={m.id}>
-            {custom != null ? attachMessageRootProps(custom, messageProps) : defaultRender()}
+            <MessageRenderSlot
+              message={m}
+              isStreaming={isStreaming}
+              defaultRender={defaultRender}
+              actions={actions}
+              messageProps={messageProps}
+              renderMessage={renderMessage}
+            />
           </MessageRenderStateProvider>
         );
       })}

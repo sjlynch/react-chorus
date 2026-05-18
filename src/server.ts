@@ -49,10 +49,21 @@ function buildDataLines(text: string): string {
  * Strings are written verbatim (after newline normalization), so the `[DONE]`
  * sentinel and other string markers pass through without quoting. Everything
  * else is `JSON.stringify`ed so connector parsers can `JSON.parse(data)` it.
+ *
+ * Throws a `TypeError` if the payload cannot be serialized — `undefined`,
+ * functions, and symbols all cause `JSON.stringify` to return `undefined`,
+ * which would otherwise blow up `buildDataLines` with a confusing
+ * `Cannot read properties of undefined (reading 'replace')`. BigInt and
+ * circular payloads continue to surface their native `JSON.stringify` errors
+ * unchanged.
  */
 export function formatSSEEvent(payload: unknown): string {
-  const text = typeof payload === 'string' ? payload : JSON.stringify(payload);
-  return buildDataLines(text);
+  if (typeof payload === 'string') return buildDataLines(payload);
+  const serialized = JSON.stringify(payload);
+  if (serialized === undefined) {
+    throw new TypeError('formatSSEEvent payload must be a string or JSON-serializable value');
+  }
+  return buildDataLines(serialized);
 }
 
 /** UTF-8 bytes of `formatSSEEvent(payload)` — for `ReadableStream` / Edge runtimes. */

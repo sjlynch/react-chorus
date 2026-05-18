@@ -52,6 +52,39 @@ export const anthropicConnector: Connector<AnthropicConnectorState> = {
         return { done: true };
       }
 
+      if (obj.type === 'message_delta') {
+        const delta = obj.delta && typeof obj.delta === 'object' ? obj.delta as Record<string, unknown> : null;
+        const stopReason = typeof delta?.stop_reason === 'string' ? delta.stop_reason : null;
+        if (!stopReason) return null;
+
+        const stopSequence = typeof delta?.stop_sequence === 'string' ? delta.stop_sequence : null;
+        const metadata: Record<string, unknown> = { stopReason };
+        if (stopSequence) metadata.stopSequence = stopSequence;
+
+        if (stopReason === 'refusal') {
+          return {
+            error: 'Anthropic model refused to respond',
+            errorPayload: obj,
+            metadata,
+          };
+        }
+
+        if (stopReason === 'max_tokens') {
+          return {
+            metadata,
+            warning: {
+              code: 'truncated',
+              message: 'Anthropic response truncated by max_tokens',
+              payload: obj,
+            },
+          };
+        }
+
+        // end_turn, stop_sequence, tool_use are all normal terminations; surface stop_reason as
+        // metadata so consumers can persist or display it without treating it as a problem.
+        return { metadata };
+      }
+
       if (obj.type === 'content_block_start') {
         const block = obj.content_block;
         if (!block || typeof block !== 'object') return null;
