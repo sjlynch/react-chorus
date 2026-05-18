@@ -10,9 +10,20 @@ import type { Transport } from '../useChorusStream';
  * `POST` with the streaming `AbortSignal`, and the body is serialized by the
  * default `JSON.stringify({ prompt, history })` (or your `formatBody`).
  */
-export interface FetchTransportInit<TMeta = Record<string, unknown>> extends Omit<RequestInit, 'body' | 'method' | 'signal'> {
+export interface FetchTransportInit<TMeta = Record<string, unknown>> extends Omit<RequestInit, 'body' | 'method' | 'signal' | 'headers'> {
   /** Endpoint Chorus POSTs to. */
   url: string;
+  /**
+   * Extra request headers forwarded verbatim to `fetch`.
+   *
+   * If you set a `Content-Type` header, the transport will not override it —
+   * caller headers always win. Because the default body is
+   * `JSON.stringify({ prompt, history })`, overriding `Content-Type` without
+   * also overriding `formatBody` will send JSON bytes under the wrong media
+   * type and confuse the upstream backend. To use the default JSON body and a
+   * custom `Content-Type`, override `formatBody` as well.
+   */
+  headers?: HeadersInit;
   /**
    * Serialize the outgoing request body.
    * Defaults to `JSON.stringify({ prompt, history })`.

@@ -132,7 +132,7 @@ The string shorthand has no place to hang an `Authorization` header or `credenti
 />
 ```
 
-`headers`, `credentials`, `cache`, `mode`, `referrer`, and the other [`RequestInit`](https://developer.mozilla.org/docs/Web/API/RequestInit) fields are forwarded straight to `fetch`. Chorus reserves `body`, `method`, and `signal` (the body is `JSON.stringify({ prompt, history })` by default — pass a `formatBody` to override). Annotate the config with `FetchTransportInit` if you want to extract it into a reusable constant.
+`headers`, `credentials`, `cache`, `mode`, `referrer`, and the other [`RequestInit`](https://developer.mozilla.org/docs/Web/API/RequestInit) fields are forwarded straight to `fetch`. Chorus reserves `body`, `method`, and `signal` (the body is `JSON.stringify({ prompt, history })` by default — pass a `formatBody` to override). Caller headers always win: if you set a `Content-Type` header, the transport will not override it, so overriding it without also overriding `formatBody` will send JSON bytes under the wrong media type. To use the default JSON body and a custom `Content-Type`, override `formatBody` as well. Annotate the config with `FetchTransportInit` if you want to extract it into a reusable constant.
 
 Seed an uncontrolled chat with a welcome message and include a hidden system prompt in every transport request:
 

@@ -89,6 +89,30 @@ describe('createDefaultFetchSSETransport', () => {
     expect(sentHeaders(options).get('content-type')).toBe('application/vnd.custom+json');
   });
 
+  // Documents the footgun called out in the FetchTransportInit JSDoc and the
+  // README: a caller-provided Content-Type wins verbatim, but the default
+  // body is still JSON. Overriding only the header (without also overriding
+  // `formatBody`) ships JSON bytes under a non-JSON media type.
+  it('preserves a caller-provided Content-Type verbatim while default body stays JSON', async () => {
+    const transport = createDefaultFetchSSETransport({
+      url: '/api/chat',
+      headers: {
+        'Content-Type': 'application/x-ndjson',
+        Authorization: 'Bearer token',
+      },
+    });
+    const history: Message[] = [{ id: '1', role: 'user', text: 'hi' }];
+
+    await transport('hello', history, new AbortController().signal);
+
+    const [, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const headers = sentHeaders(options);
+    expect(headers.get('content-type')).toBe('application/x-ndjson');
+    expect(headers.get('authorization')).toBe('Bearer token');
+    expect(options.body).toBe(JSON.stringify({ prompt: 'hello', history }));
+    expect(() => JSON.parse(options.body as string)).not.toThrow();
+  });
+
   it('object form forwards arbitrary RequestInit fields (cache, mode)', async () => {
     const transport = createDefaultFetchSSETransport({
       url: '/api/chat',
