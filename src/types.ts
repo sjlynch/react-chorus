@@ -12,6 +12,13 @@ export interface Attachment {
   url?: string;
   /** Optional provider/storage file id when the attachment was uploaded before send. */
   id?: string;
+  /**
+   * Optional human-authored description used as the image `alt` attribute when the attachment
+   * is rendered in the transcript. Falls back to a role-hinted label such as
+   * `Attached image: ${name}` when omitted. Useful for screen-reader and providers that
+   * accept image captions in multimodal requests.
+   */
+  alt?: string;
   metadata?: Record<string, unknown>;
 }
 

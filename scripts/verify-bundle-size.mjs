@@ -448,7 +448,7 @@ async function verifyConsumerBundleBudgets() {
   const chunksByFileName = new Map(chunks.map(chunk => [chunk.fileName, chunk]));
   const measurements = {};
   const entryBudgets = [
-    { label: 'root entry initial JS', entry: 'root', maxSize: 165 * KiB, maxGzip: 56 * KiB },
+    { label: 'root entry initial JS', entry: 'root', maxSize: 167 * KiB, maxGzip: 57 * KiB },
     { label: 'headless entry initial JS', entry: 'headless', maxSize: 168 * KiB, maxGzip: 57 * KiB },
     { label: 'root useChorusStream import initial JS', entry: 'rootUseChorusStream', maxSize: 42 * KiB, maxGzip: 14 * KiB },
     { label: 'root Markdown import initial JS', entry: 'rootMarkdown', maxSize: 85 * KiB, maxGzip: 30 * KiB },
@@ -639,7 +639,7 @@ async function verifyPlaygroundBudgets() {
 
   const initialGraph = await collectStaticFileGraph(entryFiles, allJsFiles);
   const initial = await measureFiles(initialGraph);
-  const initialMaxSize = 385 * KiB;
+  const initialMaxSize = 387 * KiB;
   const initialMaxGzip = 125 * KiB;
   const measurements = {
     initialJsGraph: createMeasurement('initial JS graph', initial.size, initial.gzip, initialMaxSize, initialMaxGzip),

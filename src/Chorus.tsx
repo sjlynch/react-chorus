@@ -487,6 +487,7 @@ function ChorusInner<TMeta = Record<string, unknown>>({
         resetKey={composerResetKey}
         placeholder={placeholder}
         labels={resolvedLabels.composer}
+        attachmentLabels={resolvedLabels.attachments}
         accept={accept}
         maxAttachmentBytes={maxAttachmentBytes}
         maxAttachments={maxAttachments}

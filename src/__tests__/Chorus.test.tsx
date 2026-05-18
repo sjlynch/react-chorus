@@ -2215,7 +2215,7 @@ describe('Chorus', () => {
       })],
     }));
     expect(screen.getAllByText('describe this')).toHaveLength(1);
-    await waitFor(() => expect(screen.getAllByAltText('photo.png')).toHaveLength(1));
+    await waitFor(() => expect(screen.getAllByAltText('Attached image: photo.png')).toHaveLength(1));
   });
 
   it('removes a failed partial transport response before retrying', async () => {

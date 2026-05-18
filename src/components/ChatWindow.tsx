@@ -207,6 +207,7 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
               speakerLabels={resolvedLabels.speakers}
               reasoningLabel={resolvedLabels.reasoning}
               codeCopyLabels={resolvedLabels.codeCopy}
+              attachmentLabels={resolvedLabels.attachments}
               onEdit={onEdit}
               onRegenerate={onRegenerate}
               onDelete={onDelete}
