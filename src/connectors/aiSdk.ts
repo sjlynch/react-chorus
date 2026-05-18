@@ -1,3 +1,4 @@
+import { warnOnceInDev } from '../utils/warnings';
 import { extractErrorMessage } from './error';
 import type { Connector, ConnectorResult, ConnectorToolDelta } from './types';
 
@@ -17,15 +18,26 @@ function hasOwn(value: object, key: PropertyKey) {
   return Object.prototype.hasOwnProperty.call(value, key);
 }
 
+function warnMissingToolCallId(frameType: string) {
+  warnOnceInDev(
+    `ai-sdk:${frameType}:missing-toolCallId`,
+    `[Chorus] AI SDK ${frameType} frame is missing required field \`toolCallId\`; the tool fragment was dropped. Ensure every tool frame includes a \`toolCallId\`.`,
+  );
+}
+
 function toolDeltaFromToolCall(
   state: AiSdkConnectorState,
+  frameType: string,
   toolCallId: unknown,
   toolName: unknown,
   args: unknown,
   hasArgs: boolean,
 ): ConnectorToolDelta | null {
   const explicitId = typeof toolCallId === 'string' && toolCallId ? toolCallId : undefined;
-  if (!explicitId) return null;
+  if (!explicitId) {
+    warnMissingToolCallId(frameType);
+    return null;
+  }
   const name = typeof toolName === 'string' && toolName ? toolName : state.toolNamesById.get(explicitId);
   if (name) state.toolNamesById.set(explicitId, name);
   const delta: ConnectorToolDelta = { id: explicitId, providerId: explicitId };
@@ -36,15 +48,65 @@ function toolDeltaFromToolCall(
 
 function toolDeltaFromToolResult(
   state: AiSdkConnectorState,
+  frameType: string,
   toolCallId: unknown,
   output: unknown,
 ): ConnectorToolDelta | null {
   const explicitId = typeof toolCallId === 'string' && toolCallId ? toolCallId : undefined;
-  if (!explicitId) return null;
+  if (!explicitId) {
+    warnMissingToolCallId(frameType);
+    return null;
+  }
   const delta: ConnectorToolDelta = { id: explicitId, providerId: explicitId, output };
   const name = state.toolNamesById.get(explicitId);
   if (name) delta.name = name;
   return delta;
+}
+
+// Vercel AI SDK UI-message-stream `type` values that `aiSdkConnector` either
+// parses or intentionally ignores. Exported so `autoConnector` can delegate
+// every recognised frame to the AI SDK path without duplicating the list.
+const AI_SDK_FRAME_TYPES = new Set([
+  // Parsed by uiMessageStreamResult.
+  'text-delta',
+  'text',
+  'reasoning-delta',
+  'reasoning',
+  'tool-input-start',
+  'tool-call-streaming-start',
+  'tool-input-delta',
+  'tool-call-delta',
+  'tool-input-available',
+  'tool-call',
+  'tool-output-available',
+  'tool-result',
+  'error',
+  'finish',
+  'finish-message',
+  // Intentionally ignored (lifecycle / non-text payloads) — still claimed so
+  // autoConnector does not render them as raw protocol JSON.
+  'start',
+  'start-step',
+  'finish-step',
+  'text-start',
+  'text-end',
+  'reasoning-start',
+  'reasoning-end',
+  'source-url',
+  'source-document',
+  'file',
+  'message-metadata',
+]);
+
+/**
+ * True when `type` is a Vercel AI SDK UI-message-stream frame this connector
+ * parses or intentionally ignores. `autoConnector` uses this so every AI SDK
+ * frame (including data-`*` wildcards and lifecycle-only frames) is delegated
+ * to the AI SDK path instead of falling through to raw-text rendering.
+ */
+export function isAiSdkFrameType(type: unknown): boolean {
+  if (typeof type !== 'string') return false;
+  return AI_SDK_FRAME_TYPES.has(type) || type.startsWith('data-');
 }
 
 function uiMessageStreamResult(state: AiSdkConnectorState, obj: Record<string, unknown>, raw: unknown): ConnectorResult | null {
@@ -62,27 +124,27 @@ function uiMessageStreamResult(state: AiSdkConnectorState, obj: Record<string, u
   }
 
   if (type === 'tool-input-start' || type === 'tool-call-streaming-start') {
-    const toolDelta = toolDeltaFromToolCall(state, obj.toolCallId, obj.toolName, undefined, false);
+    const toolDelta = toolDeltaFromToolCall(state, type, obj.toolCallId, obj.toolName, undefined, false);
     return toolDelta ? { toolDelta } : null;
   }
 
   if (type === 'tool-input-delta' || type === 'tool-call-delta') {
     const fragment = obj.inputTextDelta ?? obj.argsTextDelta;
-    if (typeof fragment !== 'string') return null;
-    const toolDelta = toolDeltaFromToolCall(state, obj.toolCallId, obj.toolName, fragment, true);
+    if (typeof fragment !== 'string' || fragment === '') return null;
+    const toolDelta = toolDeltaFromToolCall(state, type, obj.toolCallId, obj.toolName, fragment, true);
     return toolDelta ? { toolDelta } : null;
   }
 
   if (type === 'tool-input-available' || type === 'tool-call') {
     const input = obj.input ?? obj.args;
     const hasArgs = hasOwn(obj, 'input') || hasOwn(obj, 'args');
-    const toolDelta = toolDeltaFromToolCall(state, obj.toolCallId, obj.toolName, input, hasArgs);
+    const toolDelta = toolDeltaFromToolCall(state, type, obj.toolCallId, obj.toolName, input, hasArgs);
     return toolDelta ? { toolDelta } : null;
   }
 
   if (type === 'tool-output-available' || type === 'tool-result') {
     const output = obj.output ?? obj.result;
-    const toolDelta = toolDeltaFromToolResult(state, obj.toolCallId, output);
+    const toolDelta = toolDeltaFromToolResult(state, type, obj.toolCallId, output);
     return toolDelta ? { toolDelta } : null;
   }
 
@@ -130,28 +192,28 @@ function dataStreamProtocolResult(state: AiSdkConnectorState, data: string): Con
       const record = parsed as Record<string, unknown>;
       const hasArgs = hasOwn(record, 'args') || hasOwn(record, 'input');
       const args = record.args ?? record.input;
-      const toolDelta = toolDeltaFromToolCall(state, record.toolCallId, record.toolName, args, hasArgs);
+      const toolDelta = toolDeltaFromToolCall(state, '9:', record.toolCallId, record.toolName, args, hasArgs);
       return toolDelta ? { toolDelta } : null;
     }
     case 'b': {
       if (!parsed || typeof parsed !== 'object') return null;
       const record = parsed as Record<string, unknown>;
-      const toolDelta = toolDeltaFromToolCall(state, record.toolCallId, record.toolName, undefined, false);
+      const toolDelta = toolDeltaFromToolCall(state, 'b:', record.toolCallId, record.toolName, undefined, false);
       return toolDelta ? { toolDelta } : null;
     }
     case 'c': {
       if (!parsed || typeof parsed !== 'object') return null;
       const record = parsed as Record<string, unknown>;
       const fragment = record.argsTextDelta ?? record.inputTextDelta;
-      if (typeof fragment !== 'string') return null;
-      const toolDelta = toolDeltaFromToolCall(state, record.toolCallId, undefined, fragment, true);
+      if (typeof fragment !== 'string' || fragment === '') return null;
+      const toolDelta = toolDeltaFromToolCall(state, 'c:', record.toolCallId, undefined, fragment, true);
       return toolDelta ? { toolDelta } : null;
     }
     case 'a': {
       if (!parsed || typeof parsed !== 'object') return null;
       const record = parsed as Record<string, unknown>;
       const output = record.result ?? record.output;
-      const toolDelta = toolDeltaFromToolResult(state, record.toolCallId, output);
+      const toolDelta = toolDeltaFromToolResult(state, 'a:', record.toolCallId, output);
       return toolDelta ? { toolDelta } : null;
     }
     case 'd':
@@ -184,7 +246,21 @@ function dataStreamProtocolResult(state: AiSdkConnectorState, data: string): Con
  * `finish-message` / `d:` / `e:` frames, and surfaces in-band errors (`type: 'error'`
  * or `3:"..."`) with the original payload as `errorPayload`. Unknown or
  * lifecycle-only frames (`start`, `start-step`, `text-start`, `text-end`, etc.)
- * are silently ignored so the user never sees protocol text.
+ * are silently ignored so the user never sees protocol text. Empty-string
+ * argument deltas (`{type:'tool-input-delta', inputTextDelta:''}` and `c:`
+ * frames with an empty `argsTextDelta`) are dropped the same way empty
+ * `text-delta` / `reasoning-delta` frames are, so an empty fragment never
+ * resets accumulated tool input.
+ *
+ * **`toolCallId` is required** on every tool frame (`tool-input-start` /
+ * `tool-call-streaming-start`, `tool-input-delta` / `tool-call-delta`,
+ * `tool-input-available` / `tool-call`, `tool-output-available` / `tool-result`,
+ * and the data-stream `9:` / `b:` / `c:` / `a:` frames). When a recognized tool
+ * frame arrives without a `toolCallId`, the connector intentionally drops the
+ * fragment (there is no tool message to merge it into) and emits a dev-only
+ * `console.warn` naming the frame type and the missing field. The warning
+ * fires at most once per (frame-type, missing-field) combination; production
+ * builds stay silent.
  *
  * Usage example:
  *   const { send } = useChorusStream(transport, { connector: 'ai-sdk' });

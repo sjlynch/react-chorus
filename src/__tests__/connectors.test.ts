@@ -519,6 +519,32 @@ describe('aiSdkConnector', () => {
     it('returns done for the [DONE] sentinel even when no finish frame arrived', () => {
       expect(aiSdkConnector.extract('[DONE]')).toEqual({ done: true });
     });
+
+    it('drops empty-string tool-argument deltas instead of emitting an input-resetting toolDelta', () => {
+      const state = aiSdkConnector.createState?.();
+      const empty = JSON.stringify({ type: 'tool-input-delta', toolCallId: 'call_1', inputTextDelta: '' });
+      const emptyAlias = JSON.stringify({ type: 'tool-call-delta', toolCallId: 'call_1', argsTextDelta: '' });
+      expect(aiSdkConnector.extract(empty, state)).toBeNull();
+      expect(aiSdkConnector.extract(emptyAlias, state)).toBeNull();
+    });
+
+    it('warns once in dev when a tool frame is missing toolCallId and stays silent on the second identical frame', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const state = aiSdkConnector.createState?.();
+        const frame = JSON.stringify({ type: 'tool-input-delta', inputTextDelta: 'foo' });
+
+        expect(aiSdkConnector.extract(frame, state)).toBeNull();
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn).toHaveBeenCalledWith(expect.stringMatching(/tool-input-delta/));
+        expect(warn).toHaveBeenCalledWith(expect.stringMatching(/toolCallId/));
+
+        expect(aiSdkConnector.extract(frame, state)).toBeNull();
+        expect(warn).toHaveBeenCalledTimes(1);
+      } finally {
+        warn.mockRestore();
+      }
+    });
   });
 
   describe('data stream protocol (toDataStreamResponse)', () => {
@@ -570,6 +596,11 @@ describe('aiSdkConnector', () => {
       expect(aiSdkConnector.extract('0:not-json')).toBeNull();
       expect(aiSdkConnector.extract('plain text without prefix')).toBeNull();
       expect(aiSdkConnector.extract('')).toBeNull();
+    });
+
+    it('drops empty argsTextDelta on c: frames', () => {
+      const state = aiSdkConnector.createState?.();
+      expect(aiSdkConnector.extract('c:{"toolCallId":"call_1","argsTextDelta":""}', state)).toBeNull();
     });
   });
 });
@@ -628,6 +659,25 @@ describe('autoConnector', () => {
     expect(autoConnector.extract(finish)).toEqual({ done: true });
     const errorPayload = { type: 'error', errorText: 'kaboom' };
     expect(autoConnector.extract(JSON.stringify(errorPayload))).toEqual({ error: 'kaboom', errorPayload });
+  });
+
+  it('delegates AI SDK tool-call-streaming-start / tool-call-delta / reasoning aliases to the AI SDK path', () => {
+    const state = autoConnector.createState?.();
+    const start = JSON.stringify({ type: 'tool-call-streaming-start', toolCallId: 'call_1', toolName: 'search' });
+    const delta = JSON.stringify({ type: 'tool-call-delta', toolCallId: 'call_1', argsTextDelta: '{"q":' });
+    const reasoning = JSON.stringify({ type: 'reasoning', text: 'thinking' });
+
+    expect(autoConnector.extract(start, state)).toEqual({ toolDelta: { id: 'call_1', providerId: 'call_1', name: 'search' } });
+    expect(autoConnector.extract(delta, state)).toEqual({ toolDelta: { id: 'call_1', providerId: 'call_1', name: 'search', input: '{"q":' } });
+    expect(autoConnector.extract(reasoning, state)).toEqual({ reasoning: 'thinking' });
+  });
+
+  it('ignores AI SDK data-* wildcard frames and message-metadata instead of rendering them as raw JSON', () => {
+    const dataFrame = JSON.stringify({ type: 'data-progress', id: 'p_1', data: { percent: 42 } });
+    const metadataFrame = JSON.stringify({ type: 'message-metadata', messageMetadata: { foo: 'bar' } });
+
+    expect(autoConnector.extract(dataFrame)).toBeNull();
+    expect(autoConnector.extract(metadataFrame)).toBeNull();
   });
 
   it('delegates to aiSdkConnector for Vercel AI SDK data-stream protocol lines', () => {

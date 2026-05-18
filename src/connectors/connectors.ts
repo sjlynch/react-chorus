@@ -3,7 +3,7 @@ import type { Connector } from './types';
 import { openaiConnector, createOpenAIConnector, type OpenAIConnectorOptions } from './openai';
 import { anthropicConnector } from './anthropic';
 import { geminiConnector } from './gemini';
-import { aiSdkConnector } from './aiSdk';
+import { aiSdkConnector, isAiSdkFrameType } from './aiSdk';
 import { extractErrorMessage } from './error';
 
 export type { Connector, ConnectorResult, ConnectorToolDelta } from './types';
@@ -30,32 +30,12 @@ const KNOWN_ANTHROPIC_EVENT_TYPES = new Set([
   'error',
 ]);
 
-// Vercel AI SDK UI message stream event types (`toUIMessageStreamResponse`).
-// Used by autoConnector to dispatch to aiSdkConnector when JSON payloads carry
-// one of these hyphenated type values; the data-stream protocol (`0:"..."`,
-// `9:{...}`, etc.) is detected by prefix in the catch path below.
-const KNOWN_AI_SDK_EVENT_TYPES = new Set([
-  'text-delta',
-  'text-start',
-  'text-end',
-  'reasoning-delta',
-  'reasoning-start',
-  'reasoning-end',
-  'tool-input-start',
-  'tool-input-delta',
-  'tool-input-available',
-  'tool-output-available',
-  'tool-call',
-  'tool-result',
-  'finish',
-  'finish-step',
-  'finish-message',
-  'start',
-  'start-step',
-  'source-url',
-  'source-document',
-  'file',
-]);
+// `isAiSdkFrameType` (re-exported from `aiSdk.ts`) lists every UI-message-stream
+// `type` value `aiSdkConnector` parses or intentionally ignores (including
+// alias frames such as `tool-call-streaming-start` / `tool-call-delta`, the
+// `data-*` wildcard, and `message-metadata`). Dispatching on it keeps explicit
+// `connector="ai-sdk"` and default `connector="auto"` in sync so AI SDK
+// lifecycle frames never fall through to raw-text rendering.
 
 const AI_SDK_DATA_STREAM_PREFIX_PATTERN = /^[0-9a-z]:/;
 
@@ -109,7 +89,7 @@ export const autoConnector: Connector<AutoConnectorState> = {
       if (obj && Array.isArray(obj.candidates)) return geminiConnector.extract(data, state.gemini);
       if (obj && typeof obj.type === 'string' && obj.type.startsWith('response.')) return openaiConnector.extract(data, state.openai);
       if (obj && typeof obj.type === 'string' && KNOWN_ANTHROPIC_EVENT_TYPES.has(obj.type)) return anthropicConnector.extract(data, state.anthropic);
-      if (obj && typeof obj.type === 'string' && KNOWN_AI_SDK_EVENT_TYPES.has(obj.type)) return aiSdkConnector.extract(data, state.aiSdk);
+      if (obj && isAiSdkFrameType(obj.type)) return aiSdkConnector.extract(data, state.aiSdk);
       const genericText = genericJSONText(obj);
       if (genericText) return { text: genericText };
     } catch {
