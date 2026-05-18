@@ -22,9 +22,9 @@ const typedMessages: Message<MyMeta>[] = [
 ];
 
 const typedTransport: Transport<MyMeta> = async (_text, history) => {
-  const latency: number | undefined = history[0].metadata?.latencyMs;
+  const latency: number | undefined = history[0]?.metadata?.latencyMs;
   // @ts-expect-error MyMeta does not include tokenCount
-  void history[0].metadata?.tokenCount;
+  void history[0]?.metadata?.tokenCount;
   return new Response(`data: ${latency ?? 0}\n\n`);
 };
 
@@ -32,14 +32,14 @@ export const typedChorusElement = (
   <Chorus<MyMeta>
     value={typedMessages}
     onChange={(next) => {
-      const latency: number | undefined = next[0].metadata?.latencyMs;
+      const latency: number | undefined = next[0]?.metadata?.latencyMs;
       // @ts-expect-error MyMeta does not include costUsd
-      void next[0].metadata?.costUsd;
+      void next[0]?.metadata?.costUsd;
       void latency;
     }}
     transport={typedTransport}
     onMessagesChange={(next, context) => {
-      const latency: number | undefined = next[0].metadata?.latencyMs;
+      const latency: number | undefined = next[0]?.metadata?.latencyMs;
       const source: 'controlled' | 'uncontrolled' | 'persistence' = context.source;
       void latency;
       void source;
@@ -69,13 +69,13 @@ export const typedChorusElement = (
 
 const fetchTransport = createFetchSSETransport<MyMeta>('/api/chat', {
   headers: { 'Content-Type': 'application/json' },
-  formatBody: (_text, history) => JSON.stringify({ latency: history[0].metadata?.latencyMs }),
+  formatBody: (_text, history) => JSON.stringify({ latency: history[0]?.metadata?.latencyMs }),
 });
 
 const webSocketTransport = createWebSocketTransport<MyMeta>('wss://api.example.com/chat', {
   persistent: true,
   onMessage: (_data, _event) => undefined,
-  formatMessage: (_text, history) => JSON.stringify({ latency: history[0].metadata?.latencyMs }),
+  formatMessage: (_text, history) => JSON.stringify({ latency: history[0]?.metadata?.latencyMs }),
 });
 webSocketTransport.close();
 
@@ -92,9 +92,9 @@ const typedHelpers: ChorusSendHelpers = {
 };
 
 const typedOnSend: ChorusOnSend<MyMeta> = async (_text, history, helpers) => {
-  const latency: number | undefined = history[0].metadata?.latencyMs;
+  const latency: number | undefined = history[0]?.metadata?.latencyMs;
   // @ts-expect-error MyMeta does not include requestId
-  void history[0].metadata?.requestId;
+  void history[0]?.metadata?.requestId;
   helpers.appendAssistant(String(latency ?? 0));
 };
 
@@ -146,7 +146,7 @@ export const untypedChorusElement = (
   <Chorus
     value={untypedMessages}
     onChange={(next) => {
-      void next[0].metadata?.arbitrary;
+      void next[0]?.metadata?.arbitrary;
     }}
     renderMessage={(message) => {
       void message.metadata?.arbitrary;
