@@ -1,5 +1,8 @@
 import { warnOnceInDev } from '../../utils/warnings';
+import { hasOwn } from '../objectUtils';
 import type { ConnectorToolDelta } from '../types';
+
+export { hasOwn };
 
 export interface AiSdkConnectorState {
   toolNamesById: Map<string, string>;
@@ -11,10 +14,6 @@ export function createAiSdkConnectorState(): AiSdkConnectorState {
 
 export function resetAiSdkState(state: AiSdkConnectorState) {
   state.toolNamesById.clear();
-}
-
-export function hasOwn(value: object, key: PropertyKey) {
-  return Object.prototype.hasOwnProperty.call(value, key);
 }
 
 export function warnMissingToolCallId(frameType: string) {

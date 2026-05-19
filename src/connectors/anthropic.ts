@@ -1,4 +1,5 @@
 import { extractErrorMessage } from './error';
+import { hasOwn } from './objectUtils';
 import type { Connector, ConnectorResult, ConnectorToolDelta } from './types';
 
 export interface AnthropicConnectorState {
@@ -13,10 +14,6 @@ export function createAnthropicConnectorState(): AnthropicConnectorState {
 function resetAnthropicState(state: AnthropicConnectorState) {
   state.toolIdsByBlockIndex.clear();
   state.providerToolIdsByBlockIndex.clear();
-}
-
-function hasOwn(value: object, key: PropertyKey) {
-  return Object.prototype.hasOwnProperty.call(value, key);
 }
 
 function blockIndexKey(index: unknown) {

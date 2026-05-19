@@ -1,8 +1,7 @@
+import { hasOwn } from '../objectUtils';
 import type { ConnectorResult, ConnectorToolDelta } from '../types';
 
-export function hasOwn(value: object, key: PropertyKey) {
-  return Object.prototype.hasOwnProperty.call(value, key);
-}
+export { hasOwn };
 
 export function appendField(target: ConnectorResult, key: 'text' | 'reasoning', value: string) {
   if (!value) return;
@@ -30,7 +29,7 @@ export function mergeResult(target: ConnectorResult, source: ConnectorResult | n
   const toolDeltas = source.toolDeltas?.length ? source.toolDeltas : source.toolDelta ? [source.toolDelta] : [];
   for (const toolDelta of toolDeltas) appendToolDelta(target, toolDelta);
   if (source.error) target.error = source.error;
-  if (Object.prototype.hasOwnProperty.call(source, 'errorPayload')) target.errorPayload = source.errorPayload;
+  if (hasOwn(source, 'errorPayload')) target.errorPayload = source.errorPayload;
   if (source.done) target.done = true;
 }
 

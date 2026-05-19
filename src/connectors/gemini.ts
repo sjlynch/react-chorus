@@ -1,13 +1,14 @@
 import { extractErrorMessage } from './error';
+import {
+  DEFAULT_CANDIDATE_INDEX,
+  findWorstSafetyCategory,
+  geminiBlockedMessage,
+  isBlockingFinishReason,
+  isDoneFinishReason,
+  isUnspecifiedFinishReason,
+} from './geminiSemantics';
+import { hasOwn } from './objectUtils';
 import type { Connector, ConnectorResult, ConnectorToolDelta } from './types';
-
-const DEFAULT_CANDIDATE_INDEX = 0;
-const NORMAL_FINISH_REASONS = new Set(['STOP', 'MAX_TOKENS']);
-const UNSPECIFIED_FINISH_REASONS = new Set(['FINISH_REASON_UNSPECIFIED', 'UNSPECIFIED']);
-
-function hasOwn(value: object, key: PropertyKey) {
-  return Object.prototype.hasOwnProperty.call(value, key);
-}
 
 function appendField(target: ConnectorResult, key: 'text' | 'reasoning', value: string) {
   if (!value) return;
@@ -39,58 +40,6 @@ function getCandidateKey(candidate: unknown, arrayIndex: number) {
   return typeof providerIndex === 'number' || typeof providerIndex === 'string'
     ? String(providerIndex)
     : String(arrayIndex);
-}
-
-function isUnspecifiedFinishReason(finishReason: unknown): finishReason is string {
-  return typeof finishReason === 'string' && UNSPECIFIED_FINISH_REASONS.has(finishReason);
-}
-
-function isBlockingFinishReason(finishReason: unknown): finishReason is string {
-  if (typeof finishReason !== 'string' || !finishReason) return false;
-  return !NORMAL_FINISH_REASONS.has(finishReason) && !UNSPECIFIED_FINISH_REASONS.has(finishReason);
-}
-
-function isDoneFinishReason(finishReason: unknown): finishReason is string {
-  return typeof finishReason === 'string' && NORMAL_FINISH_REASONS.has(finishReason);
-}
-
-function geminiBlockedMessage(finishReason: string, hasText: boolean, worstCategory?: string) {
-  const base = hasText
-    ? `Gemini response ended with blocked finishReason: ${finishReason}`
-    : `Gemini response was blocked and returned no text (finishReason: ${finishReason})`;
-  return worstCategory ? `${base} (worst category: ${worstCategory})` : base;
-}
-
-const SAFETY_PROBABILITY_RANK: Record<string, number> = {
-  NEGLIGIBLE: 0,
-  LOW: 1,
-  MEDIUM: 2,
-  HIGH: 3,
-};
-
-/**
- * Pick the highest-severity safety rating from a `candidate.safetyRatings` array. Returns the
- * category string of the rating with the largest `probability` (or the first `blocked: true`
- * rating, which trumps probability). Used to enrich blocked-finish-reason error messages.
- */
-function findWorstSafetyCategory(safetyRatings: unknown): string | undefined {
-  if (!Array.isArray(safetyRatings) || safetyRatings.length === 0) return undefined;
-  let worstCategory: string | undefined;
-  let worstRank = -1;
-  for (const rating of safetyRatings) {
-    if (!rating || typeof rating !== 'object') continue;
-    const r = rating as Record<string, unknown>;
-    const category = typeof r.category === 'string' ? r.category : undefined;
-    if (!category) continue;
-    if (r.blocked === true) return category;
-    const probability = typeof r.probability === 'string' ? r.probability : undefined;
-    const rank = probability ? SAFETY_PROBABILITY_RANK[probability] ?? -1 : -1;
-    if (rank > worstRank) {
-      worstRank = rank;
-      worstCategory = category;
-    }
-  }
-  return worstCategory;
 }
 
 function extractFunctionCallToolDelta(part: Record<string, unknown>, candidateKey: string, partIndex: number): ConnectorToolDelta | null {
