@@ -6,30 +6,25 @@ import { useChorusStream, type Transport } from './useChorusStream';
 import { useLatestRef } from './useLatestRef';
 import { useMirroredState } from './useMirroredState';
 import { useAssistantSessionRefs } from './assistant-session/useAssistantSessionRefs';
-import { isChorusDevMode } from '../utils/devMode';
 import { createDefaultFetchSSETransport, type FetchTransportInit } from './assistant-session/transport';
-import { cloneHistoryForRetry, findLastUserMessage } from './assistant-session/messageUtils';
 import { DEFAULT_MAX_TOOL_ITERATIONS } from './assistant-session/toolLoop';
 import { createObserverCallbacks } from './assistant-session/observerCallbacks';
 import { useAssistantBuffer } from './assistant-session/assistantBuffer';
 import { useToolExecution } from './assistant-session/toolExecution';
-import { startOnSendLifecycle } from './assistant-session/onSendLifecycle';
 import { useSessionCommands } from './assistant-session/sessionCommands';
 import { useTransportLifecycle, type DoStream } from './assistant-session/transportLifecycle';
+import { useSessionOrchestrator } from './assistant-session/sessionOrchestrator';
 import type { ChorusToolRegistry } from '../tools';
 import type {
-  ChorusAbortReason,
   ChorusAbortSource,
   ChorusConfirmClearConversation,
   ChorusConfirmDeleteMessage,
-  ChorusFinishContext,
   ChorusOnAbort,
   ChorusOnFinish,
   ChorusOnSend,
   ChorusOnStreamDone,
   ChorusOnToolCall,
   ChorusOnToolDelta,
-  ChorusSendPath,
   ChorusShouldContinueToolLoop,
   SubmittedUserTurn,
   UpdateMessagesOptions,
@@ -205,18 +200,6 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
   }, [fallbackErrorMessageRef]);
 
   const lastSubmittedTurnRef = React.useRef<SubmittedUserTurn<TMeta> | null>(null);
-  const controllerRef = React.useRef<AbortController | null>(null);
-  const activeSessionIdRef = React.useRef(0);
-  const activeSendPathRef = React.useRef<ChorusSendPath | null>(null);
-  const warnedMissingHandlerRef = React.useRef(false);
-  const warnedTransportOnSendRef = React.useRef(false);
-
-  const warnMissingResponseHandler = React.useCallback(() => {
-    if (isChorusDevMode() && !warnedMissingHandlerRef.current) {
-      warnedMissingHandlerRef.current = true;
-      console.warn('[Chorus] `send` was called but neither `transport` nor `onSend` was provided. Pass one of these props to produce an assistant response.');
-    }
-  }, []);
 
   const updateSessionMessages = React.useCallback((
     updater: (prev: Message<TMeta>[]) => Message<TMeta>[],
@@ -236,25 +219,6 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     onToolDeltaRef,
     onToolCallRef,
   }), [onAbortRef, onChunkRef, onErrorRef, onFinishRef, onStreamDoneRef, onToolCallRef, onToolDeltaRef]);
-
-  const beginAssistantSession = React.useCallback(() => {
-    activeSessionIdRef.current += 1;
-    return activeSessionIdRef.current;
-  }, []);
-
-  const isAssistantSessionActive = React.useCallback((sessionId: number) => activeSessionIdRef.current === sessionId, []);
-
-  const invalidateAssistantSession = React.useCallback((sessionId?: number) => {
-    if (sessionId === undefined || activeSessionIdRef.current === sessionId) {
-      activeSessionIdRef.current += 1;
-      activeSendPathRef.current = null;
-    }
-  }, []);
-
-  const rememberSubmittedTurn = React.useCallback((text: string, history: Message<TMeta>[]) => {
-    if (!findLastUserMessage(history)) return;
-    lastSubmittedTurnRef.current = { text, history: cloneHistoryForRetry(history) };
-  }, []);
 
   const buffer = useAssistantBuffer<TMeta>({
     updateSessionMessages,
@@ -277,6 +241,38 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     finalizeAssistantNow,
   } = buffer;
 
+  const orchestrator = useSessionOrchestrator<TMeta>({
+    messagesRef,
+    transportRef,
+    onSendRef,
+    minAssistantDelayMsRef,
+    systemPromptRef,
+    hasStartedAssistantRef,
+    pendingAssistantIdRef,
+    pendingToolMessageIdsRef,
+    lastSubmittedTurnRef,
+    updateSessionMessages,
+    setInternalSending,
+    setTransportBusy,
+    forceRender,
+    clearStreamError,
+    showStreamError,
+    appendAssistantNow,
+    appendAssistantReasoningNow,
+    finalizeAssistantNow,
+    resetPendingAssistantState,
+    resetStreamState,
+    observers,
+  });
+  const {
+    isAssistantSessionActive,
+    invalidateAssistantSession,
+    removePendingAssistant,
+    abortActiveAssistant,
+    triggerAssistant,
+    warnMissingResponseHandler,
+  } = orchestrator;
+
   const toolExec = useToolExecution<TMeta>({
     updateSessionMessages,
     messagesRef,
@@ -291,31 +287,6 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     forceRender,
   });
   const { appendToolDeltaNow, getToolMessagesByIds, runCompletedToolCalls } = toolExec;
-
-  const completeActiveSession = React.useCallback((
-    sessionId: number,
-    finish?: { reason: ChorusFinishContext<TMeta>['reason']; response?: Response; message?: Message<TMeta> },
-  ) => {
-    if (!isAssistantSessionActive(sessionId)) return null;
-
-    const message = finish?.message ?? finalizeAssistantNow();
-    if (finish?.message) {
-      resetPendingAssistantState();
-      setInternalSending(false);
-      forceRender();
-    }
-
-    invalidateAssistantSession(sessionId);
-    if (finish && message) {
-      observers.safeOnFinish({
-        message,
-        messages: messagesRef.current,
-        reason: finish.reason,
-        response: finish.response,
-      });
-    }
-    return message;
-  }, [finalizeAssistantNow, forceRender, invalidateAssistantSession, isAssistantSessionActive, messagesRef, observers, resetPendingAssistantState, setInternalSending]);
 
   const resolvedTransport = React.useMemo((): Transport<TMeta> => {
     if (typeof transport === 'string') return createDefaultFetchSSETransport<TMeta>(transport);
@@ -334,19 +305,10 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     transportRef.current
       ? streamSendingRef.current || transportBusyRef.current
       : internalSendingRef.current
-  ), [streamSendingRef, transportRef]);
-
-  const removePendingAssistant = React.useCallback(() => {
-    const partialId = pendingAssistantIdRef.current;
-    const toolMessageIds = new Set(pendingToolMessageIdsRef.current);
-    resetStreamState();
-    if (partialId || toolMessageIds.size > 0) {
-      updateSessionMessages(prev => prev.filter(m => m.id !== partialId && !toolMessageIds.has(m.id)), { flushPersistence: true, reason: 'delete' });
-    }
-  }, [pendingAssistantIdRef, pendingToolMessageIdsRef, resetStreamState, updateSessionMessages]);
+  ), [internalSendingRef, streamSendingRef, transportBusyRef, transportRef]);
 
   const transportLifecycle = useTransportLifecycle<TMeta>({
-    controllerRef,
+    controllerRef: orchestrator.controllerRef,
     messagesRef,
     pendingToolMessageIdsRef,
     autoContinueToolsRef,
@@ -372,82 +334,10 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
   });
   const { startTransportStream } = transportLifecycle;
 
-  const abortActiveAssistant = React.useCallback((reason: ChorusAbortReason, source: ChorusAbortSource) => {
-    const path = activeSendPathRef.current ?? (transportRef.current ? 'transport' : 'onSend');
-
-    invalidateAssistantSession();
-    controllerRef.current?.abort();
-    if (path === 'transport') {
-      streamAbort();
-      setTransportBusy(false);
-    }
-    controllerRef.current = null;
-
-    const message = finalizeAssistantNow();
-    observers.safeOnAbort({
-      message,
-      messages: messagesRef.current,
-      reason,
-      source,
-      path,
-    });
-  }, [finalizeAssistantNow, invalidateAssistantSession, messagesRef, observers, setTransportBusy, streamAbort, transportRef]);
-
-  const triggerAssistant = React.useCallback((text: string, history: Message<TMeta>[] = messagesRef.current) => {
-    if (activeSendPathRef.current) abortActiveAssistant('superseded', 'programmatic');
-
-    const sessionId = beginAssistantSession();
-    rememberSubmittedTurn(text, history);
-    const currentTransport = transportRef.current;
-    const currentOnSend = onSendRef.current;
-
-    if (currentTransport) {
-      if (isChorusDevMode() && currentOnSend && !warnedTransportOnSendRef.current) {
-        warnedTransportOnSendRef.current = true;
-        console.warn('[Chorus] Both `transport` and `onSend` props were provided. `transport` takes precedence and `onSend` will be ignored. Remove one of the two props to silence this warning.');
-      }
-      controllerRef.current?.abort();
-      const controller = new AbortController();
-      controllerRef.current = controller;
-      activeSendPathRef.current = 'transport';
-      resetStreamState();
-      clearStreamError();
-      setTransportBusy(true);
-      startTransportStream(sessionId, text, history, controller, 0);
-      return;
-    }
-
-    if (!currentOnSend) {
-      invalidateAssistantSession(sessionId);
-      warnMissingResponseHandler();
-      return;
-    }
-
-    startOnSendLifecycle<TMeta>({
-      controllerRef,
-      activeSendPathRef,
-      minAssistantDelayMsRef,
-      systemPromptRef,
-      hasStartedAssistantRef,
-      setInternalSending,
-      clearStreamError,
-      resetStreamState,
-      appendAssistantNow,
-      appendAssistantReasoningNow,
-      appendToolDeltaNow,
-      completeActiveSession,
-      isAssistantSessionActive,
-      invalidateAssistantSession,
-      removePendingAssistant,
-      updateSessionMessages,
-      observers,
-      showStreamError,
-      sessionId,
-      text,
-      history,
-      onSend: currentOnSend,
-    });
-  }, [abortActiveAssistant, appendAssistantNow, appendAssistantReasoningNow, appendToolDeltaNow, beginAssistantSession, clearStreamError, completeActiveSession, hasStartedAssistantRef, invalidateAssistantSession, isAssistantSessionActive, messagesRef, minAssistantDelayMsRef, observers, onSendRef, rememberSubmittedTurn, removePendingAssistant, resetStreamState, setInternalSending, setTransportBusy, showStreamError, startTransportStream, systemPromptRef, transportRef, updateSessionMessages, warnMissingResponseHandler]);
+  // The orchestrator captures three hook-supplied callbacks at call time via
+  // a ref so it can be created before useToolExecution / useChorusStream /
+  // useTransportLifecycle (which themselves consume orchestrator outputs).
+  orchestrator.bindLateDeps({ appendToolDeltaNow, streamAbort, startTransportStream });
 
   const { send, retry, stop, clear, handleEdit, handleRegenerate, handleDelete } = useSessionCommands<TMeta>({
     messagesRef,
