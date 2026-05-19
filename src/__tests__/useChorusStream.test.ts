@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { useChorusStream, type Transport } from '../hooks/useChorusStream';
+import { ChorusStreamError } from '../streaming/errors';
 import { createFetchSSETransport } from '../streaming/createFetchSSETransport';
 import { createWebSocketTransport } from '../streaming/createWebSocketTransport';
 import type { Message } from '../types';
@@ -644,7 +645,7 @@ describe('useChorusStream', () => {
     }
   });
 
-  it('does nothing and warns in development when send() is called while already sending', async () => {
+  it('rejects with a concurrent-send ChorusStreamError when send() is called while already sending', async () => {
     const response = deferred<Response>();
     const transport = vi.fn<Transport>(() => response.promise);
     const onChunk = vi.fn();
@@ -658,13 +659,23 @@ describe('useChorusStream', () => {
 
     expect(result.current.sending).toBe(true);
 
+    const expectedMessage = '[Chorus] useChorusStream.send was called while a previous send is still in flight; the new call was ignored. Wait for the previous send to finish (await the promise) or call abort() before re-sending.';
+
+    let rejection: unknown;
     await act(async () => {
-      await result.current.send('second', [], { onChunk });
+      rejection = await result.current.send('second', [], { onChunk }).then(
+        () => undefined,
+        (err) => err,
+      );
     });
+
+    expect(rejection).toBeInstanceOf(ChorusStreamError);
+    expect((rejection as ChorusStreamError).code).toBe('concurrent-send');
+    expect((rejection as ChorusStreamError).message).toBe(expectedMessage);
 
     expect(transport).toHaveBeenCalledTimes(1);
     expect(transport).toHaveBeenCalledWith('first', [], expect.any(AbortSignal));
-    expect(warn).toHaveBeenCalledWith('[Chorus] useChorusStream.send was called while a previous send is still in flight; the new call was ignored. Wait for the previous send to finish (await the promise) or call abort() before re-sending.');
+    expect(warn).toHaveBeenCalledWith(expectedMessage);
 
     await act(async () => {
       response.resolve(makeSseResponse(['only-once']));

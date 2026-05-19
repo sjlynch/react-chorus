@@ -166,14 +166,16 @@ export function useSessionCommands<TMeta>(deps: SessionCommandsDeps<TMeta>): Ses
 
   const handleEdit = React.useCallback((id: string, newText: string) => {
     if (isBusy()) return;
+    const trimmed = newText.trim();
+    if (!trimmed) return;
     const currentMessages = messagesRef.current;
     const idx = currentMessages.findIndex(m => m.id === id);
     if (idx === -1) return;
     const currentMessage = currentMessages[idx];
     if (!currentMessage || currentMessage.role !== 'user') return;
-    const edited: Message<TMeta> = { ...currentMessage, text: newText };
+    const edited: Message<TMeta> = { ...currentMessage, text: trimmed };
     const next = updateSessionMessages(prev => [...prev.slice(0, idx), edited], { flushPersistence: true, reason: 'edit' });
-    triggerAssistant(newText, next);
+    triggerAssistant(trimmed, next);
   }, [isBusy, messagesRef, triggerAssistant, updateSessionMessages]);
 
   const handleRegenerate = React.useCallback((id: string) => {

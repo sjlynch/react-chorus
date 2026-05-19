@@ -50,12 +50,19 @@ interface UseChorusMessagesOptions<TMeta = Record<string, unknown>> {
 }
 
 function warnDuplicateMessageIds<TMeta>(next: Message<TMeta>[]) {
-  if (isChorusDevMode()) {
-    const ids = next.map(m => m.id);
-    const uniq = new Set(ids);
-    if (uniq.size !== ids.length) {
-      console.warn('[Chorus] Duplicate message IDs detected:', ids.filter((id, i) => ids.indexOf(id) !== i));
+  if (!isChorusDevMode()) return;
+  const seen = new Set<string>();
+  let duplicates: string[] | null = null;
+  for (const m of next) {
+    if (seen.has(m.id)) {
+      if (duplicates === null) duplicates = [];
+      duplicates.push(m.id);
+    } else {
+      seen.add(m.id);
     }
+  }
+  if (duplicates !== null) {
+    console.warn('[Chorus] Duplicate message IDs detected:', duplicates);
   }
 }
 

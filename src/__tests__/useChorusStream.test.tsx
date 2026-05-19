@@ -1,6 +1,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { useChorusStream, type Transport } from '../hooks/useChorusStream';
+import { ChorusStreamError } from '../streaming/errors';
 
 function makeResponse(body = 'data: hello\n\n'): Response {
   const stream = new ReadableStream<Uint8Array>({
@@ -16,17 +17,24 @@ describe('useChorusStream', () => {
   it('prevents synchronous double sends before React state updates flush', async () => {
     const transport = vi.fn<Transport>(async () => makeResponse());
     const onChunk = vi.fn();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const { result } = renderHook(() => useChorusStream(transport));
 
+    let secondError: unknown;
     await act(async () => {
       const first = result.current.send('hello', [], { onChunk });
-      const second = result.current.send('hello again', [], { onChunk });
+      const second = result.current.send('hello again', [], { onChunk }).catch((err) => {
+        secondError = err;
+      });
       await Promise.all([first, second]);
     });
 
     expect(transport).toHaveBeenCalledTimes(1);
     expect(transport).toHaveBeenCalledWith('hello', [], expect.any(AbortSignal));
     expect(onChunk).toHaveBeenCalledTimes(1);
+    expect(secondError).toBeInstanceOf(ChorusStreamError);
+    expect((secondError as ChorusStreamError).code).toBe('concurrent-send');
+    warn.mockRestore();
   });
 
   it('keeps the send callback stable across sending state changes', async () => {
