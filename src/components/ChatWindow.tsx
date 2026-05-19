@@ -1,7 +1,7 @@
 import React from 'react';
 import type { Message } from '../types';
 import { resolveChorusLabels } from '../labels/resolve';
-import { canWriteTextToClipboard, writeTextToClipboard } from '../utils/messageCopy';
+import { useCanWriteTextToClipboard, writeTextToClipboard } from '../utils/messageCopy';
 import { visibleActivityKey } from './chat-window/activityKey';
 import { useMessageFeedbackState } from './chat-window/feedback';
 import { MessageList } from './chat-window/MessageList';
@@ -73,7 +73,11 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
   const visible = React.useMemo(() => filterVisibleMessages(messages, hiddenRoleSet), [messages, hiddenRoleSet]);
   const normalizedMaxRenderedMessages = React.useMemo(() => normalizeMaxRenderedMessages(maxRenderedMessages), [maxRenderedMessages]);
   const renderedVisible = React.useMemo(() => windowVisibleMessages(visible, normalizedMaxRenderedMessages), [normalizedMaxRenderedMessages, visible]);
-  const copyAvailable = Boolean(onCopy) || canWriteTextToClipboard();
+  // Defer the navigator.clipboard feature-detect to a mount effect so the
+  // server-rendered tree and the initial client render agree (no hydration
+  // mismatch from clipboard-only browser APIs being absent on the server).
+  const clipboardWritable = useCanWriteTextToClipboard();
+  const copyAvailable = Boolean(onCopy) || clipboardWritable;
   const copyMessage = React.useCallback((message: Message<TMeta>): MessageCopyResult => {
     if (onCopy) return onCopy(message);
 
