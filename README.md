@@ -620,7 +620,7 @@ data: {"candidates":[{"index":0,"content":{"parts":[{"text":"Hello world"}]},"fi
 
 Gemini `functionCall.name` maps to `toolCall.name`, `functionCall.args` maps to `toolCall.input`, and the connector generates a stable tool delta id from the candidate/part index when Gemini does not provide one.
 
-Gemini blocked finish reasons such as `SAFETY`, `RECITATION`, `BLOCKLIST`, or `PROHIBITED_CONTENT` are treated as stream errors instead of silent completion. The `Error` passed to `onError` includes the raw `finishReason` (for example `finishReason: SAFETY`); the default UI still shows the generic `errorMessage`. `MAX_TOKENS` is treated as a completed, possibly truncated response.
+Gemini blocked finish reasons such as `SAFETY`, `RECITATION`, `BLOCKLIST`, or `PROHIBITED_CONTENT` are treated as stream errors instead of silent completion. The `Error` passed to `onError` includes the raw `finishReason` (for example `finishReason: SAFETY`); the default UI still shows the generic `errorMessage`. `MAX_TOKENS` is treated as a completed response and additionally emits a non-fatal `warning` with `code: 'truncated'` (alongside `metadata.finishReason: 'MAX_TOKENS'`) so consumers wired to `onWarning` or dev-mode warning logs are notified that the response was cut off at the model's token limit.
 
 Example backend proxy (Express + `@google/generative-ai`):
 

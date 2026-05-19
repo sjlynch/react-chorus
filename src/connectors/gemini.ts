@@ -114,8 +114,10 @@ function extractFunctionCallToolDelta(part: Record<string, unknown>, candidateKe
  * Yields text from the selected candidate's content.parts[*].text, reasoning
  * from thought/thinking parts, and tool-use deltas from functionCall parts.
  * When multiple candidates are present, only candidate index 0 is emitted;
- * alternatives are not concatenated. STOP and MAX_TOKENS finish the stream,
- * while blocked/safety finish reasons surface as connector errors. Gemini's
+ * alternatives are not concatenated. STOP and MAX_TOKENS finish the stream;
+ * MAX_TOKENS additionally emits a `truncated` warning (with `metadata.finishReason`)
+ * so consumers learn the response was cut off. Blocked/safety finish reasons
+ * surface as connector errors. Gemini's
  * UNSPECIFIED finish reasons are also surfaced as explicit errors (rather than
  * ignored) so callers receive a terminal signal instead of hanging.
  *
@@ -194,7 +196,17 @@ export const geminiConnector: Connector = {
         };
       }
 
-      if (isDoneFinishReason(finishReason)) result.done = true;
+      if (isDoneFinishReason(finishReason)) {
+        result.done = true;
+        if (finishReason === 'MAX_TOKENS') {
+          result.metadata = { ...(result.metadata ?? {}), finishReason };
+          result.warning = {
+            code: 'truncated',
+            message: 'Gemini response truncated by maxOutputTokens',
+            payload: obj,
+          };
+        }
+      }
 
       if (result.text || result.reasoning || hasToolDelta(result) || result.done || result.error || result.metadata) return result;
       return null;
