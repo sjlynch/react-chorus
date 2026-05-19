@@ -3,7 +3,7 @@ import { dataUrlFromAttachment, fileUriFromAttachment, unsupportedAttachmentText
 import { isRecord } from './metadata';
 import { stripGeminiOptions } from './options';
 import { messageText, objectToolInput, safeStringify, toolContextText } from './toolOutput';
-import { forEachHistoryEntry } from './toolRunIterator';
+import { mapHistoryWithToolRuns } from './toolRunMapper';
 import type { ProviderMappingOptions } from './types/common';
 import type {
   GeminiContent,
@@ -13,8 +13,6 @@ import type {
   GeminiGenerateContentBodyOptions,
   GeminiPart,
 } from './types/gemini';
-
-type GeminiToolMessage<TMeta> = { message: ToolMessage<TMeta>; name: string };
 
 function geminiSystemInstruction(history: Message<unknown>[]) {
   const system = history
@@ -56,17 +54,11 @@ function geminiFunctionResponsePayload(value: unknown): Record<string, unknown> 
   return { content: safeStringify(value) };
 }
 
-function geminiToolMessage<TMeta>(message: Message<TMeta>): GeminiToolMessage<TMeta> | null {
-  if (message.role !== 'tool') return null;
-  const name = message.toolCall.name;
-  return name ? { message, name } : null;
-}
-
-function geminiFunctionCallPart<TMeta>({ message, name }: GeminiToolMessage<TMeta>): GeminiFunctionCallPart {
+function geminiFunctionCallPart<TMeta>(message: ToolMessage<TMeta>, name: string): GeminiFunctionCallPart {
   return { functionCall: { name, args: objectToolInput(message.toolCall.input) } };
 }
 
-function geminiFunctionResponsePart<TMeta>({ message, name }: GeminiToolMessage<TMeta>): GeminiFunctionResponsePart {
+function geminiFunctionResponsePart<TMeta>(message: ToolMessage<TMeta>, name: string): GeminiFunctionResponsePart {
   const text = messageText(message);
   const value = message.toolCall.output ?? (text.trim() ? text : undefined);
   return { functionResponse: { name, response: geminiFunctionResponsePayload(value) } };
@@ -82,13 +74,6 @@ function appendGeminiFunctionCalls(target: GeminiContent[], parts: GeminiPart[])
   }
 
   target.push({ role: 'model', parts });
-}
-
-function appendGeminiToolRun<TMeta>(target: GeminiContent[], run: Array<GeminiToolMessage<TMeta>>) {
-  if (!run.length) return;
-
-  appendGeminiFunctionCalls(target, run.map(geminiFunctionCallPart));
-  target.push({ role: 'user', parts: run.map(geminiFunctionResponsePart) });
 }
 
 function toGeminiContent<TMeta>(message: Message<TMeta>, options: ProviderMappingOptions<TMeta>): GeminiContent | null {
@@ -117,34 +102,16 @@ export function toGeminiContents<TMeta = Record<string, unknown>>(
   history: Message<TMeta>[],
   options: ProviderMappingOptions<TMeta> = {},
 ): GeminiContent[] {
-  const contents: GeminiContent[] = [];
-
-  forEachHistoryEntry(history, {
-    onMessage: message => {
-      const mapped = toGeminiContent(message, options);
-      if (mapped) contents.push(mapped);
+  return mapHistoryWithToolRuns<TMeta, string, GeminiContent>(history, {
+    groupMode: 'contiguous',
+    mapMessage: message => toGeminiContent(message, options),
+    extractToolBlock: message => message.toolCall.name || null,
+    emitToolGroup: (target, pairs) => {
+      appendGeminiFunctionCalls(target, pairs.map(entry => geminiFunctionCallPart(entry.message, entry.block)));
+      target.push({ role: 'user', parts: pairs.map(entry => geminiFunctionResponsePart(entry.message, entry.block)) });
     },
-    onToolRun: group => {
-      let run: Array<GeminiToolMessage<TMeta>> = [];
-      for (const toolMessage of group) {
-        const geminiTool = geminiToolMessage(toolMessage);
-        if (geminiTool) {
-          run.push(geminiTool);
-          continue;
-        }
-
-        appendGeminiToolRun(contents, run);
-        run = [];
-
-        const mapped = toGeminiContent(toolMessage, options);
-        if (mapped) contents.push(mapped);
-      }
-
-      appendGeminiToolRun(contents, run);
-    },
+    fallback: message => toGeminiContent(message, options),
   });
-
-  return contents;
 }
 
 /** Build a Gemini generateContent request body. Use it with a streaming Gemini endpoint and `connector="gemini"`. */

@@ -57,6 +57,72 @@ function extractFunctionCallToolDelta(part: Record<string, unknown>, candidateKe
   return toolDelta.name || hasOwn(toolDelta, 'input') ? toolDelta : null;
 }
 
+// promptFeedback fires when Gemini blocks the *prompt itself* before any candidate is produced;
+// today `candidates` may be empty/missing in that case. Surface it as an error so the UI can show
+// the user that the request was rejected upstream.
+function handlePromptFeedback(obj: Record<string, unknown>): ConnectorResult | null {
+  const promptFeedback = obj.promptFeedback;
+  if (!promptFeedback || typeof promptFeedback !== 'object') return null;
+  const feedback = promptFeedback as Record<string, unknown>;
+  const blockReason = typeof feedback.blockReason === 'string' ? feedback.blockReason : '';
+  if (!blockReason) return null;
+  const worstCategory = findWorstSafetyCategory(feedback.safetyRatings);
+  const message = worstCategory
+    ? `Gemini blocked the prompt (blockReason: ${blockReason}, worst category: ${worstCategory})`
+    : `Gemini blocked the prompt (blockReason: ${blockReason})`;
+  return { error: message, errorPayload: obj };
+}
+
+function extractCandidateContent(candidateObj: Record<string, unknown>, candidateKey: string, result: ConnectorResult) {
+  const parts = (candidateObj.content as { parts?: unknown } | undefined)?.parts;
+  if (!Array.isArray(parts)) return;
+  parts.forEach((part, partIndex) => {
+    if (!part || typeof part !== 'object') return;
+    const partObj = part as Record<string, unknown>;
+    if (typeof partObj.text === 'string' && partObj.text) {
+      appendField(result, partObj.thought === true ? 'reasoning' : 'text', partObj.text);
+    }
+    if (typeof partObj.thinking === 'string' && partObj.thinking) appendField(result, 'reasoning', partObj.thinking);
+    if (typeof partObj.reasoning === 'string' && partObj.reasoning) appendField(result, 'reasoning', partObj.reasoning);
+    const toolDelta = extractFunctionCallToolDelta(partObj, candidateKey, partIndex);
+    if (toolDelta) appendToolDelta(result, toolDelta);
+  });
+}
+
+function applyFinishReason(
+  result: ConnectorResult,
+  finishReason: unknown,
+  worstSafetyCategory: string | undefined,
+  obj: unknown,
+): ConnectorResult {
+  if (isUnspecifiedFinishReason(finishReason)) {
+    return {
+      ...result,
+      error: 'Gemini response ended with an unspecified finish reason',
+      errorPayload: obj,
+    };
+  }
+  if (isBlockingFinishReason(finishReason)) {
+    return {
+      ...result,
+      error: geminiBlockedMessage(finishReason, Boolean(result.text || result.reasoning), worstSafetyCategory),
+      errorPayload: obj,
+    };
+  }
+  if (isDoneFinishReason(finishReason)) {
+    result.done = true;
+    if (finishReason === 'MAX_TOKENS') {
+      result.metadata = { ...(result.metadata ?? {}), finishReason };
+      result.warning = {
+        code: 'truncated',
+        message: 'Gemini response truncated by maxOutputTokens',
+        payload: obj,
+      };
+    }
+  }
+  return result;
+}
+
 /**
  * Google Gemini streaming connector (Google AI / Vertex AI).
  * Expects SSE data lines with JSON objects containing a "candidates" array.
@@ -82,21 +148,8 @@ export const geminiConnector: Connector = {
       if (error) return { error, errorPayload: obj };
       if (!obj || typeof obj !== 'object') return null;
 
-      // promptFeedback fires when Gemini blocks the *prompt itself* before any candidate is
-      // produced; today `candidates` may be empty/missing in that case. Surface it as an error
-      // so the UI can show the user that the request was rejected upstream.
-      const promptFeedback = (obj as Record<string, unknown>).promptFeedback;
-      if (promptFeedback && typeof promptFeedback === 'object') {
-        const feedback = promptFeedback as Record<string, unknown>;
-        const blockReason = typeof feedback.blockReason === 'string' ? feedback.blockReason : '';
-        if (blockReason) {
-          const worstCategory = findWorstSafetyCategory(feedback.safetyRatings);
-          const message = worstCategory
-            ? `Gemini blocked the prompt (blockReason: ${blockReason}, worst category: ${worstCategory})`
-            : `Gemini blocked the prompt (blockReason: ${blockReason})`;
-          return { error: message, errorPayload: obj };
-        }
-      }
+      const promptBlocked = handlePromptFeedback(obj as Record<string, unknown>);
+      if (promptBlocked) return promptBlocked;
 
       if (!Array.isArray(obj.candidates) || obj.candidates.length === 0) return null;
 
@@ -104,23 +157,10 @@ export const geminiConnector: Connector = {
       if (!candidate || typeof candidate !== 'object') return null;
 
       const candidateObj = candidate as Record<string, unknown>;
-      const result: ConnectorResult = {};
-      const parts = (candidateObj.content as { parts?: unknown } | undefined)?.parts;
       const candidateKey = getCandidateKey(candidate, arrayIndex);
+      const result: ConnectorResult = {};
 
-      if (Array.isArray(parts)) {
-        parts.forEach((part, partIndex) => {
-          if (!part || typeof part !== 'object') return;
-          const partObj = part as Record<string, unknown>;
-          if (typeof partObj.text === 'string' && partObj.text) {
-            appendField(result, partObj.thought === true ? 'reasoning' : 'text', partObj.text);
-          }
-          if (typeof partObj.thinking === 'string' && partObj.thinking) appendField(result, 'reasoning', partObj.thinking);
-          if (typeof partObj.reasoning === 'string' && partObj.reasoning) appendField(result, 'reasoning', partObj.reasoning);
-          const toolDelta = extractFunctionCallToolDelta(partObj, candidateKey, partIndex);
-          if (toolDelta) appendToolDelta(result, toolDelta);
-        });
-      }
+      extractCandidateContent(candidateObj, candidateKey, result);
 
       const safetyRatings = candidateObj.safetyRatings;
       const worstSafetyCategory = findWorstSafetyCategory(safetyRatings);
@@ -128,36 +168,10 @@ export const geminiConnector: Connector = {
         result.metadata = { ...(result.metadata ?? {}), safetyRatings };
       }
 
-      const finishReason = candidateObj.finishReason;
-      if (isUnspecifiedFinishReason(finishReason)) {
-        return {
-          ...result,
-          error: 'Gemini response ended with an unspecified finish reason',
-          errorPayload: obj,
-        };
-      }
+      const finalResult = applyFinishReason(result, candidateObj.finishReason, worstSafetyCategory, obj);
+      if (finalResult.error) return finalResult;
 
-      if (isBlockingFinishReason(finishReason)) {
-        return {
-          ...result,
-          error: geminiBlockedMessage(finishReason, Boolean(result.text || result.reasoning), worstSafetyCategory),
-          errorPayload: obj,
-        };
-      }
-
-      if (isDoneFinishReason(finishReason)) {
-        result.done = true;
-        if (finishReason === 'MAX_TOKENS') {
-          result.metadata = { ...(result.metadata ?? {}), finishReason };
-          result.warning = {
-            code: 'truncated',
-            message: 'Gemini response truncated by maxOutputTokens',
-            payload: obj,
-          };
-        }
-      }
-
-      if (result.text || result.reasoning || hasToolDelta(result) || result.done || result.error || result.metadata) return result;
+      if (finalResult.text || finalResult.reasoning || hasToolDelta(finalResult) || finalResult.done || finalResult.metadata) return finalResult;
       return null;
     } catch {
       return null;
