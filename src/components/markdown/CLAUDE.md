@@ -7,5 +7,5 @@ Pipeline boundaries:
 - `sanitize.ts` resolves custom sanitizers/DOMPurify and owns URL/entity decoding used by safe-mode links and images. Treat changes here as security-sensitive.
 - `renderMarkdown.ts` balances streaming fences, parses with the selected Marked instance, and applies the resolved sanitizer.
 - `highlight.ts` is the React lazy-loading hook for highlight.js and scoped theme CSS. Import failures must be caught by callers and remain retryable in `utils/hljsLoader.ts` / `utils/hljs/`.
-- `codeBlockChrome.ts` injects copy chrome around `<pre><code>` blocks using DOMParser when available and the server-side walker otherwise.
+- `codeBlockChrome/` injects copy chrome around `<pre><code>` blocks: `index.ts` exposes `addCodeBlockChrome` plus the DOMParser and server-walker writers, and `htmlScanner.ts` holds the self-contained mini HTML tokenizer (tag scanning + escape helpers) the server walker is built on.
 - `useCodeCopy.ts` owns delegated clipboard events, button feedback timers, and `onCopyError` reporting.
