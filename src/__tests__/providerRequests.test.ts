@@ -222,6 +222,42 @@ describe('provider request mappers', () => {
     ]);
   });
 
+  it('forwards relative image URLs verbatim to OpenAI image fields', () => {
+    const relativeHistory = (): Message[] => [
+      {
+        id: 'rel-user',
+        role: 'user',
+        text: 'Look at this',
+        attachments: [
+          { name: 'a.png', type: 'image/png', url: '/uploads/a.png', data: '/uploads/a.png', size: 1 },
+          { name: 'b.png', type: 'image/png', url: './local/b.png', data: '', size: 1 },
+        ],
+      },
+    ];
+
+    expect(toOpenAIChatCompletionsBody(relativeHistory()).messages).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Look at this' },
+          { type: 'image_url', image_url: { url: '/uploads/a.png' } },
+          { type: 'image_url', image_url: { url: './local/b.png' } },
+        ],
+      },
+    ]);
+
+    expect(toOpenAIResponsesBody(relativeHistory()).input).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'input_text', text: 'Look at this' },
+          { type: 'input_image', image_url: '/uploads/a.png' },
+          { type: 'input_image', image_url: './local/b.png' },
+        ],
+      },
+    ]);
+  });
+
   it('omits non-OpenAI image URI schemes from OpenAI image fields', () => {
     expect(toOpenAIChatCompletionsBody(nonOpenAIUriImageHistory()).messages).toEqual([
       {
