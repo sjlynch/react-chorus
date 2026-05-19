@@ -9,7 +9,7 @@ import { resolveChorusLabels } from './labels/resolve';
 import { useChorusPersistence } from './hooks/useChorusPersistence';
 import { useChorusMessages } from './hooks/useChorusMessages';
 import { useAssistantSession } from './hooks/useAssistantSession';
-import { isChorusDevMode } from './utils/devMode';
+import { useChorusPropWarnings } from './hooks/useChorusPropWarnings';
 import { DEFAULT_CHORUS_HIDDEN_ROLES, DEFAULT_MIN_ASSISTANT_DELAY_MS, DEFAULT_PERSISTENCE_WRITE_DEBOUNCE_MS, type ChorusProps, type ChorusRef } from './Chorus.types';
 
 export type { Transport, FetchTransportInit, Connector, RenderAttachmentErrorContext, ChorusAbortContext, ChorusAbortReason, ChorusAbortSource, ChorusClearConversationContext, ChorusConfirmClearConversation, ChorusConfirmDeleteMessage, ChorusDeleteMessageContext, ChorusFinishContext, ChorusMessagesChangeContext, ChorusOnAbort, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusProps, ChorusRef, ChorusSendHelpers, ChorusSendPath, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusStreamDoneReason, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolLoopContext, ChorusToolRegistry } from './Chorus.types';
@@ -111,33 +111,17 @@ function ChorusInner<TMeta = Record<string, unknown>>({
     onChunk,
   });
 
-  React.useEffect(() => {
-    if (!isChorusDevMode()) return;
-
-    if (messages !== undefined && onChange) {
-      console.warn('[Chorus] `messages` is initial-only and does not make <Chorus> controlled. Use `value` + `onChange` for controlled mode, or rename `messages` to `initialMessages` when you only want to seed uncontrolled state.');
-    }
-
-    if (messages !== undefined && initialMessages !== undefined) {
-      console.warn('[Chorus] Both `messages` and `initialMessages` were provided. `messages` wins as the initial seed; remove one or the other to avoid ambiguity.');
-    }
-
-    if (value !== undefined && persistenceKey) {
-      console.warn('[Chorus] Both `value` and `persistenceKey` were provided. `value` makes the message list controlled, so built-in persistence is ignored and message changes are not saved automatically. Remove `persistenceKey` or manage persistence in your controlled state.');
-    }
-
-    if (value !== undefined && !onChange) {
-      console.warn('[Chorus] `value` makes Chorus controlled, but no `onChange` prop was provided. `onChange` is required for the built-in send/edit/delete/clear UI to update controlled messages.');
-    }
-
-    if (connector !== undefined && transport === undefined && onSend) {
-      console.warn('[Chorus] `connector` only applies to the `transport` send path. With `onSend` you parse the response yourself — pass `connector` into the `useChorusStream` call inside your `onSend` if you need it.');
-    }
-
-    if (sendingProp !== undefined && transport) {
-      console.warn('[Chorus] `sending` was provided alongside `transport`. Chorus owns the transport send state; `sending` is primarily for fully custom `onSend`/`useChorusStream` integrations.');
-    }
-  }, [messages, initialMessages, onChange, value, persistenceKey, connector, transport, onSend, sendingProp]);
+  useChorusPropWarnings<TMeta>({
+    messages,
+    initialMessages,
+    onChange,
+    value,
+    persistenceKey,
+    connector,
+    transport,
+    onSend,
+    sending: sendingProp,
+  });
 
   const resetComposer = React.useCallback(() => {
     setDraft('');
