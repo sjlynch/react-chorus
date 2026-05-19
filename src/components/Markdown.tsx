@@ -2,6 +2,7 @@ import React from 'react';
 import type { MarkedExtension, MarkedOptions } from 'marked';
 import { DEFAULT_CODE_COPY_LABELS } from '../labels/codeCopy';
 import type { ChorusCodeCopyLabels } from '../labels/types';
+import { applyChorusStyleNonce } from '../utils/cspNonce';
 import { normalizeStreamingMarkdown } from '../utils/markdownNormalizer';
 import { addCodeBlockChrome } from './markdown/codeBlockChrome';
 import { useHighlightLoader, type CodeTheme } from './markdown/highlight';
@@ -42,6 +43,7 @@ function useMarkdownStyles(headless: boolean) {
     if (document.getElementById('chorus-md-styles')) return;
     const style = document.createElement('style');
     style.id = 'chorus-md-styles';
+    applyChorusStyleNonce(style);
     style.textContent =
       `.chorus-md.chorus-md-streaming{white-space:pre-wrap}
        .chorus-md .chorus-codeblock{position:relative;margin:8px 0;border-radius:8px;overflow:auto;border:1px solid var(--chorus-code-border,#30363d)}
