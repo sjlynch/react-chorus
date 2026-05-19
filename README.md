@@ -875,7 +875,7 @@ react-chorus keeps React/ReactDOM as peer dependencies and externalizes runtime 
 | `react-chorus` (`ChatWindow`) | 119.0 kB | 39.7 kB | Transcript renderer with Markdown and message action icons, without the composer/widget shell. |
 | `react-chorus` (`ConversationList`) | 7.2 kB | 2.4 kB | Conversation sidebar component only; no Markdown/icon graph. |
 | `react-chorus/transport` | 5.6 kB | 2.4 kB | Transport factories only; no React/UI/Markdown runtime. |
-| `react-chorus/provider-requests` | 9.9 kB | 3.0 kB | Provider request mappers and tool serializers; no React/UI/Markdown runtime. |
+| `react-chorus/provider-requests` | 10.1 kB | 3.1 kB | Provider request mappers and tool serializers; no React/UI/Markdown runtime. |
 | `react-chorus/server` | 0.7 kB | 0.4 kB | SSE framing helpers for proxy routes (headers, encode/format, [DONE], error envelope); no React/UI runtime. |
 | Lazy `highlight.js` runtime | 891.4 kB | 295.9 kB | Async code-fence chunk, never part of initial JS. |
 
