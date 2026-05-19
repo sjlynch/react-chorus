@@ -1,4 +1,5 @@
 import React from 'react';
+import type { ChatInputFocusOptions, ChatInputHandle } from './types';
 
 export const MAX_COMPOSER_TEXTAREA_HEIGHT = 160;
 
@@ -6,7 +7,7 @@ interface UseComposerTextareaOptions {
   value: string;
   onChange: (value: string) => void;
   composerInactive: boolean;
-  forwardedRef: React.ForwardedRef<HTMLDivElement>;
+  forwardedRef: React.ForwardedRef<ChatInputHandle>;
 }
 
 export function useComposerTextarea({
@@ -34,16 +35,22 @@ export function useComposerTextarea({
     resizeTextarea();
   }, [resizeTextarea, value]);
 
-  React.useImperativeHandle(forwardedRef, () => {
-    const root = rootRef.current!;
-    const focusTextarea = () => textareaRef.current?.focus();
-    try {
-      Object.defineProperty(root, 'focus', { value: focusTextarea, configurable: true });
-    } catch {
-      root.focus = focusTextarea;
-    }
-    return root;
-  });
+  React.useImperativeHandle(forwardedRef, () => ({
+    focus(options?: ChatInputFocusOptions) {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      const caret = options?.caret;
+      if (caret === undefined) return;
+      const len = el.value.length;
+      let pos: number;
+      if (caret === 'start') pos = 0;
+      else if (caret === 'end') pos = len;
+      else pos = Math.max(0, Math.min(len, caret));
+      el.selectionStart = pos;
+      el.selectionEnd = pos;
+    },
+  }), []);
 
   const handleTextareaChange = React.useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     if (composerInactive) return;

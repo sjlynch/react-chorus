@@ -8,11 +8,11 @@ import { useAttachmentQueue } from './chat-input/useAttachmentQueue';
 import { useChatInputSend } from './chat-input/useChatInputSend';
 import { useComposerTextarea } from './chat-input/useComposerTextarea';
 import { useFileIngestionHandlers } from './chat-input/useFileIngestionHandlers';
-import type { ChatInputProps } from './chat-input/types';
+import type { ChatInputHandle, ChatInputProps } from './chat-input/types';
 
-export type { ChatInputProps, RenderAttachmentErrorContext } from './chat-input/types';
+export type { ChatInputFocusOptions, ChatInputHandle, ChatInputProps, RenderAttachmentErrorContext } from './chat-input/types';
 
-export const ChatInput = React.forwardRef<HTMLDivElement, ChatInputProps>(function ChatInput({
+export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput({
   value,
   onChange,
   onSend,

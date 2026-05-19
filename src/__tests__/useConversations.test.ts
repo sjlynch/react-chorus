@@ -99,6 +99,34 @@ describe('useConversations', () => {
     expect(sortedIds).toEqual(['old', 'new']);
   });
 
+  it('does not bump updatedAt when pinning or unpinning a conversation', () => {
+    const storage = makeSyncStorage();
+    const ids = ['stale'];
+    const times = [
+      '2026-01-01T00:00:00.000Z',
+      '2099-01-01T00:00:00.000Z',
+      '2099-01-01T00:00:01.000Z',
+    ];
+    const now = () => times.shift() ?? '2099-01-01T00:00:02.000Z';
+    const { result } = renderHook(() => useConversations({
+      storage,
+      createId: () => ids.shift() ?? 'fallback',
+      now,
+    }));
+
+    act(() => { result.current.createConversation('Stale'); });
+    const originalUpdatedAt = result.current.conversations.find(conversation => conversation.id === 'stale')?.updatedAt;
+    expect(originalUpdatedAt).toBe('2026-01-01T00:00:00.000Z');
+
+    act(() => result.current.pinConversation('stale'));
+    expect(result.current.conversations.find(conversation => conversation.id === 'stale')?.pinned).toBe(true);
+    expect(result.current.conversations.find(conversation => conversation.id === 'stale')?.updatedAt).toBe(originalUpdatedAt);
+
+    act(() => result.current.pinConversation('stale', false));
+    expect(result.current.conversations.find(conversation => conversation.id === 'stale')?.pinned).toBe(false);
+    expect(result.current.conversations.find(conversation => conversation.id === 'stale')?.updatedAt).toBe(originalUpdatedAt);
+  });
+
   it('persists the conversation index under a configurable key', () => {
     const storage = makeSyncStorage();
     const { result } = renderHook(() => useConversations({

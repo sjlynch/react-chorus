@@ -162,12 +162,11 @@ export function useConversationActions({
     const current = stateRef.current;
     if (!current.loaded || !current.conversations.some(conversation => conversation.id === id)) return;
 
-    const timestamp = getTimestamp(nowRef.current);
     const conversations = current.conversations.map(conversation => (
-      conversation.id === id ? { ...conversation, pinned, updatedAt: timestamp } : conversation
+      conversation.id === id ? { ...conversation, pinned } : conversation
     ));
     commit(conversations, current.activeId);
-  }, [commit, nowRef, stateRef]);
+  }, [commit, stateRef]);
 
   return {
     touchConversation,
