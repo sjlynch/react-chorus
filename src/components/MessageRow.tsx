@@ -1,6 +1,7 @@
 import React from 'react';
 import type { Message, MessageFeedback } from '../types';
 import type { ChorusAttachmentLabels, ChorusCodeCopyLabels, ChorusMessageActionLabels, ChorusSpeakerLabels } from '../labels/types';
+import { useCanWriteTextToClipboard, writeTextToClipboard } from '../utils/messageCopy';
 import type { MarkdownSanitizer } from './Markdown';
 import { MessageActions, createCopyAction } from './message-row/actions';
 import { MessageBubbleLayout } from './message-row/bubble';
@@ -53,7 +54,15 @@ export interface MessageRowProps<TMeta = Record<string, unknown>> extends Messag
 export function MessageRow<TMeta = Record<string, unknown>>({ m, codeTheme, headless, onEdit, onRegenerate, onDelete, onCopy, onFeedback, initialFeedback, streaming = false, markdownProps, markdownSanitizer, messageActionLabels, speakerLabels, reasoningLabel, codeCopyLabels, attachmentLabels, before, headerSlot, footerSlot, after }: MessageRowProps<TMeta>) {
   const [editing, setEditing] = React.useState(false);
   const editButtonRef = useReturnFocusAfterEditing<HTMLButtonElement>(editing);
-  const copy = createCopyAction(m, onCopy);
+  // Defer the navigator.clipboard fallback so the SSR tree (no clipboard)
+  // matches the initial client tree. The button appears after the mount
+  // effect commits the real availability.
+  const clipboardWritable = useCanWriteTextToClipboard();
+  const copy = onCopy
+    ? createCopyAction(m, onCopy)
+    : clipboardWritable
+      ? () => writeTextToClipboard(m.text ?? '')
+      : undefined;
   const resolvedInitialFeedback = initialFeedback === undefined ? getInitialMessageFeedback(m) : initialFeedback;
   const actions: MessageRenderActions = {
     canEdit: Boolean(m.role === 'user' && onEdit),
