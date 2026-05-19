@@ -21,6 +21,20 @@ export function createClosedBeforeOpenError(event: CloseEvent) {
   return new Error(`WebSocket closed before opening (code ${event.code}${reason})`);
 }
 
+// 1000 Normal Closure is the only code that signals a clean end-of-stream from
+// the server. Everything else (1001 going away, 1006 abnormal closure, 1011
+// server error, etc.) means the socket dropped before the provider sent its
+// done sentinel and any active response stream should be errored, not closed,
+// so callers and telemetry can distinguish truncation from completion.
+export function isNormalCloseCode(code: number): boolean {
+  return code === 1000;
+}
+
+export function createAbnormalCloseError(event: CloseEvent) {
+  const reason = event.reason ? `: ${event.reason}` : '';
+  return new Error(`WebSocket closed before stream complete (code ${event.code}${reason})`);
+}
+
 export function safeCloseSocket(ws: WebSocket, code?: number, reason?: string) {
   try {
     if (code === undefined) ws.close();

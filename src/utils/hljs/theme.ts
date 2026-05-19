@@ -1,3 +1,4 @@
+import { applyChorusStyleNonce } from '../cspNonce';
 import { createRetryableLazyImport, type LazyImport } from './lazyImport';
 import { scopeHljsThemeCss } from './cssScope';
 
@@ -24,6 +25,7 @@ export function loadHljsTheme(theme: CodeTheme): Promise<void> {
         if (document.getElementById(styleId)) return;
         const style = document.createElement('style');
         style.id = styleId;
+        applyChorusStyleNonce(style);
         style.textContent = scopeHljsThemeCss(m.default, theme);
         document.head.appendChild(style);
       }));
