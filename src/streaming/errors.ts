@@ -7,15 +7,19 @@ export interface ErrorBodySnippet {
   timedOut: boolean;
 }
 
+export type ChorusStreamErrorCode = 'concurrent-send';
+
 export class ChorusStreamError extends Error {
   errorPayload?: unknown;
+  code?: ChorusStreamErrorCode;
   override cause?: unknown;
 
-  constructor(message: string, options: { errorPayload?: unknown; cause?: unknown } = {}) {
+  constructor(message: string, options: { errorPayload?: unknown; cause?: unknown; code?: ChorusStreamErrorCode } = {}) {
     super(message);
     this.name = 'ChorusStreamError';
     if (Object.prototype.hasOwnProperty.call(options, 'errorPayload')) this.errorPayload = options.errorPayload;
     if (Object.prototype.hasOwnProperty.call(options, 'cause')) this.cause = options.cause;
+    if (Object.prototype.hasOwnProperty.call(options, 'code')) this.code = options.code;
   }
 }
 
