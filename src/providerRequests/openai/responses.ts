@@ -2,6 +2,7 @@ import type { Message } from '../../types';
 import { openAIImageUrlFromAttachment, unsupportedAttachmentText } from '../attachments';
 import { stripOpenAIResponsesOptions } from '../options';
 import { compactJSONString, messageText, toolContextText, toolOutputText } from '../toolOutput';
+import { forEachHistoryEntry } from '../toolRunIterator';
 import type { ProviderMappingOptions } from '../types/common';
 import type {
   OpenAIResponsesAssistantInputItem,
@@ -125,37 +126,26 @@ export function toOpenAIResponsesInput<TMeta = Record<string, unknown>>(
 ): OpenAIResponsesInputItem[] {
   const input: OpenAIResponsesInputItem[] = [];
 
-  for (let i = 0; i < history.length; i += 1) {
-    const message = history[i];
-    if (!message) continue;
-    if (message.role !== 'tool') {
+  forEachHistoryEntry(history, {
+    onMessage: message => {
       const mapped = toOpenAIResponsesInputItem(message, options);
       if (mapped) input.push(mapped);
-      continue;
-    }
+    },
+    onToolRun: run => {
+      for (const toolMessage of run) {
+        const functionCall = openAIResponsesFunctionCall(toolMessage as Message<unknown>);
+        if (functionCall) {
+          const callId = openAIToolCallId(toolMessage as Message<unknown>);
+          input.push(functionCall);
+          if (callId) input.push({ type: 'function_call_output', call_id: callId, output: toolOutputText(toolMessage) });
+          continue;
+        }
 
-    const group: Message<TMeta>[] = [];
-    while (i < history.length) {
-      const next = history[i];
-      if (!next || next.role !== 'tool') break;
-      group.push(next);
-      i += 1;
-    }
-    i -= 1;
-
-    for (const toolMessage of group) {
-      const functionCall = openAIResponsesFunctionCall(toolMessage as Message<unknown>);
-      if (functionCall) {
-        const callId = openAIToolCallId(toolMessage as Message<unknown>);
-        input.push(functionCall);
-        if (callId) input.push({ type: 'function_call_output', call_id: callId, output: toolOutputText(toolMessage) });
-        continue;
+        const mapped = toOpenAIResponsesInputItem(toolMessage, options);
+        if (mapped) input.push(mapped);
       }
-
-      const mapped = toOpenAIResponsesInputItem(toolMessage, options);
-      if (mapped) input.push(mapped);
-    }
-  }
+    },
+  });
 
   return input;
 }

@@ -3,6 +3,7 @@ import { dataUrlFromAttachment, fileUriFromAttachment, unsupportedAttachmentText
 import { isRecord } from './metadata';
 import { stripGeminiOptions } from './options';
 import { messageText, objectToolInput, safeStringify, toolContextText } from './toolOutput';
+import { forEachHistoryEntry } from './toolRunIterator';
 import type { ProviderMappingOptions } from './types/common';
 import type {
   GeminiContent,
@@ -118,41 +119,30 @@ export function toGeminiContents<TMeta = Record<string, unknown>>(
 ): GeminiContent[] {
   const contents: GeminiContent[] = [];
 
-  for (let i = 0; i < history.length; i += 1) {
-    const message = history[i];
-    if (!message) continue;
-    if (message.role !== 'tool') {
+  forEachHistoryEntry(history, {
+    onMessage: message => {
       const mapped = toGeminiContent(message, options);
       if (mapped) contents.push(mapped);
-      continue;
-    }
+    },
+    onToolRun: group => {
+      let run: Array<GeminiToolMessage<TMeta>> = [];
+      for (const toolMessage of group) {
+        const geminiTool = geminiToolMessage(toolMessage);
+        if (geminiTool) {
+          run.push(geminiTool);
+          continue;
+        }
 
-    const group: Message<TMeta>[] = [];
-    while (i < history.length) {
-      const next = history[i];
-      if (!next || next.role !== 'tool') break;
-      group.push(next);
-      i += 1;
-    }
-    i -= 1;
+        appendGeminiToolRun(contents, run);
+        run = [];
 
-    let run: Array<GeminiToolMessage<TMeta>> = [];
-    for (const toolMessage of group) {
-      const geminiTool = geminiToolMessage(toolMessage);
-      if (geminiTool) {
-        run.push(geminiTool);
-        continue;
+        const mapped = toGeminiContent(toolMessage, options);
+        if (mapped) contents.push(mapped);
       }
 
       appendGeminiToolRun(contents, run);
-      run = [];
-
-      const mapped = toGeminiContent(toolMessage, options);
-      if (mapped) contents.push(mapped);
-    }
-
-    appendGeminiToolRun(contents, run);
-  }
+    },
+  });
 
   return contents;
 }
