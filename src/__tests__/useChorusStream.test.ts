@@ -704,18 +704,81 @@ describe('useChorusStream', () => {
     expect(capturedSignal.aborted).toBe(true);
   });
 
-  it('short-circuits pre-aborted external signals before calling the transport', async () => {
+  it('rejects with an already-aborted ChorusStreamError when send() is called with a pre-aborted externalSignal', async () => {
     const transport = vi.fn<Transport>(() => Promise.resolve(makeSseResponse(['unused'])));
+    const onChunk = vi.fn();
     const { result } = renderHook(() => useChorusStream(transport));
     const controller = new AbortController();
     controller.abort();
 
+    let rejection: unknown;
     await act(async () => {
-      await result.current.send('hello', [], { onChunk: vi.fn() }, controller.signal);
+      rejection = await result.current.send('hello', [], { onChunk }, controller.signal).then(
+        () => undefined,
+        (err) => err,
+      );
     });
 
+    expect(rejection).toBeInstanceOf(ChorusStreamError);
+    expect((rejection as ChorusStreamError).code).toBe('already-aborted');
+    expect((rejection as ChorusStreamError).message).toContain('already aborted');
     expect(transport).not.toHaveBeenCalled();
+    expect(onChunk).not.toHaveBeenCalled();
     expect(result.current.sending).toBe(false);
+  });
+
+  it('warns in dev when abort() is called while a send started with an externalSignal is in flight', async () => {
+    let capturedSignal!: AbortSignal;
+    const transport = vi.fn<Transport>((_text, _history, signal) => {
+      capturedSignal = signal;
+      return new Promise<Response>(() => undefined);
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { result } = renderHook(() => useChorusStream(transport));
+    const externalController = new AbortController();
+
+    try {
+      await act(async () => {
+        void result.current.send('hello', [], { onChunk: vi.fn() }, externalController.signal);
+      });
+
+      expect(result.current.sending).toBe(true);
+      expect(capturedSignal).toBe(externalController.signal);
+
+      act(() => {
+        result.current.abort();
+      });
+
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0][0]).toMatch(/externalSignal/);
+      expect(warn.mock.calls[0][0]).toMatch(/cannot cancel/);
+      expect(capturedSignal.aborted).toBe(false);
+    } finally {
+      warn.mockRestore();
+      externalController.abort();
+    }
+  });
+
+  it('warns in dev when the hook unmounts while a send started with an externalSignal is in flight', async () => {
+    const transport = vi.fn<Transport>(() => new Promise<Response>(() => undefined));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { result, unmount } = renderHook(() => useChorusStream(transport));
+    const externalController = new AbortController();
+
+    try {
+      await act(async () => {
+        void result.current.send('hello', [], { onChunk: vi.fn() }, externalController.signal);
+      });
+
+      unmount();
+
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0][0]).toMatch(/unmounted/);
+      expect(warn.mock.calls[0][0]).toMatch(/externalSignal/);
+    } finally {
+      warn.mockRestore();
+      externalController.abort();
+    }
   });
 
   it('rejects with HTTP JSON error response details', async () => {

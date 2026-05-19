@@ -85,11 +85,35 @@ export function useChorusStream<TMeta = Record<string, unknown>>(transport: Tran
   const controllerRef = React.useRef<AbortController | null>(null);
 
   React.useEffect(() => () => {
+    if (isSendingRef.current && !controllerRef.current) {
+      warnInDev('[Chorus] useChorusStream unmounted while a send started with an externalSignal was in flight; the hook cannot cancel it. Abort the externalSignal you passed to send() from your own cleanup to stop the stream.');
+    }
     controllerRef.current?.abort();
   }, []);
 
+  /**
+   * Start a streaming send.
+   *
+   * Throws a {@link ChorusStreamError} with `code: 'concurrent-send'` if a previous send is
+   * still in flight; await the previous send or call abort() before re-sending.
+   *
+   * Throws a {@link ChorusStreamError} with `code: 'already-aborted'` if `externalSignal`
+   * is already aborted when send() is called; the send is not started, the transport is
+   * not invoked, and no callbacks fire. This lets callers distinguish 'send refused
+   * because the signal was already aborted' from 'send completed successfully'.
+   *
+   * @param externalSignal Optional caller-owned AbortSignal. When supplied, the caller
+   *   takes ownership of cancellation: the hook's own abort() and unmount cleanup will
+   *   NOT cancel an in-flight send (the hook emits a dev-mode warning in those cases).
+   *   Abort the externalSignal yourself to cancel the stream.
+   */
   const send = React.useCallback(async (text: string, history: Message<TMeta>[], cb: SendCallbacks, externalSignal?: AbortSignal) => {
-    if (externalSignal?.aborted) return;
+    if (externalSignal?.aborted) {
+      throw new ChorusStreamError(
+        '[Chorus] useChorusStream.send was called with an externalSignal that was already aborted; the send was not started.',
+        { code: 'already-aborted' },
+      );
+    }
 
     if (isSendingRef.current) {
       const message = '[Chorus] useChorusStream.send was called while a previous send is still in flight; the new call was ignored. Wait for the previous send to finish (await the promise) or call abort() before re-sending.';
@@ -196,6 +220,11 @@ export function useChorusStream<TMeta = Record<string, unknown>>(transport: Tran
     if (errorToThrow !== undefined) throw errorToThrow;
   }, [transportRef, connectorRef]);
 
-  const abort = React.useCallback(() => { controllerRef.current?.abort(); }, []);
+  const abort = React.useCallback(() => {
+    if (isSendingRef.current && !controllerRef.current) {
+      warnInDev('[Chorus] useChorusStream.abort() was called while a send started with an externalSignal was in flight; the hook does not own that signal and cannot cancel the stream. Abort the externalSignal you passed to send() to stop the stream.');
+    }
+    controllerRef.current?.abort();
+  }, []);
   return { send, abort, sending };
 }

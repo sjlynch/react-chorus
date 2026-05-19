@@ -7,7 +7,7 @@ export interface ErrorBodySnippet {
   timedOut: boolean;
 }
 
-export type ChorusStreamErrorCode = 'concurrent-send';
+export type ChorusStreamErrorCode = 'concurrent-send' | 'already-aborted';
 
 export class ChorusStreamError extends Error {
   errorPayload?: unknown;
