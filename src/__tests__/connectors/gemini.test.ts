@@ -86,11 +86,23 @@ describe('geminiConnector', () => {
     expect(geminiConnector.extract(data)).toEqual({ text: 'end', done: true });
   });
 
-  it('returns done for MAX_TOKENS while preserving emitted text', () => {
-    const data = JSON.stringify({
+  it('returns done for MAX_TOKENS with a truncated warning and finishReason metadata', () => {
+    const payload = {
       candidates: [{ finishReason: 'MAX_TOKENS', content: { parts: [{ text: 'truncated' }] } }],
+    };
+    const data = JSON.stringify(payload);
+    const result = geminiConnector.extract(data);
+    expect(result).toEqual({
+      text: 'truncated',
+      done: true,
+      metadata: { finishReason: 'MAX_TOKENS' },
+      warning: {
+        code: 'truncated',
+        message: 'Gemini response truncated by maxOutputTokens',
+        payload,
+      },
     });
-    expect(geminiConnector.extract(data)).toEqual({ text: 'truncated', done: true });
+    expect(result?.warning?.code).toBe('truncated');
   });
 
   it.each(['FINISH_REASON_UNSPECIFIED', 'UNSPECIFIED'])('returns an error for Gemini %s finish reason', finishReason => {

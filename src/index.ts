@@ -132,6 +132,7 @@ export { defineTool } from './tools';
 export type { ChorusToolDefinition } from './tools';
 export { Markdown } from './components/Markdown';
 export type { MarkdownProps, MarkdownSanitizer } from './components/Markdown';
+export { setChorusStyleNonce } from './utils/cspNonce';
 
 export type { Connector, ConnectorResult, ConnectorToolDelta, ConnectorWarning } from './connectors/connectors';
 export { getConnector, autoConnector } from './connectors/connectors';
