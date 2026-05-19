@@ -45,4 +45,30 @@ describe('useAssistantSession', () => {
       expect.objectContaining({ role: 'assistant', text: 'hook reply' }),
     ]));
   });
+
+  it('ignores an inline edit that resolves to empty text instead of triggering an assistant turn', async () => {
+    const onSend = vi.fn<ChorusOnSend>(async () => ({ id: 'a1', role: 'assistant', text: 'hook reply' }));
+    const { result } = renderHook(() => useHarness(onSend));
+
+    act(() => {
+      expect(result.current.session.send('hello')).toBe(true);
+    });
+
+    await waitFor(() => expect(result.current.messages).toEqual([
+      expect.objectContaining({ role: 'user', text: 'hello' }),
+      expect.objectContaining({ role: 'assistant', text: 'hook reply' }),
+    ]));
+
+    const userId = result.current.messages[0]!.id;
+    const messagesBeforeEdit = result.current.messages;
+    onSend.mockClear();
+
+    act(() => {
+      result.current.session.handleEdit(userId, '   ');
+    });
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(result.current.messages).toBe(messagesBeforeEdit);
+    expect(result.current.messages[0]).toEqual(expect.objectContaining({ text: 'hello' }));
+  });
 });
