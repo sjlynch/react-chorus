@@ -7,6 +7,25 @@ export interface RenderAttachmentErrorContext {
   dismiss: () => void;
 }
 
+export interface ChatInputFocusOptions {
+  /**
+   * Where to place the caret after focusing the textarea. `'end'` (default)
+   * positions it after the existing value, `'start'` positions it at the
+   * beginning, and a number selects an explicit zero-based offset (clamped to
+   * the current value length).
+   */
+  caret?: 'end' | 'start' | number;
+}
+
+export interface ChatInputHandle {
+  /**
+   * Focus the underlying composer textarea, optionally moving the caret.
+   * Works with default and headless renders and across custom wrapper layers
+   * because it goes through the textarea ref instead of a DOM query.
+   */
+  focus(options?: ChatInputFocusOptions): void;
+}
+
 export interface ChatInputProps extends Omit<React.HTMLAttributes<HTMLDivElement>, 'onChange'> {
   value: string;
   onChange: (v: string) => void;
