@@ -42,6 +42,17 @@ describe('geminiConnector', () => {
     });
   });
 
+  it('ignores stray response property on functionCall parts (off-spec for Gemini wire format)', () => {
+    const data = JSON.stringify({
+      candidates: [{ index: 0, content: { parts: [{
+        functionCall: { name: 'lookup', args: { q: 'test' }, response: { ignored: true } },
+      }] } }],
+    });
+    expect(geminiConnector.extract(data)).toEqual({
+      toolDelta: { id: 'gemini-0-function-0-lookup', name: 'lookup', input: { q: 'test' }, provider: 'gemini', generated: true },
+    });
+  });
+
   it('extracts multiple functionCall parts as tool deltas', () => {
     const data = JSON.stringify({
       candidates: [{ index: 0, content: { parts: [

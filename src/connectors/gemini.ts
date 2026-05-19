@@ -105,8 +105,7 @@ function extractFunctionCallToolDelta(part: Record<string, unknown>, candidateKe
   else toolDelta.generated = true;
   if (name) toolDelta.name = name;
   if (hasOwn(call, 'args')) toolDelta.input = call.args;
-  if (hasOwn(call, 'response')) toolDelta.output = call.response;
-  return toolDelta.name || hasOwn(toolDelta, 'input') || hasOwn(toolDelta, 'output') ? toolDelta : null;
+  return toolDelta.name || hasOwn(toolDelta, 'input') ? toolDelta : null;
 }
 
 /**

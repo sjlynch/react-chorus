@@ -39,6 +39,7 @@ export function createToolDeltaAccumulator() {
     if (delta.provider) next.provider = delta.provider;
     if (delta.providerId) next.providerId = delta.providerId;
     if (delta.generated !== undefined) next.generated = delta.generated;
+    else if (delta.providerId && next.generated) next.generated = false;
     if (hasOwn(delta, 'input')) next.input = mergeToolValue(current.input, delta.input);
     if (hasOwn(delta, 'output')) next.output = mergeToolValue(current.output, delta.output);
 
