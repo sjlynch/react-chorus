@@ -1006,4 +1006,73 @@ describe('ChatWindow', () => {
     rerender(<ChatWindow messages={[{ id: 'tool-stream', role: 'tool', text: '', toolCall: { id: 'call_1', name: 'search', input: { q: 'test' } } }]} hiddenRoles={['system']} />);
     expect(transcript.scrollTop).toBe(1400);
   });
+
+  it('re-pins to the bottom when the content height grows without an activityKey change', () => {
+    const callbacks: ResizeObserverCallback[] = [];
+    class StubResizeObserver {
+      callback: ResizeObserverCallback;
+      constructor(cb: ResizeObserverCallback) {
+        this.callback = cb;
+        callbacks.push(cb);
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    vi.stubGlobal('ResizeObserver', StubResizeObserver);
+
+    try {
+      render(<ChatWindow messages={[ASST_MSG]} />);
+      const transcript = screen.getByRole('log', { name: /chat transcript/i });
+
+      Object.defineProperty(transcript, 'clientHeight', { configurable: true, value: 200 });
+      Object.defineProperty(transcript, 'scrollHeight', { configurable: true, value: 1000 });
+      transcript.scrollTop = 800;
+      fireEvent.scroll(transcript);
+
+      // Simulate a post-stream height bump (image load / lazy highlight pass).
+      Object.defineProperty(transcript, 'scrollHeight', { configurable: true, value: 1500 });
+      act(() => {
+        for (const cb of callbacks) cb([], {} as ResizeObserver);
+      });
+
+      expect(transcript.scrollTop).toBe(1500);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('does not re-pin on content resize when the user has scrolled away', () => {
+    const callbacks: ResizeObserverCallback[] = [];
+    class StubResizeObserver {
+      callback: ResizeObserverCallback;
+      constructor(cb: ResizeObserverCallback) {
+        this.callback = cb;
+        callbacks.push(cb);
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    vi.stubGlobal('ResizeObserver', StubResizeObserver);
+
+    try {
+      render(<ChatWindow messages={[ASST_MSG]} />);
+      const transcript = screen.getByRole('log', { name: /chat transcript/i });
+
+      Object.defineProperty(transcript, 'clientHeight', { configurable: true, value: 200 });
+      Object.defineProperty(transcript, 'scrollHeight', { configurable: true, value: 1000 });
+      transcript.scrollTop = 0;
+      fireEvent.scroll(transcript);
+
+      Object.defineProperty(transcript, 'scrollHeight', { configurable: true, value: 1500 });
+      act(() => {
+        for (const cb of callbacks) cb([], {} as ResizeObserver);
+      });
+
+      expect(transcript.scrollTop).toBe(0);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });

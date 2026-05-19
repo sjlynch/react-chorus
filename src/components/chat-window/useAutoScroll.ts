@@ -53,6 +53,41 @@ export function useAutoScroll<TElement extends HTMLElement>(activityKey: string,
     el.scrollTop = el.scrollHeight;
   }, [activityKey]);
 
+  React.useEffect(() => {
+    const el = windowRef.current;
+    if (!el) return;
+    if (typeof ResizeObserver === 'undefined') return;
+
+    const repin = () => {
+      if (!shouldAutoScrollRef.current) return;
+      if (!el.isConnected) return;
+      el.scrollTop = el.scrollHeight;
+    };
+
+    const resizeObserver = new ResizeObserver(repin);
+
+    const sync = () => {
+      resizeObserver.disconnect();
+      resizeObserver.observe(el);
+      for (const child of Array.from(el.children)) {
+        if (child instanceof HTMLElement) resizeObserver.observe(child);
+      }
+    };
+
+    sync();
+
+    let mutationObserver: MutationObserver | undefined;
+    if (typeof MutationObserver !== 'undefined') {
+      mutationObserver = new MutationObserver(sync);
+      mutationObserver.observe(el, { childList: true });
+    }
+
+    return () => {
+      resizeObserver.disconnect();
+      mutationObserver?.disconnect();
+    };
+  }, []);
+
   return {
     windowRef,
     hasUnreadActivity,
