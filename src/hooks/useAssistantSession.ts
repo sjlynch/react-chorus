@@ -4,6 +4,7 @@ import type { Connector } from '../connectors/connectors';
 import type { ConnectorName } from '../types';
 import { useChorusStream, type Transport } from './useChorusStream';
 import { useLatestRef } from './useLatestRef';
+import { useMirroredState } from './useMirroredState';
 import { useAssistantSessionRefs } from './assistant-session/useAssistantSessionRefs';
 import { isChorusDevMode } from '../utils/devMode';
 import { createDefaultFetchSSETransport, type FetchTransportInit } from './assistant-session/transport';
@@ -186,8 +187,8 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
   const clearConfirmationActiveRef = React.useRef(false);
 
   const [clearConfirmationPending, setClearConfirmationPending] = React.useState(false);
-  const [internalSending, setInternalSendingState] = React.useState(false);
-  const [transportBusy, setTransportBusyState] = React.useState(false);
+  const [internalSending, setInternalSending, internalSendingRef] = useMirroredState(false);
+  const [transportBusy, setTransportBusy, transportBusyRef] = useMirroredState(false);
   const [streamError, setStreamError] = React.useState<string | null>(null);
   const [streamRawError, setStreamRawError] = React.useState<Error | null>(null);
   const [, forceRenderImpl] = React.useReducer((value: number) => value + 1, 0);
@@ -203,8 +204,6 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     setStreamError(fallbackErrorMessageRef.current);
   }, [fallbackErrorMessageRef]);
 
-  const internalSendingRef = React.useRef(false);
-  const transportBusyRef = React.useRef(false);
   const lastSubmittedTurnRef = React.useRef<SubmittedUserTurn<TMeta> | null>(null);
   const controllerRef = React.useRef<AbortController | null>(null);
   const activeSessionIdRef = React.useRef(0);
@@ -237,16 +236,6 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     onToolDeltaRef,
     onToolCallRef,
   }), [onAbortRef, onChunkRef, onErrorRef, onFinishRef, onStreamDoneRef, onToolCallRef, onToolDeltaRef]);
-
-  const setInternalSending = React.useCallback((next: boolean) => {
-    internalSendingRef.current = next;
-    setInternalSendingState(next);
-  }, []);
-
-  const setTransportBusy = React.useCallback((next: boolean) => {
-    transportBusyRef.current = next;
-    setTransportBusyState(next);
-  }, []);
 
   const beginAssistantSession = React.useCallback(() => {
     activeSessionIdRef.current += 1;
