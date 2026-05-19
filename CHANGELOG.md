@@ -59,6 +59,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Replaced the public `Message` shape with a discriminated union (`AnyChorusMessage`) so `role: 'tool'` requires `toolCall`, non-tool messages forbid it, and tool/system messages reject attachments.
 - Extracted Chorus send/session orchestration into `useAssistantSession` and clarified controlled, transport, connector, and sending-state development warnings.
 - `useChorusStream.send()` now rejects non-abort stream failures after cleanup so `onSend` bridges can surface Chorus errors.
+- `useChorusStream.send()` now rejects with a `ChorusStreamError` whose `code === 'concurrent-send'` when called while a previous send is still in flight, instead of silently resolving with `undefined`. The transport is still not invoked a second time and the dev-mode warning is preserved; custom shells that `await send(...)` can now distinguish the re-entrant no-op from a successful empty stream.
 - Documented keyboard shortcuts, standalone `useChorusStream`, persistence examples, error handling, and OpenAI proxy buffering headers.
 
 ### Fixed
