@@ -1,7 +1,7 @@
 import type { Message } from '../../types';
 import type { FormatMessageResult, WebSocketTransport, WebSocketTransportOptions } from '../createWebSocketTransport';
 import { createManagedResponseStream, type ManagedResponseStream } from './managedResponseStream';
-import { createAbortError, createClosedBeforeOpenError, encodeSSEDataEvent, normalizeFormatMessageResult, safeCloseSocket, toError, webSocketMessageToText } from './shared';
+import { createAbnormalCloseError, createAbortError, createClosedBeforeOpenError, encodeSSEDataEvent, isNormalCloseCode, normalizeFormatMessageResult, safeCloseSocket, toError, webSocketMessageToText } from './shared';
 
 // Local duplicate of `isChorusDevMode` from `src/utils/devMode.ts`. Importing
 // the shared helper here would bundle the transport-only subpath with the
@@ -140,7 +140,11 @@ export function createPersistentWebSocketTransport<TMeta = Record<string, unknow
         socketState = 'closed';
       }
       rejectOpenWaiters(closedBeforeOpening ? createClosedBeforeOpenError(event) : new Error('WebSocket closed'));
-      closeActiveStreams();
+      if (isNormalCloseCode(event.code)) {
+        closeActiveStreams();
+      } else {
+        errorActiveStreams(createAbnormalCloseError(event));
+      }
       opts?.onClose?.(event.code, event.reason);
     };
 
