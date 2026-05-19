@@ -8,8 +8,8 @@ interface UseChorusRefArgs<TMeta> {
   session: UseAssistantSessionResult;
   setDraft: React.Dispatch<React.SetStateAction<string>>;
   messagesRef: React.RefObject<Message<TMeta>[]>;
-  rootRef: React.RefObject<HTMLDivElement>;
-  inputRef: React.RefObject<ChatInputHandle>;
+  rootRef: React.RefObject<HTMLDivElement | null>;
+  inputRef: React.RefObject<ChatInputHandle | null>;
   writesDisabled: boolean;
   controlledWithoutOnChange: boolean;
 }
