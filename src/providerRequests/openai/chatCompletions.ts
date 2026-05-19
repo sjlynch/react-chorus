@@ -3,7 +3,7 @@ import { openAIImageUrlFromAttachment, unsupportedAttachmentText } from '../atta
 import { hasOwn, isRecord, metadataArray, nonEmptyString } from '../metadata';
 import { stripOpenAIChatOptions } from '../options';
 import { compactJSONString, messageText, toolContextText, toolOutputText } from '../toolOutput';
-import { forEachHistoryEntry } from '../toolRunIterator';
+import { mapHistoryWithToolRuns } from '../toolRunMapper';
 import type { ProviderMappingOptions } from '../types/common';
 import type {
   OpenAIChatCompletionsAssistantMessage,
@@ -133,37 +133,22 @@ export function toOpenAIChatCompletionsMessages<TMeta = Record<string, unknown>>
   history: Message<TMeta>[],
   options: ProviderMappingOptions<TMeta> = {},
 ): OpenAIChatCompletionsMessage[] {
-  const messages: OpenAIChatCompletionsMessage[] = [];
-
-  forEachHistoryEntry(history, {
-    onMessage: message => {
-      const mapped = toOpenAIChatCompletionsMessage(message, options);
-      if (mapped) messages.push(mapped);
+  return mapHistoryWithToolRuns<TMeta, OpenAIChatCompletionsToolCall, OpenAIChatCompletionsMessage>(history, {
+    groupMode: 'all',
+    mapMessage: message => toOpenAIChatCompletionsMessage(message, options),
+    extractToolBlock: message => openAIChatToolCall(message as Message<unknown>),
+    emitToolGroup: (target, pairs) => {
+      appendOpenAIChatToolCalls(target, pairs.map(entry => entry.block));
+      for (const entry of pairs) {
+        const toolCallId = openAIToolCallId(entry.message as Message<unknown>);
+        if (toolCallId) target.push({ role: 'tool', tool_call_id: toolCallId, content: toolOutputText(entry.message) });
+      }
     },
-    onToolRun: run => {
-      const providerTools: Array<{ message: Message<TMeta>; toolCall: OpenAIChatCompletionsToolCall }> = [];
-      for (const toolMessage of run) {
-        const toolCall = openAIChatToolCall(toolMessage as Message<unknown>);
-        if (toolCall) providerTools.push({ message: toolMessage, toolCall });
-      }
-
-      if (providerTools.length) {
-        appendOpenAIChatToolCalls(messages, providerTools.map(entry => entry.toolCall));
-        for (const entry of providerTools) {
-          const toolCallId = openAIToolCallId(entry.message as Message<unknown>);
-          if (toolCallId) messages.push({ role: 'tool', tool_call_id: toolCallId, content: toolOutputText(entry.message) });
-        }
-      }
-
-      for (const toolMessage of run) {
-        if (openAIToolCallId(toolMessage as Message<unknown>)) continue;
-        const mapped = toOpenAIChatCompletionsMessage(toolMessage, options);
-        if (mapped) messages.push(mapped);
-      }
+    fallback: message => {
+      if (openAIToolCallId(message as Message<unknown>)) return null;
+      return toOpenAIChatCompletionsMessage(message, options);
     },
   });
-
-  return messages;
 }
 
 /** Build an OpenAI Chat Completions request body. Defaults `stream` to true. */

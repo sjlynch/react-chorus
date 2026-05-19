@@ -2,7 +2,7 @@ import type { Message } from '../../types';
 import { openAIImageUrlFromAttachment, unsupportedAttachmentText } from '../attachments';
 import { stripOpenAIResponsesOptions } from '../options';
 import { compactJSONString, messageText, toolContextText, toolOutputText } from '../toolOutput';
-import { forEachHistoryEntry } from '../toolRunIterator';
+import { mapHistoryWithToolRuns } from '../toolRunMapper';
 import type { ProviderMappingOptions } from '../types/common';
 import type {
   OpenAIResponsesAssistantInputItem,
@@ -124,30 +124,19 @@ export function toOpenAIResponsesInput<TMeta = Record<string, unknown>>(
   history: Message<TMeta>[],
   options: ProviderMappingOptions<TMeta> = {},
 ): OpenAIResponsesInputItem[] {
-  const input: OpenAIResponsesInputItem[] = [];
-
-  forEachHistoryEntry(history, {
-    onMessage: message => {
-      const mapped = toOpenAIResponsesInputItem(message, options);
-      if (mapped) input.push(mapped);
-    },
-    onToolRun: run => {
-      for (const toolMessage of run) {
-        const functionCall = openAIResponsesFunctionCall(toolMessage as Message<unknown>);
-        if (functionCall) {
-          const callId = openAIToolCallId(toolMessage as Message<unknown>);
-          input.push(functionCall);
-          if (callId) input.push({ type: 'function_call_output', call_id: callId, output: toolOutputText(toolMessage) });
-          continue;
-        }
-
-        const mapped = toOpenAIResponsesInputItem(toolMessage, options);
-        if (mapped) input.push(mapped);
+  return mapHistoryWithToolRuns<TMeta, OpenAIResponsesFunctionCallInputItem, OpenAIResponsesInputItem>(history, {
+    groupMode: 'contiguous',
+    mapMessage: message => toOpenAIResponsesInputItem(message, options),
+    extractToolBlock: message => openAIResponsesFunctionCall(message as Message<unknown>),
+    emitToolGroup: (target, pairs) => {
+      for (const entry of pairs) {
+        target.push(entry.block);
+        const callId = openAIToolCallId(entry.message as Message<unknown>);
+        if (callId) target.push({ type: 'function_call_output', call_id: callId, output: toolOutputText(entry.message) });
       }
     },
+    fallback: message => toOpenAIResponsesInputItem(message, options),
   });
-
-  return input;
 }
 
 /** Build an OpenAI Responses API request body. Defaults `stream` to true. */

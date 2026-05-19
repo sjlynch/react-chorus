@@ -3,7 +3,7 @@ import { dataUrlFromAttachment, unsupportedAttachmentText } from './attachments'
 import { metadataBoolean, metadataString } from './metadata';
 import { stripAnthropicOptions } from './options';
 import { messageText, objectToolInput, toolContextText, toolOutputText } from './toolOutput';
-import { forEachHistoryEntry } from './toolRunIterator';
+import { mapHistoryWithToolRuns } from './toolRunMapper';
 import type { ProviderMappingOptions } from './types/common';
 import type {
   AnthropicContentBlock,
@@ -140,40 +140,25 @@ export function toAnthropicMessages<TMeta = Record<string, unknown>>(
   history: Message<TMeta>[],
   options: ProviderMappingOptions<TMeta> = {},
 ): AnthropicMessage[] {
-  const messages: AnthropicMessage[] = [];
-
-  forEachHistoryEntry(history, {
-    onMessage: message => {
-      const mapped = toAnthropicMessage(message, options);
-      if (mapped) messages.push(mapped);
+  return mapHistoryWithToolRuns<TMeta, AnthropicToolUseBlock, AnthropicMessage>(history, {
+    groupMode: 'all',
+    mapMessage: message => toAnthropicMessage(message, options),
+    extractToolBlock: message => anthropicToolUseBlock(message as Message<unknown>),
+    emitToolGroup: (target, pairs) => {
+      appendAnthropicToolUseBlocks(target, pairs.map(entry => entry.block));
+      target.push({
+        role: 'user',
+        content: pairs.map(entry => anthropicToolResultBlock(
+          entry.message as Message<unknown>,
+          anthropicToolUseId(entry.message as Message<unknown>) ?? '',
+        )),
+      });
     },
-    onToolRun: run => {
-      const providerTools: Array<{ message: Message<TMeta>; block: AnthropicToolUseBlock }> = [];
-      for (const toolMessage of run) {
-        const block = anthropicToolUseBlock(toolMessage as Message<unknown>);
-        if (block) providerTools.push({ message: toolMessage, block });
-      }
-
-      if (providerTools.length) {
-        appendAnthropicToolUseBlocks(messages, providerTools.map(entry => entry.block));
-        messages.push({
-          role: 'user',
-          content: providerTools.map(entry => anthropicToolResultBlock(
-            entry.message as Message<unknown>,
-            anthropicToolUseId(entry.message as Message<unknown>) ?? '',
-          )),
-        });
-      }
-
-      for (const toolMessage of run) {
-        if (anthropicToolUseId(toolMessage as Message<unknown>)) continue;
-        const mapped = toAnthropicMessage(toolMessage, options);
-        if (mapped) messages.push(mapped);
-      }
+    fallback: message => {
+      if (anthropicToolUseId(message as Message<unknown>)) return null;
+      return toAnthropicMessage(message, options);
     },
   });
-
-  return messages;
 }
 
 /** Build an Anthropic Messages API request body. Defaults `stream` to true. */
