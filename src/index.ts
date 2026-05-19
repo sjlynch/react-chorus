@@ -1,7 +1,7 @@
 export { ChatWindow, MessageBubble } from './components/ChatWindow';
 export type { ChatWindowProps, GetMessageFeedback, MessageBubbleProps, MessageBubbleSlots, MessageCopyResult, MessageFeedback, RenderErrorContext, RenderMessageContext, RenderMessageRootProps, MessageMarkdownProps, MessageRenderActions } from './components/ChatWindow';
 export { ChatInput } from './components/ChatInput';
-export type { ChatInputProps, RenderAttachmentErrorContext } from './components/ChatInput';
+export type { ChatInputFocusOptions, ChatInputHandle, ChatInputProps, RenderAttachmentErrorContext } from './components/ChatInput';
 export { ToolCallBlock } from './components/ToolCallBlock';
 export { ConversationList } from './components/ConversationList';
 export type { ConfirmDeleteConversation, ConfirmDeleteConversationContext, ConversationListProps } from './components/ConversationList';
@@ -132,6 +132,7 @@ export { defineTool } from './tools';
 export type { ChorusToolDefinition } from './tools';
 export { Markdown } from './components/Markdown';
 export type { MarkdownProps, MarkdownSanitizer } from './components/Markdown';
+export { setChorusStyleNonce } from './utils/cspNonce';
 
 export type { Connector, ConnectorResult, ConnectorToolDelta, ConnectorWarning } from './connectors/connectors';
 export { getConnector, autoConnector } from './connectors/connectors';

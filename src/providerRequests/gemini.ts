@@ -67,7 +67,7 @@ function geminiFunctionCallPart<TMeta>({ message, name }: GeminiToolMessage<TMet
 
 function geminiFunctionResponsePart<TMeta>({ message, name }: GeminiToolMessage<TMeta>): GeminiFunctionResponsePart {
   const text = messageText(message);
-  const value = message.toolCall.output ?? (text.trim() ? text : message.toolCall.input);
+  const value = message.toolCall.output ?? (text.trim() ? text : undefined);
   return { functionResponse: { name, response: geminiFunctionResponsePayload(value) } };
 }
 

@@ -56,6 +56,10 @@ npm run dev
 
 Vite prints the local URL (usually <http://localhost:5173>). The dev server proxies `/api` → `http://localhost:3001`, so the frontend's `createFetchSSETransport('/api/chat')` reaches the Express backend transparently.
 
+## Attachment limits
+
+The composer accepts images (`accept="image/*"`) and caps each attachment at **2 MB** (`maxAttachmentBytes={2 * 1024 * 1024}`) with at most **3 files per message** (`maxAttachments={3}`). Attachments are inlined as data URLs in the request body; the Express backend caps incoming JSON at 10 MB (`express.json({ limit: '10mb' })`), and base64 encoding inflates payload size by ~33%, so the client-side caps keep typical sends well under the server limit. Raise the caps in [`src/App.tsx`](./src/App.tsx) only if you also raise the matching limit in [`server/index.js`](./server/index.js).
+
 ## Troubleshooting
 
 - **Connection error / CORS-style failure on first send** — usually means the backend isn't running on port 3001 or `OPENAI_API_KEY` is unset. Check Terminal 1.

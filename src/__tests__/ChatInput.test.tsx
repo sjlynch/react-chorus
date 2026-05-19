@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ChatInput } from '../components/ChatInput';
-import type { ChatInputProps } from '../components/ChatInput';
+import type { ChatInputHandle, ChatInputProps } from '../components/ChatInput';
 import type { AttachmentUploadResult } from '../types';
 import { DEFAULT_ATTACHMENT_LABELS } from '../labels/attachments';
 import type { ChorusAttachmentLabels } from '../labels/types';
@@ -137,15 +137,41 @@ describe('ChatInput', () => {
     expect(textarea).toHaveValue('Hello\nworld');
   });
 
-  it('forwards root refs and HTML attributes while focus() targets the textarea', () => {
-    const ref = createRef<HTMLDivElement>();
-    const { container } = render(<ChatInput ref={ref} value="" onChange={vi.fn()} onSend={vi.fn()} id="composer" data-testid="composer-root" />);
+  it('forwards an imperative handle whose focus() targets the textarea and accepts caret options', () => {
+    const ref = createRef<ChatInputHandle>();
+    render(
+      <ChatInput
+        ref={ref}
+        value="hello world"
+        onChange={vi.fn()}
+        onSend={vi.fn()}
+        id="composer"
+        data-testid="composer-root"
+      />,
+    );
 
-    expect(ref.current).toBe(container.firstElementChild);
     expect(screen.getByTestId('composer-root')).toHaveAttribute('id', 'composer');
 
-    ref.current?.focus();
-    expect(screen.getByRole('textbox')).toHaveFocus();
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+
+    act(() => ref.current?.focus());
+    expect(textarea).toHaveFocus();
+
+    act(() => ref.current?.focus({ caret: 'end' }));
+    expect(textarea.selectionStart).toBe('hello world'.length);
+    expect(textarea.selectionEnd).toBe('hello world'.length);
+
+    act(() => ref.current?.focus({ caret: 'start' }));
+    expect(textarea.selectionStart).toBe(0);
+    expect(textarea.selectionEnd).toBe(0);
+
+    act(() => ref.current?.focus({ caret: 3 }));
+    expect(textarea.selectionStart).toBe(3);
+    expect(textarea.selectionEnd).toBe(3);
+
+    act(() => ref.current?.focus({ caret: 999 }));
+    expect(textarea.selectionStart).toBe('hello world'.length);
+    expect(textarea.selectionEnd).toBe('hello world'.length);
   });
 
   it('has an accessible name from the placeholder or default label', () => {
