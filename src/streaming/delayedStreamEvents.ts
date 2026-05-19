@@ -1,77 +1,102 @@
 import type { SendCallbacks } from '../hooks/useChorusStream';
 import type { ConnectorToolDelta } from '../connectors/types';
-
-// Local duplicates keep streaming-only imports from pulling UI-owned utility chunks.
-function toError(error: unknown): Error {
-  if (error instanceof Error) return error;
-  if (typeof DOMException !== 'undefined' && error instanceof DOMException) return error as Error;
-  return new Error(String(error));
-}
-
-function isAbortError(error: unknown) {
-  return typeof error === 'object' && error !== null && 'name' in error && (error as { name?: unknown }).name === 'AbortError';
-}
-
-function createAbortError(message = 'Aborted'): Error {
-  if (typeof DOMException === 'function') return new DOMException(message, 'AbortError') as Error;
-  const error = new Error(message);
-  error.name = 'AbortError';
-  return error;
-}
+import { createAbortError, isAbortError, toError } from './internal/streamErrors';
 
 type DelayedStreamEvent =
   | { type: 'text'; chunk: string }
   | { type: 'reasoning'; chunk: string }
   | { type: 'toolDelta'; toolDelta: ConnectorToolDelta };
 
-export function createDelayedChunkEmitter(cb: SendCallbacks, startedAt: number, signal: AbortSignal) {
-  const minDelayMs = Math.max(0, cb.minDelayMs ?? 0);
-  let hasDeliveredFirstTextChunk = false;
-  let released = minDelayMs === 0;
-  let cancelled = false;
-  let bufferedEvents: DelayedStreamEvent[] = [];
+/**
+ * Owns the `minDelayMs` release timer. The timer either settles (release the
+ * buffered events) or rejects (caller cancelled / signal aborted). The
+ * promise/timer/abort-listener bookkeeping all live here so the delivery
+ * pipeline only sees a single `schedule()` -> Promise<void> surface.
+ */
+function createReleaseSchedule(signal: AbortSignal, onAbort: () => void) {
   let releasePromise: Promise<void> | null = null;
-  let deliveryPromise: Promise<void> | null = null;
-  let callbackError: Error | null = null;
-  let rejectCallbackError!: (err: Error) => void;
   let resolveRelease: (() => void) | null = null;
   let rejectRelease: ((err: Error) => void) | null = null;
   let releaseTimer: ReturnType<typeof setTimeout> | null = null;
   let abortListener: ((event: Event) => void) | null = null;
 
+  const cleanup = () => {
+    if (releaseTimer !== null) {
+      clearTimeout(releaseTimer);
+      releaseTimer = null;
+    }
+    if (abortListener) {
+      signal.removeEventListener('abort', abortListener);
+      abortListener = null;
+    }
+    resolveRelease = null;
+    rejectRelease = null;
+  };
+
+  const settle = () => {
+    const resolve = resolveRelease;
+    cleanup();
+    releasePromise = null;
+    resolve?.();
+  };
+
+  const reject = (err: Error) => {
+    const r = rejectRelease;
+    cleanup();
+    releasePromise = null;
+    r?.(err);
+  };
+
+  return {
+    schedule(waitMs: number) {
+      if (!releasePromise) {
+        releasePromise = new Promise<void>((resolve, rej) => {
+          resolveRelease = resolve;
+          rejectRelease = rej;
+          abortListener = () => {
+            onAbort();
+            reject(createAbortError());
+          };
+          signal.addEventListener('abort', abortListener, { once: true });
+          releaseTimer = setTimeout(settle, waitMs);
+        });
+      }
+      return releasePromise;
+    },
+    /**
+     * Resolve the pending schedule promise (if any) and tear down the timer
+     * and abort listener. Used by callers that deliver buffered events
+     * synchronously before the timer would have fired.
+     */
+    settle,
+    rejectWith: reject,
+  };
+}
+
+export function createDelayedChunkEmitter(cb: SendCallbacks, startedAt: number, signal: AbortSignal) {
+  const minDelayMs = Math.max(0, cb.minDelayMs ?? 0);
+
+  // Mutable state — every change goes through one of the methods below so the
+  // invariants ('callbackError is set at most once', 'once cancelled, no
+  // further events flow', 'releasePromise/deliveryPromise are settled exactly
+  // once') can be checked locally.
+  let hasDeliveredFirstTextChunk = false;
+  let released = minDelayMs === 0;
+  let cancelled = false;
+  let bufferedEvents: DelayedStreamEvent[] = [];
+  let deliveryPromise: Promise<void> | null = null;
+  let callbackError: Error | null = null;
+
+  let rejectCallbackError!: (err: Error) => void;
   const callbackErrorPromise = new Promise<never>((_, reject) => {
     rejectCallbackError = reject;
   });
   callbackErrorPromise.catch(() => undefined);
 
-  const cleanupScheduledRelease = () => {
-    if (releaseTimer !== null) {
-      clearTimeout(releaseTimer);
-      releaseTimer = null;
-    }
-
-    if (abortListener) {
-      signal.removeEventListener('abort', abortListener);
-      abortListener = null;
-    }
-
-    resolveRelease = null;
-    rejectRelease = null;
-  };
-
-  const settleScheduledRelease = () => {
-    const resolve = resolveRelease;
-    cleanupScheduledRelease();
-    releasePromise = null;
-    resolve?.();
-  };
-
-  const rejectScheduledRelease = (err: Error) => {
-    const reject = rejectRelease;
-    cleanupScheduledRelease();
-    releasePromise = null;
-    reject?.(err);
-  };
+  const release = createReleaseSchedule(signal, () => {
+    cancelled = true;
+    bufferedEvents = [];
+  });
 
   const failDelivery = (err: unknown) => {
     const error = toError(err);
@@ -79,7 +104,7 @@ export function createDelayedChunkEmitter(cb: SendCallbacks, startedAt: number, 
       callbackError = error;
       cancelled = true;
       bufferedEvents = [];
-      rejectScheduledRelease(error);
+      release.rejectWith(error);
       rejectCallbackError(error);
     }
     return callbackError;
@@ -91,14 +116,6 @@ export function createDelayedChunkEmitter(cb: SendCallbacks, startedAt: number, 
 
   const throwIfCancelled = () => {
     if (cancelled) throw createAbortError();
-  };
-
-  const deliverSafely = (deliver: () => void) => {
-    try {
-      deliver();
-    } catch (err) {
-      throw failDelivery(err);
-    }
   };
 
   const deliverEvent = (event: DelayedStreamEvent) => {
@@ -121,6 +138,14 @@ export function createDelayedChunkEmitter(cb: SendCallbacks, startedAt: number, 
     cb.onToolDelta?.(event.toolDelta);
   };
 
+  const deliverSafely = (deliver: () => void) => {
+    try {
+      deliver();
+    } catch (err) {
+      throw failDelivery(err);
+    }
+  };
+
   const flushBufferedEvents = () => {
     throwIfDeliveryFailed();
     if (cancelled || released) return;
@@ -128,13 +153,13 @@ export function createDelayedChunkEmitter(cb: SendCallbacks, startedAt: number, 
     const events = bufferedEvents;
     bufferedEvents = [];
     for (const event of events) deliverEvent(event);
-    settleScheduledRelease();
+    release.settle();
   };
 
   const cancel = () => {
     cancelled = true;
     bufferedEvents = [];
-    rejectScheduledRelease(createAbortError());
+    release.rejectWith(createAbortError());
   };
 
   const scheduleRelease = () => {
@@ -148,21 +173,7 @@ export function createDelayedChunkEmitter(cb: SendCallbacks, startedAt: number, 
       return Promise.reject(createAbortError());
     }
 
-    if (!releasePromise) {
-      releasePromise = new Promise<void>((resolve, reject) => {
-        resolveRelease = resolve;
-        rejectRelease = reject;
-        abortListener = () => {
-          cancelled = true;
-          bufferedEvents = [];
-          rejectScheduledRelease(createAbortError());
-        };
-        signal.addEventListener('abort', abortListener, { once: true });
-        releaseTimer = setTimeout(settleScheduledRelease, wait);
-      });
-    }
-
-    return releasePromise;
+    return release.schedule(wait);
   };
 
   const scheduleBufferedDelivery = () => {

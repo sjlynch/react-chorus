@@ -6,6 +6,8 @@ import { readSSEStream } from '../streaming/readSSEStream';
 import { createDelayedChunkEmitter } from '../streaming/delayedStreamEvents';
 import { createToolDeltaAccumulator } from '../streaming/toolDeltaAccumulator';
 import { ChorusStreamError, createConnectorStreamError, createHttpResponseError } from '../streaming/errors';
+import { isAbortError, toError } from '../streaming/internal/streamErrors';
+import { warnInDev } from '../streaming/internal/devMode';
 
 export { readSSEStream } from '../streaming/readSSEStream';
 export { ChorusStreamError } from '../streaming/errors';
@@ -43,36 +45,178 @@ export interface StreamOptions {
   connector?: Connector | ConnectorName;
 }
 
-// Local duplicates keep useChorusStream root imports free of UI-owned utility chunks.
-function isStreamDevMode() {
-  try {
-    return typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production';
-  } catch {
-    return false;
-  }
-}
-
-function warnInDev(message: string, ...args: unknown[]): void {
-  if (!isStreamDevMode()) return;
-  console.warn(message, ...args);
-}
-
-function toError(error: unknown): Error {
-  if (error instanceof Error) return error;
-  if (typeof DOMException !== 'undefined' && error instanceof DOMException) return error as Error;
-  return new Error(String(error));
-}
-
-function isAbortError(error: unknown) {
-  return typeof error === 'object' && error !== null && 'name' in error && (error as { name?: unknown }).name === 'AbortError';
-}
-
 function safeOnObserverError(callbackName: string, error: unknown) {
   warnInDev(`[Chorus] \`${callbackName}\` callback threw and was ignored so the original stream error could be re-thrown.`, error);
 }
 
 function connectorErrorFromResult(out: ConnectorResult) {
   return out.error ? createConnectorStreamError(out.error, out.errorPayload) : null;
+}
+
+type DelayedChunkEmitter = ReturnType<typeof createDelayedChunkEmitter>;
+type ToolDeltaAccumulator = ReturnType<typeof createToolDeltaAccumulator>;
+
+/**
+ * Abort-signal/controller wiring for one send. With an externalSignal the
+ * caller owns cancellation and `controller` is null; otherwise the hook owns
+ * an AbortController that abort()/unmount can cancel. `readerController` is
+ * always hook-owned and bounds the SSE reader; `forwardAbort` is the
+ * pre-installed listener that propagates the outer signal into the reader.
+ */
+type StreamSession = {
+  signal: AbortSignal;
+  controller: AbortController | null;
+  readerController: AbortController;
+  forwardAbort: (() => void) | null;
+};
+
+function startStreamSession(
+  externalSignal: AbortSignal | undefined,
+  controllerRef: React.MutableRefObject<AbortController | null>,
+): StreamSession {
+  let controller: AbortController | null = null;
+  let signal: AbortSignal;
+
+  if (externalSignal) {
+    signal = externalSignal;
+    controllerRef.current = null;
+  } else {
+    controller = new AbortController();
+    controllerRef.current = controller;
+    signal = controller.signal;
+  }
+
+  const readerController = new AbortController();
+  let forwardAbort: (() => void) | null = null;
+  if (signal.aborted) {
+    readerController.abort();
+  } else {
+    forwardAbort = () => readerController.abort();
+    signal.addEventListener('abort', forwardAbort, { once: true });
+  }
+
+  return { signal, controller, readerController, forwardAbort };
+}
+
+function endStreamSession(
+  session: StreamSession,
+  controllerRef: React.MutableRefObject<AbortController | null>,
+) {
+  if (session.forwardAbort) session.signal.removeEventListener('abort', session.forwardAbort);
+  if (controllerRef.current === session.controller) controllerRef.current = null;
+}
+
+function createConnectorResultDeliverer(
+  delayedChunks: DelayedChunkEmitter,
+  accumulateToolDelta: ToolDeltaAccumulator,
+) {
+  return (out: ConnectorResult | null | undefined): boolean => {
+    if (!out) return false;
+
+    const chunk = out.text || '';
+    if (chunk) delayedChunks.handleChunk(chunk);
+
+    const reasoning = out.reasoning || '';
+    if (reasoning) delayedChunks.handleReasoning(reasoning);
+
+    const toolDeltas = out.toolDeltas?.length ? out.toolDeltas : out.toolDelta ? [out.toolDelta] : [];
+    for (const toolDelta of toolDeltas) delayedChunks.handleToolDelta(accumulateToolDelta(toolDelta));
+
+    // Non-fatal connector signals (truncation, safety ratings, telemetry events). Logged in
+    // dev so they're discoverable; not yet routed to a typed callback. Stream keeps flowing.
+    if (out.warning) warnInDev(`[Chorus] connector warning (${out.warning.code}): ${out.warning.message}`, out.warning.payload);
+
+    const connectorError = connectorErrorFromResult(out);
+    if (connectorError) throw connectorError;
+    return Boolean(out.done);
+  };
+}
+
+type StreamPromiseRef = { current: Promise<void> | null };
+
+/**
+ * Drives the success path: invoke the transport, validate the response,
+ * pump the SSE reader, flush the connector, then deliver buffered events
+ * and call cb.onDone. Throws connector/HTTP/transport errors so the caller
+ * can route them through `handleSendError`. Stores the SSE reader promise
+ * into `streamPromiseRef.current` as soon as it starts so the error branch
+ * can await it during teardown.
+ *
+ * Returns the cb.onDone callback error (if onDone threw); otherwise undefined.
+ * onDone errors are caught here so they reject send() without going through
+ * the onError observer — there was no stream error to report.
+ */
+async function runSendStream<TMeta>(args: {
+  text: string;
+  history: Message<TMeta>[];
+  transport: Transport<TMeta>;
+  connector: Connector;
+  session: StreamSession;
+  delayedChunks: DelayedChunkEmitter;
+  deliverConnectorResult: (out: ConnectorResult | null | undefined) => boolean;
+  cb: SendCallbacks;
+  streamPromiseRef: StreamPromiseRef;
+}): Promise<unknown | undefined> {
+  const { text, history, transport, connector, session, delayedChunks, deliverConnectorResult, cb, streamPromiseRef } = args;
+  const connectorState = connector.createState?.();
+
+  const res = await transport(text, history, session.signal);
+  if (!res.ok) throw await createHttpResponseError(res);
+  if (!res.body) throw new ChorusStreamError(`Response body was missing for HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''}`);
+
+  const streamPromise = readSSEStream(res, (payload) => {
+    const done = deliverConnectorResult(connector.extract(payload, connectorState));
+    if (done) return false;
+  }, session.readerController.signal);
+  streamPromiseRef.current = streamPromise;
+
+  await Promise.race([streamPromise, delayedChunks.callbackErrorPromise]);
+  await streamPromise;
+
+  deliverConnectorResult(connector.flush?.(connectorState));
+  await delayedChunks.flushBeforeDone();
+
+  try {
+    cb.onDone?.(res);
+  } catch (callbackError) {
+    // Completion observers run after the stream has succeeded. Preserve the
+    // historical contract that their failures reject send(), but do not route
+    // them through onError because there is no underlying stream error.
+    return callbackError;
+  }
+  return undefined;
+}
+
+/**
+ * Drives the error path: cancel the reader, drain any in-flight SSE read,
+ * then prefer a captured observer-callback error over the caught error
+ * (delayed observer throws surface here even if the stream itself raced to
+ * resolve first). AbortErrors are swallowed silently — the caller already
+ * sees `sending: false`. Other errors are reported to cb.onError (whose
+ * own throws are warned-and-ignored so the original stream error wins) and
+ * returned for send() to reject with.
+ */
+async function handleSendError(args: {
+  caught: unknown;
+  session: StreamSession;
+  streamPromise: Promise<void> | null;
+  delayedChunks: DelayedChunkEmitter;
+  cb: SendCallbacks;
+}): Promise<unknown | undefined> {
+  const { caught, session, streamPromise, delayedChunks, cb } = args;
+  session.readerController.abort();
+  if (streamPromise) await streamPromise.catch(() => undefined);
+  const caughtError = delayedChunks.getCallbackError() ?? caught;
+  delayedChunks.cancel();
+  if (isAbortError(caughtError)) return undefined;
+
+  const error = toError(caughtError);
+  try {
+    cb.onError?.(error);
+  } catch (callbackError) {
+    safeOnObserverError('onError', callbackError);
+  }
+  return error;
 }
 
 export function useChorusStream<TMeta = Record<string, unknown>>(transport: Transport<TMeta>, opts?: StreamOptions) {
@@ -122,99 +266,42 @@ export function useChorusStream<TMeta = Record<string, unknown>>(transport: Tran
     }
 
     isSendingRef.current = true;
-
-    let controller: AbortController | null = null;
-    let signal: AbortSignal;
-
-    if (externalSignal) {
-      signal = externalSignal;
-      controllerRef.current = null;
-    } else {
-      controller = new AbortController();
-      controllerRef.current = controller;
-      signal = controller.signal;
-    }
-
-    const readerController = new AbortController();
-    let forwardAbort: (() => void) | null = null;
-    if (signal.aborted) {
-      readerController.abort();
-    } else {
-      forwardAbort = () => readerController.abort();
-      signal.addEventListener('abort', forwardAbort, { once: true });
-    }
-
+    const session = startStreamSession(externalSignal, controllerRef);
     setSending(true);
+
     const startedAt = Date.now();
-    const delayedChunks = createDelayedChunkEmitter(cb, startedAt, signal);
+    const delayedChunks = createDelayedChunkEmitter(cb, startedAt, session.signal);
     const accumulateToolDelta = createToolDeltaAccumulator();
     const activeConnector = connectorRef.current;
-    const connectorState = activeConnector.createState?.();
+    const deliverConnectorResult = createConnectorResultDeliverer(delayedChunks, accumulateToolDelta);
+
+    const streamPromiseRef: StreamPromiseRef = { current: null };
     let errorToThrow: unknown;
-    let streamPromise: Promise<void> | null = null;
-
-    const deliverConnectorResult = (out: ConnectorResult | null | undefined) => {
-      if (!out) return false;
-
-      const chunk = out.text || '';
-      if (chunk) delayedChunks.handleChunk(chunk);
-
-      const reasoning = out.reasoning || '';
-      if (reasoning) delayedChunks.handleReasoning(reasoning);
-
-      const toolDeltas = out.toolDeltas?.length ? out.toolDeltas : out.toolDelta ? [out.toolDelta] : [];
-      for (const toolDelta of toolDeltas) delayedChunks.handleToolDelta(accumulateToolDelta(toolDelta));
-
-      // Non-fatal connector signals (truncation, safety ratings, telemetry events). Logged in
-      // dev so they're discoverable; not yet routed to a typed callback. Stream keeps flowing.
-      if (out.warning) warnInDev(`[Chorus] connector warning (${out.warning.code}): ${out.warning.message}`, out.warning.payload);
-
-      const connectorError = connectorErrorFromResult(out);
-      if (connectorError) throw connectorError;
-      return Boolean(out.done);
-    };
 
     try {
-      const res = await transportRef.current(text, history, signal);
-      if (!res.ok) throw await createHttpResponseError(res);
-      if (!res.body) throw new ChorusStreamError(`Response body was missing for HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''}`);
-
-      streamPromise = readSSEStream(res, (payload) => {
-        const done = deliverConnectorResult(activeConnector.extract(payload, connectorState));
-        if (done) return false;
-      }, readerController.signal);
-      await Promise.race([streamPromise, delayedChunks.callbackErrorPromise]);
-      await streamPromise;
-
-      deliverConnectorResult(activeConnector.flush?.(connectorState));
-      await delayedChunks.flushBeforeDone();
-      try {
-        cb.onDone?.(res);
-      } catch (callbackError) {
-        // Completion observers run after the stream has succeeded. Preserve the
-        // historical contract that their failures reject send(), but do not route
-        // them through onError because there is no underlying stream error.
-        errorToThrow = callbackError;
-      }
+      errorToThrow = await runSendStream({
+        text,
+        history,
+        transport: transportRef.current,
+        connector: activeConnector,
+        session,
+        delayedChunks,
+        deliverConnectorResult,
+        cb,
+        streamPromiseRef,
+      });
     } catch (e: unknown) {
-      readerController.abort();
-      if (streamPromise) await streamPromise.catch(() => undefined);
-      const caughtError = delayedChunks.getCallbackError() ?? e;
-      delayedChunks.cancel();
-      if (!isAbortError(caughtError)) {
-        const error = toError(caughtError);
-        try {
-          cb.onError?.(error);
-        } catch (callbackError) {
-          safeOnObserverError('onError', callbackError);
-        }
-        errorToThrow = error;
-      }
+      errorToThrow = await handleSendError({
+        caught: e,
+        session,
+        streamPromise: streamPromiseRef.current,
+        delayedChunks,
+        cb,
+      });
     } finally {
-      if (forwardAbort) signal.removeEventListener('abort', forwardAbort);
+      endStreamSession(session, controllerRef);
       isSendingRef.current = false;
       setSending(false);
-      if (controllerRef.current === controller) controllerRef.current = null;
     }
 
     if (errorToThrow !== undefined) throw errorToThrow;
