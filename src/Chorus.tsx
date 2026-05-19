@@ -10,6 +10,7 @@ import { useChorusPersistence } from './hooks/useChorusPersistence';
 import { useChorusMessages } from './hooks/useChorusMessages';
 import { useAssistantSession } from './hooks/useAssistantSession';
 import { useChorusPropWarnings } from './hooks/useChorusPropWarnings';
+import { useChorusRef } from './hooks/useChorusRef';
 import { DEFAULT_CHORUS_HIDDEN_ROLES, DEFAULT_MIN_ASSISTANT_DELAY_MS, DEFAULT_PERSISTENCE_WRITE_DEBOUNCE_MS, type ChorusProps, type ChorusRef } from './Chorus.types';
 
 export type { Transport, FetchTransportInit, Connector, RenderAttachmentErrorContext, ChorusAbortContext, ChorusAbortReason, ChorusAbortSource, ChorusClearConversationContext, ChorusConfirmClearConversation, ChorusConfirmDeleteMessage, ChorusDeleteMessageContext, ChorusFinishContext, ChorusMessagesChangeContext, ChorusOnAbort, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusProps, ChorusRef, ChorusSendHelpers, ChorusSendPath, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusStreamDoneReason, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolLoopContext, ChorusToolRegistry } from './Chorus.types';
@@ -217,39 +218,15 @@ function ChorusInner<TMeta = Record<string, unknown>>({
 
   const controlledWithoutOnChange = value !== undefined && !onChange;
 
-  React.useImperativeHandle(ref, () => ({
-    send(text: string, attachments: Attachment[] = []) {
-      if (writesDisabled) return false;
-      if (controlledWithoutOnChange) return false;
-      const accepted = session.send(text, attachments);
-      if (accepted) setDraft('');
-      return accepted;
-    },
-    stop() {
-      session.stop('programmatic');
-    },
-    clear() {
-      if (writesDisabled || session.clearConfirmationPending) return false;
-      if (controlledWithoutOnChange) return false;
-      session.clear('programmatic');
-      return true;
-    },
-    focus() {
-      inputRef.current?.focus();
-    },
-    getMessages() {
-      return messagesRef.current.slice();
-    },
-    scrollToMessage(id: string) {
-      const root = rootRef.current;
-      if (!root) return false;
-      const nodes = root.querySelectorAll<HTMLElement>('[data-chorus-message-id]');
-      const target = Array.from(nodes).find(node => node.dataset.chorusMessageId === id);
-      if (!target) return false;
-      target.scrollIntoView({ block: 'nearest' });
-      return true;
-    },
-  }), [controlledWithoutOnChange, messagesRef, session, writesDisabled]);
+  useChorusRef<TMeta>(ref, {
+    session,
+    setDraft,
+    messagesRef,
+    rootRef,
+    inputRef,
+    writesDisabled,
+    controlledWithoutOnChange,
+  });
 
   return (
     <div
