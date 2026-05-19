@@ -1,7 +1,7 @@
 import type { Message } from '../../types';
 import type { FormatMessageResult, WebSocketTransport, WebSocketTransportOptions } from '../createWebSocketTransport';
 import { createManagedResponseStream } from './managedResponseStream';
-import { createAbortError, createClosedBeforeOpenError, encodeSSEDataEvent, normalizeFormatMessageResult, safeCloseSocket, toError, webSocketMessageToText } from './shared';
+import { createAbnormalCloseError, createAbortError, createClosedBeforeOpenError, encodeSSEDataEvent, isNormalCloseCode, normalizeFormatMessageResult, safeCloseSocket, toError, webSocketMessageToText } from './shared';
 
 export function createTransientWebSocketTransport<TMeta = Record<string, unknown>>(
   url: string,
@@ -81,7 +81,11 @@ export function createTransientWebSocketTransport<TMeta = Record<string, unknown
 
       ws.onclose = (event: CloseEvent) => {
         cleanup();
-        responseStream.close();
+        if (resolved && !isNormalCloseCode(event.code)) {
+          responseStream.error(createAbnormalCloseError(event));
+        } else {
+          responseStream.close();
+        }
         opts?.onClose?.(event.code, event.reason);
         if (!resolved && !settled) {
           settled = true;

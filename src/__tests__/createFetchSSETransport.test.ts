@@ -132,12 +132,52 @@ describe('createFetchSSETransport', () => {
     expect(options.signal).toBe(controller.signal);
   });
 
-  it('always calls fetch with method POST', async () => {
+  it('defaults to method POST', async () => {
     const transport = createFetchSSETransport('https://api.example.com/chat');
 
     await transport('hello', [], new AbortController().signal);
 
     const [, options] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(options.method).toBe('POST');
+  });
+
+  it('uses GET with no body when method: "GET" is passed', async () => {
+    const transport = createFetchSSETransport('https://api.example.com/chat?prompt=hello', {
+      method: 'GET',
+    });
+
+    await transport('hello', [], new AbortController().signal);
+
+    const [, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(options.method).toBe('GET');
+    expect(options.body).toBeUndefined();
+    expect(sentHeaders(options).has('content-type')).toBe(false);
+  });
+
+  it('skips formatBody when method is GET', async () => {
+    const formatBody = vi.fn(() => 'should-not-be-called');
+    const transport = createFetchSSETransport('https://api.example.com/chat', {
+      method: 'GET',
+      formatBody,
+    });
+
+    await transport('hello', [], new AbortController().signal);
+
+    expect(formatBody).not.toHaveBeenCalled();
+    const [, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(options.body).toBeUndefined();
+  });
+
+  it('forwards custom method like PUT with a body', async () => {
+    const transport = createFetchSSETransport('https://api.example.com/chat', {
+      method: 'PUT',
+    });
+
+    await transport('hello', [], new AbortController().signal);
+
+    const [, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(options.method).toBe('PUT');
+    expect(options.body).toBe(JSON.stringify({ prompt: 'hello', history: [] }));
+    expect(sentHeaders(options).get('content-type')).toBe('application/json');
   });
 });

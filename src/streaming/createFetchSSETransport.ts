@@ -3,6 +3,15 @@ import type { Transport } from '../hooks/useChorusStream';
 
 export interface FetchSSETransportOptions<TMeta = Record<string, unknown>> extends Omit<RequestInit, 'body' | 'method' | 'signal'> {
   /**
+   * HTTP method for the outgoing request. Defaults to `'POST'`.
+   *
+   * When set to a body-less method (`'GET'` or `'HEAD'`), the transport skips
+   * `formatBody` and the default `Content-Type: application/json` header — the
+   * URL is expected to carry any state (typically as query parameters). This
+   * enables GET-based SSE proxies and EventSource-style endpoints.
+   */
+  method?: 'GET' | 'HEAD' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+  /**
    * Serialize the outgoing request body.
    * Defaults to `JSON.stringify({ prompt, history })` for backwards compatibility.
    *
@@ -18,6 +27,8 @@ export interface FetchSSETransportOptions<TMeta = Record<string, unknown>> exten
    * caller supplied an explicit Content-Type header. When provided, set headers
    * yourself for JSON bodies; FormData/Blob/URLSearchParams are not forced to JSON.
    *
+   * Ignored when `method` is `'GET'` or `'HEAD'`.
+   *
    * @example OpenAI-compatible backend
    * ```ts
    * import { formatOpenAIChatCompletionsBody } from 'react-chorus/provider-requests';
@@ -32,19 +43,24 @@ export function createFetchSSETransport<TMeta = Record<string, unknown>>(
   url: string,
   init?: FetchSSETransportOptions<TMeta>,
 ): Transport<TMeta> {
+  const method = init?.method ?? 'POST';
+  const bodyless = method === 'GET' || method === 'HEAD';
   const hasCustomFormatBody = typeof init?.formatBody === 'function';
   const formatBody =
     init?.formatBody ??
     ((text: string, history: Message<TMeta>[]) => JSON.stringify({ prompt: text, history }));
 
-  const { formatBody: _removed, headers: initHeaders, ...rest } = init ?? {};
+  const { formatBody: _removed, headers: initHeaders, method: _removedMethod, ...rest } = init ?? {};
 
   return async (text: string, history: Message<TMeta>[], signal: AbortSignal) => {
-    const body = formatBody(text, history);
     const headers = new Headers(initHeaders);
+    if (bodyless) {
+      return fetch(url, { ...rest, method, headers, signal });
+    }
+    const body = formatBody(text, history);
     if (!hasCustomFormatBody && !headers.has('Content-Type')) {
       headers.set('Content-Type', 'application/json');
     }
-    return fetch(url, { ...rest, method: 'POST', headers, body, signal });
+    return fetch(url, { ...rest, method, headers, body, signal });
   };
 }

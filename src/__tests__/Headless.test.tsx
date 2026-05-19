@@ -1,6 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { cleanup, render } from '@testing-library/react';
+import React from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import {
+  ChatInput,
   ChatWindow,
   Chorus,
   ConversationList,
@@ -10,6 +13,8 @@ import {
   useChorusPersistence,
   useConversations,
 } from '../headless';
+import type { ChatInputHandle } from '../headless';
+import type { ChorusRef } from '../headless';
 import {
   formatOpenAIChatCompletionsBody as rootFormatOpenAIChatCompletionsBody,
   useChorusPersistence as rootUseChorusPersistence,
@@ -66,5 +71,46 @@ describe('react-chorus/headless defaults', () => {
     render(<Chorus initialMessages={[USER_MSG]} />);
 
     expect(document.getElementById('chorus-md-styles')).not.toBeInTheDocument();
+  });
+
+  it('ChatInput ref.focus() focuses the textarea in headless mode', () => {
+    const ref = React.createRef<ChatInputHandle>();
+    render(
+      <ChatInput
+        ref={ref}
+        value="hi"
+        onChange={() => {}}
+        onSend={vi.fn()}
+      />,
+    );
+
+    act(() => ref.current?.focus({ caret: 'end' }));
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+    expect(textarea).toHaveFocus();
+    expect(textarea.selectionStart).toBe(2);
+    expect(textarea.selectionEnd).toBe(2);
+  });
+
+  it('Chorus headless suggestedPrompt and imperative focus both land on the textarea', async () => {
+    const user = userEvent.setup();
+    const ref = React.createRef<ChorusRef>();
+    render(
+      <Chorus
+        ref={ref}
+        suggestedPrompts={['Draft a release note']}
+      />,
+    );
+
+    const composer = screen.getByRole('textbox');
+
+    await user.click(screen.getByRole('button', { name: 'Draft a release note' }));
+    expect(composer).toHaveValue('Draft a release note');
+    await waitFor(() => expect(composer).toHaveFocus());
+
+    (composer as HTMLTextAreaElement).blur();
+    expect(composer).not.toHaveFocus();
+
+    act(() => ref.current?.focus());
+    expect(composer).toHaveFocus();
   });
 });

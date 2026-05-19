@@ -2,6 +2,7 @@ import React from 'react';
 import './Chorus.css';
 import { ChatWindow } from './components/ChatWindow';
 import { ChatInput } from './components/ChatInput';
+import type { ChatInputHandle } from './components/ChatInput';
 import { styleVarsFromPalette } from './components/ChorusTheme';
 import type { Attachment, Message } from './types';
 import { resolveChorusLabels } from './labels/resolve';
@@ -82,7 +83,7 @@ function ChorusInner<TMeta = Record<string, unknown>>({
   const resolvedLabels = React.useMemo(() => resolveChorusLabels(labels), [labels]);
   const resolvedClearLabel = clearLabel ?? resolvedLabels.clearConversation;
   const rootRef = React.useRef<HTMLDivElement>(null);
-  const inputRef = React.useRef<HTMLDivElement>(null);
+  const inputRef = React.useRef<ChatInputHandle>(null);
   const [draft, setDraft] = React.useState('');
   const [composerResetKey, setComposerResetKey] = React.useState(0);
   const fallbackErrorMessage = errorMessage ?? 'Something went wrong. Please try again.';
@@ -220,11 +221,7 @@ function ChorusInner<TMeta = Record<string, unknown>>({
     setDraft(prompt);
 
     const focusComposer = () => {
-      const el = rootRef.current?.querySelector<HTMLTextAreaElement>('.chorus-input textarea');
-      if (!el) return;
-      el.focus();
-      el.selectionStart = el.value.length;
-      el.selectionEnd = el.value.length;
+      inputRef.current?.focus({ caret: 'end' });
     };
 
     if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {

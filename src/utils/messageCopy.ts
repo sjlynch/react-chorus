@@ -1,3 +1,5 @@
+import React from 'react';
+
 export const COPY_FEEDBACK_DURATION_MS = 1200;
 export const COPY_FAILED_LABEL = 'Copy failed';
 
@@ -21,6 +23,17 @@ export function toClipboardError(error: unknown, fallbackMessage = CLIPBOARD_COP
 
 export function canWriteTextToClipboard() {
   return typeof navigator !== 'undefined' && typeof navigator.clipboard?.writeText === 'function';
+}
+
+// Hook variant of canWriteTextToClipboard that is hydration-stable: returns
+// false on the server and on the first client render so SSR markup matches
+// the initial client tree, then updates after the mount effect runs.
+export function useCanWriteTextToClipboard() {
+  const [writable, setWritable] = React.useState(false);
+  React.useEffect(() => {
+    setWritable(canWriteTextToClipboard());
+  }, []);
+  return writable;
 }
 
 export async function writeTextToClipboard(text: string, onError?: ClipboardCopyErrorHandler) {
