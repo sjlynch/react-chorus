@@ -3,6 +3,7 @@ import { openAIImageUrlFromAttachment, unsupportedAttachmentText } from '../atta
 import { hasOwn, isRecord, metadataArray, nonEmptyString } from '../metadata';
 import { stripOpenAIChatOptions } from '../options';
 import { compactJSONString, messageText, toolContextText, toolOutputText } from '../toolOutput';
+import { forEachHistoryEntry } from '../toolRunIterator';
 import type { ProviderMappingOptions } from '../types/common';
 import type {
   OpenAIChatCompletionsAssistantMessage,
@@ -134,44 +135,33 @@ export function toOpenAIChatCompletionsMessages<TMeta = Record<string, unknown>>
 ): OpenAIChatCompletionsMessage[] {
   const messages: OpenAIChatCompletionsMessage[] = [];
 
-  for (let i = 0; i < history.length; i += 1) {
-    const message = history[i];
-    if (!message) continue;
-    if (message.role !== 'tool') {
+  forEachHistoryEntry(history, {
+    onMessage: message => {
       const mapped = toOpenAIChatCompletionsMessage(message, options);
       if (mapped) messages.push(mapped);
-      continue;
-    }
-
-    const group: Message<TMeta>[] = [];
-    while (i < history.length) {
-      const next = history[i];
-      if (!next || next.role !== 'tool') break;
-      group.push(next);
-      i += 1;
-    }
-    i -= 1;
-
-    const providerTools: Array<{ message: Message<TMeta>; toolCall: OpenAIChatCompletionsToolCall }> = [];
-    for (const toolMessage of group) {
-      const toolCall = openAIChatToolCall(toolMessage as Message<unknown>);
-      if (toolCall) providerTools.push({ message: toolMessage, toolCall });
-    }
-
-    if (providerTools.length) {
-      appendOpenAIChatToolCalls(messages, providerTools.map(entry => entry.toolCall));
-      for (const entry of providerTools) {
-        const toolCallId = openAIToolCallId(entry.message as Message<unknown>);
-        if (toolCallId) messages.push({ role: 'tool', tool_call_id: toolCallId, content: toolOutputText(entry.message) });
+    },
+    onToolRun: run => {
+      const providerTools: Array<{ message: Message<TMeta>; toolCall: OpenAIChatCompletionsToolCall }> = [];
+      for (const toolMessage of run) {
+        const toolCall = openAIChatToolCall(toolMessage as Message<unknown>);
+        if (toolCall) providerTools.push({ message: toolMessage, toolCall });
       }
-    }
 
-    for (const toolMessage of group) {
-      if (openAIToolCallId(toolMessage as Message<unknown>)) continue;
-      const mapped = toOpenAIChatCompletionsMessage(toolMessage, options);
-      if (mapped) messages.push(mapped);
-    }
-  }
+      if (providerTools.length) {
+        appendOpenAIChatToolCalls(messages, providerTools.map(entry => entry.toolCall));
+        for (const entry of providerTools) {
+          const toolCallId = openAIToolCallId(entry.message as Message<unknown>);
+          if (toolCallId) messages.push({ role: 'tool', tool_call_id: toolCallId, content: toolOutputText(entry.message) });
+        }
+      }
+
+      for (const toolMessage of run) {
+        if (openAIToolCallId(toolMessage as Message<unknown>)) continue;
+        const mapped = toOpenAIChatCompletionsMessage(toolMessage, options);
+        if (mapped) messages.push(mapped);
+      }
+    },
+  });
 
   return messages;
 }
