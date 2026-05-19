@@ -74,7 +74,8 @@ function createAutoConnectorState(): AutoConnectorState {
  * - If data parses as JSON and looks like Gemini => extract candidates text/reasoning/tool deltas
  * - If data parses as JSON and looks like a Vercel AI SDK UI message stream event => extract via aiSdkConnector
  * - If data matches the Vercel AI SDK data-stream protocol (`0:"..."`, `9:{...}`) => extract via aiSdkConnector
- * - Else, treat as plain text
+ * - Else, delegate plain text to openaiConnector so `<think>...</think>` traces
+ *   are routed into reasoning instead of rendered as visible answer text
  */
 export const autoConnector: Connector<AutoConnectorState> = {
   name: 'auto',
@@ -94,6 +95,11 @@ export const autoConnector: Connector<AutoConnectorState> = {
       if (genericText) return { text: genericText };
     } catch {
       if (AI_SDK_DATA_STREAM_PREFIX_PATTERN.test(data)) return aiSdkConnector.extract(data, state.aiSdk);
+      // Plain-text fallthrough: delegate to openaiConnector so DeepSeek-style
+      // `<think>...</think>` traces are split into reasoning rather than rendered
+      // verbatim. Per-stream think state lives in `state.openai`, so fragments
+      // straddling chunk boundaries are preserved across calls.
+      return data ? openaiConnector.extract(data, state.openai) : null;
     }
     return data ? { text: data } : null;
   },

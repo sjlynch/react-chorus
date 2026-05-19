@@ -99,4 +99,16 @@ describe('autoConnector', () => {
   it('returns null for empty string', () => {
     expect(autoConnector.extract('')).toBeNull();
   });
+
+  it('routes plain-text <think>...</think> traces into reasoning instead of visible text', () => {
+    const state = autoConnector.createState?.();
+    expect(autoConnector.extract('<think>scratching head</think>', state)).toEqual({ reasoning: 'scratching head' });
+    expect(autoConnector.extract('hello', state)).toEqual({ text: 'hello' });
+  });
+
+  it('preserves per-stream <think> state across fragmented plain-text chunks', () => {
+    const state = autoConnector.createState?.();
+    expect(autoConnector.extract('<think>scratch', state)).toEqual({ reasoning: 'scratch' });
+    expect(autoConnector.extract('ing head</think>visible', state)).toEqual({ reasoning: 'ing head', text: 'visible' });
+  });
 });

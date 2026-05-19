@@ -92,8 +92,9 @@ export function useChorusStream<TMeta = Record<string, unknown>>(transport: Tran
     if (externalSignal?.aborted) return;
 
     if (isSendingRef.current) {
-      warnInDev('[Chorus] useChorusStream.send was called while a previous send is still in flight; the new call was ignored. Wait for the previous send to finish (await the promise) or call abort() before re-sending.');
-      return;
+      const message = '[Chorus] useChorusStream.send was called while a previous send is still in flight; the new call was ignored. Wait for the previous send to finish (await the promise) or call abort() before re-sending.';
+      warnInDev(message);
+      throw new ChorusStreamError(message, { code: 'concurrent-send' });
     }
 
     isSendingRef.current = true;
