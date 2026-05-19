@@ -59,79 +59,22 @@ function prefixSelectorList(selectors: string, scope: string) {
   return `${leading}${scoped}${trailing}`;
 }
 
-function splitTopLevelSelectors(selectors: string) {
-  const parts: string[] = [];
-  let partStart = 0;
-  let quote: '"' | "'" | null = null;
-  let escaping = false;
-  let parenDepth = 0;
-  let bracketDepth = 0;
-
-  for (let i = 0; i < selectors.length; i++) {
-    const char = selectors[i];
-    const next = selectors[i + 1];
-
-    if (quote) {
-      if (escaping) escaping = false;
-      else if (char === '\\') escaping = true;
-      else if (char === quote) quote = null;
-      continue;
-    }
-
-    if (char === '/' && next === '*') {
-      const end = selectors.indexOf('*/', i + 2);
-      i = end === -1 ? selectors.length : end + 1;
-      continue;
-    }
-
-    if (char === '"' || char === "'") quote = char;
-    else if (char === '(') parenDepth++;
-    else if (char === ')') parenDepth = Math.max(0, parenDepth - 1);
-    else if (char === '[') bracketDepth++;
-    else if (char === ']') bracketDepth = Math.max(0, bracketDepth - 1);
-    else if (char === ',' && parenDepth === 0 && bracketDepth === 0) {
-      parts.push(selectors.slice(partStart, i));
-      partStart = i + 1;
-    }
-  }
-
-  parts.push(selectors.slice(partStart));
-  return parts;
+// Shared CSS scanner. Yields one event per character with quote/escape and
+// `/* ... */` comments handled once, plus running paren/bracket depth so the
+// per-scanner loops below only have to look at the chars they actually care
+// about. `parenDepth`/`bracketDepth` are reported BEFORE the current char
+// takes effect, matching how the original hand-rolled loops checked depth
+// before incrementing on `(`/`[`. Unterminated comments end the generator,
+// mirroring the `break`/`i = length` exits in the originals.
+interface CssCharEvent {
+  index: number;
+  char: string;
+  inString: boolean;
+  parenDepth: number;
+  bracketDepth: number;
 }
 
-function stripCssComments(css: string) {
-  let output = '';
-  let quote: '"' | "'" | null = null;
-  let escaping = false;
-
-  for (let i = 0; i < css.length; i++) {
-    const char = css[i];
-    const next = css[i + 1];
-
-    if (quote) {
-      output += char;
-      if (escaping) escaping = false;
-      else if (char === '\\') escaping = true;
-      else if (char === quote) quote = null;
-      continue;
-    }
-
-    if (char === '"' || char === "'") {
-      quote = char;
-      output += char;
-    } else if (char === '/' && next === '*') {
-      const end = css.indexOf('*/', i + 2);
-      if (end === -1) break;
-      i = end + 1;
-    } else {
-      output += char;
-    }
-  }
-
-  return output;
-}
-
-function findNextRuleOpen(css: string, start: number) {
+function* scanCssChars(css: string, start = 0): Generator<CssCharEvent> {
   let quote: '"' | "'" | null = null;
   let escaping = false;
   let parenDepth = 0;
@@ -139,75 +82,81 @@ function findNextRuleOpen(css: string, start: number) {
 
   for (let i = start; i < css.length; i++) {
     const char = css[i];
+    if (char === undefined) continue;
 
     if (quote) {
+      yield { index: i, char, inString: true, parenDepth, bracketDepth };
       if (escaping) escaping = false;
       else if (char === '\\') escaping = true;
       else if (char === quote) quote = null;
       continue;
     }
 
-    if (char === '"' || char === "'") quote = char;
-    else if (char === '(') parenDepth++;
+    if (char === '/' && css[i + 1] === '*') {
+      const end = css.indexOf('*/', i + 2);
+      if (end === -1) return;
+      i = end + 1;
+      continue;
+    }
+
+    if (char === '"' || char === "'") {
+      yield { index: i, char, inString: false, parenDepth, bracketDepth };
+      quote = char;
+      continue;
+    }
+
+    yield { index: i, char, inString: false, parenDepth, bracketDepth };
+
+    if (char === '(') parenDepth++;
     else if (char === ')') parenDepth = Math.max(0, parenDepth - 1);
     else if (char === '[') bracketDepth++;
     else if (char === ']') bracketDepth = Math.max(0, bracketDepth - 1);
-    else if (char === '{' && parenDepth === 0 && bracketDepth === 0) return i;
   }
+}
 
+function splitTopLevelSelectors(selectors: string) {
+  const parts: string[] = [];
+  let partStart = 0;
+  for (const { index, char, inString, parenDepth, bracketDepth } of scanCssChars(selectors)) {
+    if (!inString && char === ',' && parenDepth === 0 && bracketDepth === 0) {
+      parts.push(selectors.slice(partStart, index));
+      partStart = index + 1;
+    }
+  }
+  parts.push(selectors.slice(partStart));
+  return parts;
+}
+
+function stripCssComments(css: string) {
+  let output = '';
+  for (const { char } of scanCssChars(css)) output += char;
+  return output;
+}
+
+function findNextRuleOpen(css: string, start: number) {
+  for (const { index, char, inString, parenDepth, bracketDepth } of scanCssChars(css, start)) {
+    if (!inString && char === '{' && parenDepth === 0 && bracketDepth === 0) return index;
+  }
   return -1;
 }
 
 function findMatchingBrace(css: string, open: number) {
-  let quote: '"' | "'" | null = null;
-  let escaping = false;
   let depth = 0;
-
-  for (let i = open; i < css.length; i++) {
-    const char = css[i];
-
-    if (quote) {
-      if (escaping) escaping = false;
-      else if (char === '\\') escaping = true;
-      else if (char === quote) quote = null;
-      continue;
-    }
-
-    if (char === '"' || char === "'") quote = char;
-    else if (char === '{') depth++;
+  for (const { index, char, inString } of scanCssChars(css, open)) {
+    if (inString) continue;
+    if (char === '{') depth++;
     else if (char === '}') {
       depth--;
-      if (depth === 0) return i;
+      if (depth === 0) return index;
     }
   }
-
   return -1;
 }
 
 function findLastTopLevelSemicolon(text: string) {
   let last = -1;
-  let quote: '"' | "'" | null = null;
-  let escaping = false;
-  let parenDepth = 0;
-  let bracketDepth = 0;
-
-  for (let i = 0; i < text.length; i++) {
-    const char = text[i];
-
-    if (quote) {
-      if (escaping) escaping = false;
-      else if (char === '\\') escaping = true;
-      else if (char === quote) quote = null;
-      continue;
-    }
-
-    if (char === '"' || char === "'") quote = char;
-    else if (char === '(') parenDepth++;
-    else if (char === ')') parenDepth = Math.max(0, parenDepth - 1);
-    else if (char === '[') bracketDepth++;
-    else if (char === ']') bracketDepth = Math.max(0, bracketDepth - 1);
-    else if (char === ';' && parenDepth === 0 && bracketDepth === 0) last = i;
+  for (const { index, char, inString, parenDepth, bracketDepth } of scanCssChars(text)) {
+    if (!inString && char === ';' && parenDepth === 0 && bracketDepth === 0) last = index;
   }
-
   return last;
 }

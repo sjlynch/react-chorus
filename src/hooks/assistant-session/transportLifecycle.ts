@@ -48,15 +48,17 @@ export interface TransportLifecycleDeps<TMeta> {
   forceRender: () => void;
 }
 
+export type StartTransportStream<TMeta> = (
+  sessionId: number,
+  text: string,
+  history: Message<TMeta>[],
+  controller: AbortController,
+  iteration: number,
+) => void;
+
 export interface TransportLifecycle<TMeta> {
   historyForTransport: (history: Message<TMeta>[]) => Message<TMeta>[];
-  startTransportStream: (
-    sessionId: number,
-    text: string,
-    history: Message<TMeta>[],
-    controller: AbortController,
-    iteration: number,
-  ) => void;
+  startTransportStream: StartTransportStream<TMeta>;
   decideToolLoopContinuation: (
     iteration: number,
     assistantMessage: Message<TMeta> | null,

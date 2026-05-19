@@ -14,6 +14,7 @@
 - `onSendLifecycle.ts` — `startOnSendLifecycle` owns the custom `onSend` branch once the facade selects it: abort-controller setup, `createSessionHelpers`, returned-message normalization, auto-finalize warnings, non-abort error handling, and cleanup.
 - `transportLifecycle.ts` — `useTransportLifecycle` owns `historyForTransport`, `startTransportStream`, `decideToolLoopContinuation`, and the internal `finishTransportStream` that runs queued tool calls and continues or releases the loop.
 - `sessionCommands.ts` — `useSessionCommands` builds the user-facing `send` / `retry` / `stop` / `clear` / `handleEdit` / `handleRegenerate` / `handleDelete` callbacks from refs and lifecycle callbacks supplied by the facade.
+- `sessionOrchestrator.ts` — `useSessionOrchestrator` owns the active session/path/controller bookkeeping and exposes `beginAssistantSession` / `isAssistantSessionActive` / `invalidateAssistantSession` / `completeActiveSession` / `removePendingAssistant` / `abortActiveAssistant` / `triggerAssistant` / `warnMissingResponseHandler` so the facade composes refs + buffer + orchestrator + toolExec + transportLifecycle + sessionCommands instead of inlining the lifecycle glue.
 - `toolLoop.ts` — `maxToolIterations` normalization (`Infinity` is the explicit unlimited sentinel) and defaults.
 - `transport.ts` — string-URL transport shortcut. It intentionally mirrors the default fetch SSE request locally to keep transport-only bundles isolated.
 
@@ -56,6 +57,10 @@ Conversation index persistence is split into focused helpers (see `conversations
 ## `useLatestRef`
 
 Small helper that stores the latest callback/value in a ref after each render. It is used by stable callbacks and async closures so they can read current props/state without changing callback identity.
+
+## `useMirroredState`
+
+Small helper that returns `[value, setMirrored, ref]` — a `useState` whose ref is kept in sync synchronously inside the setter so synchronous reads from event handlers and async closures see the latest value without waiting for the next render. The setter identity is stable for `useCallback` deps.
 
 ## Closure pattern
 
