@@ -200,6 +200,112 @@ describe('createWebSocketTransport', () => {
     expect(result.value).toBeUndefined();
   });
 
+  it('treats a normal 1000 close after a chunk as clean EOF in transient mode', async () => {
+    const transport = createWebSocketTransport('wss://api.example.com/chat');
+    const promise = transport('hello', [], new AbortController().signal);
+    const ws = MockWebSocket.instances[0];
+
+    ws.emitOpen();
+    const response = await promise;
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+
+    ws.onmessage?.({ data: '{"chunk":"hi"}' } as MessageEvent);
+    const first = await reader.read();
+    expect(decoder.decode(first.value)).toBe('data: {"chunk":"hi"}\n\n');
+
+    ws.emitClose(1000, 'done');
+    const next = await reader.read();
+    expect(next.done).toBe(true);
+  });
+
+  it('errors the response stream on abnormal 1006 close after a chunk in transient mode', async () => {
+    const transport = createWebSocketTransport('wss://api.example.com/chat');
+    const promise = transport('hello', [], new AbortController().signal);
+    const ws = MockWebSocket.instances[0];
+
+    ws.emitOpen();
+    const response = await promise;
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+
+    ws.onmessage?.({ data: '{"chunk":"hi"}' } as MessageEvent);
+    const first = await reader.read();
+    expect(decoder.decode(first.value)).toBe('data: {"chunk":"hi"}\n\n');
+
+    ws.emitClose(1006, 'abnormal');
+    await expect(reader.read()).rejects.toThrow(/code 1006: abnormal/);
+  });
+
+  it('errors the response stream on abnormal 1011 close after a chunk in transient mode', async () => {
+    const transport = createWebSocketTransport('wss://api.example.com/chat');
+    const promise = transport('hello', [], new AbortController().signal);
+    const ws = MockWebSocket.instances[0];
+
+    ws.emitOpen();
+    const response = await promise;
+    const reader = response.body!.getReader();
+
+    ws.onmessage?.({ data: '{"chunk":"partial"}' } as MessageEvent);
+    await reader.read();
+
+    ws.emitClose(1011, 'server error');
+    await expect(reader.read()).rejects.toThrow(/code 1011: server error/);
+  });
+
+  it('errors active streams on abnormal 1006 close in persistent mode', async () => {
+    const transport = createWebSocketTransport('wss://api.example.com/chat', { persistent: true });
+    const promise = transport('hello', [], new AbortController().signal);
+    const ws = MockWebSocket.instances[0];
+
+    ws.emitOpen();
+    const response = await promise;
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+
+    ws.onmessage?.({ data: '{"chunk":"hi"}' } as MessageEvent);
+    const first = await reader.read();
+    expect(decoder.decode(first.value)).toBe('data: {"chunk":"hi"}\n\n');
+
+    ws.emitClose(1006, 'abnormal');
+    await expect(reader.read()).rejects.toThrow(/code 1006: abnormal/);
+  });
+
+  it('errors active streams on abnormal 1011 close in persistent mode', async () => {
+    const transport = createWebSocketTransport('wss://api.example.com/chat', { persistent: true });
+    const promise = transport('hello', [], new AbortController().signal);
+    const ws = MockWebSocket.instances[0];
+
+    ws.emitOpen();
+    const response = await promise;
+    const reader = response.body!.getReader();
+
+    ws.onmessage?.({ data: '{"chunk":"partial"}' } as MessageEvent);
+    await reader.read();
+
+    ws.emitClose(1011, 'server error');
+    await expect(reader.read()).rejects.toThrow(/code 1011: server error/);
+  });
+
+  it('closes active streams cleanly on a normal 1000 close in persistent mode', async () => {
+    const transport = createWebSocketTransport('wss://api.example.com/chat', { persistent: true });
+    const promise = transport('hello', [], new AbortController().signal);
+    const ws = MockWebSocket.instances[0];
+
+    ws.emitOpen();
+    const response = await promise;
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+
+    ws.onmessage?.({ data: '{"chunk":"hi"}' } as MessageEvent);
+    const first = await reader.read();
+    expect(decoder.decode(first.value)).toBe('data: {"chunk":"hi"}\n\n');
+
+    ws.emitClose(1000, 'done');
+    const next = await reader.read();
+    expect(next.done).toBe(true);
+  });
+
   it('closes the WS and errors the stream when the AbortSignal fires after open', async () => {
     const controller = new AbortController();
     const transport = createWebSocketTransport('wss://api.example.com/chat');
