@@ -4,6 +4,7 @@ import type { Connector } from '../connectors/connectors';
 import type { ConnectorName } from '../types';
 import { useChorusStream, type Transport } from './useChorusStream';
 import { useLatestRef } from './useLatestRef';
+import { useAssistantSessionRefs } from './assistant-session/useAssistantSessionRefs';
 import { isChorusDevMode } from '../utils/devMode';
 import { createDefaultFetchSSETransport, type FetchTransportInit } from './assistant-session/transport';
 import { cloneHistoryForRetry, findLastUserMessage } from './assistant-session/messageUtils';
@@ -134,28 +135,53 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
   resetToInitialMessages = false,
   onClear,
 }: UseAssistantSessionOptions<TMeta>): UseAssistantSessionResult {
-  const messagesRef = useLatestRef(messages);
-  const transportRef = useLatestRef(transport);
-  const onSendRef = useLatestRef(onSend);
-  const onErrorRef = useLatestRef(onError);
-  const onFinishRef = useLatestRef(onFinish);
-  const onAbortRef = useLatestRef(onAbort);
-  const onStreamDoneRef = useLatestRef(onStreamDone);
-  const onToolCallRef = useLatestRef(onToolCall);
-  const onToolDeltaRef = useLatestRef(onToolDelta);
-  const toolsRef = useLatestRef(tools);
-  const autoContinueToolsRef = useLatestRef(autoContinueTools);
-  const maxToolIterationsRef = useLatestRef(maxToolIterations);
-  const shouldContinueToolLoopRef = useLatestRef(shouldContinueToolLoop);
-  const confirmDeleteMessageRef = useLatestRef(confirmDeleteMessage);
-  const confirmClearConversationRef = useLatestRef(confirmClearConversation);
-  const persistenceKeyRef = useLatestRef(persistenceKey);
-  const resetToInitialMessagesRef = useLatestRef(resetToInitialMessages);
-  const onClearRef = useLatestRef(onClear);
-  const fallbackErrorMessageRef = useLatestRef(fallbackErrorMessage);
-  const systemPromptRef = useLatestRef(systemPrompt);
-  const minAssistantDelayMsRef = useLatestRef(minAssistantDelayMs);
-  const seedMessagesRef = useLatestRef(seedMessages);
+  const {
+    messages: messagesRef,
+    transport: transportRef,
+    onSend: onSendRef,
+    onError: onErrorRef,
+    onFinish: onFinishRef,
+    onAbort: onAbortRef,
+    onStreamDone: onStreamDoneRef,
+    onToolCall: onToolCallRef,
+    onToolDelta: onToolDeltaRef,
+    tools: toolsRef,
+    autoContinueTools: autoContinueToolsRef,
+    maxToolIterations: maxToolIterationsRef,
+    shouldContinueToolLoop: shouldContinueToolLoopRef,
+    confirmDeleteMessage: confirmDeleteMessageRef,
+    confirmClearConversation: confirmClearConversationRef,
+    persistenceKey: persistenceKeyRef,
+    resetToInitialMessages: resetToInitialMessagesRef,
+    onClear: onClearRef,
+    fallbackErrorMessage: fallbackErrorMessageRef,
+    systemPrompt: systemPromptRef,
+    minAssistantDelayMs: minAssistantDelayMsRef,
+    seedMessages: seedMessagesRef,
+  } = useAssistantSessionRefs<TMeta>({
+    messages,
+    transport,
+    onSend,
+    onError,
+    onFinish,
+    onAbort,
+    onStreamDone,
+    onToolCall,
+    onToolDelta,
+    tools,
+    autoContinueTools,
+    maxToolIterations,
+    shouldContinueToolLoop,
+    confirmDeleteMessage,
+    confirmClearConversation,
+    persistenceKey,
+    resetToInitialMessages,
+    onClear,
+    fallbackErrorMessage,
+    systemPrompt,
+    minAssistantDelayMs,
+    seedMessages,
+  });
   const pendingDeleteIdsRef = React.useRef(new Set<string>());
   const clearConfirmationActiveRef = React.useRef(false);
 

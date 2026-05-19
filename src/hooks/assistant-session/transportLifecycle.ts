@@ -179,6 +179,48 @@ export function useTransportLifecycle<TMeta>(deps: TransportLifecycleDeps<TMeta>
     };
   }, [autoContinueToolsRef, maxToolIterationsRef, messagesRef, shouldContinueToolLoopRef]);
 
+  const emitFinishForAssistantMessage = React.useCallback((
+    assistantMessage: Message<TMeta> | null,
+    response: Response | undefined,
+  ) => {
+    if (!assistantMessage) return;
+    observers.safeOnFinish({
+      message: assistantMessage,
+      messages: messagesRef.current,
+      reason: 'done',
+      response,
+    });
+  }, [messagesRef, observers]);
+
+  const safeDecideToolLoopContinuation = React.useCallback(async (
+    sessionId: number,
+    iteration: number,
+    assistantMessage: Message<TMeta> | null,
+    toolMessages: ToolMessage<TMeta>[],
+    response: Response | undefined,
+    signal: AbortSignal,
+  ): Promise<ToolLoopDecision> => {
+    try {
+      return await decideToolLoopContinuation(iteration, assistantMessage, toolMessages, response, signal);
+    } catch (decisionError) {
+      if (!isAbortError(decisionError) && isAssistantSessionActive(sessionId)) {
+        // shouldContinueToolLoop threw. Surface a terminal callback so observers see the
+        // turn end before the error is reported via onError.
+        observers.safeOnStreamDone({
+          assistantMessage,
+          toolMessages,
+          messages: messagesRef.current,
+          response,
+          reason: 'tool-loop-veto',
+          willContinue: false,
+          iteration: iteration + 1,
+          maxToolIterations: normalizeMaxToolIterations(maxToolIterationsRef.current),
+        });
+      }
+      throw decisionError;
+    }
+  }, [decideToolLoopContinuation, isAssistantSessionActive, maxToolIterationsRef, messagesRef, observers]);
+
   const finishTransportStream = React.useCallback<FinishTransportStream>(async (sessionId, response, controller, iteration) => {
     const toolMessageIds = new Set(pendingToolMessageIdsRef.current);
     let keepTransportBusy = false;
@@ -188,37 +230,17 @@ export function useTransportLifecycle<TMeta>(deps: TransportLifecycleDeps<TMeta>
       if (!isAssistantSessionActive(sessionId)) return;
 
       const assistantMessage = finalizeAssistantNow();
-      if (assistantMessage) {
-        observers.safeOnFinish({
-          message: assistantMessage,
-          messages: messagesRef.current,
-          reason: 'done',
-          response,
-        });
-      }
+      emitFinishForAssistantMessage(assistantMessage, response);
 
       const toolMessages = getToolMessagesByIds(toolMessageIds);
-
-      let decision: ToolLoopDecision;
-      try {
-        decision = await decideToolLoopContinuation(iteration, assistantMessage, toolMessages, response, controller.signal);
-      } catch (decisionError) {
-        if (!isAbortError(decisionError) && isAssistantSessionActive(sessionId)) {
-          // shouldContinueToolLoop threw. Surface a terminal callback so observers see the
-          // turn end before the error is reported via onError.
-          observers.safeOnStreamDone({
-            assistantMessage,
-            toolMessages,
-            messages: messagesRef.current,
-            response,
-            reason: 'tool-loop-veto',
-            willContinue: false,
-            iteration: iteration + 1,
-            maxToolIterations: normalizeMaxToolIterations(maxToolIterationsRef.current),
-          });
-        }
-        throw decisionError;
-      }
+      const decision = await safeDecideToolLoopContinuation(
+        sessionId,
+        iteration,
+        assistantMessage,
+        toolMessages,
+        response,
+        controller.signal,
+      );
       if (!isAssistantSessionActive(sessionId)) return;
 
       observers.safeOnStreamDone({
@@ -256,7 +278,7 @@ export function useTransportLifecycle<TMeta>(deps: TransportLifecycleDeps<TMeta>
         if (controllerRef.current === controller) controllerRef.current = null;
       }
     }
-  }, [controllerRef, decideToolLoopContinuation, finalizeAssistantNow, forceRender, getToolMessagesByIds, invalidateAssistantSession, isAssistantSessionActive, maxToolIterationsRef, messagesRef, observers, pendingToolMessageIdsRef, resetPendingAssistantState, runCompletedToolCalls, setTransportBusy, showStreamError, startTransportStream]);
+  }, [controllerRef, emitFinishForAssistantMessage, finalizeAssistantNow, forceRender, getToolMessagesByIds, invalidateAssistantSession, isAssistantSessionActive, messagesRef, observers, pendingToolMessageIdsRef, resetPendingAssistantState, runCompletedToolCalls, safeDecideToolLoopContinuation, setTransportBusy, showStreamError, startTransportStream]);
 
   finishTransportStreamRef.current = finishTransportStream;
 
