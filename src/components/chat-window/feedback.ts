@@ -5,11 +5,16 @@ import { getInitialMessageFeedback, type GetMessageFeedback } from '../message-r
 export interface UseMessageFeedbackStateOptions<TMeta = Record<string, unknown>> {
   messages: Message<TMeta>[];
   getMessageFeedback?: GetMessageFeedback<TMeta>;
-  onFeedback?: (message: Message<TMeta>, feedback: MessageFeedback) => void;
+  onFeedback?: (message: Message<TMeta>, feedback: MessageFeedback | null) => void;
 }
 
+// Stored overrides are only ever `'up' | 'down' | null` — `null` is a real
+// value meaning "feedback explicitly cleared". An absent key reads back as
+// `undefined`, which is the only signal to fall back to the seeded selection.
+type FeedbackOverrides = Record<string, MessageFeedback | null>;
+
 export function useMessageFeedbackState<TMeta = Record<string, unknown>>({ messages, getMessageFeedback, onFeedback }: UseMessageFeedbackStateOptions<TMeta>) {
-  const [feedbackOverrides, setFeedbackOverrides] = React.useState<Record<string, MessageFeedback>>({});
+  const [feedbackOverrides, setFeedbackOverrides] = React.useState<FeedbackOverrides>({});
   const feedbackOverridesRef = React.useRef(feedbackOverrides);
 
   React.useEffect(() => {
@@ -20,7 +25,7 @@ export function useMessageFeedbackState<TMeta = Record<string, unknown>>({ messa
     const messageIds = new Set(messages.map(message => message.id));
     const current = feedbackOverridesRef.current;
     let changed = false;
-    const next: Record<string, MessageFeedback> = {};
+    const next: FeedbackOverrides = {};
 
     for (const [messageId, feedback] of Object.entries(current)) {
       if (messageIds.has(messageId)) next[messageId] = feedback;
@@ -33,15 +38,19 @@ export function useMessageFeedbackState<TMeta = Record<string, unknown>>({ messa
     }
   }, [messages]);
 
-  const getSelectedFeedback = React.useCallback((message: Message<TMeta>) => {
-    return feedbackOverrides[message.id] ?? getInitialMessageFeedback(message, getMessageFeedback);
+  const getSelectedFeedback = React.useCallback((message: Message<TMeta>): MessageFeedback | null => {
+    const override = feedbackOverrides[message.id];
+    if (override !== undefined) return override;
+    return getInitialMessageFeedback(message, getMessageFeedback);
   }, [feedbackOverrides, getMessageFeedback]);
 
-  const handleMessageFeedback = React.useCallback((message: Message<TMeta>, variant: MessageFeedback) => {
-    const current = feedbackOverridesRef.current[message.id] ?? getInitialMessageFeedback(message, getMessageFeedback);
+  const handleMessageFeedback = React.useCallback((message: Message<TMeta>, variant: MessageFeedback | null) => {
+    const overrides = feedbackOverridesRef.current;
+    const override = overrides[message.id];
+    const current = override !== undefined ? override : getInitialMessageFeedback(message, getMessageFeedback);
     if (current === variant) return;
 
-    const next = { ...feedbackOverridesRef.current, [message.id]: variant };
+    const next = { ...overrides, [message.id]: variant };
     feedbackOverridesRef.current = next;
     setFeedbackOverrides(next);
     onFeedback?.(message, variant);

@@ -116,8 +116,8 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
    */
   onCopy?: (message: Message<TMeta>) => MessageCopyResult;
   onError?: (error: Error) => void;
-  /** Built-in controls call this only when the chosen variant differs from the current selection; clicks do not toggle feedback off. */
-  onFeedback?: (message: Message<TMeta>, feedback: MessageFeedback) => void;
+  /** Enables built-in thumbs-up/down controls and reports changes. Receives `null` when the active thumb is clicked again to clear the rating. */
+  onFeedback?: (message: Message<TMeta>, feedback: MessageFeedback | null) => void;
   /** Called when an active assistant generation is cancelled by Stop, clear, or supersession. */
   onAbort?: ChorusOnAbort<TMeta>;
   /** Called exactly once when an assistant message completes normally. */

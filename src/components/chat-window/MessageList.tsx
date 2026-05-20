@@ -41,7 +41,7 @@ export interface MessageListProps<TMeta = Record<string, unknown>> {
   copyMessage: (message: Message<TMeta>) => MessageCopyResult;
   feedbackEnabled: boolean;
   getSelectedFeedback: (message: Message<TMeta>) => MessageFeedback | null;
-  onMessageFeedback: (message: Message<TMeta>, feedback: MessageFeedback) => void;
+  onMessageFeedback: (message: Message<TMeta>, feedback: MessageFeedback | null) => void;
   onDelete?: (id: string) => void;
   onEdit?: (id: string, newText: string) => void;
   onRegenerate?: (id: string) => void;
@@ -70,7 +70,7 @@ export function MessageList<TMeta = Record<string, unknown>>({
       {messages.map(message => {
         const isStreaming = message.id === streamingMessageId;
         const initialFeedback = getSelectedFeedback(message);
-        const feedback = feedbackEnabled ? (variant: MessageFeedback) => onMessageFeedback(message, variant) : undefined;
+        const feedback = feedbackEnabled ? (variant: MessageFeedback | null) => onMessageFeedback(message, variant) : undefined;
         const defaultRender = (slots?: MessageBubbleSlots) => {
           if (message.role === 'tool') {
             return (

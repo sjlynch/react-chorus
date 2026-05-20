@@ -1009,7 +1009,7 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `onStreamDone` | `({ assistantMessage, toolMessages, messages, response, reason, willContinue, iteration, maxToolIterations }) => void` | — | Called after each `transport` stream completes normally and tool handlers (if any) finish. Fires for tool-only turns where `onFinish` has no assistant message. `reason` is `'completed'`, `'tool-loop-continue'`, `'tool-loop-veto'`, or `'max-tool-iterations'` — use it to detect when `autoContinueTools` stops because the safety cap was reached. |
 | `onCopy` | `(message: Message<TMeta>) => void` | Clipboard copy when available | Overrides the built-in per-message Copy action. If omitted, Chorus copies `message.text` with `navigator.clipboard.writeText` when the Clipboard API is available. |
 | `getMessageFeedback` | `(message: Message<TMeta>) => 'up' \| 'down' \| null \| undefined` | `message.metadata.feedback` | Seeds the pressed thumb state from persisted feedback. Return `null` for no selection; return `undefined` to fall back to `message.metadata.feedback` when it is `'up'` or `'down'`. |
-| `onFeedback` | `(message: Message<TMeta>, feedback: 'up' \| 'down') => void` | — | Enables built-in thumbs-up / thumbs-down per-message feedback actions and reports changes. Clicking the already-selected thumb is ignored (no toggle-off callback). |
+| `onFeedback` | `(message: Message<TMeta>, feedback: 'up' \| 'down' \| null) => void` | — | Enables built-in thumbs-up / thumbs-down per-message feedback actions and reports changes. Clicking the already-selected thumb toggles the rating off and reports `null` so a mis-click can be undone. |
 | `confirmDeleteMessage` | `({ message, messages }) => boolean \| void \| Promise<boolean \| void>` | — | Optional gate for built-in message delete actions. Return or resolve `false` to cancel; persistence is flushed only after deletion is confirmed. |
 | `onFinish` | `({ message, messages, reason, response }) => void` | — | Called once when an assistant message completes normally. Use it for telemetry, persistence handoff, moderation, or post-response UI. Not called for tool-only turns, aborts, Stop, or errors; use `onAbort` for cancellation telemetry and `onStreamDone`/`onToolCall` for tool-only streams. |
 | `persistenceKey` | `string` | — | Uncontrolled-mode persistence key. When set without `value`, Chorus saves/restores messages using this key (defaults to localStorage). If `value` is provided, controlled state wins and built-in persistence is not used. |
@@ -1929,7 +1929,7 @@ interface MessageRenderActions {
   delete?: () => void;
   /** Returns boolean | void | Promise<boolean | void>; built-in controls show "Copy failed" on explicit false. */
   copy?: () => MessageCopyResult;
-  feedback?: (variant: MessageFeedback) => void;
+  feedback?: (variant: MessageFeedback | null) => void; // null clears the rating
   /** Current persisted feedback selection used to seed the built-in thumb state. */
   initialFeedback?: MessageFeedback | null;
   /** Renders the built-in action controls (Copy/Edit/Regenerate/Delete/Feedback) for this message. */
@@ -1948,7 +1948,7 @@ interface RenderMessageRootProps {
 }
 ```
 
-`edit`, `regenerate`, `delete`, and `feedback` are only set when those actions are available for the message and the current Chorus state — for example `edit` is omitted while the chat is disabled/read-only or for non-user messages. Repeating the current `initialFeedback` variant is a no-op. `actions.defaultRender()` renders the built-in control row exactly as `defaultRender()` would.
+`edit`, `regenerate`, `delete`, and `feedback` are only set when those actions are available for the message and the current Chorus state — for example `edit` is omitted while the chat is disabled/read-only or for non-user messages. Clicking the already-active thumb in the built-in controls toggles the rating off and calls `feedback(null)`; a custom row can clear feedback the same way by calling `feedback(null)`. `actions.defaultRender()` renders the built-in control row exactly as `defaultRender()` would.
 
 #### Editing inside a custom row
 

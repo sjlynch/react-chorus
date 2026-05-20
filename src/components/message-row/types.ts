@@ -28,8 +28,8 @@ export interface MessageRenderActions {
   regenerate?: () => void;
   delete?: () => void;
   copy?: () => MessageCopyResult;
-  /** Called when the user chooses a different feedback variant. Built-in controls ignore repeat clicks on the selected variant. */
-  feedback?: (variant: MessageFeedback) => void;
+  /** Called when the user changes feedback. Receives `null` when the active thumb is clicked again to clear the rating. */
+  feedback?: (variant: MessageFeedback | null) => void;
   /** Current persisted feedback selection used to seed the built-in thumb state. */
   initialFeedback?: MessageFeedback | null;
   defaultRender: () => ReactNode;

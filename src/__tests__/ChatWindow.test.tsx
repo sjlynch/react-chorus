@@ -520,14 +520,34 @@ describe('ChatWindow', () => {
     await user.click(screen.getByRole('button', { name: 'Copy' }));
     await user.click(screen.getByRole('button', { name: 'Thumbs up' }));
     expect(screen.getByRole('button', { name: 'Thumbs up' })).toHaveAttribute('aria-pressed', 'true');
+    // Clicking the active thumb again toggles the rating off.
     await user.click(screen.getByRole('button', { name: 'Thumbs up' }));
+    expect(screen.getByRole('button', { name: 'Thumbs up' })).toHaveAttribute('aria-pressed', 'false');
     await user.click(screen.getByRole('button', { name: 'Thumbs down' }));
 
     expect(onCopy).toHaveBeenCalledWith(ASST_MSG);
     expect(onFeedback).toHaveBeenNthCalledWith(1, ASST_MSG, 'up');
-    expect(onFeedback).toHaveBeenNthCalledWith(2, ASST_MSG, 'down');
-    expect(onFeedback).toHaveBeenCalledTimes(2);
+    expect(onFeedback).toHaveBeenNthCalledWith(2, ASST_MSG, null);
+    expect(onFeedback).toHaveBeenNthCalledWith(3, ASST_MSG, 'down');
+    expect(onFeedback).toHaveBeenCalledTimes(3);
     expect(screen.getByRole('button', { name: 'Thumbs down' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('clears seeded feedback when the active thumb is clicked again', async () => {
+    type FeedbackMeta = { feedback?: MessageFeedback | null };
+    const user = userEvent.setup();
+    const onFeedback = vi.fn();
+    const seeded: Message<FeedbackMeta> = { id: 'seeded', role: 'assistant', text: 'Seeded reply', metadata: { feedback: 'down' } };
+    render(<ChatWindow messages={[seeded]} onFeedback={onFeedback} />);
+
+    expect(screen.getByRole('button', { name: 'Thumbs down' })).toHaveAttribute('aria-pressed', 'true');
+
+    await user.click(screen.getByRole('button', { name: 'Thumbs down' }));
+
+    expect(onFeedback).toHaveBeenCalledTimes(1);
+    expect(onFeedback).toHaveBeenCalledWith(seeded, null);
+    expect(screen.getByRole('button', { name: 'Thumbs down' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: 'Thumbs up' })).toHaveAttribute('aria-pressed', 'false');
   });
 
   it('seeds feedback from message metadata when action controls remount', () => {

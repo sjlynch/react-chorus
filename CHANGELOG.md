@@ -56,6 +56,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Changed
 - Bumped the package to `0.2.0` for a public message typing refinement.
+- Built-in message feedback can now be cleared: clicking the already-active thumb toggles the rating off instead of being ignored. `onFeedback` (and the `MessageRenderActions.feedback` action) now receive `'up' | 'down' | null`, where `null` reports the cleared state.
 - Replaced the public `Message` shape with a discriminated union (`AnyChorusMessage`) so `role: 'tool'` requires `toolCall`, non-tool messages forbid it, and tool/system messages reject attachments.
 - Extracted Chorus send/session orchestration into `useAssistantSession` and clarified controlled, transport, connector, and sending-state development warnings.
 - `useChorusStream.send()` now rejects non-abort stream failures after cleanup so `onSend` bridges can surface Chorus errors.

@@ -37,8 +37,8 @@ export interface MessageRowProps<TMeta = Record<string, unknown>> extends Messag
    * to show the Copy failed indicator; return void to keep historical assume-success behavior.
    */
   onCopy?: (message: Message<TMeta>) => MessageCopyResult;
-  /** Built-in controls call this only when the chosen variant differs from the current selection. */
-  onFeedback?: (message: Message<TMeta>, feedback: MessageFeedback) => void;
+  /** Called when feedback changes. Receives `null` when the active thumb is clicked again to clear the rating. */
+  onFeedback?: (message: Message<TMeta>, feedback: MessageFeedback | null) => void;
   /** Seeds the pressed thumb state. When omitted, message.metadata.feedback is used if it is 'up' or 'down'. */
   initialFeedback?: MessageFeedback | null;
   streaming?: boolean;

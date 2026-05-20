@@ -53,8 +53,8 @@ export interface ChatWindowProps<TMeta = Record<string, unknown>> extends Omit<R
   onDelete?: (id: string) => void;
   onDismissError?: () => void;
   onEdit?: (id: string, newText: string) => void;
-  /** Built-in controls call this only when the chosen variant differs from the current selection; clicks do not toggle feedback off. */
-  onFeedback?: (message: Message<TMeta>, feedback: MessageFeedback) => void;
+  /** Enables built-in thumbs-up/down controls and reports changes. Receives `null` when the active thumb is clicked again to clear the rating. */
+  onFeedback?: (message: Message<TMeta>, feedback: MessageFeedback | null) => void;
   onRegenerate?: (id: string) => void;
   onRetry?: () => void;
   onSuggestedPrompt?: (prompt: string) => void;
