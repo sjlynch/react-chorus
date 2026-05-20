@@ -9,6 +9,7 @@ import { useChatInputSend } from './chat-input/useChatInputSend';
 import { useComposerTextarea } from './chat-input/useComposerTextarea';
 import { useFileIngestionHandlers } from './chat-input/useFileIngestionHandlers';
 import type { ChatInputHandle, ChatInputProps } from './chat-input/types';
+import { styleVarsFromPalette } from './ChorusTheme';
 
 export type { ChatInputFocusOptions, ChatInputHandle, ChatInputProps, RenderAttachmentErrorContext } from './chat-input/types';
 
@@ -31,6 +32,7 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(funct
   uploadAttachment,
   labels = DEFAULT_COMPOSER_LABELS,
   attachmentLabels = DEFAULT_ATTACHMENT_LABELS,
+  palette,
   className,
   style,
   onPaste: onPasteProp,
@@ -148,6 +150,8 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(funct
     className,
   ].filter(Boolean).join(' ');
 
+  const paletteVars = React.useMemo(() => styleVarsFromPalette(palette), [palette]);
+
   const attachmentErrorNode = attachmentError && renderAttachmentError !== null
     ? (renderAttachmentError
       ? renderAttachmentError({ error: attachmentError, dismiss: dismissAttachmentError })
@@ -165,7 +169,7 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(funct
       {...rest}
       ref={rootRef}
       className={rootClassName}
-      style={style}
+      style={{ ...paletteVars, ...style }}
       onPaste={handleRootPaste}
       onDragEnter={handleRootDragEnter}
       onDragOver={handleRootDragOver}

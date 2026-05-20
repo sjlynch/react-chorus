@@ -31,7 +31,10 @@ export function ConversationList({
 }: ConversationListProps) {
   const resolvedNewConversation = newConversationLabel ?? labels.newConversation;
   const resolvedEmpty = emptyLabel ?? labels.empty;
-  const paletteVars = React.useMemo(() => (headless ? {} : styleVarsFromPalette(palette)), [headless, palette]);
+  // Apply palette CSS variables regardless of `headless`, matching <Chorus>,
+  // <ChatWindow>, and <ChatInput>. `palette` is a host-supplied theme, not
+  // default styling, so headless renders honor it too.
+  const paletteVars = React.useMemo(() => styleVarsFromPalette(palette), [palette]);
   const orderedConversations = React.useMemo(() => sortedConversations(conversations), [conversations]);
   const interactionsDisabled = !loaded;
   const {

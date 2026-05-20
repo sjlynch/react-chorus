@@ -59,6 +59,20 @@ describe('ConversationList', () => {
     expect(support.getByRole('button', { name: /delete support chat/i })).toBeInTheDocument();
   });
 
+  it('applies the palette as --chorus-* variables on the root in both default and headless renders', () => {
+    const { rerender } = render(
+      <ConversationList conversations={CONVERSATIONS} palette={{ chatBg: '#101010' }} style={{ borderRadius: '4px' }} />,
+    );
+    let nav = screen.getByRole('navigation');
+    expect(nav.style.getPropertyValue('--chorus-chat-bg')).toBe('#101010');
+    expect(nav.style.borderRadius).toBe('4px');
+
+    // A host-supplied palette is a theme, not default styling, so headless renders honor it too.
+    rerender(<ConversationList conversations={CONVERSATIONS} palette={{ chatBg: '#202020' }} headless />);
+    nav = screen.getByRole('navigation');
+    expect(nav.style.getPropertyValue('--chorus-chat-bg')).toBe('#202020');
+  });
+
   it('supports select, rename, delete, and create affordances', () => {
     const createConversation = vi.fn();
     const selectConversation = vi.fn();

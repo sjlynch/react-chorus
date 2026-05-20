@@ -67,6 +67,24 @@ describe('ChatWindow', () => {
     expect(transcript).toHaveAttribute('id', 'transcript');
   });
 
+  it('applies the palette as --chorus-* variables on the root and merges an explicit style', () => {
+    render(
+      <ChatWindow
+        messages={[USER_MSG]}
+        data-testid="chat-window"
+        palette={{ chatBg: '#101010', assistantText: '#fafafa' }}
+        style={{ borderRadius: '4px' }}
+      />,
+    );
+
+    const transcript = screen.getByTestId('chat-window');
+    expect(transcript.style.getPropertyValue('--chorus-chat-bg')).toBe('#101010');
+    expect(transcript.style.getPropertyValue('--chorus-assistant-text')).toBe('#fafafa');
+    // Unset palette keys emit no variable so an ancestor theme can still cascade in.
+    expect(transcript.style.getPropertyValue('--chorus-user-bg')).toBe('');
+    expect(transcript.style.borderRadius).toBe('4px');
+  });
+
   it('builds activity keys for trailing emoji without lone surrogates', () => {
     const value = `${'x'.repeat(23)}\u{1F44B}`;
     const key = stringActivityKey(value);

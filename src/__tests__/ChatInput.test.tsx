@@ -174,6 +174,26 @@ describe('ChatInput', () => {
     expect(textarea.selectionEnd).toBe('hello world'.length);
   });
 
+  it('applies the palette as --chorus-* variables on the root and merges an explicit style', () => {
+    render(
+      <ChatInput
+        value=""
+        onChange={vi.fn()}
+        onSend={vi.fn()}
+        data-testid="composer-root"
+        palette={{ inputBg: '#1a1a1a', sendButtonBg: '#6366f1' }}
+        style={{ borderRadius: '4px' }}
+      />,
+    );
+
+    const root = screen.getByTestId('composer-root');
+    expect(root.style.getPropertyValue('--chorus-input-bg')).toBe('#1a1a1a');
+    expect(root.style.getPropertyValue('--chorus-send-bg')).toBe('#6366f1');
+    // Unset palette keys emit no variable so an ancestor theme can still cascade in.
+    expect(root.style.getPropertyValue('--chorus-chat-bg')).toBe('');
+    expect(root.style.borderRadius).toBe('4px');
+  });
+
   it('has an accessible name from the placeholder or default label', () => {
     const { rerender } = render(<ChatInput value="" onChange={vi.fn()} onSend={vi.fn()} placeholder="Ask Chorus" />);
 

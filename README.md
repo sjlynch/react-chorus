@@ -2100,9 +2100,10 @@ Built-in tool call blocks can be themed through palette keys (`toolBorder`, `too
 
 ## Theming
 
-Pass a `palette` prop to `<Chorus>` (or wrap components in `<ChorusTheme palette={…}>`):
+Theming is a single mechanism: a **`palette`** object that maps to `--chorus-*` CSS custom properties. Every exported root component — `Chorus`, `ChatWindow`, `ChatInput`, and `ConversationList` — accepts a `palette` prop and writes those variables onto its own root element. `<ChorusTheme>` is the same mechanism without a component: a bare `<div>` that carries the variables for any subtree, handy when you compose the pieces yourself.
 
 ```tsx
+// Full widget — theme it directly.
 <Chorus
   palette={{
     chatBg: '#0f0f0f',
@@ -2114,7 +2115,29 @@ Pass a `palette` prop to `<Chorus>` (or wrap components in `<ChorusTheme palette
   }}
   onSend={…}
 />
+
+// Composed shell — theme each piece via its own `palette` prop…
+<ChatWindow messages={messages} palette={{ chatBg: '#0f0f0f' }} />
+<ChatInput value={value} onChange={setValue} onSend={onSend} palette={{ inputBg: '#1a1a1a' }} />
+
+// …or wrap the whole subtree once with <ChorusTheme>.
+<ChorusTheme palette={{ chatBg: '#0f0f0f', inputBg: '#1a1a1a' }}>
+  <ChatWindow messages={messages} />
+  <ChatInput value={value} onChange={setValue} onSend={onSend} />
+</ChorusTheme>
 ```
+
+A per-component `palette` prop and a `<ChorusTheme palette={…}>` wrapper are interchangeable: both emit the same `--chorus-*` variables, only the DOM element they land on differs. The `palette` is applied the same way on the default and `react-chorus/headless` exports — `headless` controls injected `<style>` tags and code-block chrome, not the host-supplied theme.
+
+### Theming precedence
+
+Theming resolves through the **standard CSS custom-property cascade** — there is no JavaScript-level merge between layers. `styleVarsFromPalette` only emits a variable for a palette key you actually set, so resolution is *per variable*:
+
+1. The **nearest ancestor — or the element itself — that sets a given `--chorus-*` variable wins.** A component's own `palette` prop sits closest to its own DOM, so it overrides an ancestor `<ChorusTheme>` or `<Chorus palette>` for the keys it defines — but only those keys; keys it omits keep inheriting from the ancestor.
+2. **Host CSS variables** (e.g. `--chorus-chat-bg` declared on `:root` or any ancestor in your own stylesheet) join the same cascade. A closer `palette`/`ChorusTheme` overrides them; they in turn override the bundled defaults.
+3. The **bundled stylesheet defaults** (the `var(--chorus-chat-bg, #161616)` fallbacks in `Chorus.css`) apply when nothing else sets the variable.
+
+So `<ChorusTheme palette={A}><Chorus palette={B} /></ChorusTheme>` renders `<Chorus>` with `B` winning, falling back to `A` for any key `B` omits, then to host CSS variables, then to the built-in defaults.
 
 Available palette keys: `chatBg`, `chatText`, `border`, `assistantBubbleBg`, `assistantText`, `assistantBorder`, `userBubbleBg`, `userText`, `userBorder`, `inputAreaBg`, `inputBg`, `inputText`, `inputBorder`, `sendButtonBg`, `sendButtonText`, `focusRing`, `actionText`, `actionHoverBg`, `actionHoverText`, `errorBg`, `errorBorder`, `errorText`, `toolBorder`, `toolHeaderBg`, `toolHeaderText`, `toolHeaderHover`, `toolNameText`, `toolBodyBg`, `toolLabelText`, `toolCodeText`.
 
@@ -2134,9 +2157,9 @@ You can compose the UI from smaller pieces:
 import { ChatWindow, ChatInput, ChorusTheme, Markdown } from 'react-chorus';
 ```
 
-- **`<ChatWindow messages={…} typing={…} />`** — renders the scrollable message list with empty-state prompts, a typing indicator, errors, the optional floating jump-to-latest button, and optional `maxRenderedMessages` windowing. It accepts `hiddenRoles?: Role[]` (default `['system', 'tool']`); `showSystemMessages` is deprecated but remains supported as an alias for showing all roles. `showJumpToBottomButton?: boolean` defaults to `!headless` and toggles the floating “Jump to latest” button that surfaces when the user scrolls away from the bottom and new activity arrives — pass `false` to disable it and render your own affordance. Pass `markdownSanitizer`, `markdownProps`, `renderError`, or `renderMessage` to customize built-in rendering.
-- **`<ChatInput value onSend onStop placeholder sending />`** — the text input, send/stop button, disabled/read-only states, and optional attachment composer (`accept`, paste/drop, limits, cancellable `uploadAttachment`).
-- **`<ChorusTheme palette={…}>`** — applies theme CSS variables to any subtree.
+- **`<ChatWindow messages={…} typing={…} />`** — renders the scrollable message list with empty-state prompts, a typing indicator, errors, the optional floating jump-to-latest button, and optional `maxRenderedMessages` windowing. It accepts `hiddenRoles?: Role[]` (default `['system', 'tool']`); `showSystemMessages` is deprecated but remains supported as an alias for showing all roles. `showJumpToBottomButton?: boolean` defaults to `!headless` and toggles the floating “Jump to latest” button that surfaces when the user scrolls away from the bottom and new activity arrives — pass `false` to disable it and render your own affordance. Pass `markdownSanitizer`, `markdownProps`, `renderError`, or `renderMessage` to customize built-in rendering. Accepts a `palette` prop (see [Theming](#theming)).
+- **`<ChatInput value onSend onStop placeholder sending />`** — the text input, send/stop button, disabled/read-only states, and optional attachment composer (`accept`, paste/drop, limits, cancellable `uploadAttachment`). Accepts a `palette` prop (see [Theming](#theming)).
+- **`<ChorusTheme palette={…}>`** — applies the `--chorus-*` theme variables to any subtree; the standalone form of the `palette` prop carried by `Chorus`, `ChatWindow`, `ChatInput`, and `ConversationList`. See [Theming](#theming) for the precedence rules.
 - **`<Markdown text={…} codeTheme="dark" />`** — standalone markdown renderer with syntax highlighting and copy buttons. It supports `streaming` to render escaped plain text until finalization, `sanitizer` to provide a custom DOMPurify-compatible sanitizer when SSR needs sanitized raw HTML instead of the built-in no-raw-HTML safe mode, `markedOptions`/`markedExtensions` for per-instance parser customization, and `onCopyError` for clipboard-copy failures.
 - **`<MessageBubble message={…} />`** — renders the default bubble for one message, including attachments and screen-reader speaker labels. Accepts `className`, `style`, `codeTheme`, `headless`, `streaming`, `markdownProps`, `markdownSanitizer`, and decoration slots (`before`, `headerSlot`, `footerSlot`, `after`) without replacing the full renderer.
 

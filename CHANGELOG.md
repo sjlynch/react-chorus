@@ -54,6 +54,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Exported the standalone `Markdown` component with `MarkdownProps` and `MarkdownSanitizer` types.
 - Added configurable `markedOptions`, `markedExtensions`, and sanitizer override for the Markdown pipeline.
 
+#### Theming
+- Added a `palette` prop to `<ChatWindow>` and `<ChatInput>` so every exported root component (`Chorus`, `ChatWindow`, `ChatInput`, `ConversationList`) themes through the same `--chorus-*` CSS-variable mechanism — making `<ChorusTheme>` an interchangeable wrapper form rather than the only theming path for composed shells.
+- Documented a single theming entry point and the per-variable CSS-cascade precedence between `<Chorus palette>`, `<ChorusTheme>`, component `palette` props, and host CSS variables.
+
 ### Changed
 - Bumped the package to `0.2.0` for a public message typing refinement.
 - Replaced the public `Message` shape with a discriminated union (`AnyChorusMessage`) so `role: 'tool'` requires `toolCall`, non-tool messages forbid it, and tool/system messages reject attachments.
@@ -61,6 +65,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - `useChorusStream.send()` now rejects non-abort stream failures after cleanup so `onSend` bridges can surface Chorus errors.
 - `useChorusStream.send()` now rejects with a `ChorusStreamError` whose `code === 'concurrent-send'` when called while a previous send is still in flight, instead of silently resolving with `undefined`. The transport is still not invoked a second time and the dev-mode warning is preserved; custom shells that `await send(...)` can now distinguish the re-entrant no-op from a successful empty stream.
 - Documented keyboard shortcuts, standalone `useChorusStream`, persistence examples, error handling, and OpenAI proxy buffering headers.
+- `<ConversationList palette>` now applies the palette in `headless` renders too, matching `<Chorus>`/`<ChatWindow>`/`<ChatInput>`; a host-supplied palette is treated as a theme rather than default styling.
 
 ### Fixed
 - Fixed stream cleanup on unmount/pre-aborted signals, richer HTTP error details, WebSocket close-before-open hangs, safe dev-mode checks without `process`, observer callback isolation, and transport concurrency guards.

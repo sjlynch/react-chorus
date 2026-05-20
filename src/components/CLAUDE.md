@@ -2,7 +2,7 @@
 
 ## `ChatWindow`
 
-Message list and auto-scroll container. It filters roles via `hiddenRoles` (default hides `system` and `tool`), windows visible rows with `maxRenderedMessages`, renders edit/regenerate/delete/copy/feedback controls, typing state, retry errors, custom `renderMessage`, and `ToolCallBlock` for visible tool messages.
+Message list and auto-scroll container. It filters roles via `hiddenRoles` (default hides `system` and `tool`), windows visible rows with `maxRenderedMessages`, renders edit/regenerate/delete/copy/feedback controls, typing state, retry errors, custom `renderMessage`, and `ToolCallBlock` for visible tool messages. Accepts an optional `palette` prop applied as `--chorus-*` CSS variables on its root — see the `ChorusTheme` theming model below.
 
 Helper map:
 
@@ -31,7 +31,7 @@ Submodule map:
 
 ## `ChatInput`
 
-Textarea plus send/stop button and optional file attachment UI (`accept` enables attach). Enter sends, Shift+Enter inserts a newline, and attached files are read as data URLs by default. `onSend` may return `false` to veto a send; attachment chips and textarea height are only cleared after an accepted send.
+Textarea plus send/stop button and optional file attachment UI (`accept` enables attach). Enter sends, Shift+Enter inserts a newline, and attached files are read as data URLs by default. `onSend` may return `false` to veto a send; attachment chips and textarea height are only cleared after an accepted send. Accepts an optional `palette` prop applied as `--chorus-*` CSS variables on its root — see the `ChorusTheme` theming model below.
 
 Composer and attachment internals live in `components/chat-input/`; see `components/chat-input/CLAUDE.md` for the full submodule map. Key split points:
 
@@ -46,6 +46,16 @@ Public facade only. Internals live in `components/markdown/`: `marked.ts` owns p
 ## `ChorusTheme`
 
 Standalone wrapper that applies palette CSS variables via `styleVarsFromPalette`. It is not used as the `Chorus` root wrapper; `Chorus.tsx` merges palette variables directly into the root div `style` prop.
+
+### Theming model (keep uniform)
+
+Every exported root component themes the same way: it takes an optional `palette` prop and emits `--chorus-*` CSS variables onto its own root via `styleVarsFromPalette`. This holds for `Chorus`, `ChatWindow`, `ChatInput`, and `ConversationList`. `ChorusTheme` is the same mechanism without a component — a bare `<div>` carrying those variables — so it themes any subtree (including composed shells that mix the pieces).
+
+Rules to preserve when touching theming:
+
+- A new exported root component that renders chrome should accept `palette` and apply `styleVarsFromPalette` to its root. Do not add a per-component bespoke theming path.
+- Apply the palette unconditionally — do **not** gate it on `headless`. `palette` is a host-supplied theme, not default styling. (`ConversationList` previously gated on `headless`; that was the inconsistency the unified model removed.)
+- Precedence is the plain CSS cascade: `styleVarsFromPalette` only emits keys the palette actually defines, so the nearest ancestor that sets a given `--chorus-*` variable wins per variable. There is no JS-level merge between a component's own `palette` and an ancestor `<ChorusTheme>`/`<Chorus palette>`.
 
 ## `MessageBubble`
 
