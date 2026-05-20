@@ -4,12 +4,14 @@
 
 Module map:
 
-- `ConversationListItem.tsx` — per-row DOM, ARIA, action buttons, rename form, and timestamp rendering.
+- `ConversationListItem.tsx` — per-row DOM, ARIA, action buttons, rename form (inline validation message + `maxLength`), and timestamp rendering. The row root carries `data-conversation-id` so the facade can locate it for focus restoration.
 - `types.ts` — public `ConversationListProps`, `ConfirmDeleteConversation`, and delete-confirmation context types.
 - `sorting.ts` — pinned/recency/stable-input-order sorting.
 - `classes.ts` — conversation row class-name composition.
 - `formatTimestamp.ts` — default timestamp formatting with invalid-date and `Intl` fallback behavior.
-- `useConversationRename.ts` — rename draft state, input focus/select behavior, Escape/cancel plumbing, and cleanup when the edited conversation disappears.
-- `useDeleteConversationConfirmation.ts` — async delete confirmation and per-id pending state.
+- `useConversationRename.ts` — rename draft state, input focus/select behavior, Escape/cancel plumbing, the exported `CONVERSATION_RENAME_MAX_LENGTH` guard, empty/too-long draft validation, `restoreFocusId` (row trigger to re-focus when rename mode exits), and cleanup when the edited conversation disappears.
+- `useDeleteConversationConfirmation.ts` — async delete confirmation, per-id pending state, and the `onConversationDeleted` hook the facade uses to restore focus + announce the delete.
+
+`ConversationList.tsx` owns post-mutation focus management: it re-focuses the rename trigger after rename mode exits and moves focus to a sibling row's select control (or the list container) after a delete, and renders the polite `role="status"` live region that announces deletions.
 
 `useDeleteConversationConfirmation.ts` intentionally duplicates small async/dev helpers instead of importing shared utilities. Importing `utils/async` or the shared dev-mode gate would couple this component to the assistant-session chunk and can change the tracked ConversationList bundle-size numbers. Keep the bundle-isolation comments with any future duplicate helper changes.
