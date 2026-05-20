@@ -232,4 +232,121 @@ describe('geminiConnector', () => {
     const payload = { error: { message: 'gemini failed' } };
     expect(geminiConnector.extract(JSON.stringify(payload))).toEqual({ error: 'gemini failed', errorPayload: payload });
   });
+
+  describe('createState — stable fallback function-call ids', () => {
+    it('exposes createState', () => {
+      expect(typeof geminiConnector.createState).toBe('function');
+      expect(geminiConnector.createState?.()).toBeTruthy();
+    });
+
+    it('keeps one fallback id when a function call streams name then args-only across frames', () => {
+      const state = geminiConnector.createState!();
+      // Frame 1: name + partial args, no provider id.
+      const frame1 = JSON.stringify({
+        candidates: [{ index: 0, content: { parts: [{ functionCall: { name: 'get_weather', args: { city: 'SF' } } }] } }],
+      });
+      // Frame 2: same candidate/part, arguments continue, provider omits `name`.
+      const frame2 = JSON.stringify({
+        candidates: [{ index: 0, content: { parts: [{ functionCall: { args: { unit: 'celsius' } } }] } }],
+      });
+
+      const r1 = geminiConnector.extract(frame1, state);
+      const r2 = geminiConnector.extract(frame2, state);
+
+      expect(r1?.toolDelta).toEqual({
+        id: 'gemini-0-function-0-get_weather',
+        name: 'get_weather',
+        input: { city: 'SF' },
+        provider: 'gemini',
+        generated: true,
+      });
+      // Without remembered state, frame 2 (no `name`) would compute
+      // `gemini-0-function-0-call` and render a duplicate placeholder block.
+      expect(r2?.toolDelta).toEqual({
+        id: 'gemini-0-function-0-get_weather',
+        input: { unit: 'celsius' },
+        provider: 'gemini',
+        generated: true,
+      });
+      expect(r1?.toolDelta?.id).toBe(r2?.toolDelta?.id);
+    });
+
+    it('recomputes a fresh id per frame when no shared state is passed (the pre-fix behaviour)', () => {
+      const frame1 = JSON.stringify({
+        candidates: [{ index: 0, content: { parts: [{ functionCall: { name: 'get_weather', args: { city: 'SF' } } }] } }],
+      });
+      const frame2 = JSON.stringify({
+        candidates: [{ index: 0, content: { parts: [{ functionCall: { args: { unit: 'celsius' } } }] } }],
+      });
+      expect(geminiConnector.extract(frame1)?.toolDelta?.id).toBe('gemini-0-function-0-get_weather');
+      expect(geminiConnector.extract(frame2)?.toolDelta?.id).toBe('gemini-0-function-0-call');
+    });
+
+    it('reuses a provider id across frames when later frames omit it', () => {
+      const state = geminiConnector.createState!();
+      const frame1 = JSON.stringify({
+        candidates: [{ index: 0, content: { parts: [{ functionCall: { id: 'fc_abc', name: 'lookup', args: { q: 'a' } } }] } }],
+      });
+      const frame2 = JSON.stringify({
+        candidates: [{ index: 0, content: { parts: [{ functionCall: { args: { q: 'b' } } }] } }],
+      });
+
+      expect(geminiConnector.extract(frame1, state)?.toolDelta).toEqual({
+        id: 'fc_abc',
+        name: 'lookup',
+        input: { q: 'a' },
+        provider: 'gemini',
+        providerId: 'fc_abc',
+      });
+      expect(geminiConnector.extract(frame2, state)?.toolDelta).toEqual({
+        id: 'fc_abc',
+        input: { q: 'b' },
+        provider: 'gemini',
+        providerId: 'fc_abc',
+      });
+    });
+  });
+
+  describe('inlineData / fileData parts', () => {
+    it('emits an unsupported-part warning instead of dropping a pure-inlineData chunk', () => {
+      const payload = {
+        candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: 'iVBORw0KGgo=' } }] } }],
+      };
+      const result = geminiConnector.extract(JSON.stringify(payload));
+      expect(result).not.toBeNull();
+      expect(result?.warning?.code).toBe('unsupported-part');
+      expect(result?.warning?.message).toContain('inlineData (image/png)');
+      expect(result?.warning?.payload).toEqual(payload);
+    });
+
+    it('emits an unsupported-part warning for fileData parts', () => {
+      const payload = {
+        candidates: [{ content: { parts: [{ fileData: { mimeType: 'image/jpeg', fileUri: 'gs://bucket/img.jpg' } }] } }],
+      };
+      const result = geminiConnector.extract(JSON.stringify(payload));
+      expect(result?.warning?.code).toBe('unsupported-part');
+      expect(result?.warning?.message).toContain('fileData (image/jpeg)');
+    });
+
+    it('keeps text alongside an unsupported inlineData part in the same candidate', () => {
+      const data = JSON.stringify({
+        candidates: [{ content: { parts: [
+          { text: 'Here is an image:' },
+          { inlineData: { mimeType: 'image/png', data: 'AAAA' } },
+        ] } }],
+      });
+      const result = geminiConnector.extract(data);
+      expect(result?.text).toBe('Here is an image:');
+      expect(result?.warning?.code).toBe('unsupported-part');
+    });
+
+    it('accepts snake_case inline_data spelling from proxies', () => {
+      const data = JSON.stringify({
+        candidates: [{ content: { parts: [{ inline_data: { mime_type: 'image/webp', data: 'AAAA' } }] } }],
+      });
+      const result = geminiConnector.extract(data);
+      expect(result?.warning?.code).toBe('unsupported-part');
+      expect(result?.warning?.message).toContain('inlineData (image/webp)');
+    });
+  });
 });

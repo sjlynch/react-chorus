@@ -40,7 +40,10 @@ export function useRAFQueue(flushCallback: (queued: string) => void) {
     if (!flushPending) chunkQueueRef.current.length = 0;
   }, [flushQueue]);
 
-  React.useEffect(() => () => cancelPending(false), [cancelPending]);
+  // On unmount, flush synchronously instead of discarding: if a chunk was enqueued
+  // (via onChunk/appendAssistant) but the next RAF hasn't fired yet, dropping it would
+  // leave the in-memory message — and any subsequent persistence write — ending mid-token.
+  React.useEffect(() => () => cancelPending(true), [cancelPending]);
 
   return { enqueue, cancelPending };
 }

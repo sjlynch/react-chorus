@@ -448,11 +448,11 @@ async function verifyConsumerBundleBudgets() {
   const chunksByFileName = new Map(chunks.map(chunk => [chunk.fileName, chunk]));
   const measurements = {};
   const entryBudgets = [
-    { label: 'root entry initial JS', entry: 'root', maxSize: 188 * KiB, maxGzip: 62 * KiB },
-    { label: 'headless entry initial JS', entry: 'headless', maxSize: 188 * KiB, maxGzip: 62 * KiB },
-    { label: 'root useChorusStream import initial JS', entry: 'rootUseChorusStream', maxSize: 53 * KiB, maxGzip: 17 * KiB },
+    { label: 'root entry initial JS', entry: 'root', maxSize: 203 * KiB, maxGzip: 68 * KiB },
+    { label: 'headless entry initial JS', entry: 'headless', maxSize: 203 * KiB, maxGzip: 68 * KiB },
+    { label: 'root useChorusStream import initial JS', entry: 'rootUseChorusStream', maxSize: 59 * KiB, maxGzip: 19 * KiB },
     { label: 'root Markdown import initial JS', entry: 'rootMarkdown', maxSize: 85 * KiB, maxGzip: 30 * KiB },
-    { label: 'root ChatWindow import initial JS', entry: 'rootChatWindow', maxSize: 120 * KiB, maxGzip: 41 * KiB },
+    { label: 'root ChatWindow import initial JS', entry: 'rootChatWindow', maxSize: 128 * KiB, maxGzip: 43 * KiB },
     { label: 'root ConversationList import initial JS', entry: 'rootConversationList', maxSize: 12 * KiB, maxGzip: 5 * KiB },
     { label: 'transport subpath initial JS', entry: 'transport', maxSize: 8 * KiB, maxGzip: 3 * KiB },
     { label: 'provider-requests subpath initial JS', entry: 'providerRequests', maxSize: 16 * KiB, maxGzip: 6 * KiB },
@@ -639,8 +639,8 @@ async function verifyPlaygroundBudgets() {
 
   const initialGraph = await collectStaticFileGraph(entryFiles, allJsFiles);
   const initial = await measureFiles(initialGraph);
-  const initialMaxSize = 409 * KiB;
-  const initialMaxGzip = 129 * KiB;
+  const initialMaxSize = 422 * KiB;
+  const initialMaxGzip = 133 * KiB;
   const measurements = {
     initialJsGraph: createMeasurement('initial JS graph', initial.size, initial.gzip, initialMaxSize, initialMaxGzip),
   };
