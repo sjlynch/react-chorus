@@ -754,3 +754,64 @@ describe('tool definition serialization', () => {
     expect(body).not.toHaveProperty('tools');
   });
 });
+
+describe('OpenAI tool-call arguments are always valid JSON', () => {
+  function toolCallHistory(input: unknown): Message[] {
+    return [
+      { id: 'assistant', role: 'assistant', text: 'On it.' },
+      {
+        id: 'tool',
+        role: 'tool',
+        text: '',
+        toolCall: { name: 'web_search', input, output: 'done' },
+        metadata: { openai: { toolCallId: 'call_search' } },
+      },
+    ];
+  }
+
+  function chatToolArguments(history: Message[]): string {
+    const messages = toOpenAIChatCompletionsBody(history).messages as Array<{
+      tool_calls?: { function: { arguments: string } }[];
+    }>;
+    const toolCall = messages.flatMap(message => message.tool_calls ?? [])[0];
+    if (!toolCall) throw new Error('expected an assistant tool_call');
+    return toolCall.function.arguments;
+  }
+
+  function responsesToolArguments(history: Message[]): string {
+    const input = toOpenAIResponsesBody(history).input as Array<{ type?: string; arguments?: string }>;
+    const call = input.find(item => item.type === 'function_call');
+    if (!call?.arguments) throw new Error('expected a function_call item');
+    return call.arguments;
+  }
+
+  it('wraps a plain-text Chat Completions tool input so arguments stays valid JSON', () => {
+    const plain = 'the text search the docs';
+    const args = chatToolArguments(toolCallHistory(plain));
+
+    expect(args).not.toBe(plain);
+    expect(() => JSON.parse(args)).not.toThrow();
+    expect(JSON.parse(args)).toEqual({ input: plain });
+  });
+
+  it('wraps a plain-text Responses function_call input so arguments stays valid JSON', () => {
+    const plain = 'the text search the docs';
+    const args = responsesToolArguments(toolCallHistory(plain));
+
+    expect(args).not.toBe(plain);
+    expect(() => JSON.parse(args)).not.toThrow();
+    expect(JSON.parse(args)).toEqual({ input: plain });
+  });
+
+  it('passes through a string that already encodes a JSON object verbatim', () => {
+    const json = '{"q":"react-chorus"}';
+
+    expect(chatToolArguments(toolCallHistory(json))).toBe(json);
+    expect(responsesToolArguments(toolCallHistory(json))).toBe(json);
+  });
+
+  it('still serializes structured object inputs as compact JSON', () => {
+    expect(chatToolArguments(toolCallHistory({ q: 'x' }))).toBe('{"q":"x"}');
+    expect(responsesToolArguments(toolCallHistory({ q: 'x' }))).toBe('{"q":"x"}');
+  });
+});

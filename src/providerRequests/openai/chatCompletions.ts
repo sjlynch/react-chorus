@@ -2,7 +2,7 @@ import type { Message } from '../../types';
 import { openAIImageUrlFromAttachment, unsupportedAttachmentText } from '../attachments';
 import { hasOwn, isRecord, metadataArray, nonEmptyString } from '../metadata';
 import { stripOpenAIChatOptions } from '../options';
-import { compactJSONString, messageText, toolContextText, toolOutputText } from '../toolOutput';
+import { messageText, toolContextText, toolOutputText } from '../toolOutput';
 import { mapHistoryWithToolRuns } from '../toolRunMapper';
 import type { ProviderMappingOptions } from '../types/common';
 import type {
@@ -13,7 +13,7 @@ import type {
   OpenAIChatCompletionsToolCall,
   OpenAIChatCompletionsUserContentPart,
 } from '../types/openaiChat';
-import { openAIToolCallId } from './shared';
+import { openAIToolCallArguments, openAIToolCallId } from './shared';
 
 function openAIAssistantToolCalls(message: Message<unknown>): OpenAIChatCompletionsToolCall[] | null {
   // Tool call shapes come from caller-supplied metadata; we trust the structure here.
@@ -37,7 +37,7 @@ function openAIChatToolCall(message: Message<unknown>): OpenAIChatCompletionsToo
     type: 'function',
     function: {
       name: message.toolCall.name || 'tool',
-      arguments: compactJSONString(message.toolCall.input ?? {}),
+      arguments: openAIToolCallArguments(message.toolCall.input),
     },
   };
 }

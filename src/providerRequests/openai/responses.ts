@@ -1,7 +1,7 @@
 import type { Message } from '../../types';
 import { openAIImageUrlFromAttachment, unsupportedAttachmentText } from '../attachments';
 import { stripOpenAIResponsesOptions } from '../options';
-import { compactJSONString, messageText, toolContextText, toolOutputText } from '../toolOutput';
+import { messageText, toolContextText, toolOutputText } from '../toolOutput';
 import { mapHistoryWithToolRuns } from '../toolRunMapper';
 import type { ProviderMappingOptions } from '../types/common';
 import type {
@@ -17,7 +17,7 @@ import type {
   OpenAIResponsesSystemInputItem,
   OpenAIResponsesUserInputItem,
 } from '../types/openaiResponses';
-import { openAIToolCallId } from './shared';
+import { openAIToolCallArguments, openAIToolCallId } from './shared';
 
 function openAIResponsesFunctionCall(message: Message<unknown>): OpenAIResponsesFunctionCallInputItem | null {
   const callId = openAIToolCallId(message);
@@ -26,7 +26,7 @@ function openAIResponsesFunctionCall(message: Message<unknown>): OpenAIResponses
     type: 'function_call',
     call_id: callId,
     name: message.toolCall.name || 'tool',
-    arguments: compactJSONString(message.toolCall.input ?? {}),
+    arguments: openAIToolCallArguments(message.toolCall.input),
   };
 }
 
