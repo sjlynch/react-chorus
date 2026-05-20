@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   defineTool,
   formatAnthropicMessagesBody,
@@ -589,6 +589,127 @@ describe('provider request mappers', () => {
     expect(JSON.parse(String(formatGeminiGenerateContentBody({ generationConfig: { temperature: 0.2 } })('ignored', messages)))).toEqual(
       toGeminiGenerateContentBody(messages, { generationConfig: { temperature: 0.2 } }),
     );
+  });
+});
+
+describe('attachment MIME allow-lists and system precedence', () => {
+  it('routes Gemini data-URL attachments with an unsupported MIME type to text parts', () => {
+    expect(toGeminiGenerateContentBody([
+      {
+        id: 'user',
+        role: 'user',
+        text: 'Parse this',
+        attachments: [
+          { name: 'rows.csv', type: 'text/csv', data: 'data:text/csv;base64,YSxiCjEsMg==', size: 8 },
+        ],
+      },
+    ]).contents).toEqual([
+      {
+        role: 'user',
+        parts: [
+          { text: 'Parse this' },
+          { text: '[Unsupported attachment omitted: rows.csv (text/csv)]' },
+        ],
+      },
+    ]);
+  });
+
+  it('prefers the Gemini data-URL header MIME over a mismatched attachment.type', () => {
+    expect(toGeminiGenerateContentBody([
+      {
+        id: 'user',
+        role: 'user',
+        text: 'Describe',
+        attachments: [
+          { name: 'shot.png', type: 'image/png', data: 'data:image/jpeg;base64,aGVsbG8=', size: 5 },
+        ],
+      },
+    ]).contents).toEqual([
+      {
+        role: 'user',
+        parts: [
+          { text: 'Describe' },
+          { inlineData: { mimeType: 'image/jpeg', data: 'aGVsbG8=' } },
+        ],
+      },
+    ]);
+  });
+
+  it('routes Anthropic image attachments with an unsupported MIME type to text blocks', () => {
+    expect(toAnthropicMessagesBody([
+      {
+        id: 'user',
+        role: 'user',
+        text: 'Look',
+        attachments: [
+          { name: 'logo.svg', type: 'image/svg+xml', data: 'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=', size: 9 },
+          { name: 'pic.bmp', type: 'image/bmp', data: 'data:image/bmp;base64,Qk0=', size: 3 },
+          { name: 'frame.png', type: 'image/png', data: 'data:image/png;base64,aGVsbG8=', size: 5 },
+        ],
+      },
+    ]).messages).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Look' },
+          { type: 'text', text: '[Unsupported attachment omitted: logo.svg (image/svg+xml)]' },
+          { type: 'text', text: '[Unsupported attachment omitted: pic.bmp (image/bmp)]' },
+          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'aGVsbG8=' } },
+        ],
+      },
+    ]);
+  });
+
+  it('lets a caller-provided Anthropic system option win over history system text, warning once', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const body = toAnthropicMessagesBody([
+        { id: 'sys', role: 'system', text: 'History system instructions.' },
+        { id: 'user', role: 'user', text: 'Hello' },
+      ], { model: 'claude-sonnet-4-6', max_tokens: 64, system: 'Caller system instructions.' });
+
+      expect(body.system).toBe('Caller system instructions.');
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toContain('caller-provided `system`');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('lets a caller-provided Gemini systemInstruction win over history system text, warning once', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const callerSystemInstruction = { parts: [{ text: 'Caller system instructions.' }] };
+      const body = toGeminiGenerateContentBody([
+        { id: 'sys', role: 'system', text: 'History system instructions.' },
+        { id: 'user', role: 'user', text: 'Hello' },
+      ], { systemInstruction: callerSystemInstruction });
+
+      expect(body.systemInstruction).toEqual(callerSystemInstruction);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toContain('caller-provided `systemInstruction`');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('keeps the caller system option without warning when the history has no system message', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const anthropic = toAnthropicMessagesBody([
+        { id: 'user', role: 'user', text: 'Hello' },
+      ], { model: 'claude-sonnet-4-6', max_tokens: 64, system: 'Only the caller system.' });
+      expect(anthropic.system).toBe('Only the caller system.');
+
+      const gemini = toGeminiGenerateContentBody([
+        { id: 'user', role: 'user', text: 'Hello' },
+      ], { systemInstruction: { parts: [{ text: 'Only the caller system.' }] } });
+      expect(gemini.systemInstruction).toEqual({ parts: [{ text: 'Only the caller system.' }] });
+
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 
