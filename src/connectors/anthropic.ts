@@ -33,6 +33,8 @@ function fallbackToolId(index: unknown) {
  *
  * Usage example:
  *   const { send } = useChorusStream(transport, { connector: 'anthropic' });
+ *
+ * @internal Not part of the public API. Obtain it via `getConnector('anthropic')`.
  */
 export const anthropicConnector: Connector<AnthropicConnectorState> = {
   name: 'anthropic',

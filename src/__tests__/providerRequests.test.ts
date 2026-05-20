@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   defineTool,
   formatAnthropicMessagesBody,
@@ -135,21 +135,65 @@ describe('provider request mappers', () => {
     ]);
   });
 
-  it('falls back to safe context for OpenAI tool messages without provider ids', () => {
-    const body = toOpenAIChatCompletionsBody([
+  it('synthesizes a best-effort id for OpenAI tool messages without provider ids', () => {
+    const toolMessage: Message = {
+      id: 'tool',
+      role: 'tool',
+      text: '',
+      toolCall: { name: 'lookup', input: { q: 'x' }, output: { result: 1 } },
+    };
+
+    // The structured tool call is preserved (not dropped or degraded to prose);
+    // call and output share the synthesized id so they reference each other.
+    expect(toOpenAIChatCompletionsBody([toolMessage]).messages).toEqual([
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [{
+          id: 'chorus_synth_tool',
+          type: 'function',
+          function: { name: 'lookup', arguments: '{"q":"x"}' },
+        }],
+      },
+      { role: 'tool', tool_call_id: 'chorus_synth_tool', content: '{\n  "result": 1\n}' },
+    ]);
+
+    expect(toOpenAIResponsesBody([toolMessage]).input).toEqual([
+      { type: 'function_call', call_id: 'chorus_synth_tool', name: 'lookup', arguments: '{"q":"x"}' },
+      { type: 'function_call_output', call_id: 'chorus_synth_tool', output: '{\n  "result": 1\n}' },
+    ]);
+  });
+
+  it('trims surrounding whitespace from provider tool-call ids', () => {
+    const trimmedHistory = (): Message[] => [
+      { id: 'assistant', role: 'assistant', text: 'Looking.' },
       {
         id: 'tool',
         role: 'tool',
         text: '',
-        toolCall: { name: 'lookup', input: { q: 'x' }, output: { result: 1 } },
+        toolCall: { name: 'lookup', input: { q: 'x' }, output: 'ok' },
+        metadata: { openai: { toolCallId: '  call_padded  ' }, anthropic: { toolUseId: '\ttoolu_padded\n' } },
       },
+    ];
+
+    expect(toOpenAIChatCompletionsBody(trimmedHistory()).messages).toEqual([
+      {
+        role: 'assistant',
+        content: 'Looking.',
+        tool_calls: [{ id: 'call_padded', type: 'function', function: { name: 'lookup', arguments: '{"q":"x"}' } }],
+      },
+      { role: 'tool', tool_call_id: 'call_padded', content: 'ok' },
     ]);
 
-    expect(body.messages).toEqual([
+    expect(toAnthropicMessagesBody(trimmedHistory()).messages).toEqual([
       {
-        role: 'system',
-        content: 'Tool call lookup\nInput:\n{\n  "q": "x"\n}\nOutput:\n{\n  "result": 1\n}',
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'Looking.' },
+          { type: 'tool_use', id: 'toolu_padded', name: 'lookup', input: { q: 'x' } },
+        ],
       },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_padded', content: 'ok' }] },
     ]);
   });
 
@@ -592,6 +636,127 @@ describe('provider request mappers', () => {
   });
 });
 
+describe('attachment MIME allow-lists and system precedence', () => {
+  it('routes Gemini data-URL attachments with an unsupported MIME type to text parts', () => {
+    expect(toGeminiGenerateContentBody([
+      {
+        id: 'user',
+        role: 'user',
+        text: 'Parse this',
+        attachments: [
+          { name: 'rows.csv', type: 'text/csv', data: 'data:text/csv;base64,YSxiCjEsMg==', size: 8 },
+        ],
+      },
+    ]).contents).toEqual([
+      {
+        role: 'user',
+        parts: [
+          { text: 'Parse this' },
+          { text: '[Unsupported attachment omitted: rows.csv (text/csv)]' },
+        ],
+      },
+    ]);
+  });
+
+  it('prefers the Gemini data-URL header MIME over a mismatched attachment.type', () => {
+    expect(toGeminiGenerateContentBody([
+      {
+        id: 'user',
+        role: 'user',
+        text: 'Describe',
+        attachments: [
+          { name: 'shot.png', type: 'image/png', data: 'data:image/jpeg;base64,aGVsbG8=', size: 5 },
+        ],
+      },
+    ]).contents).toEqual([
+      {
+        role: 'user',
+        parts: [
+          { text: 'Describe' },
+          { inlineData: { mimeType: 'image/jpeg', data: 'aGVsbG8=' } },
+        ],
+      },
+    ]);
+  });
+
+  it('routes Anthropic image attachments with an unsupported MIME type to text blocks', () => {
+    expect(toAnthropicMessagesBody([
+      {
+        id: 'user',
+        role: 'user',
+        text: 'Look',
+        attachments: [
+          { name: 'logo.svg', type: 'image/svg+xml', data: 'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=', size: 9 },
+          { name: 'pic.bmp', type: 'image/bmp', data: 'data:image/bmp;base64,Qk0=', size: 3 },
+          { name: 'frame.png', type: 'image/png', data: 'data:image/png;base64,aGVsbG8=', size: 5 },
+        ],
+      },
+    ]).messages).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Look' },
+          { type: 'text', text: '[Unsupported attachment omitted: logo.svg (image/svg+xml)]' },
+          { type: 'text', text: '[Unsupported attachment omitted: pic.bmp (image/bmp)]' },
+          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'aGVsbG8=' } },
+        ],
+      },
+    ]);
+  });
+
+  it('lets a caller-provided Anthropic system option win over history system text, warning once', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const body = toAnthropicMessagesBody([
+        { id: 'sys', role: 'system', text: 'History system instructions.' },
+        { id: 'user', role: 'user', text: 'Hello' },
+      ], { model: 'claude-sonnet-4-6', max_tokens: 64, system: 'Caller system instructions.' });
+
+      expect(body.system).toBe('Caller system instructions.');
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toContain('caller-provided `system`');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('lets a caller-provided Gemini systemInstruction win over history system text, warning once', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const callerSystemInstruction = { parts: [{ text: 'Caller system instructions.' }] };
+      const body = toGeminiGenerateContentBody([
+        { id: 'sys', role: 'system', text: 'History system instructions.' },
+        { id: 'user', role: 'user', text: 'Hello' },
+      ], { systemInstruction: callerSystemInstruction });
+
+      expect(body.systemInstruction).toEqual(callerSystemInstruction);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toContain('caller-provided `systemInstruction`');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('keeps the caller system option without warning when the history has no system message', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const anthropic = toAnthropicMessagesBody([
+        { id: 'user', role: 'user', text: 'Hello' },
+      ], { model: 'claude-sonnet-4-6', max_tokens: 64, system: 'Only the caller system.' });
+      expect(anthropic.system).toBe('Only the caller system.');
+
+      const gemini = toGeminiGenerateContentBody([
+        { id: 'user', role: 'user', text: 'Hello' },
+      ], { systemInstruction: { parts: [{ text: 'Only the caller system.' }] } });
+      expect(gemini.systemInstruction).toEqual({ parts: [{ text: 'Only the caller system.' }] });
+
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
+
 describe('tool definition serialization', () => {
   const searchTool = defineTool({
     name: 'search',
@@ -752,5 +917,66 @@ describe('tool definition serialization', () => {
   it('omits tools entirely when the definition array is empty', () => {
     const body = toOpenAIChatCompletionsBody([], { model: 'gpt-4o-mini', tools: [] });
     expect(body).not.toHaveProperty('tools');
+  });
+});
+
+describe('OpenAI tool-call arguments are always valid JSON', () => {
+  function toolCallHistory(input: unknown): Message[] {
+    return [
+      { id: 'assistant', role: 'assistant', text: 'On it.' },
+      {
+        id: 'tool',
+        role: 'tool',
+        text: '',
+        toolCall: { name: 'web_search', input, output: 'done' },
+        metadata: { openai: { toolCallId: 'call_search' } },
+      },
+    ];
+  }
+
+  function chatToolArguments(history: Message[]): string {
+    const messages = toOpenAIChatCompletionsBody(history).messages as Array<{
+      tool_calls?: { function: { arguments: string } }[];
+    }>;
+    const toolCall = messages.flatMap(message => message.tool_calls ?? [])[0];
+    if (!toolCall) throw new Error('expected an assistant tool_call');
+    return toolCall.function.arguments;
+  }
+
+  function responsesToolArguments(history: Message[]): string {
+    const input = toOpenAIResponsesBody(history).input as Array<{ type?: string; arguments?: string }>;
+    const call = input.find(item => item.type === 'function_call');
+    if (!call?.arguments) throw new Error('expected a function_call item');
+    return call.arguments;
+  }
+
+  it('wraps a plain-text Chat Completions tool input so arguments stays valid JSON', () => {
+    const plain = 'the text search the docs';
+    const args = chatToolArguments(toolCallHistory(plain));
+
+    expect(args).not.toBe(plain);
+    expect(() => JSON.parse(args)).not.toThrow();
+    expect(JSON.parse(args)).toEqual({ input: plain });
+  });
+
+  it('wraps a plain-text Responses function_call input so arguments stays valid JSON', () => {
+    const plain = 'the text search the docs';
+    const args = responsesToolArguments(toolCallHistory(plain));
+
+    expect(args).not.toBe(plain);
+    expect(() => JSON.parse(args)).not.toThrow();
+    expect(JSON.parse(args)).toEqual({ input: plain });
+  });
+
+  it('passes through a string that already encodes a JSON object verbatim', () => {
+    const json = '{"q":"react-chorus"}';
+
+    expect(chatToolArguments(toolCallHistory(json))).toBe(json);
+    expect(responsesToolArguments(toolCallHistory(json))).toBe(json);
+  });
+
+  it('still serializes structured object inputs as compact JSON', () => {
+    expect(chatToolArguments(toolCallHistory({ q: 'x' }))).toBe('{"q":"x"}');
+    expect(responsesToolArguments(toolCallHistory({ q: 'x' }))).toBe('{"q":"x"}');
   });
 });

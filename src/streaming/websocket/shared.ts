@@ -35,6 +35,19 @@ export function createAbnormalCloseError(event: CloseEvent) {
   return new Error(`WebSocket closed before stream complete (code ${event.code}${reason})`);
 }
 
+// A client-initiated `transport.close()` is *not* a clean end-of-stream: unlike
+// a server close, the response was still streaming when the caller tore the
+// socket down. The socket closes with code 1000 (normal closure) by default, so
+// `isNormalCloseCode` cannot tell it apart from a real server EOF — `close()`
+// instead surfaces this explicit error to every in-flight response stream so a
+// reader mid-stream rejects rather than seeing a silent `done` (a truncated
+// assistant message).
+export function createTransportClosedError(code?: number, reason?: string) {
+  let detail = '';
+  if (code !== undefined) detail = reason ? ` (code ${code}: ${reason})` : ` (code ${code})`;
+  return new Error(`WebSocket transport closed by client before the stream completed${detail}`);
+}
+
 export function safeCloseSocket(ws: WebSocket, code?: number, reason?: string) {
   try {
     if (code === undefined) ws.close();

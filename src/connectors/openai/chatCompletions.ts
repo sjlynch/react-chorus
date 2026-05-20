@@ -69,6 +69,14 @@ function extractChatToolDelta(
   return result.name || hasOwn(result, 'input') || hasOwn(result, 'output') ? result : null;
 }
 
+// Chat Completions `finish_reason` values that signal the response was cut
+// short. Mirrors the non-fatal `warning` Gemini/Anthropic already emit so a
+// truncated answer is not rendered as if it were complete.
+const FINISH_REASON_WARNINGS: Record<string, { code: string; message: string }> = {
+  length: { code: 'truncated', message: 'OpenAI response truncated by max_tokens' },
+  content_filter: { code: 'content_filter', message: 'OpenAI response stopped by the content filter' },
+};
+
 export function extractChatCompletionEvent(obj: Record<string, unknown>, state: OpenAIConnectorState): ConnectorResult | null {
   const choices = obj.choices;
   if (!Array.isArray(choices) || choices.length === 0) return null;
@@ -79,26 +87,40 @@ export function extractChatCompletionEvent(obj: Record<string, unknown>, state: 
   const delta = choiceObj.delta && typeof choiceObj.delta === 'object'
     ? choiceObj.delta as Record<string, unknown>
     : undefined;
-  if (!delta) return null;
 
   const result: ConnectorResult = {};
-  const reasoning = extractReasoningFromDelta(delta);
-  if (reasoning) appendField(result, 'reasoning', reasoning);
 
-  const content = typeof delta.content === 'string' ? delta.content : '';
-  if (content) mergeResult(result, createThinkTagSplitter(state.thinkState, state.thinkOptions).feed(content));
+  if (delta) {
+    const reasoning = extractReasoningFromDelta(delta);
+    if (reasoning) appendField(result, 'reasoning', reasoning);
 
-  const toolCalls = delta.tool_calls;
-  if (Array.isArray(toolCalls)) {
-    const choiceKey = getChoiceKey(choice, arrayIndex);
-    const providerLabel = typeof obj.model === 'string' && obj.model
-      ? obj.model
-      : 'unknown OpenAI-compatible provider';
-    for (let i = 0; i < toolCalls.length; i++) {
-      const toolDelta = extractChatToolDelta(choiceKey, toolCalls[i], i, providerLabel, state);
-      if (toolDelta) appendToolDelta(result, toolDelta);
+    const content = typeof delta.content === 'string' ? delta.content : '';
+    if (content) mergeResult(result, createThinkTagSplitter(state.thinkState, state.thinkTags).feed(content));
+
+    const toolCalls = delta.tool_calls;
+    if (Array.isArray(toolCalls)) {
+      const choiceKey = getChoiceKey(choice, arrayIndex);
+      const providerLabel = typeof obj.model === 'string' && obj.model
+        ? obj.model
+        : 'unknown OpenAI-compatible provider';
+      for (let i = 0; i < toolCalls.length; i++) {
+        const toolDelta = extractChatToolDelta(choiceKey, toolCalls[i], i, providerLabel, state);
+        if (toolDelta) appendToolDelta(result, toolDelta);
+      }
     }
   }
 
-  return result.text || result.reasoning || hasToolDelta(result) ? result : null;
+  // A non-null `finish_reason` terminates the stream. Many proxies (Azure
+  // OpenAI, OpenRouter) omit the trailing `data: [DONE]`, so without this the
+  // chat-completions branch never emits `done` and the reader hangs.
+  const finishReason = choiceObj.finish_reason;
+  if (typeof finishReason === 'string' && finishReason) {
+    mergeResult(result, createThinkTagSplitter(state.thinkState, state.thinkTags).flush());
+    result.done = true;
+    result.metadata = { ...(result.metadata ?? {}), finishReason };
+    const warning = FINISH_REASON_WARNINGS[finishReason];
+    if (warning) result.warning = { code: warning.code, message: warning.message, payload: obj };
+  }
+
+  return result.text || result.reasoning || hasToolDelta(result) || result.done ? result : null;
 }

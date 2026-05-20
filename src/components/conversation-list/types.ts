@@ -24,6 +24,12 @@ export interface ConversationListProps {
   /** Disable conversation mutations while async conversation storage is loading. */
   loaded?: boolean;
   formatTimestamp?: (timestamp: string, conversation: ConversationSummary) => React.ReactNode;
+  /**
+   * Theme palette applied as `--chorus-*` CSS variables on the sidebar root.
+   * Equivalent to wrapping this component in `<ChorusTheme palette={…}>`. When
+   * it is nested inside another `<Chorus palette>` or `<ChorusTheme>`, the
+   * nearest ancestor that sets a given variable wins per the normal CSS cascade.
+   */
   palette?: Palette;
   headless?: boolean;
   className?: string;

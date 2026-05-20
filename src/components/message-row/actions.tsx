@@ -65,10 +65,12 @@ export function MessageActions({ actions, onEditRequested, labels = DEFAULT_MESS
   };
 
   const handleFeedback = (variant: MessageFeedback) => {
-    if (selectedFeedbackRef.current === variant) return;
-    selectedFeedbackRef.current = variant;
-    setSelectedFeedback(variant);
-    actions.feedback?.(variant);
+    // Clicking the already-active thumb toggles feedback back off so a
+    // mis-click can be undone without forcing the opposite rating.
+    const next = selectedFeedbackRef.current === variant ? null : variant;
+    selectedFeedbackRef.current = next;
+    setSelectedFeedback(next);
+    actions.feedback?.(next);
   };
 
   const copyLabel = copyFailed ? labels.copyFailed : labels.copy;
