@@ -87,7 +87,17 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
   hiddenRoles?: Role[];
   /** Return a persisted feedback selection for a message. If omitted or undefined, message.metadata.feedback seeds built-in thumbs when it is 'up' or 'down'. */
   getMessageFeedback?: GetMessageFeedback<TMeta>;
-  /** Initial messages for uncontrolled mode. Useful for welcome messages. */
+  /**
+   * Initial messages for uncontrolled mode. Useful for welcome messages.
+   *
+   * Frozen-seed contract: the seed (`messages ?? initialMessages`) is captured
+   * once at mount and never re-derived. Swapping this array after mount (e.g.
+   * rebuilding welcome messages on a locale/theme change) is ignored — the
+   * transcript does not re-seed and `resetToInitialMessages` still restores the
+   * mount-time value. In development a one-time warning fires when the
+   * reference changes. To replace the transcript, use `value` + `onChange`,
+   * call `ChorusRef.clear()`, or remount via `key={...}`.
+   */
   initialMessages?: Message<TMeta>[];
   /** Props forwarded to the built-in Markdown renderer for message text. */
   markdownProps?: MessageMarkdownProps;
@@ -97,6 +107,12 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
   maxAttachments?: number;
   /** Render only the latest N visible messages. Typing and error rows still render outside this message window. */
   maxRenderedMessages?: number;
+  /**
+   * Legacy initial-only seed for uncontrolled mode; prefer `initialMessages`.
+   * Wins over `initialMessages` when both are set and follows the same
+   * frozen-seed contract — captured once at mount, later reference changes are
+   * ignored and warned about once in development.
+   */
   messages?: Message<TMeta>[];
   minAssistantDelayMs?: number;
   onAttachmentError?: (error: AttachmentError) => void;
@@ -143,7 +159,15 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
   renderMessage?: (message: Message<TMeta>, context: RenderMessageContext<TMeta>) => React.ReactNode;
   /** Prevent compose/edit/regenerate/delete/retry/clear while leaving read-only actions like copy and scroll available. */
   readOnly?: boolean;
-  /** When clearing, restore initialMessages/messages instead of clearing to []. Defaults to false. */
+  /**
+   * When clearing, restore the `initialMessages`/`messages` seed instead of
+   * clearing to `[]`. Defaults to false.
+   *
+   * The restored seed is the mount-time value (frozen-seed contract): if a
+   * parent swapped `initialMessages`/`messages` after mount, `clear()` still
+   * restores the original seed, not the latest array. Remount via `key={...}`
+   * to reset the seed.
+   */
   resetToInitialMessages?: boolean;
   sending?: boolean;
   /** Override built-in JSON persistence serialization. */

@@ -253,6 +253,53 @@ describe('createWebSocketTransport', () => {
     await expect(reader.read()).rejects.toThrow(/code 1011: server error/);
   });
 
+  it('errors the in-flight response stream when transport.close() is called mid-stream in transient mode', async () => {
+    const transport = createWebSocketTransport('wss://api.example.com/chat');
+    const promise = transport('hello', [], new AbortController().signal);
+    const ws = MockWebSocket.instances[0];
+
+    ws.emitOpen();
+    const response = await promise;
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+
+    ws.onmessage?.({ data: '{"chunk":"partial"}' } as MessageEvent);
+    const first = await reader.read();
+    expect(decoder.decode(first.value)).toBe('data: {"chunk":"partial"}\n\n');
+
+    // Client tears the socket down (e.g. hot-reload teardown) mid-stream.
+    transport.close();
+
+    // The reader must reject rather than report a silent, truncated `done`.
+    await expect(reader.read()).rejects.toThrow(/transport closed by client/);
+    expect(ws.closedWith.length).toBeGreaterThan(0);
+  });
+
+  it('rejects the outer promise when transport.close() is called before the socket opens in transient mode', async () => {
+    const transport = createWebSocketTransport('wss://api.example.com/chat');
+    const promise = transport('hello', [], new AbortController().signal);
+
+    // Socket is still connecting — the send promise has not resolved yet.
+    transport.close();
+
+    await expect(promise).rejects.toThrow(/transport closed by client/);
+  });
+
+  it('forwards the close code and reason to the socket and into the stream error in transient mode', async () => {
+    const transport = createWebSocketTransport('wss://api.example.com/chat');
+    const promise = transport('hello', [], new AbortController().signal);
+    const ws = MockWebSocket.instances[0];
+
+    ws.emitOpen();
+    const response = await promise;
+    const reader = response.body!.getReader();
+
+    transport.close(4000, 'unmounting');
+
+    expect(ws.closedWith).toEqual([{ code: 4000, reason: 'unmounting' }]);
+    await expect(reader.read()).rejects.toThrow(/code 4000: unmounting/);
+  });
+
   it('errors active streams on abnormal 1006 close in persistent mode', async () => {
     const transport = createWebSocketTransport('wss://api.example.com/chat', { persistent: true });
     const promise = transport('hello', [], new AbortController().signal);
@@ -304,6 +351,26 @@ describe('createWebSocketTransport', () => {
     ws.emitClose(1000, 'done');
     const next = await reader.read();
     expect(next.done).toBe(true);
+  });
+
+  it('errors active streams when transport.close() is called mid-stream in persistent mode', async () => {
+    const transport = createWebSocketTransport('wss://api.example.com/chat', { persistent: true });
+    const promise = transport('hello', [], new AbortController().signal);
+    const ws = MockWebSocket.instances[0];
+
+    ws.emitOpen();
+    const response = await promise;
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+
+    ws.onmessage?.({ data: '{"chunk":"partial"}' } as MessageEvent);
+    const first = await reader.read();
+    expect(decoder.decode(first.value)).toBe('data: {"chunk":"partial"}\n\n');
+
+    // Client closes the shared socket while a response is still streaming.
+    transport.close();
+
+    await expect(reader.read()).rejects.toThrow(/transport closed by client/);
   });
 
   it('closes the WS and errors the stream when the AbortSignal fires after open', async () => {
