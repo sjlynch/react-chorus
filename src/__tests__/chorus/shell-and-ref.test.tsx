@@ -55,6 +55,44 @@ describe('Chorus', () => {
     expect(root).toHaveClass('chorus', 'chorus--always-show-actions');
   });
 
+  it('renders per-message timestamps when showTimestamps is enabled', () => {
+    const { container } = render(
+      <Chorus
+        showTimestamps
+        initialMessages={[
+          { id: 'u1', role: 'user', text: 'Hello', createdAt: '2026-05-20T15:47:06.425Z' },
+          { id: 'a1', role: 'assistant', text: 'Hi there', createdAt: '2026-05-20T15:48:00.000Z' },
+        ]}
+      />
+    );
+
+    const times = container.querySelectorAll('time.chorus-msg-time');
+    expect(times).toHaveLength(2);
+    expect(times[0]).toHaveAttribute('datetime', '2026-05-20T15:47:06.425Z');
+    expect(times[1]).toHaveAttribute('datetime', '2026-05-20T15:48:00.000Z');
+    expect(times[0].textContent?.trim()).not.toBe('');
+  });
+
+  it('does not render per-message timestamps without showTimestamps', () => {
+    const { container } = render(
+      <Chorus initialMessages={[{ id: 'u1', role: 'user', text: 'Hello', createdAt: '2026-05-20T15:47:06.425Z' }]} />
+    );
+
+    expect(container.querySelector('.chorus-msg-time')).not.toBeInTheDocument();
+  });
+
+  it('applies a custom formatTimestamp on the Chorus timestamp path', () => {
+    render(
+      <Chorus
+        showTimestamps
+        formatTimestamp={(timestamp) => `formatted:${timestamp}`}
+        initialMessages={[{ id: 'u1', role: 'user', text: 'Hello', createdAt: '2026-05-20T15:47:06.425Z' }]}
+      />
+    );
+
+    expect(screen.getByText('formatted:2026-05-20T15:47:06.425Z')).toBeInTheDocument();
+  });
+
   it('seeds feedback through getMessageFeedback', () => {
     const message: Message<{ storedFeedback: 'down' | null }> = {
       id: 'stored-feedback',
@@ -317,6 +355,61 @@ describe('Chorus', () => {
     );
   });
 
+  it('reports each controlled change once when the host derives a new array in onChange', async () => {
+    const user = userEvent.setup();
+    const onMessagesChange = vi.fn();
+
+    function CloningHarness() {
+      const [messages, setMessages] = React.useState<Message[]>([{ id: 'seed', role: 'assistant', text: 'controlled seed' }]);
+      return (
+        <>
+          <button
+            type="button"
+            onClick={() => setMessages((prev) => [...prev, { id: 'host-added', role: 'user', text: 'host added' }])}
+          >
+            host append
+          </button>
+          <Chorus
+            value={messages}
+            // The host normalizes by cloning the emitted array back into a NEW
+            // array — the exact pattern that used to double-report changes.
+            onChange={(next) => setMessages([...next])}
+            onMessagesChange={onMessagesChange}
+            onSend={() => ({ id: 'controlled-assistant', role: 'assistant', text: 'controlled reply' })}
+            minAssistantDelayMs={0}
+          />
+        </>
+      );
+    }
+
+    render(<CloningHarness />);
+
+    await waitFor(() => expect(onMessagesChange).toHaveBeenCalled());
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'controlled send');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+    await waitFor(() => expect(screen.getByText('controlled reply')).toBeInTheDocument());
+
+    const reasonsAfterSend = onMessagesChange.mock.calls.map(([, context]) => context.reason);
+    // The clone in onChange must not turn one logical change into two calls —
+    // once correctly labeled, once mislabeled 'external'.
+    expect(reasonsAfterSend.filter((reason) => reason === 'send')).toHaveLength(1);
+    expect(reasonsAfterSend.filter((reason) => reason === 'assistant').length).toBeGreaterThanOrEqual(1);
+    // Only the initial mount observation is 'external' — no round-trip echoes.
+    expect(reasonsAfterSend.filter((reason) => reason === 'external')).toHaveLength(1);
+
+    // A genuine host-driven change still surfaces as an 'external' observation.
+    await user.click(screen.getByRole('button', { name: 'host append' }));
+    await waitFor(() => expect(onMessagesChange).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ id: 'host-added' })]),
+      expect.objectContaining({ source: 'controlled', reason: 'external' }),
+    ));
+    const externalReasons = onMessagesChange.mock.calls
+      .map(([, context]) => context.reason)
+      .filter((reason) => reason === 'external');
+    expect(externalReasons).toHaveLength(2);
+  });
+
   it('fills and focuses the composer when a suggested prompt is clicked', async () => {
     const user = userEvent.setup();
 
@@ -395,5 +488,211 @@ describe('Chorus', () => {
 
     expect(screen.getByText('Custom welcome')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Hidden prompt' })).not.toBeInTheDocument();
+  });
+
+  it('exposes ref.retry() to re-run the last turn after a stream error', async () => {
+    const ref = React.createRef<ChorusRef>();
+    let attempts = 0;
+    const onSend = vi.fn<OnSend>(async (_text, _messages, helpers) => {
+      attempts += 1;
+      if (attempts === 1) throw new Error('first attempt failed');
+      helpers.appendAssistant('recovered reply');
+      helpers.finalizeAssistant();
+    });
+
+    render(<Chorus ref={ref} onSend={onSend} minAssistantDelayMs={0} />);
+
+    // No error yet: retry is a no-op and reports false.
+    let earlyRetry: boolean | undefined;
+    act(() => { earlyRetry = ref.current?.retry(); });
+    expect(earlyRetry).toBe(false);
+
+    act(() => { ref.current?.send('hello'); });
+    expect(await screen.findByText('Something went wrong. Please try again.')).toBeInTheDocument();
+
+    let retryAccepted: boolean | undefined;
+    act(() => { retryAccepted = ref.current?.retry(); });
+    expect(retryAccepted).toBe(true);
+
+    expect(await screen.findByText('recovered reply')).toBeInTheDocument();
+    expect(screen.queryByText('Something went wrong. Please try again.')).not.toBeInTheDocument();
+    expect(onSend).toHaveBeenCalledTimes(2);
+  });
+
+  it('exposes ref.regenerate(id) to regenerate a specific assistant message', async () => {
+    const ref = React.createRef<ChorusRef>();
+    const onSend = vi.fn<OnSend>(async () => ({ id: 'a2', role: 'assistant', text: 'regenerated reply' }));
+
+    render(
+      <Chorus
+        ref={ref}
+        initialMessages={[
+          { id: 'u1', role: 'user', text: 'first question' },
+          { id: 'a1', role: 'assistant', text: 'first answer' },
+        ]}
+        onSend={onSend}
+        minAssistantDelayMs={0}
+      />,
+    );
+
+    // Unknown id is rejected without touching the transcript.
+    let unknownResult: boolean | undefined;
+    act(() => { unknownResult = ref.current?.regenerate('missing'); });
+    expect(unknownResult).toBe(false);
+
+    let regenAccepted: boolean | undefined;
+    act(() => { regenAccepted = ref.current?.regenerate('a1'); });
+    expect(regenAccepted).toBe(true);
+
+    expect(await screen.findByText('regenerated reply')).toBeInTheDocument();
+    expect(screen.queryByText('first answer')).not.toBeInTheDocument();
+    expect(onSend).toHaveBeenCalledWith('first question', expect.any(Array), expect.any(Object));
+  });
+
+  it('ref.regenerate returns false for a message with no preceding user turn', () => {
+    const ref = React.createRef<ChorusRef>();
+
+    render(
+      <Chorus
+        ref={ref}
+        initialMessages={[{ id: 'a0', role: 'assistant', text: 'orphan assistant' }]}
+        onSend={vi.fn<OnSend>(async () => undefined)}
+        minAssistantDelayMs={0}
+      />,
+    );
+
+    let orphanResult: boolean | undefined;
+    act(() => { orphanResult = ref.current?.regenerate('a0'); });
+    expect(orphanResult).toBe(false);
+  });
+
+  it('exposes ref.dismissError() to clear the error banner', async () => {
+    const ref = React.createRef<ChorusRef>();
+    const onSend = vi.fn<OnSend>(async () => { throw new Error('upstream boom'); });
+
+    render(<Chorus ref={ref} onSend={onSend} minAssistantDelayMs={0} />);
+
+    // No error yet: dismissError is a no-op and reports false.
+    let earlyDismiss: boolean | undefined;
+    act(() => { earlyDismiss = ref.current?.dismissError(); });
+    expect(earlyDismiss).toBe(false);
+
+    act(() => { ref.current?.send('hello'); });
+    expect(await screen.findByText('Something went wrong. Please try again.')).toBeInTheDocument();
+
+    let dismissed: boolean | undefined;
+    act(() => { dismissed = ref.current?.dismissError(); });
+    expect(dismissed).toBe(true);
+    expect(screen.queryByText('Something went wrong. Please try again.')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['disabled', { disabled: true }],
+    ['read-only', { readOnly: true }],
+  ] as const)('blocks imperative retry/regenerate/dismissError while %s', (_label, modeProps) => {
+    const ref = React.createRef<ChorusRef>();
+
+    render(
+      <Chorus
+        ref={ref}
+        {...modeProps}
+        initialMessages={[
+          { id: 'u1', role: 'user', text: 'Hello' },
+          { id: 'a1', role: 'assistant', text: 'Hi' },
+        ]}
+        onSend={vi.fn<OnSend>(async () => undefined)}
+      />,
+    );
+
+    let retryResult: boolean | undefined;
+    let regenResult: boolean | undefined;
+    let dismissResult: boolean | undefined;
+    act(() => { retryResult = ref.current?.retry(); });
+    act(() => { regenResult = ref.current?.regenerate('a1'); });
+    act(() => { dismissResult = ref.current?.dismissError(); });
+
+    expect(retryResult).toBe(false);
+    expect(regenResult).toBe(false);
+    expect(dismissResult).toBe(false);
+  });
+
+  it('rejects imperative retry/regenerate/dismissError in controlled mode without onChange', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const ref = React.createRef<ChorusRef>();
+
+      render(
+        <Chorus
+          ref={ref}
+          value={[
+            { id: 'u1', role: 'user', text: 'Hello' },
+            { id: 'a1', role: 'assistant', text: 'Hi' },
+          ]}
+          onSend={vi.fn<OnSend>(async () => undefined)}
+          minAssistantDelayMs={0}
+        />,
+      );
+
+      let retryResult: boolean | undefined;
+      let regenResult: boolean | undefined;
+      let dismissResult: boolean | undefined;
+      act(() => { retryResult = ref.current?.retry(); });
+      act(() => { regenResult = ref.current?.regenerate('a1'); });
+      act(() => { dismissResult = ref.current?.dismissError(); });
+
+      expect(retryResult).toBe(false);
+      expect(regenResult).toBe(false);
+      expect(dismissResult).toBe(false);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('ref.send resets the composer, discarding attachment chips the user had staged', async () => {
+    const user = userEvent.setup();
+    const ref = React.createRef<ChorusRef>();
+    const onSend = vi.fn<OnSend>(async () => ({ id: 'a1', role: 'assistant', text: 'reply' }));
+    const file = new File(['notes'], 'staged.txt', { type: 'text/plain' });
+
+    const { container } = render(
+      <Chorus ref={ref} onSend={onSend} accept="text/plain" minAssistantDelayMs={0} />,
+    );
+
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(fileInput, file);
+    // Wait for the staged attachment to finish reading so the chip is stable.
+    await waitFor(() => expect(screen.getByRole('button', { name: /send/i })).toBeEnabled());
+    expect(screen.getByText('staged.txt')).toBeInTheDocument();
+
+    let accepted: boolean | undefined;
+    act(() => { accepted = ref.current?.send('imperative send'); });
+    expect(accepted).toBe(true);
+
+    // The imperative send sends its own (empty) attachments argument, so the
+    // staged chip was never sent — and after an accepted send it is cleared.
+    await waitFor(() => expect(screen.queryByText('staged.txt')).not.toBeInTheDocument());
+  });
+
+  it('ref.clear resets the composer, discarding attachment chips the user had staged', async () => {
+    const user = userEvent.setup();
+    const ref = React.createRef<ChorusRef>();
+    const onSend = vi.fn<OnSend>(async () => ({ id: 'a1', role: 'assistant', text: 'reply' }));
+    const file = new File(['notes'], 'staged.txt', { type: 'text/plain' });
+
+    const { container } = render(
+      <Chorus ref={ref} onSend={onSend} accept="text/plain" minAssistantDelayMs={0} />,
+    );
+
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(fileInput, file);
+    // Wait for the staged attachment to finish reading so the chip is stable.
+    await waitFor(() => expect(screen.getByRole('button', { name: /send/i })).toBeEnabled());
+    expect(screen.getByText('staged.txt')).toBeInTheDocument();
+
+    let cleared: boolean | undefined;
+    act(() => { cleared = ref.current?.clear(); });
+    expect(cleared).toBe(true);
+
+    await waitFor(() => expect(screen.queryByText('staged.txt')).not.toBeInTheDocument());
   });
 });

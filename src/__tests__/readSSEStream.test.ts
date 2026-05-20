@@ -228,6 +228,59 @@ describe('readSSEStream', () => {
     expect(events).toEqual([]);
   });
 
+  it('captures the event: name and passes it as the second onEvent argument', async () => {
+    const frames: Array<[string, string | undefined]> = [];
+    const body =
+      'event: error\nid: 1\nretry: 1000\ndata: rate limited\n\n' +
+      'event: heartbeat\ndata: {}\n\n' +
+      ': keepalive\ndata: plain\n\n';
+    await readSSEStream(makeResponse(body), (payload, name) => { frames.push([payload, name]); });
+    expect(frames).toEqual([
+      ['rate limited', 'error'],
+      ['{}', 'heartbeat'],
+      // The event-type buffer resets after each dispatch, so this frame has no name.
+      ['plain', undefined],
+    ]);
+  });
+
+  it('does not dispatch a named event: frame that carries no data line', async () => {
+    const frames: Array<[string, string | undefined]> = [];
+    await readSSEStream(makeResponse('event: heartbeat\n\ndata: real\n\n'), (payload, name) => {
+      frames.push([payload, name]);
+    });
+    expect(frames).toEqual([['real', undefined]]);
+  });
+
+  it('resolves without error for a text/event-stream that contains only a keepalive comment', async () => {
+    const res = makeResponse(': keepalive\n\n', {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    });
+    const events: string[] = [];
+    await expect(readSSEStream(res, e => events.push(e))).resolves.toBeUndefined();
+    expect(events).toEqual([]);
+  });
+
+  it('resolves without error for a text/event-stream that contains only named event lines', async () => {
+    const res = makeResponse('event: heartbeat\n\nevent: heartbeat\n\n', {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream; charset=utf-8' },
+    });
+    const events: string[] = [];
+    await expect(readSSEStream(res, e => events.push(e))).resolves.toBeUndefined();
+    expect(events).toEqual([]);
+  });
+
+  it('still rejects a text/event-stream body that has a JSON error and no SSE-shaped lines', async () => {
+    const res = makeResponse(JSON.stringify({ error: 'quota exceeded' }), {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    });
+    const promise = readSSEStream(res, () => undefined);
+    await expect(promise).rejects.toBeInstanceOf(ChorusStreamError);
+    await expect(promise).rejects.toThrow(/Server-Sent Events/);
+  });
+
   it('stops reading and cancels the body when the callback returns false', async () => {
     const events: string[] = [];
     let cancelled = false;

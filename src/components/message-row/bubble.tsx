@@ -5,9 +5,10 @@ import { DEFAULT_REASONING_LABEL } from '../../labels/reasoning';
 import type { ChorusAttachmentLabels, ChorusCodeCopyLabels, ChorusSpeakerLabels } from '../../labels/types';
 import { getAttachmentPreviewSource } from '../../utils/attachmentPreview';
 import { Markdown, type MarkdownSanitizer } from '../Markdown';
+import { defaultFormatMessageTimestamp } from './formatTimestamp';
 import { MessageRenderStateContext } from './renderState';
 import { MessageSpeakerLabel } from './speaker';
-import type { MessageBubbleSlots, MessageMarkdownProps } from './types';
+import type { MessageBubbleSlots, MessageMarkdownProps, MessageTimestampFormatter } from './types';
 
 export function resolveAttachmentImageAlt(att: Attachment, labels: ChorusAttachmentLabels = DEFAULT_ATTACHMENT_LABELS): string {
   if (typeof att.alt === 'string' && att.alt.length > 0) return att.alt;
@@ -53,6 +54,24 @@ export function MessageReasoning({ reasoning, codeTheme, headless, streaming = f
   );
 }
 
+export interface MessageTimestampProps<TMeta = Record<string, unknown>> {
+  message: Message<TMeta>;
+  formatTimestamp?: MessageTimestampFormatter<TMeta>;
+}
+
+/**
+ * Renders a message's `createdAt` time as a `<time>` element. Returns null when the
+ * message has no `createdAt`, so callers can mount it unconditionally behind a
+ * `showTimestamps` flag without first checking for the field.
+ */
+export function MessageTimestamp<TMeta = Record<string, unknown>>({ message, formatTimestamp }: MessageTimestampProps<TMeta>) {
+  const createdAt = message.createdAt;
+  if (typeof createdAt !== 'string' || createdAt.length === 0) return null;
+
+  const format = formatTimestamp ?? defaultFormatMessageTimestamp;
+  return <time className="chorus-msg-time" dateTime={createdAt}>{format(createdAt, message)}</time>;
+}
+
 export interface MessageBubbleLayoutProps<TMeta = Record<string, unknown>> extends MessageBubbleSlots {
   message: Message<TMeta>;
   codeTheme: 'dark' | 'light';
@@ -63,10 +82,14 @@ export interface MessageBubbleLayoutProps<TMeta = Record<string, unknown>> exten
   reasoningLabel?: string;
   codeCopyLabels?: ChorusCodeCopyLabels;
   attachmentLabels?: ChorusAttachmentLabels;
+  /** Render the message's `createdAt` time below the bubble. Off by default. */
+  showTimestamp?: boolean;
+  /** Override the locale-aware default timestamp formatting. Only used when `showTimestamp` is true. */
+  formatTimestamp?: MessageTimestampFormatter<TMeta>;
   children?: React.ReactNode;
 }
 
-export function MessageBubbleLayout<TMeta = Record<string, unknown>>({ message, codeTheme, headless, streaming = false, markdownProps, markdownSanitizer, reasoningLabel, codeCopyLabels, attachmentLabels, before, headerSlot, footerSlot, after, children }: MessageBubbleLayoutProps<TMeta>) {
+export function MessageBubbleLayout<TMeta = Record<string, unknown>>({ message, codeTheme, headless, streaming = false, markdownProps, markdownSanitizer, reasoningLabel, codeCopyLabels, attachmentLabels, showTimestamp = false, formatTimestamp, before, headerSlot, footerSlot, after, children }: MessageBubbleLayoutProps<TMeta>) {
   const text = message.text ?? '';
   const hasAttachments = Boolean(message.attachments?.length);
   const hasBubbleText = text.trim().length > 0;
@@ -77,13 +100,16 @@ export function MessageBubbleLayout<TMeta = Record<string, unknown>>({ message, 
       {before}
       <div className="chorus-msg-content">
         {headerSlot}
-        <MessageReasoning reasoning={message.reasoning} codeTheme={codeTheme} headless={headless} streaming={streaming} markdownProps={markdownProps} markdownSanitizer={markdownSanitizer} reasoningLabel={reasoningLabel} codeCopyLabels={codeCopyLabels} />
+        {message.role === 'assistant' && (
+          <MessageReasoning reasoning={message.reasoning} codeTheme={codeTheme} headless={headless} streaming={streaming} markdownProps={markdownProps} markdownSanitizer={markdownSanitizer} reasoningLabel={reasoningLabel} codeCopyLabels={codeCopyLabels} />
+        )}
         {shouldRenderBubble && (
           <div className="chorus-bubble">
             <MessageAttachments attachments={message.attachments} attachmentLabels={attachmentLabels} />
             {hasBubbleText && <Markdown {...markdownProps} text={text} codeTheme={codeTheme} headless={headless} streaming={streaming} sanitizer={markdownSanitizer ?? markdownProps?.sanitizer} codeCopyLabels={codeCopyLabels ?? markdownProps?.codeCopyLabels} />}
           </div>
         )}
+        {showTimestamp && <MessageTimestamp message={message} formatTimestamp={formatTimestamp} />}
         {footerSlot}
         {children}
       </div>
@@ -105,9 +131,13 @@ export interface MessageBubbleProps<TMeta = Record<string, unknown>> extends Mes
   codeCopyLabels?: ChorusCodeCopyLabels;
   speakerLabels?: ChorusSpeakerLabels;
   attachmentLabels?: ChorusAttachmentLabels;
+  /** Render the message's `createdAt` time below the bubble. Off by default. */
+  showTimestamp?: boolean;
+  /** Override the locale-aware default timestamp formatting. Only used when `showTimestamp` is true. */
+  formatTimestamp?: MessageTimestampFormatter<TMeta>;
 }
 
-export function MessageBubble<TMeta = Record<string, unknown>>({ message, className, style, codeTheme = 'dark', headless, streaming = false, markdownProps, markdownSanitizer, reasoningLabel, codeCopyLabels, speakerLabels, attachmentLabels, before, headerSlot, footerSlot, after }: MessageBubbleProps<TMeta>) {
+export function MessageBubble<TMeta = Record<string, unknown>>({ message, className, style, codeTheme = 'dark', headless, streaming = false, markdownProps, markdownSanitizer, reasoningLabel, codeCopyLabels, speakerLabels, attachmentLabels, showTimestamp, formatTimestamp, before, headerSlot, footerSlot, after }: MessageBubbleProps<TMeta>) {
   const renderState = React.useContext(MessageRenderStateContext);
   if (renderState?.messageId === message.id && renderState.isEditing) return null;
 
@@ -125,6 +155,8 @@ export function MessageBubble<TMeta = Record<string, unknown>>({ message, classN
         reasoningLabel={reasoningLabel}
         codeCopyLabels={codeCopyLabels}
         attachmentLabels={attachmentLabels}
+        showTimestamp={showTimestamp}
+        formatTimestamp={formatTimestamp}
         before={before}
         headerSlot={headerSlot}
         footerSlot={footerSlot}

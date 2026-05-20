@@ -1,18 +1,6 @@
 import type { Attachment, Message } from '../types';
+import { warnOnceInDev } from './devWarn';
 import type { ProviderMappingOptions } from './types/common';
-
-// Local dev gate + warn-once cache. Duplicated from utils/warnings.ts so the
-// provider-requests subpath stays standalone (server-friendly, no shared utils
-// chunk). Same pattern as ChatWindow / useDeleteConversationConfirmation —
-// see src/utils/CLAUDE.md.
-const warnedKeys = new Set<string>();
-function warnOnceInDev(key: string, message: string): void {
-  if (typeof process === 'undefined' || typeof process.env === 'undefined') return;
-  if (process.env.NODE_ENV === 'production') return;
-  if (warnedKeys.has(key)) return;
-  warnedKeys.add(key);
-  console.warn(message);
-}
 
 function defaultUnsupportedAttachmentText(attachment: Attachment): string {
   const name = attachment.name || 'attachment';
@@ -76,6 +64,21 @@ export function openAIImageUrlFromAttachment(attachment: Attachment) {
 export function dataUrlFromAttachment(attachment: Attachment) {
   const data = typeof attachment.data === 'string' ? attachment.data : '';
   return data ? parseDataUrl(data) : null;
+}
+
+/**
+ * Resolve the effective MIME type for a base64 `data:` URL attachment.
+ *
+ * Prefers the MIME type parsed from the `data:` URL header over
+ * `attachment.type`: a UI may relabel an attachment so the two disagree, and
+ * the bytes the provider actually receives are the ones the header describes.
+ * Falls back to `attachment.type` only when the data-URL header is absent
+ * (`parseDataUrl` reports the generic `application/octet-stream` placeholder).
+ */
+export function resolveDataUrlMimeType(attachment: Attachment, dataUrl: { mimeType: string }): string {
+  const header = dataUrl.mimeType;
+  if (header && header !== 'application/octet-stream') return header;
+  return attachment.type || header;
 }
 
 export function fileUriFromAttachment(attachment: Attachment) {

@@ -31,8 +31,15 @@ export interface OnSendLifecycleDeps<TMeta> {
   invalidateAssistantSession: (sessionId?: number) => void;
   removePendingAssistant: () => void;
   updateSessionMessages: UpdateSessionMessages<TMeta>;
-  observers: Pick<ObserverCallbacks<TMeta>, 'safeOnError'>;
+  observers: Pick<ObserverCallbacks<TMeta>, 'safeOnError' | 'safeOnStreamWarning'>;
   showStreamError: (rawError: Error) => void;
+  /**
+   * Dev-mode warning fired (once per hook instance) when `onSend` resolves
+   * without appending assistant chunks or returning a message — that turn
+   * closes silently with no `onFinish`/`onAbort` observer. Owned by
+   * `useSessionOrchestrator` alongside the other once-warnings.
+   */
+  warnEmptyOnSend: () => void;
 }
 
 export interface StartOnSendLifecycleArgs<TMeta> extends OnSendLifecycleDeps<TMeta> {
@@ -66,6 +73,7 @@ export function startOnSendLifecycle<TMeta>({
   updateSessionMessages,
   observers,
   showStreamError,
+  warnEmptyOnSend,
   sessionId,
   text,
   history,
@@ -84,6 +92,7 @@ export function startOnSendLifecycle<TMeta>({
     appendAssistantNow,
     appendAssistantReasoningNow,
     appendToolDeltaNow,
+    safeOnStreamWarning: observers.safeOnStreamWarning,
     completeActiveSession,
     isAssistantSessionActive,
     minAssistantDelayMsRef,
@@ -128,6 +137,11 @@ export function startOnSendLifecycle<TMeta>({
       }
     } finally {
       if (isAssistantSessionActive(sessionId) && !hasStartedAssistantRef.current && !sessionHelpers.hasPendingAssistant()) {
+        // `onSend` resolved without appending assistant chunks or returning a
+        // message. `completeActiveSession` with no `finish` flips `sending`
+        // off but emits no `onFinish`/`onAbort`, so the turn closes silently —
+        // warn so hosts wiring lifecycle telemetry notice the no-op turn.
+        warnEmptyOnSend();
         completeActiveSession(sessionId);
       }
       if (controllerRef.current === controller && !isAssistantSessionActive(sessionId)) controllerRef.current = null;

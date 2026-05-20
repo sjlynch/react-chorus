@@ -49,6 +49,8 @@ export { isAiSdkFrameType } from './aiSdk/uiMessageStream';
  *
  * Usage example:
  *   const { send } = useChorusStream(transport, { connector: 'ai-sdk' });
+ *
+ * @internal Not part of the public API. Obtain it via `getConnector('ai-sdk')`.
  */
 export const aiSdkConnector: Connector<AiSdkConnectorState> = {
   name: 'ai-sdk',

@@ -67,6 +67,24 @@ describe('ChatWindow', () => {
     expect(transcript).toHaveAttribute('id', 'transcript');
   });
 
+  it('applies the palette as --chorus-* variables on the root and merges an explicit style', () => {
+    render(
+      <ChatWindow
+        messages={[USER_MSG]}
+        data-testid="chat-window"
+        palette={{ chatBg: '#101010', assistantText: '#fafafa' }}
+        style={{ borderRadius: '4px' }}
+      />,
+    );
+
+    const transcript = screen.getByTestId('chat-window');
+    expect(transcript.style.getPropertyValue('--chorus-chat-bg')).toBe('#101010');
+    expect(transcript.style.getPropertyValue('--chorus-assistant-text')).toBe('#fafafa');
+    // Unset palette keys emit no variable so an ancestor theme can still cascade in.
+    expect(transcript.style.getPropertyValue('--chorus-user-bg')).toBe('');
+    expect(transcript.style.borderRadius).toBe('4px');
+  });
+
   it('builds activity keys for trailing emoji without lone surrogates', () => {
     const value = `${'x'.repeat(23)}\u{1F44B}`;
     const key = stringActivityKey(value);
@@ -87,11 +105,17 @@ describe('ChatWindow', () => {
     expect(stringActivityKey(edited)).not.toBe(stringActivityKey(original));
   });
 
-  it('exposes the transcript as a polite live log region', () => {
-    render(<ChatWindow messages={[USER_MSG, ASST_MSG]} />);
+  it('exposes the transcript as the single polite live log region', () => {
+    render(<ChatWindow messages={[USER_MSG, ASST_MSG]} typing error="boom" />);
     const transcript = screen.getByRole('log', { name: /chat transcript/i });
     expect(transcript).toHaveAttribute('aria-live', 'polite');
+    // aria-atomic=false keeps streaming additions incremental rather than
+    // re-announcing the whole transcript per chunk.
+    expect(transcript).toHaveAttribute('aria-atomic', 'false');
     expect(transcript).toHaveClass('chorus-window');
+    // No nested live regions: typing/error rows must not wrap their own.
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('hides system and tool messages by default', () => {
@@ -126,7 +150,9 @@ describe('ChatWindow', () => {
   it('renders the typing indicator when typing=true', () => {
     const { container } = render(<ChatWindow messages={[]} typing />);
     expect(container.querySelector('.chorus-typing')).toBeInTheDocument();
-    expect(screen.getByRole('status', { name: /assistant is typing/i })).toBeInTheDocument();
+    // The typing label is SR-only text announced by the transcript live
+    // region (the row no longer carries its own role="status").
+    expect(screen.getByText(/assistant is typing/i)).toHaveClass('chorus-sr-only');
   });
 
   it('does not render the typing indicator when typing=false', () => {
@@ -166,16 +192,67 @@ describe('ChatWindow', () => {
     expect(screen.queryByRole('button', { name: 'Summarize this' })).not.toBeInTheDocument();
   });
 
-  it('renders an alert error message when error is provided', () => {
-    render(<ChatWindow messages={[]} error="Network error" />);
-    expect(screen.getByRole('alert')).toHaveTextContent('Network error');
+  it('exposes the suggested prompts as a labeled group', () => {
+    render(<ChatWindow messages={[]} suggestedPrompts={['One', 'Two']} onSuggestedPrompt={vi.fn()} />);
+
+    const group = screen.getByRole('group', { name: 'Suggested prompts' });
+    expect(group).toHaveClass('chorus-suggested-prompts');
+  });
+
+  it('renders repeated prompt strings without duplicate-key warnings', () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    render(<ChatWindow messages={[]} suggestedPrompts={['Repeat', 'Repeat']} onSuggestedPrompt={vi.fn()} />);
+
+    expect(screen.getAllByRole('button', { name: 'Repeat' })).toHaveLength(2);
+    expect(errorSpy.mock.calls.some(args => String(args[0]).includes('same key'))).toBe(false);
+    errorSpy.mockRestore();
+  });
+
+  it('routes focus to the transcript when activating a prompt unmounts the empty state', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <ChatWindow messages={[]} suggestedPrompts={['Go']} onSuggestedPrompt={vi.fn()} />,
+    );
+
+    const button = screen.getByRole('button', { name: 'Go' });
+    await user.click(button);
+    expect(button).toHaveFocus();
+
+    rerender(<ChatWindow messages={[USER_MSG]} suggestedPrompts={['Go']} />);
+
+    expect(screen.getByRole('log')).toHaveFocus();
+  });
+
+  it('routes focus to the composer input when the empty state unmounts', async () => {
+    const user = userEvent.setup();
+    function Harness({ messages }: { messages: Message[] }) {
+      return (
+        <div className="chorus">
+          <ChatWindow messages={messages} suggestedPrompts={['Go']} onSuggestedPrompt={vi.fn()} />
+          <div className="chorus-input"><textarea aria-label="composer" /></div>
+        </div>
+      );
+    }
+
+    const { rerender } = render(<Harness messages={[]} />);
+    await user.click(screen.getByRole('button', { name: 'Go' }));
+
+    rerender(<Harness messages={[USER_MSG]} />);
+
+    expect(screen.getByRole('textbox', { name: 'composer' })).toHaveFocus();
+  });
+
+  it('renders an error message when error is provided', () => {
+    const { container } = render(<ChatWindow messages={[]} error="Network error" />);
+    expect(container.querySelector('.chorus-error')).toHaveTextContent('Network error');
   });
 
   it('renders errors alongside an active empty state', () => {
-    render(<ChatWindow messages={[]} emptyState={<p>Empty welcome</p>} error="Network error" />);
+    const { container } = render(<ChatWindow messages={[]} emptyState={<p>Empty welcome</p>} error="Network error" />);
 
     expect(screen.getByText('Empty welcome')).toBeInTheDocument();
-    expect(screen.getByRole('alert')).toHaveTextContent('Network error');
+    expect(container.querySelector('.chorus-error')).toHaveTextContent('Network error');
   });
 
   it('shows a retry button when onRetry is provided alongside an error', () => {
@@ -222,6 +299,69 @@ describe('ChatWindow', () => {
     expect(screen.getByText('Reasoning')).toBeInTheDocument();
     expect(screen.getByText('thinking only')).toBeInTheDocument();
     expect(container.querySelector('.chorus-assistant .chorus-bubble')).not.toBeInTheDocument();
+  });
+
+  it('does not render a reasoning disclosure on a user message carrying a reasoning field', () => {
+    const { container } = render(<ChatWindow messages={[{ id: 'u-reasoning', role: 'user', text: 'Hello', reasoning: 'sneaky plan' }]} />);
+
+    expect(screen.queryByText('Reasoning')).not.toBeInTheDocument();
+    expect(screen.queryByText('sneaky plan')).not.toBeInTheDocument();
+    expect(container.querySelector('.chorus-reasoning')).not.toBeInTheDocument();
+    expect(screen.getByText('Hello')).toBeInTheDocument();
+  });
+
+  it('does not render a reasoning disclosure on a system message carrying a reasoning field', () => {
+    const { container } = render(
+      <ChatWindow hiddenRoles={[]} messages={[{ id: 's-reasoning', role: 'system', text: 'Be concise.', reasoning: 'system-only plan' }]} />
+    );
+
+    expect(screen.queryByText('Reasoning')).not.toBeInTheDocument();
+    expect(screen.queryByText('system-only plan')).not.toBeInTheDocument();
+    expect(container.querySelector('.chorus-reasoning')).not.toBeInTheDocument();
+  });
+
+  it('still renders the reasoning disclosure on an assistant message', () => {
+    const { container } = render(<ChatWindow messages={[{ ...ASST_MSG, reasoning: 'assistant plan' }]} />);
+
+    expect(screen.getByText('Reasoning')).toBeInTheDocument();
+    expect(screen.getByText('assistant plan')).toBeInTheDocument();
+    expect(container.querySelector('.chorus-reasoning')).toBeInTheDocument();
+  });
+
+  it('renders a per-message timestamp when showTimestamps is set', () => {
+    const { container } = render(<ChatWindow showTimestamps messages={[{ ...USER_MSG, createdAt: '2026-05-20T15:47:06.425Z' }]} />);
+
+    const time = container.querySelector('time.chorus-msg-time');
+    expect(time).toBeInTheDocument();
+    expect(time).toHaveAttribute('datetime', '2026-05-20T15:47:06.425Z');
+    expect(time?.textContent?.trim()).not.toBe('');
+  });
+
+  it('does not render per-message timestamps by default', () => {
+    const { container } = render(<ChatWindow messages={[{ ...USER_MSG, createdAt: '2026-05-20T15:47:06.425Z' }]} />);
+
+    expect(container.querySelector('.chorus-msg-time')).not.toBeInTheDocument();
+  });
+
+  it('omits the timestamp for a message with no createdAt even when showTimestamps is set', () => {
+    const { container } = render(<ChatWindow showTimestamps messages={[USER_MSG]} />);
+
+    expect(container.querySelector('.chorus-msg-time')).not.toBeInTheDocument();
+    expect(screen.getByText('Hello')).toBeInTheDocument();
+  });
+
+  it('uses a custom formatTimestamp override with the message in context', () => {
+    const formatTimestamp = vi.fn((_timestamp: string, message: Message) => `sent by ${message.role}`);
+    render(<ChatWindow showTimestamps formatTimestamp={formatTimestamp} messages={[{ ...USER_MSG, createdAt: '2026-05-20T15:47:06.425Z' }]} />);
+
+    expect(formatTimestamp).toHaveBeenCalledWith('2026-05-20T15:47:06.425Z', expect.objectContaining({ id: 'u1', role: 'user' }));
+    expect(screen.getByText('sent by user')).toBeInTheDocument();
+  });
+
+  it('echoes an unparseable createdAt string through the default timestamp formatter', () => {
+    render(<ChatWindow showTimestamps messages={[{ ...USER_MSG, createdAt: 'definitely-not-a-date' }]} />);
+
+    expect(screen.getByText('definitely-not-a-date')).toBeInTheDocument();
   });
 
   it('preserves a bubble for attachment-only user messages', () => {
@@ -520,14 +660,34 @@ describe('ChatWindow', () => {
     await user.click(screen.getByRole('button', { name: 'Copy' }));
     await user.click(screen.getByRole('button', { name: 'Thumbs up' }));
     expect(screen.getByRole('button', { name: 'Thumbs up' })).toHaveAttribute('aria-pressed', 'true');
+    // Clicking the active thumb again toggles the rating off.
     await user.click(screen.getByRole('button', { name: 'Thumbs up' }));
+    expect(screen.getByRole('button', { name: 'Thumbs up' })).toHaveAttribute('aria-pressed', 'false');
     await user.click(screen.getByRole('button', { name: 'Thumbs down' }));
 
     expect(onCopy).toHaveBeenCalledWith(ASST_MSG);
     expect(onFeedback).toHaveBeenNthCalledWith(1, ASST_MSG, 'up');
-    expect(onFeedback).toHaveBeenNthCalledWith(2, ASST_MSG, 'down');
-    expect(onFeedback).toHaveBeenCalledTimes(2);
+    expect(onFeedback).toHaveBeenNthCalledWith(2, ASST_MSG, null);
+    expect(onFeedback).toHaveBeenNthCalledWith(3, ASST_MSG, 'down');
+    expect(onFeedback).toHaveBeenCalledTimes(3);
     expect(screen.getByRole('button', { name: 'Thumbs down' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('clears seeded feedback when the active thumb is clicked again', async () => {
+    type FeedbackMeta = { feedback?: MessageFeedback | null };
+    const user = userEvent.setup();
+    const onFeedback = vi.fn();
+    const seeded: Message<FeedbackMeta> = { id: 'seeded', role: 'assistant', text: 'Seeded reply', metadata: { feedback: 'down' } };
+    render(<ChatWindow messages={[seeded]} onFeedback={onFeedback} />);
+
+    expect(screen.getByRole('button', { name: 'Thumbs down' })).toHaveAttribute('aria-pressed', 'true');
+
+    await user.click(screen.getByRole('button', { name: 'Thumbs down' }));
+
+    expect(onFeedback).toHaveBeenCalledTimes(1);
+    expect(onFeedback).toHaveBeenCalledWith(seeded, null);
+    expect(screen.getByRole('button', { name: 'Thumbs down' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: 'Thumbs up' })).toHaveAttribute('aria-pressed', 'false');
   });
 
   it('seeds feedback from message metadata when action controls remount', () => {
@@ -546,6 +706,46 @@ describe('ChatWindow', () => {
     expect(screen.getByText('Seeded reply')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Thumbs up' })).toHaveAttribute('aria-pressed', 'true');
     expect(onFeedback).not.toHaveBeenCalled();
+  });
+
+  it('evicts a clicked feedback override when getMessageFeedback later changes it', async () => {
+    const user = userEvent.setup();
+    const onFeedback = vi.fn();
+    const renderWith = (getMessageFeedback: (message: Message) => MessageFeedback | null) =>
+      <ChatWindow messages={[ASST_MSG]} onFeedback={onFeedback} getMessageFeedback={getMessageFeedback} />;
+
+    const { rerender } = render(renderWith(() => null));
+
+    // User clicks thumbs up — the local override shadows host state.
+    await user.click(screen.getByRole('button', { name: 'Thumbs up' }));
+    expect(screen.getByRole('button', { name: 'Thumbs up' })).toHaveAttribute('aria-pressed', 'true');
+
+    // The host persists a correction and reports the new feedback value.
+    rerender(renderWith(() => 'down'));
+    expect(screen.getByRole('button', { name: 'Thumbs down' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Thumbs up' })).toHaveAttribute('aria-pressed', 'false');
+
+    // The host clears the feedback — the UI follows host state, not the override.
+    rerender(renderWith(() => null));
+    expect(screen.getByRole('button', { name: 'Thumbs up' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: 'Thumbs down' })).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('evicts a clicked feedback override when message metadata feedback later changes', async () => {
+    type FeedbackMeta = { feedback?: MessageFeedback | null };
+    const user = userEvent.setup();
+    const onFeedback = vi.fn();
+    const base: Message<FeedbackMeta> = { id: 'a1', role: 'assistant', text: 'Hi there' };
+
+    const { rerender } = render(<ChatWindow messages={[base]} onFeedback={onFeedback} />);
+
+    await user.click(screen.getByRole('button', { name: 'Thumbs up' }));
+    expect(screen.getByRole('button', { name: 'Thumbs up' })).toHaveAttribute('aria-pressed', 'true');
+
+    // Host syncs a different persisted value for the same still-present message.
+    rerender(<ChatWindow messages={[{ ...base, metadata: { feedback: 'down' } }]} onFeedback={onFeedback} />);
+    expect(screen.getByRole('button', { name: 'Thumbs down' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Thumbs up' })).toHaveAttribute('aria-pressed', 'false');
   });
 
   it('copies with navigator.clipboard by default when available', async () => {
@@ -665,6 +865,32 @@ describe('ChatWindow', () => {
     expect(onFeedback).toHaveBeenCalledTimes(1);
   });
 
+  it('renders recorded feedback as read-only thumbs when getMessageFeedback is set without onFeedback', () => {
+    const getMessageFeedback = vi.fn((message: Message) => (message.id === 'a1' ? 'up' : null));
+    render(<ChatWindow messages={[USER_MSG, ASST_MSG]} getMessageFeedback={getMessageFeedback} />);
+
+    // The recorded reaction renders as an inert indicator, not a control.
+    const thumb = screen.getByRole('img', { name: 'Thumbs up' });
+    expect(thumb.tagName).toBe('SPAN');
+    expect(thumb).toHaveClass('chorus-action-btn--readonly');
+    // No interactive feedback buttons and no down-thumb for the unrated message.
+    expect(screen.queryByRole('button', { name: 'Thumbs up' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Thumbs down' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: 'Thumbs down' })).not.toBeInTheDocument();
+  });
+
+  it('keeps feedback interactive when both getMessageFeedback and onFeedback are provided', async () => {
+    const user = userEvent.setup();
+    const onFeedback = vi.fn();
+    const getMessageFeedback = (message: Message) => (message.id === 'a1' ? 'up' : null);
+    render(<ChatWindow messages={[ASST_MSG]} getMessageFeedback={getMessageFeedback} onFeedback={onFeedback} />);
+
+    const thumbsUp = screen.getByRole('button', { name: 'Thumbs up' });
+    expect(thumbsUp).toHaveAttribute('aria-pressed', 'true');
+    await user.click(screen.getByRole('button', { name: 'Thumbs down' }));
+    expect(onFeedback).toHaveBeenCalledWith(ASST_MSG, 'down');
+  });
+
   it('preserves local edit state when messages stream in', async () => {
     const user = userEvent.setup();
     const onEdit = vi.fn();
@@ -718,6 +944,62 @@ describe('ChatWindow', () => {
 
       expect(onEdit).toHaveBeenCalledWith('u1', 'Saved');
       expect(screen.queryByRole('textbox', { name: 'Edit message' })).not.toBeInTheDocument();
+    });
+
+    it(`trims edit input before calling onEdit and cancels all-whitespace edits in the ${variant.name}`, () => {
+      const onEdit = vi.fn();
+      render(<ChatWindow messages={[USER_MSG]} onEdit={onEdit} renderMessage={variant.renderMessage} />);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+      fireEvent.change(screen.getByRole('textbox', { name: 'Edit message' }), { target: { value: '  hello  ' } });
+      fireEvent.keyDown(screen.getByRole('textbox', { name: 'Edit message' }), { key: 'Enter' });
+
+      expect(onEdit).toHaveBeenCalledTimes(1);
+      expect(onEdit).toHaveBeenCalledWith('u1', 'hello');
+
+      fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+      fireEvent.change(screen.getByRole('textbox', { name: 'Edit message' }), { target: { value: '   ' } });
+      fireEvent.keyDown(screen.getByRole('textbox', { name: 'Edit message' }), { key: 'Enter' });
+
+      // An all-whitespace edit cancels instead of firing onEdit a second time.
+      expect(onEdit).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole('textbox', { name: 'Edit message' })).not.toBeInTheDocument();
+    });
+
+    it(`does not submit on Enter while an IME candidate is composing in the ${variant.name}`, () => {
+      const onEdit = vi.fn();
+      render(<ChatWindow messages={[USER_MSG]} onEdit={onEdit} renderMessage={variant.renderMessage} />);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+      const textarea = screen.getByRole('textbox', { name: 'Edit message' });
+      fireEvent.change(textarea, { target: { value: 'にほんご' } });
+
+      // Enter pressed to confirm an IME candidate: isComposing true / keyCode 229.
+      fireEvent.keyDown(textarea, { key: 'Enter', isComposing: true });
+      fireEvent.keyDown(textarea, { key: 'Enter', keyCode: 229 });
+      expect(onEdit).not.toHaveBeenCalled();
+      expect(textarea).toBeInTheDocument();
+
+      // A plain Enter on the now-committed text submits.
+      fireEvent.keyDown(textarea, { key: 'Enter' });
+      expect(onEdit).toHaveBeenCalledWith('u1', 'にほんご');
+    });
+
+    it(`stops Escape from propagating to ancestor handlers in the ${variant.name}`, () => {
+      const onEdit = vi.fn();
+      const ancestorEscape = vi.fn();
+      render(
+        <div onKeyDown={e => { if (e.key === 'Escape') ancestorEscape(); }}>
+          <ChatWindow messages={[USER_MSG]} onEdit={onEdit} renderMessage={variant.renderMessage} />
+        </div>
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+      fireEvent.keyDown(screen.getByRole('textbox', { name: 'Edit message' }), { key: 'Escape' });
+
+      expect(screen.queryByRole('textbox', { name: 'Edit message' })).not.toBeInTheDocument();
+      expect(ancestorEscape).not.toHaveBeenCalled();
+      expect(onEdit).not.toHaveBeenCalled();
     });
   }
 
@@ -865,6 +1147,54 @@ describe('ChatWindow', () => {
     expect(screen.getByTestId('ctx-footer')).toHaveTextContent('sent');
   });
 
+  it('passes decoration slots through ctx.defaultRender for a tool message', () => {
+    const { container } = render(
+      <ChatWindow
+        messages={[TOOL_MSG]}
+        hiddenRoles={[]}
+        renderMessage={(_message, ctx) => ctx.defaultRender({
+          headerSlot: <span data-testid="tool-ctx-header">search · now</span>,
+          footerSlot: <span data-testid="tool-ctx-footer">done</span>,
+        })}
+      />
+    );
+
+    expect(screen.getByTestId('tool-ctx-header')).toHaveTextContent('search · now');
+    expect(screen.getByTestId('tool-ctx-footer')).toHaveTextContent('done');
+
+    // Mirror MessageBubbleLayout ordering: headerSlot before the tool call, footerSlot after.
+    const toolCall = container.querySelector('.chorus-tool .chorus-tool-call')!;
+    expect(toolCall.previousElementSibling).toHaveAttribute('data-testid', 'tool-ctx-header');
+    expect(toolCall.nextElementSibling).toHaveAttribute('data-testid', 'tool-ctx-footer');
+  });
+
+  it('flips ctx.isEditing when Edit is clicked on a row from ctx.defaultRender()', async () => {
+    const user = userEvent.setup();
+    render(
+      <ChatWindow
+        messages={[USER_MSG]}
+        onEdit={vi.fn()}
+        renderMessage={(msg, ctx) => (
+          <div {...ctx.messageProps}>
+            {!ctx.isEditing && <p data-testid="custom-text">{msg.text}</p>}
+            {ctx.defaultRender()}
+          </div>
+        )}
+      />
+    );
+
+    expect(screen.getByTestId('custom-text')).toHaveTextContent('Hello');
+
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+
+    expect(screen.queryByTestId('custom-text')).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Edit message' })).toHaveValue('Hello');
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.getByTestId('custom-text')).toHaveTextContent('Hello');
+  });
+
   it('MessageBubble renders message attachments', () => {
     const message: Message = {
       id: 'u2',
@@ -903,14 +1233,14 @@ describe('ChatWindow', () => {
       text: `Message ${i}`,
     }));
 
-    render(<ChatWindow messages={messages} maxRenderedMessages={5} typing error="Still accessible" />);
+    const { container } = render(<ChatWindow messages={messages} maxRenderedMessages={5} typing error="Still accessible" />);
 
     expect(screen.getAllByTestId('markdown')).toHaveLength(5);
     expect(screen.queryByText('Message 94')).not.toBeInTheDocument();
     expect(screen.getByText('Message 95')).toBeInTheDocument();
     expect(screen.getByText('Message 99')).toBeInTheDocument();
-    expect(screen.getByRole('status', { name: /assistant is typing/i })).toBeInTheDocument();
-    expect(screen.getByRole('alert')).toHaveTextContent('Still accessible');
+    expect(screen.getByText(/assistant is typing/i)).toBeInTheDocument();
+    expect(container.querySelector('.chorus-error')).toHaveTextContent('Still accessible');
   });
 
   it('keeps actions wired to original message ids when a render window is active', async () => {
@@ -1076,6 +1406,34 @@ describe('ChatWindow', () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  it('treats the scroll event echoed by an auto-pin as programmatic, not a user scroll-away', () => {
+    const { rerender } = render(<ChatWindow messages={[ASST_MSG]} />);
+    const transcript = screen.getByRole('log', { name: /chat transcript/i });
+
+    Object.defineProperty(transcript, 'clientHeight', { configurable: true, value: 200 });
+    Object.defineProperty(transcript, 'scrollHeight', { configurable: true, value: 1000 });
+    transcript.scrollTop = 1000;
+    fireEvent.scroll(transcript); // user sits at the bottom -> auto-scroll engaged
+
+    // A streamed chunk grows the transcript; the layout effect pins to the new
+    // bottom, which is a programmatic scroll.
+    Object.defineProperty(transcript, 'scrollHeight', { configurable: true, value: 1400 });
+    rerender(<ChatWindow messages={[{ ...ASST_MSG, text: 'streamed chunk' }]} />);
+    expect(transcript.scrollTop).toBe(1400);
+
+    // The browser then echoes a scroll event for that pin. Even if it reports a
+    // stale, scrolled-up position, it must not be read as the user leaving.
+    transcript.scrollTop = 0;
+    fireEvent.scroll(transcript);
+
+    // The next chunk should still auto-pin (no jump-to-bottom button), proving
+    // the echoed event did not pause auto-scroll.
+    Object.defineProperty(transcript, 'scrollHeight', { configurable: true, value: 1800 });
+    rerender(<ChatWindow messages={[{ ...ASST_MSG, text: 'streamed chunk two' }]} />);
+    expect(transcript.scrollTop).toBe(1800);
+    expect(screen.queryByRole('button', { name: /jump to latest/i })).not.toBeInTheDocument();
   });
 
   it('produces a hydration-stable initial tree when navigator.clipboard is only available client-side', () => {

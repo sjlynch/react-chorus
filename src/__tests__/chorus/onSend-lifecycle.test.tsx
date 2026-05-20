@@ -137,6 +137,7 @@ describe('Chorus', () => {
 
   it('does not call onFinish on aborts, errors, or sends with no assistant output', async () => {
     const user = userEvent.setup();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const onFinish = vi.fn();
     let helpers!: OnSendHelpers;
     const onSend = vi.fn<OnSend>((text, _messages, h) => {
@@ -166,6 +167,7 @@ describe('Chorus', () => {
     await waitFor(() => expect(onSend).toHaveBeenCalledWith('empty', expect.any(Array), expect.any(Object)));
 
     expect(onFinish).not.toHaveBeenCalled();
+    warn.mockRestore();
   });
 
   it('calls onAbort with the partial assistant when Stop cancels streamed onSend output', async () => {
