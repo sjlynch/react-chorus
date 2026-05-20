@@ -28,6 +28,14 @@ export function useChorusPropWarnings<TMeta>({
   onSend,
   sending,
 }: UseChorusPropWarningsArgs<TMeta>): void {
+  // The message seed (`messages ?? initialMessages`) is captured once at mount
+  // by useChorusMessages and never re-derived. Track its mount-time reference so
+  // a parent that later swaps the array (locale/theme/persona change) gets a
+  // one-time warning instead of a silently ignored update — the seed also backs
+  // `resetToInitialMessages`, so the stale value resurfaces on clear().
+  const mountSeedRef = React.useRef<Message<TMeta>[] | undefined>(messages ?? initialMessages);
+  const seedChangeWarnedRef = React.useRef(false);
+
   React.useEffect(() => {
     if (!isChorusDevMode()) return;
 
@@ -37,6 +45,12 @@ export function useChorusPropWarnings<TMeta>({
 
     if (messages !== undefined && initialMessages !== undefined) {
       console.warn('[Chorus] Both `messages` and `initialMessages` were provided. `messages` wins as the initial seed; remove one or the other to avoid ambiguity.');
+    }
+
+    if (!seedChangeWarnedRef.current && (messages ?? initialMessages) !== mountSeedRef.current) {
+      seedChangeWarnedRef.current = true;
+      const changedProp = messages !== undefined ? 'messages' : 'initialMessages';
+      console.warn(`[Chorus] \`${changedProp}\` array reference changed after mount; the new value is ignored because the seed is captured at mount. To replace the transcript, use \`value\`+\`onChange\`, call ChorusRef.clear(), or remount via \`key={...}\`.`);
     }
 
     if (value !== undefined && persistenceKey) {

@@ -65,6 +65,12 @@ export function MessageList<TMeta = Record<string, unknown>>({
   onEdit,
   onRegenerate,
 }: MessageListProps<TMeta>) {
+  // A tool call belongs to a turn that is still streaming whenever any
+  // assistant turn is in flight — its arguments/result may not have arrived
+  // yet. Tool messages never carry the `streamingMessageId` themselves (that
+  // tracks the pending assistant message), so derive it from session activity.
+  const sessionStreaming = streamingMessageId != null;
+
   return (
     <>
       {messages.map(message => {
@@ -77,7 +83,7 @@ export function MessageList<TMeta = Record<string, unknown>>({
               <div className="chorus-msg chorus-tool" data-chorus-message-id={message.id}>
                 <MessageSpeakerLabel role={message.role} speakers={resolvedLabels.speakers} />
                 {slots?.before}
-                <ToolCallBlock toolCall={message.toolCall} labels={resolvedLabels.toolCall} />
+                <ToolCallBlock toolCall={message.toolCall} labels={resolvedLabels.toolCall} streaming={sessionStreaming} />
                 {slots?.after}
               </div>
             );
