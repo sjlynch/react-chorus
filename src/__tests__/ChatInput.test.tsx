@@ -1,6 +1,6 @@
-import { createRef, useState } from 'react';
+import { createRef, useState, type ReactNode } from 'react';
 import { describe, it, expect, vi } from 'vitest';
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ChatInput } from '../components/ChatInput';
 import type { ChatInputHandle, ChatInputProps } from '../components/ChatInput';
@@ -18,6 +18,25 @@ function ControlledChatInput(props: Partial<ChatInputProps>) {
       onChange={setValue}
       onSend={props.onSend ?? vi.fn()}
     />
+  );
+}
+
+// Renders a ChatInput inside a `.chorus` widget root with a sibling transcript
+// area, mirroring the real <Chorus> layout so transcript-wide drag-and-drop
+// (which is wired to the surrounding surface) can be exercised.
+function ChorusSurface({ children, ...props }: Partial<ChatInputProps> & { children?: ReactNode }) {
+  const [value, setValue] = useState(props.value ?? '');
+
+  return (
+    <div className="chorus">
+      <div data-testid="transcript">{children ?? 'transcript'}</div>
+      <ChatInput
+        {...props}
+        value={value}
+        onChange={setValue}
+        onSend={props.onSend ?? vi.fn()}
+      />
+    </div>
   );
 }
 
@@ -345,24 +364,44 @@ describe('ChatInput', () => {
     expect(screen.getByRole('button', { name: /attach file/i })).toBeInTheDocument();
   });
 
-  it('treats an empty accept string as allowing any file while still showing attachments', async () => {
-    const user = userEvent.setup();
+  it('treats an empty or whitespace-only accept string as no attachments allowed', async () => {
+    const uploadAttachment = vi.fn();
     const file = new File(['notes'], 'notes.txt', { type: 'text/plain' });
-    const uploadAttachment = vi.fn(async (incoming: File) => ({
-      name: incoming.name,
-      type: incoming.type,
-      size: incoming.size,
-      data: 'uploaded-notes',
-    }));
-    const { container } = render(<ControlledChatInput accept="" uploadAttachment={uploadAttachment} />);
+    const { container, rerender } = render(<ControlledChatInput accept="" uploadAttachment={uploadAttachment} />);
     const local = within(container);
 
-    expect(local.getByRole('button', { name: /attach file/i })).toBeInTheDocument();
-    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
-    await user.upload(fileInput, file);
+    // Empty accept: no attach button and no unfiltered hidden file picker.
+    expect(local.queryByRole('button', { name: /attach file/i })).not.toBeInTheDocument();
+    expect(container.querySelector('input[type="file"]')).toBeNull();
 
-    expect(await local.findByText('notes.txt')).toBeInTheDocument();
-    expect(uploadAttachment).toHaveBeenCalledWith(file, { signal: expect.any(AbortSignal) });
+    // Whitespace-only accept is treated the same way.
+    rerender(<ControlledChatInput accept="   " uploadAttachment={uploadAttachment} />);
+    expect(local.queryByRole('button', { name: /attach file/i })).not.toBeInTheDocument();
+    expect(container.querySelector('input[type="file"]')).toBeNull();
+
+    // Pasting a file is ignored rather than ingested.
+    await pasteFiles(local.getByRole('textbox'), file);
+    expect(uploadAttachment).not.toHaveBeenCalled();
+    expect(local.queryByText('notes.txt')).not.toBeInTheDocument();
+  });
+
+  it('treats maxAttachmentBytes=0 as no files allowed rather than unlimited', async () => {
+    const onAttachmentError = vi.fn();
+    // A zero-byte file would slip past a `size > limit` check when the limit is 0.
+    const file = new File([], 'empty.png', { type: 'image/png' });
+    const { container } = render(
+      <ControlledChatInput accept="image/*" maxAttachmentBytes={0} onAttachmentError={onAttachmentError} />,
+    );
+    const local = within(container);
+
+    await dropFiles(local.getByRole('textbox'), file);
+
+    await waitFor(() => expect(onAttachmentError).toHaveBeenCalledWith(expect.objectContaining({
+      reason: 'too-large',
+      file,
+      maxAttachmentBytes: 0,
+    })));
+    expect(local.queryByText('empty.png')).not.toBeInTheDocument();
   });
 
   it('renders attachments as chips and removes them with the X button', async () => {
@@ -1107,5 +1146,191 @@ describe('ChatInput', () => {
         data: 'https://cdn.example.com/uploaded.png',
       }),
     ]);
+  });
+
+  describe('paste preventDefault', () => {
+    it('preventDefaults a file paste so the file path is not also inserted into the textarea', async () => {
+      const file = new File(['image-bytes'], 'pasted.png', { type: 'image/png' });
+      const uploadAttachment = vi.fn(async (incoming: File) => ({
+        name: incoming.name,
+        type: incoming.type,
+        size: incoming.size,
+        data: 'data:image/png;base64,cGFzdGVk',
+      }));
+      const { container } = render(<ControlledChatInput accept="image/*" uploadAttachment={uploadAttachment} />);
+      const local = within(container);
+
+      const textbox = local.getByRole('textbox');
+      const pasteEvent = createEvent.paste(textbox, { clipboardData: fileTransfer(file) });
+      await act(async () => {
+        fireEvent(textbox, pasteEvent);
+      });
+
+      expect(pasteEvent.defaultPrevented).toBe(true);
+      expect(await local.findByText('pasted.png')).toBeInTheDocument();
+    });
+  });
+
+  describe('IME composition', () => {
+    it('does not send on Enter while an IME composition is active', () => {
+      const onSend = vi.fn();
+      render(<ControlledChatInput value="こんにちは" onSend={onSend} />);
+      const textarea = screen.getByRole('textbox');
+
+      // Inside the compositionstart..compositionend window Enter belongs to the IME.
+      fireEvent.compositionStart(textarea);
+      fireEvent.keyDown(textarea, { key: 'Enter' });
+      expect(onSend).not.toHaveBeenCalled();
+      fireEvent.compositionEnd(textarea);
+
+      // The keydown that confirms a composition still carries isComposing even
+      // after compositionend has fired.
+      fireEvent.keyDown(textarea, { key: 'Enter', isComposing: true });
+      expect(onSend).not.toHaveBeenCalled();
+
+      // A plain Enter outside any composition sends as usual.
+      fireEvent.keyDown(textarea, { key: 'Enter' });
+      expect(onSend).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe('async send / typing race', () => {
+    it('clears attachments after an async send resolves when the composer is untouched', async () => {
+      const user = userEvent.setup();
+      const send = deferred<void>();
+      const onSend = vi.fn(() => send.promise);
+      const uploadAttachment = vi.fn(async (incoming: File) => ({
+        name: incoming.name,
+        type: incoming.type,
+        size: incoming.size,
+        data: 'uploaded',
+      }));
+      const file = new File(['image'], 'sent.png', { type: 'image/png' });
+      const { container } = render(
+        <ControlledChatInput value="hi" onSend={onSend} accept="image/*" uploadAttachment={uploadAttachment} />,
+      );
+      const local = within(container);
+
+      await dropFiles(local.getByRole('textbox'), file);
+      expect(await local.findByText('sent.png')).toBeInTheDocument();
+      await waitFor(() => expect(local.getByRole('button', { name: /send/i })).toBeEnabled());
+      await user.click(local.getByRole('button', { name: /send/i }));
+
+      await act(async () => {
+        send.resolve();
+      });
+
+      await waitFor(() => expect(local.queryByText('sent.png')).not.toBeInTheDocument());
+    });
+
+    it('keeps freshly typed input when an async send resolves after the user typed again', async () => {
+      const send = deferred<void>();
+      const onSend = vi.fn(() => send.promise);
+      const uploadAttachment = vi.fn(async (incoming: File) => ({
+        name: incoming.name,
+        type: incoming.type,
+        size: incoming.size,
+        data: 'uploaded',
+      }));
+      const inFlight = new File(['image'], 'in-flight.png', { type: 'image/png' });
+      const { container } = render(
+        <ControlledChatInput value="first" onSend={onSend} accept="image/*" uploadAttachment={uploadAttachment} />,
+      );
+      const local = within(container);
+
+      await dropFiles(local.getByRole('textbox'), inFlight);
+      expect(await local.findByText('in-flight.png')).toBeInTheDocument();
+      await waitFor(() => expect(local.getByRole('button', { name: /send/i })).toBeEnabled());
+      await act(async () => {
+        fireEvent.click(local.getByRole('button', { name: /send/i }));
+      });
+      expect(onSend).toHaveBeenCalledOnce();
+
+      // User starts a fresh message + attachment before the in-flight send resolves.
+      await act(async () => {
+        fireEvent.change(local.getByRole('textbox'), { target: { value: 'first and more' } });
+      });
+      const kept = new File(['image2'], 'kept.png', { type: 'image/png' });
+      await dropFiles(local.getByRole('textbox'), kept);
+      expect(await local.findByText('kept.png')).toBeInTheDocument();
+
+      await act(async () => {
+        send.resolve();
+      });
+
+      // The stale resolved callback must not wipe the user's new attachment.
+      expect(local.getByText('kept.png')).toBeInTheDocument();
+    });
+  });
+
+  describe('transcript-wide drag-and-drop', () => {
+    it('suppresses browser navigation and ingests a file dropped onto the transcript', async () => {
+      const uploadAttachment = vi.fn(async (incoming: File) => ({
+        name: incoming.name,
+        type: incoming.type,
+        size: incoming.size,
+        data: 'uploaded',
+      }));
+      const file = new File(['drop-bytes'], 'transcript-drop.png', { type: 'image/png' });
+      const { container } = render(<ChorusSurface accept="image/*" uploadAttachment={uploadAttachment} />);
+      const transcript = screen.getByTestId('transcript');
+
+      // dragover must be prevented so the drop is a drop, not a navigation.
+      const overEvent = createEvent.dragOver(transcript, { dataTransfer: fileTransfer(file) });
+      await act(async () => {
+        fireEvent(transcript, overEvent);
+      });
+      expect(overEvent.defaultPrevented).toBe(true);
+
+      const dropEvent = createEvent.drop(transcript, { dataTransfer: fileTransfer(file) });
+      await act(async () => {
+        fireEvent(transcript, dropEvent);
+      });
+      expect(dropEvent.defaultPrevented).toBe(true);
+
+      expect(await within(container).findByText('transcript-drop.png')).toBeInTheDocument();
+      expect(uploadAttachment).toHaveBeenCalledWith(file, { signal: expect.any(AbortSignal) });
+    });
+
+    it('shows the "Drop to attach" overlay while a file is dragged over the surface', async () => {
+      const { container } = render(<ChorusSurface accept="image/*" />);
+      const local = within(container);
+      const transcript = screen.getByTestId('transcript');
+      const file = new File(['bytes'], 'over.png', { type: 'image/png' });
+
+      expect(local.queryByText('Drop to attach')).not.toBeInTheDocument();
+
+      await act(async () => {
+        fireEvent.dragEnter(transcript, { dataTransfer: fileTransfer(file) });
+      });
+      expect(local.getByText('Drop to attach')).toBeInTheDocument();
+
+      await act(async () => {
+        fireEvent.dragEnd(window);
+      });
+      expect(local.queryByText('Drop to attach')).not.toBeInTheDocument();
+    });
+
+    it('still preventDefaults transcript drops when attachments are disabled, without an overlay', async () => {
+      const { container } = render(<ChorusSurface accept={undefined} />);
+      const local = within(container);
+      const transcript = screen.getByTestId('transcript');
+      const file = new File(['bytes'], 'ignored.png', { type: 'image/png' });
+
+      const overEvent = createEvent.dragOver(transcript, { dataTransfer: fileTransfer(file) });
+      await act(async () => {
+        fireEvent(transcript, overEvent);
+      });
+      const dropEvent = createEvent.drop(transcript, { dataTransfer: fileTransfer(file) });
+      await act(async () => {
+        fireEvent(transcript, dropEvent);
+      });
+
+      // Navigation is still suppressed even though no attachment is ingested.
+      expect(overEvent.defaultPrevented).toBe(true);
+      expect(dropEvent.defaultPrevented).toBe(true);
+      expect(local.queryByText('Drop to attach')).not.toBeInTheDocument();
+      expect(local.queryByText('ignored.png')).not.toBeInTheDocument();
+    });
   });
 });

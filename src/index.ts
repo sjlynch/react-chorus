@@ -53,6 +53,8 @@ export { useChorusPersistence } from './hooks/useChorusPersistence';
 export type { ChorusPersistenceError, DeserializeMessages, PersistenceOperation, PersistenceWriteOptions, SerializeMessages, UseChorusPersistenceOptions, UseChorusPersistenceResult } from './hooks/useChorusPersistence';
 export { useConversations } from './hooks/useConversations';
 export type { ConversationStorageError, ConversationStorageOperation, ConversationSummary, RenameFromFirstMessageOptions, UseConversationsOptions, UseConversationsResult } from './hooks/useConversations';
+export { useChorusTranscriptActions } from './hooks/useChorusTranscriptActions';
+export type { ChorusTranscriptActions, ChorusTranscriptActionsOptions, TranscriptExportFormat } from './hooks/useChorusTranscriptActions';
 export { createFetchSSETransport } from './streaming/createFetchSSETransport';
 export type { FetchSSETransportOptions } from './streaming/createFetchSSETransport';
 export { createWebSocketTransport } from './streaming/createWebSocketTransport';
@@ -131,7 +133,7 @@ export type {
 export { defineTool } from './tools';
 export type { ChorusToolDefinition } from './tools';
 export { Markdown } from './components/Markdown';
-export type { MarkdownProps, MarkdownSanitizer } from './components/Markdown';
+export type { MarkdownProps, MarkdownSanitizer, CodeBlockCopy, CodeBlockCopyContext, CodeBlockCopyRenderer } from './components/Markdown';
 export { setChorusStyleNonce } from './utils/cspNonce';
 
 export type { Connector, ConnectorResult, ConnectorToolDelta, ConnectorWarning } from './connectors/connectors';
