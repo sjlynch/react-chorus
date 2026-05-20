@@ -3,16 +3,28 @@ import type { Transport } from '../useChorusStream';
 
 /**
  * Object form of the simple `transport` shorthand. Lets the URL string shorthand
- * grow auth headers, cookies, and other `fetch` options without dropping the
- * batteries-included streaming path.
+ * grow auth headers, cookies, an HTTP method, and other `fetch` options without
+ * dropping the batteries-included streaming path.
  *
- * `body`, `method`, and `signal` are reserved by Chorus: the request is always
- * `POST` with the streaming `AbortSignal`, and the body is serialized by the
- * default `JSON.stringify({ prompt, history })` (or your `formatBody`).
+ * `body` and `signal` are reserved by Chorus: the request always carries the
+ * streaming `AbortSignal`, and the body is serialized by the default
+ * `JSON.stringify({ prompt, history })` (or your `formatBody`).
  */
 export interface FetchTransportInit<TMeta = Record<string, unknown>> extends Omit<RequestInit, 'body' | 'method' | 'signal' | 'headers'> {
-  /** Endpoint Chorus POSTs to. */
+  /** Endpoint Chorus sends the request to. */
   url: string;
+  /**
+   * HTTP method for the outgoing request. Defaults to `'POST'`.
+   *
+   * When set to a body-less method (`'GET'` or `'HEAD'`), the transport skips
+   * `formatBody` and the default `Content-Type: application/json` header — the
+   * URL is expected to carry any state (typically as query parameters). This
+   * enables GET-based SSE proxies and EventSource-style endpoints.
+   *
+   * Mirrors `createFetchSSETransport`'s `method` option so the object shorthand
+   * and the standalone factory stay in lockstep.
+   */
+  method?: 'GET' | 'HEAD' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   /**
    * Extra request headers forwarded verbatim to `fetch`.
    *
@@ -31,6 +43,8 @@ export interface FetchTransportInit<TMeta = Record<string, unknown>> extends Omi
    * When omitted, the transport adds `Content-Type: application/json` unless the
    * caller supplied an explicit Content-Type header. When provided, set headers
    * yourself for JSON bodies; FormData/Blob/URLSearchParams are not forced to JSON.
+   *
+   * Ignored when `method` is `'GET'` or `'HEAD'`.
    */
   formatBody?: (text: string, history: Message<TMeta>[]) => BodyInit;
 }
@@ -50,17 +64,21 @@ export function createDefaultFetchSSETransport<TMeta = Record<string, unknown>>(
   config: string | FetchTransportInit<TMeta>,
 ): Transport<TMeta> {
   const init: FetchTransportInit<TMeta> = typeof config === 'string' ? { url: config } : config;
-  const { url, formatBody, headers: initHeaders, ...rest } = init;
+  const { url, formatBody, headers: initHeaders, method = 'POST', ...rest } = init;
+  const bodyless = method === 'GET' || method === 'HEAD';
   const hasCustomFormatBody = typeof formatBody === 'function';
   const serializeBody = formatBody
     ?? ((text: string, history: Message<TMeta>[]) => JSON.stringify({ prompt: text, history }));
 
   return async (text: string, history: Message<TMeta>[], signal: AbortSignal) => {
-    const body = serializeBody(text, history);
     const headers = new Headers(initHeaders);
+    if (bodyless) {
+      return fetch(url, { ...rest, method, headers, signal });
+    }
+    const body = serializeBody(text, history);
     if (!hasCustomFormatBody && !headers.has('Content-Type')) {
       headers.set('Content-Type', 'application/json');
     }
-    return fetch(url, { ...rest, method: 'POST', headers, body, signal });
+    return fetch(url, { ...rest, method, headers, body, signal });
   };
 }

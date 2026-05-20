@@ -32,6 +32,7 @@ export interface ToolExecutionDeps<TMeta> {
   hasStartedAssistantRef: React.MutableRefObject<boolean>;
   toolsRef: React.MutableRefObject<ChorusToolRegistry<TMeta> | undefined>;
   onToolCallRef: React.MutableRefObject<ChorusOnToolCall<TMeta> | undefined>;
+  continueOnToolErrorRef: React.MutableRefObject<boolean>;
   safeOnToolDelta: ObserverCallbacks<TMeta>['safeOnToolDelta'];
   safeNotifyToolCall: ObserverCallbacks<TMeta>['safeNotifyToolCall'];
   isAssistantSessionActive: (sessionId: number) => boolean;
@@ -57,6 +58,7 @@ export function useToolExecution<TMeta>(deps: ToolExecutionDeps<TMeta>): ToolExe
     hasStartedAssistantRef,
     toolsRef,
     onToolCallRef,
+    continueOnToolErrorRef,
     safeOnToolDelta,
     safeNotifyToolCall,
     isAssistantSessionActive,
@@ -172,13 +174,24 @@ export function useToolExecution<TMeta>(deps: ToolExecutionDeps<TMeta>): ToolExe
         if (signal.aborted) throw createAbortError();
         if (output !== undefined) setToolOutput(currentMessage.id, output);
       } catch (error) {
-        if (!signal.aborted && !isAbortError(error) && isAssistantSessionActive(sessionId)) {
-          setToolErrorOutput(currentMessage.id, { error: toError(error).message });
+        // Abort errors (Stop pressed) and stale-session errors always end the
+        // turn — never feed them back to the model.
+        if (signal.aborted || isAbortError(error) || !isAssistantSessionActive(sessionId)) {
+          throw error;
         }
-        throw error;
+        // Record the thrown error as the tool's output so the row stays
+        // inspectable. `setToolErrorOutput` also flags `metadata.isError`,
+        // which `toAnthropicMessagesBody` maps to `is_error: true`.
+        setToolErrorOutput(currentMessage.id, { error: toError(error).message });
+        // Without `continueOnToolError`, a thrown handler ends the whole turn
+        // with the generic error banner (re-throw). With it opted in, the
+        // recorded error output is treated as a normal tool result: the
+        // auto-continue loop feeds it back to the model so it can self-recover,
+        // and already-streamed assistant text from this iteration is kept.
+        if (!continueOnToolErrorRef.current) throw error;
       }
     }
-  }, [createToolCallContext, isAssistantSessionActive, messagesRef, onToolCallRef, safeNotifyToolCall, setToolErrorOutput, setToolOutput, toolsRef]);
+  }, [continueOnToolErrorRef, createToolCallContext, isAssistantSessionActive, messagesRef, onToolCallRef, safeNotifyToolCall, setToolErrorOutput, setToolOutput, toolsRef]);
 
   return {
     toolMessageIdForDelta,

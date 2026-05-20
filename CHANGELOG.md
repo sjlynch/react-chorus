@@ -24,6 +24,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 #### Tool agent loop
 - Added a `tools` registry prop and `ChorusToolRegistry` type for declaring client-side tool implementations.
 - Added `autoContinueTools`, `maxToolIterations`, and `shouldContinueToolLoop` props for controlling automatic tool-call → result → resume cycles.
+- Added `continueOnToolError`: when a tool handler (or `onToolCall`) throws a non-abort error, the error is recorded on the tool row and — with `autoContinueTools` enabled — fed back to the model as the tool result so the loop self-recovers instead of ending the turn with the error banner.
 - Added `onToolCall`, `onToolDelta`, `onStreamDone`, and `onAbort` callbacks with `ChorusToolCallContext`, `ChorusToolDeltaContext`, `ChorusToolLoopContext`, `ChorusStreamDoneContext`, and `ChorusAbortContext` payload types.
 
 #### Multi-conversation
@@ -67,6 +68,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Exported the standalone `Markdown` component with `MarkdownProps` and `MarkdownSanitizer` types.
 - Added configurable `markedOptions`, `markedExtensions`, and sanitizer override for the Markdown pipeline.
 
+#### Theming
+- Added a `palette` prop to `<ChatWindow>` and `<ChatInput>` so every exported root component (`Chorus`, `ChatWindow`, `ChatInput`, `ConversationList`) themes through the same `--chorus-*` CSS-variable mechanism — making `<ChorusTheme>` an interchangeable wrapper form rather than the only theming path for composed shells.
+- Documented a single theming entry point and the per-variable CSS-cascade precedence between `<Chorus palette>`, `<ChorusTheme>`, component `palette` props, and host CSS variables.
+
 ### Changed
 - Bumped the package to `0.2.0` for a public message typing refinement.
 - Replaced the public `Message` shape with a discriminated union (`AnyChorusMessage`) so `role: 'tool'` requires `toolCall`, non-tool messages forbid it, and tool/system messages reject attachments.
@@ -74,9 +79,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - `useChorusStream.send()` now rejects non-abort stream failures after cleanup so `onSend` bridges can surface Chorus errors.
 - `useChorusStream.send()` now rejects with a `ChorusStreamError` whose `code === 'concurrent-send'` when called while a previous send is still in flight, instead of silently resolving with `undefined`. The transport is still not invoked a second time and the dev-mode warning is preserved; custom shells that `await send(...)` can now distinguish the re-entrant no-op from a successful empty stream.
 - Documented keyboard shortcuts, standalone `useChorusStream`, persistence examples, error handling, and OpenAI proxy buffering headers.
+- `<ConversationList palette>` now applies the palette in `headless` renders too, matching `<Chorus>`/`<ChatWindow>`/`<ChatInput>`; a host-supplied palette is treated as a theme rather than default styling.
 
 ### Fixed
 - Fixed stream cleanup on unmount/pre-aborted signals, richer HTTP error details, WebSocket close-before-open hangs, safe dev-mode checks without `process`, observer callback isolation, and transport concurrency guards.
+- Fixed the object-form `transport` shorthand (`FetchTransportInit`) ignoring `method`: it now accepts the same `'GET' | 'HEAD' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'` set as `createFetchSSETransport`, including body-less `GET`/`HEAD` requests that skip `formatBody` and the default JSON `Content-Type`, instead of always issuing a `POST` against the configured `url`.
+- A misconfigured `transport` no longer fails silently: an empty/whitespace-only URL string, or a transport object without a usable string `url` (missing, `undefined`, empty, or whitespace-only), now warns in development and resolves to a transport that rejects with a descriptive error so the existing stream-error UI surfaces it, instead of ending the assistant turn with a blank message or POSTing to the current document URL. A genuinely absent `transport` is unaffected.
 
 ## [0.1.0] - 2026-05-11
 

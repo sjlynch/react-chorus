@@ -1,10 +1,11 @@
+import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Chorus } from '../../Chorus';
 import { defineTool, toAnthropicMessagesBody, toOpenAIChatCompletionsBody } from '../../providerRequests';
 import { sseResponse } from './testUtils';
-import type { OnSend, Transport } from './testUtils';
+import type { ChorusRef, OnSend, Transport } from './testUtils';
 
 vi.mock('../../components/Markdown', () => ({
   Markdown: ({ text }: { text: string }) => <span data-testid="markdown">{text}</span>,
@@ -248,6 +249,99 @@ describe('Chorus', () => {
     expect(screen.queryByText(/tool failed/)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /search/i })).not.toBeInTheDocument();
     expect(transport).toHaveBeenCalledTimes(2);
+  });
+
+  it('continues the auto tool loop after a handler throws when continueOnToolError is set', async () => {
+    const user = userEvent.setup();
+    const onError = vi.fn();
+    const onStreamDone = vi.fn();
+    const search = vi.fn(async () => {
+      if (search.mock.calls.length === 1) throw new Error('tool failed');
+      return { result: 'found' };
+    });
+    const transport = vi.fn<Transport>(async () => {
+      const call = transport.mock.calls.length;
+      if (call === 1) {
+        return sseResponse([
+          JSON.stringify({ choices: [{ index: 0, delta: { content: 'Let me search.', tool_calls: [{ index: 0, id: 'call_1', function: { name: 'search', arguments: '{"q":"react"}' } }] } }] }),
+          '[DONE]',
+        ]);
+      }
+      if (call === 2) {
+        return sseResponse([
+          JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_2', function: { name: 'search', arguments: '{"q":"react"}' } }] } }] }),
+          '[DONE]',
+        ]);
+      }
+      return sseResponse([
+        JSON.stringify({ choices: [{ index: 0, delta: { content: 'All good now.' } }] }),
+        '[DONE]',
+      ]);
+    });
+
+    render(<Chorus
+      transport={transport}
+      connector="openai"
+      minAssistantDelayMs={0}
+      autoContinueTools
+      continueOnToolError
+      tools={{ search }}
+      onError={onError}
+      onStreamDone={onStreamDone}
+    />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'search react');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByText('All good now.')).toBeInTheDocument();
+    await waitFor(() => expect(transport).toHaveBeenCalledTimes(3));
+    expect(search).toHaveBeenCalledTimes(2);
+    // The throw is fed back to the model, not surfaced as a terminal turn error.
+    expect(onError).not.toHaveBeenCalled();
+    expect(screen.queryByText('Something went wrong. Please try again.')).not.toBeInTheDocument();
+    // Assistant text streamed in the failing iteration is kept, not discarded.
+    expect(screen.getByText('Let me search.')).toBeInTheDocument();
+    // The loop continued past the throw rather than ending the turn.
+    expect(onStreamDone).toHaveBeenNthCalledWith(1, expect.objectContaining({ reason: 'tool-loop-continue', willContinue: true }));
+
+    // The continuation request after the throw carries the error tool_result.
+    const continuationBody = toOpenAIChatCompletionsBody(transport.mock.calls[1][1]);
+    expect(continuationBody.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: 'tool', tool_call_id: 'call_1', content: expect.stringContaining('tool failed') }),
+    ]));
+
+    // The errored tool row stays inspectable.
+    await user.click(screen.getAllByRole('button', { name: /search/i })[0]);
+    expect(screen.getByText(/tool failed/)).toBeInTheDocument();
+  });
+
+  it('records a thrown tool error without the banner when continueOnToolError is set but autoContinueTools is off', async () => {
+    const user = userEvent.setup();
+    const onError = vi.fn();
+    const transport = vi.fn<Transport>(async () => sseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'search', arguments: '{"q":"react"}' } }] } }] }),
+      '[DONE]',
+    ]));
+
+    render(<Chorus
+      transport={transport}
+      connector="openai"
+      minAssistantDelayMs={0}
+      continueOnToolError
+      tools={{ search: async () => { throw new Error('tool failed'); } }}
+      onError={onError}
+    />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'search react');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByRole('button', { name: /search/i })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument());
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(onError).not.toHaveBeenCalled();
+    expect(screen.queryByText('Something went wrong. Please try again.')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /search/i }));
+    expect(screen.getByText(/tool failed/)).toBeInTheDocument();
   });
 
   it('aborts during tool execution without showing an error', async () => {
@@ -623,6 +717,32 @@ describe('Chorus', () => {
       expect.objectContaining({ role: 'user', text: 'hi' }),
     ]);
     expect(screen.queryByText('Stay concise.')).not.toBeInTheDocument();
+  });
+
+  it('dispatches send() to the transport from the same commit that swapped the transport prop', async () => {
+    const transportA = vi.fn<Transport>(async () => sseResponse(['from A']));
+    const transportB = vi.fn<Transport>(async () => sseResponse(['from B']));
+    const ref = React.createRef<ChorusRef>();
+
+    // The layout effect runs right after Chorus re-renders with transportB but
+    // before any passive effect — exercising a "latest ref read inside the same
+    // commit" path. A useLatestRef that updated in a passive effect would still
+    // hold transportA at this point and post to the previous endpoint.
+    function Host({ transport, sendNow }: { transport: Transport; sendNow: boolean }) {
+      React.useLayoutEffect(() => {
+        if (sendNow) ref.current?.send('same-commit send');
+      }, [sendNow]);
+      return <Chorus ref={ref} transport={transport} connector="openai" minAssistantDelayMs={0} />;
+    }
+
+    const { rerender } = render(<Host transport={transportA} sendNow={false} />);
+    expect(transportA).not.toHaveBeenCalled();
+
+    rerender(<Host transport={transportB} sendNow />);
+
+    await waitFor(() => expect(transportB).toHaveBeenCalledOnce());
+    expect(transportA).not.toHaveBeenCalled();
+    expect(transportB.mock.calls[0][0]).toBe('same-commit send');
   });
 
   it('uses transport instead of onSend when both are provided', async () => {
