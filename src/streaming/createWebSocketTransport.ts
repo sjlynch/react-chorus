@@ -59,7 +59,19 @@ export interface WebSocketTransportOptions<TMeta = Record<string, unknown>> {
 }
 
 export type WebSocketTransport<TMeta = Record<string, unknown>> = Transport<TMeta> & {
-  /** Close any currently open WebSocket owned by this transport. */
+  /**
+   * Close any open WebSocket owned by this transport.
+   *
+   * A client-initiated close is treated as truncation, not completion: any send
+   * still in flight is settled with a transport-closed error — its outer promise
+   * rejects if it has not resolved yet, otherwise the response body reader
+   * rejects on the next `read()`. This is deliberately different from the server
+   * closing the socket normally (code 1000), which ends the active stream as a
+   * clean `done`. Use `close()` for teardown (unmount, hot-reload) — not as a
+   * way to end an in-flight response.
+   *
+   * `code`/`reason` are forwarded to the WebSocket close frame.
+   */
   close: (code?: number, reason?: string) => void;
 };
 

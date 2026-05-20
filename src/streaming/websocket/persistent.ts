@@ -1,7 +1,7 @@
 import type { Message } from '../../types';
 import type { FormatMessageResult, WebSocketTransport, WebSocketTransportOptions } from '../createWebSocketTransport';
 import { createManagedResponseStream, type ManagedResponseStream } from './managedResponseStream';
-import { createAbnormalCloseError, createAbortError, createClosedBeforeOpenError, encodeSSEDataEvent, isNormalCloseCode, normalizeFormatMessageResult, safeCloseSocket, toError, webSocketMessageToText } from './shared';
+import { createAbnormalCloseError, createAbortError, createClosedBeforeOpenError, createTransportClosedError, encodeSSEDataEvent, isNormalCloseCode, normalizeFormatMessageResult, safeCloseSocket, toError, webSocketMessageToText } from './shared';
 
 // Local duplicate of `isChorusDevMode` from `src/utils/devMode.ts`. Importing
 // the shared helper here would bundle the transport-only subpath with the
@@ -83,7 +83,12 @@ export function createPersistentWebSocketTransport<TMeta = Record<string, unknow
     socket = null;
     socketState = 'closed';
     rejectOpenWaiters(new Error('WebSocket transport closed'));
-    closeActiveStreams();
+    // A client-initiated close is *not* a clean end-of-stream: unlike a server
+    // close (code 1000 → done), any response still streaming was truncated.
+    // Error the active streams so a reader mid-stream rejects instead of seeing
+    // a silent `done`. A genuine server-side normal-close EOF is still handled
+    // as a clean close in `ws.onclose`.
+    errorActiveStreams(createTransportClosedError(code, reason));
     safeCloseSocket(ws, code, reason);
   };
 
