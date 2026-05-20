@@ -123,6 +123,53 @@ describe('useChorusStream', () => {
     }
   });
 
+  it('surfaces a named event: error frame as a ChorusStreamError', async () => {
+    const cases: Array<{ body: string; expected: string }> = [
+      // Bare (non-JSON) string payload — the connector would otherwise type it as text.
+      { body: 'event: error\ndata: rate limited\n\n', expected: 'rate limited' },
+      // JSON object error payload.
+      { body: 'event: error\ndata: {"error":"quota exceeded"}\n\n', expected: 'quota exceeded' },
+      // Bare JSON string payload.
+      { body: 'event: error\ndata: "overloaded"\n\n', expected: 'overloaded' },
+      // JSON object with no recognisable error field — falls back to the raw payload.
+      { body: 'event: error\ndata: {"status":"bad"}\n\n', expected: '{"status":"bad"}' },
+      // Empty data payload — still surfaces an error rather than being silently dropped.
+      { body: 'event: error\ndata:\n\n', expected: 'SSE `event: error` frame' },
+    ];
+
+    for (const { body, expected } of cases) {
+      const transport = vi.fn<Transport>(async () => makeResponse(body));
+      const onChunk = vi.fn();
+      const onError = vi.fn();
+      const { result } = renderHook(() => useChorusStream(transport));
+
+      let sendError: unknown;
+      await act(async () => {
+        await result.current.send('hi', [], { onChunk, onError }).catch(err => { sendError = err; });
+      });
+
+      expect(onChunk).not.toHaveBeenCalled();
+      expect(sendError).toBeInstanceOf(ChorusStreamError);
+      expect((sendError as Error).message).toBe(expected);
+      expect(onError).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it('does not type text for a named event: heartbeat keepalive frame', async () => {
+    const transport = vi.fn<Transport>(async () => makeResponse('event: heartbeat\ndata: {}\n\ndata: hello\n\n'));
+    const onChunk = vi.fn();
+    const onDone = vi.fn();
+    const { result } = renderHook(() => useChorusStream(transport));
+
+    await act(async () => {
+      await result.current.send('hi', [], { onChunk, onDone, minDelayMs: 0 });
+    });
+
+    expect(onChunk).toHaveBeenCalledTimes(1);
+    expect(onChunk).toHaveBeenCalledWith('hello');
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
   it('delivers chunks without extra delay when the transport is slower than minDelayMs', async () => {
     vi.useFakeTimers();
     try {

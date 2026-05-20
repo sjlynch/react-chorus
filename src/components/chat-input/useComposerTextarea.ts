@@ -18,6 +18,12 @@ export function useComposerTextarea({
 }: UseComposerTextareaOptions) {
   const rootRef = React.useRef<HTMLDivElement>(null);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+  // True while an IME composition is active so Enter can commit the composition
+  // instead of sending (CJK / accented input).
+  const isComposingRef = React.useRef(false);
+  // Bumped on every user edit; a send captures the current value and a pending
+  // async `onSend` can detect that the user has typed since it was dispatched.
+  const composerGenerationRef = React.useRef(0);
 
   const resizeTextarea = React.useCallback(() => {
     const el = textareaRef.current;
@@ -54,14 +60,27 @@ export function useComposerTextarea({
 
   const handleTextareaChange = React.useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     if (composerInactive) return;
+    composerGenerationRef.current += 1;
     onChange(e.target.value);
     resizeTextarea();
   }, [composerInactive, onChange, resizeTextarea]);
+
+  const handleCompositionStart = React.useCallback(() => {
+    isComposingRef.current = true;
+  }, []);
+
+  const handleCompositionEnd = React.useCallback(() => {
+    isComposingRef.current = false;
+  }, []);
 
   return {
     rootRef,
     textareaRef,
     handleTextareaChange,
+    handleCompositionStart,
+    handleCompositionEnd,
+    isComposingRef,
+    composerGenerationRef,
     resetTextareaHeight,
     resizeTextarea,
   };

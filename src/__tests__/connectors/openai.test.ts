@@ -189,6 +189,16 @@ describe('openaiConnector', () => {
     expect(openaiConnector.extract(JSON.stringify(objectPayload))).toEqual({ error: 'bad request', errorPayload: objectPayload });
   });
 
+  it('does not treat a delta field named "error" as a terminal stream error', () => {
+    const data = JSON.stringify({ choices: [{ delta: { content: 'hi', error: 'ignore-me' } }] });
+    expect(openaiConnector.extract(data)).toEqual({ text: 'hi' });
+  });
+
+  it('does not treat a top-level "error" string on a choices frame as terminal', () => {
+    const data = JSON.stringify({ choices: [{ index: 0, delta: { content: 'hi' } }], error: 'none' });
+    expect(openaiConnector.extract(data)).toEqual({ text: 'hi' });
+  });
+
   it('splits mixed-case <Think> tags out of text content', () => {
     const data = JSON.stringify({ choices: [{ index: 0, delta: { content: '<Think>plan</Think>answer' } }] });
     expect(openaiConnector.extract(data)).toEqual({ reasoning: 'plan', text: 'answer' });

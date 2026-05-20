@@ -24,12 +24,12 @@ The facade owns React lifecycle wiring (state setters, refs, `useChorusStream` i
 
 Core streaming hook for the simple `transport` path. The facade is `useChorusStream.ts`; focused internals are in `src/streaming/`:
 
-- `readSSEStream.ts` — line-by-line SSE parser (BOM, colonless fields, CR/LF, chunk boundaries).
+- `readSSEStream.ts` — line-by-line SSE parser (BOM, colonless fields, CR/LF, chunk boundaries, named `event:` capture).
 - `delayedStreamEvents.ts` — `minDelayMs` buffering and callback-error propagation.
 - `errors.ts` — `ChorusStreamError`, HTTP error-body snippets/timeouts, connector `errorPayload` preservation.
 - `toolDeltaAccumulator.ts` — merges streamed tool-call argument/output deltas.
 
-The hook creates connector state once per send, feeds SSE payloads through `extract()`, calls connector `flush()` at EOF, delivers text/reasoning/tool events, and finalizes or reports errors.
+The hook creates connector state once per send, feeds SSE payloads through `extract()`, calls connector `flush()` at EOF, delivers text/reasoning/tool events, and finalizes or reports errors. Named SSE `event:` frames are routed before `extract()`: `event: error` is surfaced as a `ChorusStreamError` (even for a bare-string payload), `event: heartbeat`/`event: ping` keepalives are dropped, and unnamed/`event: message` frames go to the connector unchanged.
 
 ## `useChorusPersistence`
 
@@ -56,7 +56,7 @@ Conversation index persistence is split into focused helpers (see `conversations
 
 ## `useLatestRef`
 
-Small helper that stores the latest callback/value in a ref after each render. It is used by stable callbacks and async closures so they can read current props/state without changing callback identity.
+Small helper that stores the latest callback/value in a ref. The ref is assigned during render (in the hook body), so synchronous reads in the same commit — including layout effects and callbacks fired before passive effects flush — see the latest value rather than lagging one render behind. It is used by stable callbacks and async closures so they can read current props/state without changing callback identity.
 
 ## `useMirroredState`
 
