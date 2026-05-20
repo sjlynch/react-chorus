@@ -53,4 +53,4 @@ Exported from `ChatWindow.tsx` for use in `renderMessage` render-props and imple
 
 ## `ToolCallBlock`
 
-Collapsible block for tool call messages. It shows the tool name and expands to pretty-printed input/output when present.
+Collapsible block for tool call messages. It shows the tool name and expands to pretty-printed input/output when present. A call with neither input nor output has nothing to expand, so instead of a dead disabled button it renders a static status row: `running` while the `streaming` prop is true (the turn is still in flight), `empty` once it has settled. `MessageList` passes `streaming` derived from session activity (`streamingMessageId != null`).
