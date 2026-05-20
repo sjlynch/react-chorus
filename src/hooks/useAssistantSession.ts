@@ -297,7 +297,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     return () => Promise.resolve(new Response(null, { status: 200 }));
   }, [transport]);
 
-  const { send: doStream, abort: streamAbort, sending: streamSending } = useChorusStream<TMeta>(resolvedTransport, { connector });
+  const { send: doStream, sending: streamSending } = useChorusStream<TMeta>(resolvedTransport, { connector });
   const streamSendingRef = useLatestRef(streamSending);
   const sending = transport ? (streamSending || transportBusy) : internalSending;
 
@@ -334,10 +334,10 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
   });
   const { startTransportStream } = transportLifecycle;
 
-  // The orchestrator captures three hook-supplied callbacks at call time via
-  // a ref so it can be created before useToolExecution / useChorusStream /
-  // useTransportLifecycle (which themselves consume orchestrator outputs).
-  orchestrator.bindLateDeps({ appendToolDeltaNow, streamAbort, startTransportStream });
+  // The orchestrator captures two hook-supplied callbacks at call time via
+  // a ref so it can be created before useToolExecution / useTransportLifecycle
+  // (which themselves consume orchestrator outputs).
+  orchestrator.bindLateDeps({ appendToolDeltaNow, startTransportStream });
 
   const { send, retry, stop, clear, handleEdit, handleRegenerate, handleDelete } = useSessionCommands<TMeta>({
     messagesRef,

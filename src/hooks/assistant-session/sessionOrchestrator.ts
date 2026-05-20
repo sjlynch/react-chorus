@@ -24,7 +24,6 @@ interface CompleteActiveSessionFinish<TMeta> {
 
 export interface SessionOrchestratorLateDeps<TMeta> {
   appendToolDeltaNow: (delta: ConnectorToolDelta) => void;
-  streamAbort: () => void;
   startTransportStream: StartTransportStream<TMeta>;
 }
 
@@ -78,10 +77,10 @@ export interface SessionOrchestrator<TMeta> {
  * begin/active/invalidate/complete/remove/abort/trigger callbacks that drive
  * a Chorus assistant turn.
  *
- * Three late-bound deps (`appendToolDeltaNow`, `streamAbort`,
- * `startTransportStream`) come from hooks (`useToolExecution`,
- * `useChorusStream`, `useTransportLifecycle`) that the facade creates AFTER
- * this orchestrator because they consume `isAssistantSessionActive` /
+ * Two late-bound deps (`appendToolDeltaNow`, `startTransportStream`) come
+ * from hooks (`useToolExecution`, `useTransportLifecycle`) that the facade
+ * creates AFTER this orchestrator because they consume
+ * `isAssistantSessionActive` /
  * `invalidateAssistantSession` / `removePendingAssistant` from it. The facade
  * wires them in via `bindLateDeps` once those hooks exist; the orchestrator's
  * trigger/abort callbacks read them through a ref at call time.
@@ -195,9 +194,13 @@ export function useSessionOrchestrator<TMeta>(deps: SessionOrchestratorDeps<TMet
     const path = activeSendPathRef.current ?? (transportRef.current ? 'transport' : 'onSend');
 
     invalidateAssistantSession();
+    // On the transport path `controllerRef.current` IS the external signal
+    // passed to `useChorusStream.send`, so aborting it cancels the stream.
+    // `useChorusStream.abort()` is intentionally not called here: the hook
+    // does not own that signal, and calling abort() would log a spurious
+    // dev warning telling the host to abort a signal they never passed.
     controllerRef.current?.abort();
     if (path === 'transport') {
-      lateDepsRef.current?.streamAbort();
       setTransportBusy(false);
     }
     controllerRef.current = null;
