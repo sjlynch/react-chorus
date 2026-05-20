@@ -42,6 +42,7 @@
 .chorus-conversation-new:hover { background: var(--chorus-action-hover-bg, rgba(255,255,255,0.15)); color: var(--chorus-action-hover-text, #eee); }
 .chorus-conversation-new:focus-visible { outline: 2px solid var(--chorus-send-bg, #ffffff); outline-offset: 2px; }
 .chorus-conversation-items { display: flex; flex-direction: column; gap: 6px; }
+.chorus-conversation-items:focus { outline: none; }
 .chorus-conversation-empty { padding: 12px 8px; color: var(--chorus-action-text, #a3a3a3); font-size: 13px; }
 .chorus-conversation-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px; align-items: center; border-radius: 8px; border: 1px solid transparent; }
 .chorus-conversation-item--active { border-color: var(--chorus-border, #2a2a2a); background: var(--chorus-action-hover-bg, rgba(255,255,255,0.1)); }
@@ -57,9 +58,11 @@
 .chorus-conversation-pin[aria-pressed="true"] { color: var(--chorus-send-bg, #ffffff); }
 .chorus-conversation-action:hover { background: var(--chorus-action-hover-bg, rgba(255,255,255,0.15)); color: var(--chorus-action-hover-text, #eee); }
 .chorus-conversation-action:focus-visible { outline: 2px solid var(--chorus-send-bg, #ffffff); outline-offset: 1px; }
-.chorus-conversation-rename { grid-column: 1 / -1; display: flex; gap: 4px; padding: 4px; }
+.chorus-conversation-rename { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; }
 .chorus-conversation-rename-input { min-width: 0; flex: 1; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--chorus-input-border, #333333); background: var(--chorus-input-bg, #1a1a1a); color: var(--chorus-input-text, #f3f4f6); }
 .chorus-conversation-rename-input:focus { outline: none; border-color: var(--chorus-send-bg, #ffffff); box-shadow: 0 0 0 3px var(--chorus-focus-ring, rgba(255,255,255,0.2)); }
+.chorus-conversation-rename-input[aria-invalid="true"] { border-color: var(--chorus-error-border, rgba(220, 38, 38, 0.4)); }
+.chorus-conversation-rename-error { flex-basis: 100%; margin: 0; font-size: 12px; line-height: 1.4; color: var(--chorus-error-text, #fca5a5); }
 
 /* Input area — column flex to stack attachment previews above the input row */
 .chorus-clear-row { display: flex; justify-content: flex-end; margin-top: 8px; }

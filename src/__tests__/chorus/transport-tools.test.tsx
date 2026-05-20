@@ -1,10 +1,11 @@
+import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Chorus } from '../../Chorus';
 import { defineTool, toAnthropicMessagesBody, toOpenAIChatCompletionsBody } from '../../providerRequests';
 import { sseResponse } from './testUtils';
-import type { OnSend, Transport } from './testUtils';
+import type { ChorusRef, OnSend, Transport } from './testUtils';
 
 vi.mock('../../components/Markdown', () => ({
   Markdown: ({ text }: { text: string }) => <span data-testid="markdown">{text}</span>,
@@ -623,6 +624,32 @@ describe('Chorus', () => {
       expect.objectContaining({ role: 'user', text: 'hi' }),
     ]);
     expect(screen.queryByText('Stay concise.')).not.toBeInTheDocument();
+  });
+
+  it('dispatches send() to the transport from the same commit that swapped the transport prop', async () => {
+    const transportA = vi.fn<Transport>(async () => sseResponse(['from A']));
+    const transportB = vi.fn<Transport>(async () => sseResponse(['from B']));
+    const ref = React.createRef<ChorusRef>();
+
+    // The layout effect runs right after Chorus re-renders with transportB but
+    // before any passive effect — exercising a "latest ref read inside the same
+    // commit" path. A useLatestRef that updated in a passive effect would still
+    // hold transportA at this point and post to the previous endpoint.
+    function Host({ transport, sendNow }: { transport: Transport; sendNow: boolean }) {
+      React.useLayoutEffect(() => {
+        if (sendNow) ref.current?.send('same-commit send');
+      }, [sendNow]);
+      return <Chorus ref={ref} transport={transport} connector="openai" minAssistantDelayMs={0} />;
+    }
+
+    const { rerender } = render(<Host transport={transportA} sendNow={false} />);
+    expect(transportA).not.toHaveBeenCalled();
+
+    rerender(<Host transport={transportB} sendNow />);
+
+    await waitFor(() => expect(transportB).toHaveBeenCalledOnce());
+    expect(transportA).not.toHaveBeenCalled();
+    expect(transportB.mock.calls[0][0]).toBe('same-commit send');
   });
 
   it('uses transport instead of onSend when both are provided', async () => {

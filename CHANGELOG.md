@@ -64,6 +64,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Fixed
 - Fixed stream cleanup on unmount/pre-aborted signals, richer HTTP error details, WebSocket close-before-open hangs, safe dev-mode checks without `process`, observer callback isolation, and transport concurrency guards.
+- A misconfigured `transport` no longer fails silently: an empty/whitespace-only URL string, or a transport object without a usable string `url` (missing, `undefined`, empty, or whitespace-only), now warns in development and resolves to a transport that rejects with a descriptive error so the existing stream-error UI surfaces it, instead of ending the assistant turn with a blank message or POSTing to the current document URL. A genuinely absent `transport` is unaffected.
 
 ### Deprecation candidates (future major)
 - The default transport body `{ prompt, history }` duplicates the latest user turn — `prompt` equals `history[history.length - 1].text`. Backends already consume `history` only (see all `examples/` proxies). A future major release should drop `prompt` from `createFetchSSETransport`, `createWebSocketTransport`, and `createDefaultFetchSSETransport` defaults and send `{ history }` exclusively. Until then, README and JSDoc warn against re-appending `prompt` server-side. See [README → Migration and Upgrading → Default transport body will drop the `prompt` field](./README.md#default-transport-body-will-drop-the-prompt-field) for the concrete migration path.
