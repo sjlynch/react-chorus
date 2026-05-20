@@ -12,6 +12,13 @@ function getCodeCopyText(codeEl: HTMLElement | null) {
   return raw.replace(/\r?\n$/, '');
 }
 
+/** Announce a status string into the code block's polite `aria-live` region, if present. */
+function setCopyStatus(btn: HTMLElement, text: string) {
+  const wrapper = btn.closest('.chorus-codeblock');
+  const status = wrapper?.querySelector('.chorus-copy-status') as HTMLElement | null;
+  if (status) status.textContent = text;
+}
+
 export function useCodeCopy(
   containerRef: ContainerRef,
   onCopyError?: (error: Error) => void,
@@ -30,13 +37,19 @@ export function useCodeCopy(
       const existingTimer = feedbackTimers.get(btn);
       if (existingTimer) clearTimeout(existingTimer);
 
+      // Reflect the new state visually (text), in the accessible name (aria-label),
+      // and announce it via the block's polite live region for screen readers.
       btn.textContent = label;
+      btn.setAttribute('aria-label', label);
       btn.classList.remove('copied', 'copy-failed');
       btn.classList.add(className);
+      setCopyStatus(btn, label);
 
       const timer = setTimeout(() => {
         btn.textContent = labelsRef.current.copy;
+        btn.setAttribute('aria-label', labelsRef.current.ariaLabel);
         btn.classList.remove(className);
+        setCopyStatus(btn, '');
         feedbackTimers.delete(btn);
       }, COPY_FEEDBACK_DURATION_MS);
       feedbackTimers.set(btn, timer);
@@ -65,6 +78,10 @@ export function useCodeCopy(
     const onKeyDown = (e: KeyboardEvent) => {
       const btn = (e.target as HTMLElement)?.closest?.('.chorus-copy-btn') as HTMLElement | null;
       if (!btn) return;
+      // Native <button> chrome (the default) already activates on Enter/Space via
+      // a synthesized click; only polyfill keyboard activation for custom chrome
+      // built on a non-button element so it does not copy twice.
+      if (btn.tagName === 'BUTTON') return;
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
         handleCopy(btn);
