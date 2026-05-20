@@ -4,6 +4,8 @@ import type { MarkedExtension } from 'marked';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { Markdown, normalizeStreamingMarkdown } from '../components/Markdown';
+import { resolveMarkedInstance } from '../components/markdown/marked';
+import { renderMarkdown } from '../components/markdown/renderMarkdown';
 import { scopeHljsThemeCss } from '../utils/hljsLoader';
 
 const mocks = vi.hoisted(() => {
@@ -91,6 +93,40 @@ describe('normalizeStreamingMarkdown', () => {
     const text = 'Use ``` on its own line, like:\n```ts\nconst x = 1;';
 
     expect(normalizeStreamingMarkdown(text)).toBe(`${text}\n\`\`\``);
+  });
+
+  it('reuses an existing trailing newline instead of doubling it before the closing backtick fence', () => {
+    const text = 'Before\n```ts\nconst x = 1;\n';
+
+    expect(normalizeStreamingMarkdown(text)).toBe(`${text}\`\`\``);
+  });
+
+  it('reuses an existing trailing newline instead of doubling it before the closing tilde fence', () => {
+    const text = 'Before\n~~~ts\nconst x = 1;\n';
+
+    expect(normalizeStreamingMarkdown(text)).toBe(`${text}~~~`);
+  });
+
+  it('finalizes a trailing fence with the same paragraph spacing the stream rendered', () => {
+    // A streamed assistant message that stops mid-fence: the last code line
+    // ends in '\n', so `text` ends in '\n'. When the model emits its own
+    // closing fence it just adds '```' on the next line, so finalizing the
+    // stream must produce that exact document — not a doubled '\n\n```' that
+    // adds a visible blank line and shifts the transcript on finalize.
+    const streamed = 'First paragraph.\n\nSecond paragraph.\n\n```ts\nconst x = 1;\n';
+    const modelClosed = `${streamed}\`\`\``;
+    const marked = resolveMarkedInstance(true);
+
+    const finalized = renderMarkdown(normalizeStreamingMarkdown(streamed), undefined, marked);
+    const explicitlyClosed = renderMarkdown(modelClosed, undefined, marked);
+
+    expect(finalized).toBe(explicitlyClosed);
+    expect(finalized).toMatchInlineSnapshot(`
+      "<p>First paragraph.</p>
+      <p>Second paragraph.</p>
+      <pre><code class="hljs language-ts">const x = 1;
+      </code></pre>"
+    `);
   });
 });
 
