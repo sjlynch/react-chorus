@@ -4,6 +4,24 @@ on:
   push:
     branches:
       - main
+    # Only redeploy when something that affects the built playground changes.
+    # Docs- or test-only commits (e.g. a CLAUDE.md edit) are intentionally
+    # skipped so they don't queue a redundant npm ci + build + Pages deploy.
+    # Use the workflow_dispatch trigger below to deploy manually if needed.
+    paths:
+      - 'src/**'
+      - 'index.html'
+      - 'vite.playground.config.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/deploy-playground.yml'
+      # ...but not the test suite or in-tree docs, which never reach the site.
+      - '!src/__tests__/**'
+      - '!src/**/*.test.ts'
+      - '!src/**/*.test.tsx'
+      - '!src/**/*.spec.ts'
+      - '!src/**/*.spec.tsx'
+      - '!**/*.md'
   workflow_dispatch:
 
 permissions:
