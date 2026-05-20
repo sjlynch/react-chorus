@@ -138,6 +138,8 @@ function applyFinishReason(
  *
  * Usage example:
  *   const { send } = useChorusStream(transport, { connector: 'gemini' });
+ *
+ * @internal Not part of the public API. Obtain it via `getConnector('gemini')`.
  */
 export const geminiConnector: Connector = {
   name: 'gemini',

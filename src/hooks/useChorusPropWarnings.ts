@@ -10,6 +10,7 @@ interface UseChorusPropWarningsArgs<TMeta> {
   value: Message<TMeta>[] | undefined;
   persistenceKey: string | undefined;
   connector: ChorusProps<TMeta>['connector'];
+  connectorOptions: ChorusProps<TMeta>['connectorOptions'];
   transport: ChorusProps<TMeta>['transport'];
   onSend: ChorusProps<TMeta>['onSend'];
   sending: boolean | undefined;
@@ -22,6 +23,7 @@ export function useChorusPropWarnings<TMeta>({
   value,
   persistenceKey,
   connector,
+  connectorOptions,
   transport,
   onSend,
   sending,
@@ -49,8 +51,12 @@ export function useChorusPropWarnings<TMeta>({
       console.warn('[Chorus] `connector` only applies to the `transport` send path. With `onSend` you parse the response yourself — pass `connector` into the `useChorusStream` call inside your `onSend` if you need it.');
     }
 
+    if (connectorOptions !== undefined && transport === undefined && onSend) {
+      console.warn('[Chorus] `connectorOptions` only applies to the `transport` send path. With `onSend` you parse the response yourself — pass `connectorOptions` into the `useChorusStream` call inside your `onSend` if you need it.');
+    }
+
     if (sending !== undefined && transport) {
       console.warn('[Chorus] `sending` was provided alongside `transport`. Chorus owns the transport send state; `sending` is primarily for fully custom `onSend`/`useChorusStream` integrations.');
     }
-  }, [messages, initialMessages, onChange, value, persistenceKey, connector, transport, onSend, sending]);
+  }, [messages, initialMessages, onChange, value, persistenceKey, connector, connectorOptions, transport, onSend, sending]);
 }

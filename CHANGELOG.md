@@ -48,7 +48,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Added richer OpenAI Responses event coverage and Gemini blocked-finish-reason errors.
 - Added `<think>` tag splitting so chain-of-thought output renders separately from the visible answer.
 - Added `provider`, `providerId`, and `generated` fields to `ConnectorToolDelta` so connectors can report provider-issued tool-call IDs.
-- Exported `autoConnector`, `getConnector`, `openaiConnector`, `anthropicConnector`, and `geminiConnector`.
+- Exported `getConnector` and `createOpenAIConnector` as the connector public API, plus the `Connector`/`ConnectorResult`/`ConnectorToolDelta`/`ConnectorWarning`/`OpenAIConnectorOptions`/`ThinkTagSplitterOptions` types.
+- Added a `connectorOptions` prop on `<Chorus>` and option on `useChorusStream`/`useAssistantSession` that forwards connector customization (e.g. a custom `thinkTag` delimiter pair) to the built-in `'openai'` connector resolved from a `connector` string. Previously `getConnector`'s `options` argument was unreachable from the widget and hook.
 
 #### Markdown
 - Exported the standalone `Markdown` component with `MarkdownProps` and `MarkdownSanitizer` types.
@@ -56,6 +57,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Changed
 - Bumped the package to `0.2.0` for a public message typing refinement.
+- Settled on a single connector public API: built-in connectors are selected by name through `getConnector` (and the `connector` prop/option). The provider connector singletons (`openaiConnector` / `anthropicConnector` / `geminiConnector` / `aiSdkConnector`) and `autoConnector` are now `@internal` and are no longer re-exported from `react-chorus` / `react-chorus/headless`. See [README → Migration and Upgrading → Connector public API](./README.md#connector-public-api-getconnector-is-canonical).
 - Replaced the public `Message` shape with a discriminated union (`AnyChorusMessage`) so `role: 'tool'` requires `toolCall`, non-tool messages forbid it, and tool/system messages reject attachments.
 - Extracted Chorus send/session orchestration into `useAssistantSession` and clarified controlled, transport, connector, and sending-state development warnings.
 - `useChorusStream.send()` now rejects non-abort stream failures after cleanup so `onSend` bridges can surface Chorus errors.

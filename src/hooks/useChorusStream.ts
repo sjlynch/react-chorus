@@ -1,6 +1,7 @@
 import React from 'react';
 import type { ConnectorName, Message } from '../types';
 import { getConnector, type Connector, type ConnectorResult, type ConnectorToolDelta } from '../connectors/connectors';
+import type { OpenAIConnectorOptions } from '../connectors/openai';
 import { useLatestRef } from './useLatestRef';
 import { readSSEStream } from '../streaming/readSSEStream';
 import { createDelayedChunkEmitter } from '../streaming/delayedStreamEvents';
@@ -43,6 +44,13 @@ export type Transport<TMeta = Record<string, unknown>> = (text: string, history:
 
 export interface StreamOptions {
   connector?: Connector | ConnectorName;
+  /**
+   * Options forwarded to the built-in connector resolved from a `connector`
+   * string. Currently only the `'openai'` connector consumes options (e.g. a
+   * custom `thinkTag` delimiter pair). Ignored when `connector` is a custom
+   * `Connector` object — build that object with `createOpenAIConnector(options)`.
+   */
+  connectorOptions?: OpenAIConnectorOptions;
 }
 
 function safeOnObserverError(callbackName: string, error: unknown) {
@@ -220,7 +228,7 @@ async function handleSendError(args: {
 }
 
 export function useChorusStream<TMeta = Record<string, unknown>>(transport: Transport<TMeta>, opts?: StreamOptions) {
-  const connector = getConnector(opts?.connector);
+  const connector = getConnector(opts?.connector, opts?.connectorOptions);
   const transportRef = useLatestRef(transport);
   const connectorRef = useLatestRef(connector);
 

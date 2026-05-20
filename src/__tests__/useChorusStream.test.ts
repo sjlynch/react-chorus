@@ -215,6 +215,43 @@ describe('useChorusStream', () => {
     expect(onToolDelta).toHaveBeenNthCalledWith(2, expect.objectContaining({ id: 'call_1', name: 'search', input: { q: 'test' }, provider: 'openai', providerId: 'call_1' }));
   });
 
+  it('forwards connectorOptions to the resolved built-in connector', async () => {
+    const transport = vi.fn<Transport>(() => Promise.resolve(makeSseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { content: '<reasoning>plan</reasoning>answer' } }] }),
+      '[DONE]',
+    ])));
+    const onChunk = vi.fn();
+    const onReasoning = vi.fn();
+    const { result } = renderHook(() => useChorusStream(transport, {
+      connector: 'openai',
+      connectorOptions: { thinkTag: { start: '<reasoning>', end: '</reasoning>' } },
+    }));
+
+    await act(async () => {
+      await result.current.send('hello', [], { onChunk, onReasoning });
+    });
+
+    expect(onReasoning).toHaveBeenCalledWith('plan');
+    expect(onChunk).toHaveBeenCalledWith('answer');
+  });
+
+  it('leaves a custom tag in visible text when connectorOptions is omitted', async () => {
+    const transport = vi.fn<Transport>(() => Promise.resolve(makeSseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { content: '<reasoning>plan</reasoning>answer' } }] }),
+      '[DONE]',
+    ])));
+    const onChunk = vi.fn();
+    const onReasoning = vi.fn();
+    const { result } = renderHook(() => useChorusStream(transport, { connector: 'openai' }));
+
+    await act(async () => {
+      await result.current.send('hello', [], { onChunk, onReasoning });
+    });
+
+    expect(onReasoning).not.toHaveBeenCalled();
+    expect(onChunk).toHaveBeenCalledWith('<reasoning>plan</reasoning>answer');
+  });
+
   it('emits every tool delta when one connector result contains multiple calls', async () => {
     const transport = vi.fn<Transport>(() => Promise.resolve(makeSseResponse([
       JSON.stringify({ choices: [{ index: 0, delta: { content: 'tools:', tool_calls: [

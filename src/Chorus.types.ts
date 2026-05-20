@@ -10,6 +10,7 @@ import type { DeserializeMessages, SerializeMessages } from './hooks/useChorusPe
 import type { ChorusMessagesChangeContext } from './hooks/useChorusMessages';
 import type { ChorusAbortContext, ChorusAbortReason, ChorusAbortSource, ChorusClearConversationContext, ChorusConfirmClearConversation, ChorusConfirmDeleteMessage, ChorusDeleteMessageContext, ChorusFinishContext, ChorusOnAbort, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusSendHelpers, ChorusSendPath, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusStreamDoneReason, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolLoopContext, ChorusToolRegistry } from './hooks/useAssistantSession';
 import type { Connector } from './connectors/connectors';
+import type { OpenAIConnectorOptions } from './connectors/openai';
 import type { MarkdownSanitizer } from './components/Markdown';
 
 export type { Transport };
@@ -65,6 +66,14 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
   clearLabel?: string;
   codeBlockTheme?: 'dark' | 'light';
   connector?: Connector | ConnectorName;
+  /**
+   * Options forwarded to the built-in connector resolved from a `connector`
+   * string. Currently only the `'openai'` connector consumes options (e.g.
+   * `{ thinkTag: { start: '<reasoning>', end: '</reasoning>' } }` for a custom
+   * reasoning tag pair). Ignored when `connector` is a custom `Connector`
+   * object — build that object with `createOpenAIConnector(options)` instead.
+   */
+  connectorOptions?: OpenAIConnectorOptions;
   /** Optional gate for built-in message deletes. Return or resolve false to cancel. */
   confirmDeleteMessage?: ChorusConfirmDeleteMessage<TMeta>;
   /** Optional gate for the built-in clear/reset action. Return or resolve false to cancel before persistence is touched. While an async confirmation is pending, the clear button is disabled and duplicate clears are ignored. */

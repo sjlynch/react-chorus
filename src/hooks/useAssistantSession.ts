@@ -1,6 +1,7 @@
 import React from 'react';
 import type { Attachment, Message } from '../types';
 import type { Connector } from '../connectors/connectors';
+import type { OpenAIConnectorOptions } from '../connectors/openai';
 import type { ConnectorName } from '../types';
 import { useChorusStream, type Transport } from './useChorusStream';
 import { useLatestRef } from './useLatestRef';
@@ -64,6 +65,7 @@ export interface UseAssistantSessionOptions<TMeta = Record<string, unknown>> {
   transport?: string | FetchTransportInit<TMeta> | Transport<TMeta>;
   systemPrompt?: string;
   connector?: Connector | ConnectorName;
+  connectorOptions?: OpenAIConnectorOptions;
   onSend?: ChorusOnSend<TMeta>;
   minAssistantDelayMs: number;
   fallbackErrorMessage: string;
@@ -110,6 +112,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
   transport,
   systemPrompt,
   connector,
+  connectorOptions,
   onSend,
   minAssistantDelayMs,
   fallbackErrorMessage,
@@ -297,7 +300,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     return () => Promise.resolve(new Response(null, { status: 200 }));
   }, [transport]);
 
-  const { send: doStream, abort: streamAbort, sending: streamSending } = useChorusStream<TMeta>(resolvedTransport, { connector });
+  const { send: doStream, abort: streamAbort, sending: streamSending } = useChorusStream<TMeta>(resolvedTransport, { connector, connectorOptions });
   const streamSendingRef = useLatestRef(streamSending);
   const sending = transport ? (streamSending || transportBusy) : internalSending;
 

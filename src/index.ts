@@ -134,10 +134,14 @@ export { Markdown } from './components/Markdown';
 export type { MarkdownProps, MarkdownSanitizer } from './components/Markdown';
 export { setChorusStyleNonce } from './utils/cspNonce';
 
+// Connectors: `getConnector` (the string registry) is the single public way to
+// obtain a connector. Pass a name and optional options — `getConnector('openai',
+// { thinkTag })` — or hand it a custom `Connector` object. `createOpenAIConnector`
+// builds an OpenAI connector object directly for callers that need one (e.g. a
+// custom `onSend` client). The provider singletons (`openaiConnector` /
+// `anthropicConnector` / `geminiConnector` / `aiSdkConnector`) and `autoConnector`
+// are `@internal` and intentionally not re-exported from the public barrel.
 export type { Connector, ConnectorResult, ConnectorToolDelta, ConnectorWarning } from './connectors/connectors';
-export { getConnector, autoConnector } from './connectors/connectors';
-export { openaiConnector, createOpenAIConnector } from './connectors/openai';
+export { getConnector } from './connectors/connectors';
+export { createOpenAIConnector } from './connectors/openai';
 export type { OpenAIConnectorOptions, ThinkTagSplitterOptions } from './connectors/openai';
-export { anthropicConnector } from './connectors/anthropic';
-export { geminiConnector } from './connectors/gemini';
-export { aiSdkConnector } from './connectors/aiSdk';

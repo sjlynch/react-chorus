@@ -480,7 +480,18 @@ Keep provider API keys on the server. Browser code may use the `format*Body` hel
 
 ## Connectors
 
-Connectors tell Chorus how to parse the streaming response from different AI providers. Pass a connector name or object via `useChorusStream`'s `connector` option.
+Connectors tell Chorus how to parse the streaming response from different AI providers. Pass a connector name or object via the `connector` prop on `<Chorus>` or the `connector` option on `useChorusStream`.
+
+### Obtaining a connector
+
+A connector name (`'openai'`, `'anthropic'`, `'gemini'`, `'ai-sdk'`, `'auto'`) is the canonical way to select a built-in connector — pass it as `connector` and Chorus resolves it internally. To customize a built-in connector, pass `connectorOptions` alongside the name (see [Custom reasoning tag pair](#custom-reasoning-tag-pair)).
+
+If you need a connector *object* — to write a custom connector, or to pass one to a hand-rolled `useChorusStream`/`onSend` client — use the two exported accessors:
+
+- **`getConnector(name, options?)`** resolves a built-in connector by name, applying `options` (currently `{ thinkTag }` for `'openai'`). `getConnector()` with no argument returns the auto-detecting connector.
+- **`createOpenAIConnector(options?)`** builds a customized OpenAI connector object directly.
+
+The provider connector objects themselves (`openaiConnector`, `anthropicConnector`, etc.) are internal: select them by name instead. See [Migration and Upgrading](#migration-and-upgrading) for the rationale.
 
 ### Built-in connectors
 
@@ -540,7 +551,7 @@ const { send } = useChorusStream(transport);
 
 ## OpenAI SSE format
 
-The `openaiConnector` reads the selected Chat Completions alternative (`choices[index === 0]`, or the first array entry when indexes are omitted). It maps:
+The `'openai'` connector reads the selected Chat Completions alternative (`choices[index === 0]`, or the first array entry when indexes are omitted). It maps:
 
 - `choices[0].delta.content` → assistant text. DeepSeek-style `<think>...</think>` spans inside content are split into `reasoning` instead of being rendered in the answer.
 - `choices[0].delta.reasoning`, `reasoning_content`, or `reasoning_summary` → assistant `reasoning`.
@@ -566,17 +577,31 @@ For OpenAI Responses API-style streams, common `response.output_text.delta`, `re
 
 ### Custom reasoning tag pair
 
-The `<think>...</think>` pair is matched case-insensitively by default and tolerates whitespace inside the angle brackets, so DeepSeek-style proxies that emit `<Think>`, `<THINK>`, or `< think >` are split into `reasoning` correctly. To use a different delimiter pair (for example, `<reasoning>...</reasoning>` or `<scratchpad>...</scratchpad>`), pass a `thinkTag` option to either `createOpenAIConnector` or `getConnector('openai', { ... })`:
+The `<think>...</think>` pair is matched case-insensitively by default and tolerates whitespace inside the angle brackets, so DeepSeek-style proxies that emit `<Think>`, `<THINK>`, or `< think >` are split into `reasoning` correctly. To use a different delimiter pair (for example, `<reasoning>...</reasoning>` or `<scratchpad>...</scratchpad>`), pass `connectorOptions` alongside `connector="openai"`. The `<Chorus>` widget forwards it to the connector:
+
+```tsx
+<Chorus
+  transport="/api/chat"
+  connector="openai"
+  connectorOptions={{ thinkTag: { start: '<reasoning>', end: '</reasoning>' } }}
+/>
+```
+
+The same option works on the standalone `useChorusStream` hook:
 
 ```ts
-import { createOpenAIConnector, getConnector } from 'react-chorus';
+const { send } = useChorusStream(transport, {
+  connector: 'openai',
+  connectorOptions: { thinkTag: { start: '<reasoning>', end: '</reasoning>' } },
+});
+```
+
+`connectorOptions` only applies to the built-in `'openai'` connector. If you need a connector *object* — for a custom `onSend` client, or to pass as `connector={...}` — build one with `createOpenAIConnector`:
+
+```ts
+import { createOpenAIConnector } from 'react-chorus';
 
 const connector = createOpenAIConnector({
-  thinkTag: { start: '<reasoning>', end: '</reasoning>' },
-});
-
-// Same thing via the string registry:
-const sameConnector = getConnector('openai', {
   thinkTag: { start: '<reasoning>', end: '</reasoning>' },
 });
 ```
@@ -585,7 +610,7 @@ Set `thinkTag.caseInsensitive: false` if you need to match the literal casing on
 
 ## Anthropic SSE format
 
-The Anthropic Messages API streams server-sent events. The `anthropicConnector` extracts text and thinking/tool-use deltas from content block events and signals completion on `message_stop`:
+The Anthropic Messages API streams server-sent events. The `'anthropic'` connector extracts text and thinking/tool-use deltas from content block events and signals completion on `message_stop`:
 
 ```
 event: content_block_delta
@@ -608,7 +633,7 @@ Anthropic `tool_use` maps to a Chorus tool message by `content_block.id` (`toolD
 
 ## Gemini SSE format
 
-The Google Gemini streaming API (Google AI and Vertex AI) sends server-sent events where each chunk contains a `candidates` array. The `geminiConnector` reads only candidate index `0`, collects text from `content.parts[*].text`, maps `thought: true` text/thinking fields to reasoning, maps every `functionCall` part to a tool message, and signals completion for normal `STOP` / `MAX_TOKENS` finish reasons:
+The Google Gemini streaming API (Google AI and Vertex AI) sends server-sent events where each chunk contains a `candidates` array. The `'gemini'` connector reads only candidate index `0`, collects text from `content.parts[*].text`, maps `thought: true` text/thinking fields to reasoning, maps every `functionCall` part to a tool message, and signals completion for normal `STOP` / `MAX_TOKENS` finish reasons:
 
 ```
 data: {"candidates":[{"index":0,"content":{"parts":[{"text":"Thinking","thought":true}]}}]}
@@ -972,6 +997,7 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `transport` | `string \| Transport<TMeta>` | — | Simple path: URL to POST to, or a custom Transport function. Chorus handles all streaming. |
 | `systemPrompt` | `string` | — | Hidden instruction for both send paths. With `transport`, Chorus prepends it as a `system` message in request history. With `onSend`, read it from `helpers.systemPrompt`; `messages` is left unchanged to avoid duplicates. |
 | `connector` | `Connector \| 'auto' \| 'openai' \| 'anthropic' \| 'gemini' \| 'ai-sdk'` | `'auto'` | SSE connector used to parse the stream. `'auto'` detects OpenAI, Anthropic, Gemini, and Vercel AI SDK frames; pass an explicit name when the format is known. |
+| `connectorOptions` | `OpenAIConnectorOptions` | — | Options forwarded to the built-in connector resolved from a `connector` string. Currently only the `'openai'` connector consumes options (e.g. `{ thinkTag }` for a custom reasoning tag pair). Ignored for other names and for custom `Connector` objects — build those with `createOpenAIConnector(options)`. |
 | `onSend` | `(text, messages, helpers) => Message<TMeta> \| void \| Promise<Message<TMeta> \| void>` | — | Advanced path: called when the user submits a message. Use `helpers.appendAssistant`/`helpers.finalizeAssistant` to stream tokens, or return a complete assistant `Message` for non-streaming replies. |
 | `value` | `Message<TMeta>[]` | — | Controlled message list. Pair with `onChange`; Chorus renders this array as the source of truth. |
 | `onChange` | `(messages: Message<TMeta>[]) => void` | — | Called whenever Chorus wants to change the message list in controlled mode (`value` is provided). Not called for legacy `messages`-only uncontrolled state. |
@@ -1559,6 +1585,7 @@ const { send, abort, sending } = useChorusStream<MyMeta>(transport, { connector:
 - A 200 response that contains no SSE `data:` lines (for example a JSON `{"error":"missing key"}` or plain-text body served instead of `text/event-stream`) rejects `send()` with a `ChorusStreamError` whose message names Server-Sent Events, includes the response `Content-Type`, and previews the body — instead of completing silently with no chunks and no error. Truly empty/no-content bodies still resolve.
 - Calling `send()` while a previous `send()` is still in flight rejects the new call with a `ChorusStreamError` whose `code === 'concurrent-send'` (the previous send keeps running, the transport is not invoked a second time, and a dev-mode warning is logged). Custom shells that `await send(...)` can branch on `err instanceof ChorusStreamError && err.code === 'concurrent-send'` to keep their input/UI state intact, instead of mistaking the silent no-op for a successful empty stream. To start a fresh send, await the active promise or call `abort()` first.
 - `opts.connector` — `'openai'` | `'anthropic'` | `'gemini'` | `'ai-sdk'` | `'auto'` | custom `Connector`. Defaults to `'auto'` which handles OpenAI, Gemini, Anthropic, and Vercel AI SDK JSON / data-stream frames, plain-text SSE, reasoning/tool deltas, and in-band `{ error }` payloads.
+- `opts.connectorOptions` — options forwarded to the built-in connector named by `opts.connector`. Currently only `connector: 'openai'` consumes them (e.g. `{ thinkTag: { start: '<reasoning>', end: '</reasoning>' } }`). Ignored for other connector names and for custom `Connector` objects; in development a console warning fires when options are passed but the connector cannot apply them.
 - If a connector exposes `createState()`, the hook creates one state object per `send()` and passes it to every `extract(data, state)` call for that stream. Do not store per-stream parser buffers in module globals; use connector state instead.
 
 ### `createFetchSSETransport(url, init?)`
@@ -2179,7 +2206,7 @@ Helpers and constants:
 
 - `createFetchSSETransport`, `createWebSocketTransport` — transport factories.
 - `defineTool` — typed tool definition for `<Chorus tools>` + provider request helpers.
-- `getConnector`, `autoConnector`, `openaiConnector`, `createOpenAIConnector`, `anthropicConnector`, `geminiConnector`, `aiSdkConnector` — built-in connectors.
+- `getConnector`, `createOpenAIConnector` — connector accessors. `getConnector(name, options?)` resolves a built-in connector by name (`'openai'` / `'anthropic'` / `'gemini'` / `'ai-sdk'` / `'auto'`); `createOpenAIConnector(options?)` builds a customized OpenAI connector object.
 - `formatAnthropicMessagesBody`, `formatGeminiGenerateContentBody`, `formatOpenAIChatCompletionsBody`, `formatOpenAIResponsesBody`, `toAnthropicMessages`, `toAnthropicMessagesBody`, `toAnthropicTools`, `toGeminiContents`, `toGeminiGenerateContentBody`, `toGeminiTools`, `toOpenAIChatCompletionsBody`, `toOpenAIChatCompletionsMessages`, `toOpenAIChatCompletionsTools`, `toOpenAIResponsesBody`, `toOpenAIResponsesInput`, `toOpenAIResponsesTools` — provider request mappers.
 - `ChorusStreamError` — error class thrown by `useChorusStream` and the transport path.
 - `DEFAULT_CHORUS_LABELS`, `resolveChorusLabels` — built-in localization helpers.
@@ -2306,6 +2333,12 @@ The generic `Message` declaration shape is a minor semver-level type declaration
 ## Migration and Upgrading
 
 This section is the canonical place to look up breaking changes and deprecations release-over-release. The matching changelog entries live in [`CHANGELOG.md`](./CHANGELOG.md) — anything labelled "Deprecation candidate" there is documented here with a concrete migration path before it ships as a breaking change.
+
+### Connector public API: `getConnector` is canonical
+
+There is exactly one supported way to obtain a connector. Select a built-in connector **by name** — `connector="openai"` on `<Chorus>`, `{ connector: 'openai' }` on `useChorusStream`, or `getConnector('openai')` for a connector object. Customize it with `connectorOptions` (widget/hook) or the `options` argument of `getConnector`. For a connector object you build yourself, use `createOpenAIConnector(options)` or implement the `Connector` interface directly.
+
+The provider connector singletons (`openaiConnector`, `anthropicConnector`, `geminiConnector`, `aiSdkConnector`) and `autoConnector` are **`@internal`** and are not exported from `react-chorus` or `react-chorus/headless`. They duplicated the string registry — a second public API doing the same job — so the barrel exports only `getConnector` and `createOpenAIConnector`. If a pre-release imported a singleton directly, switch to the equivalent name: `openaiConnector` → `getConnector('openai')`, `anthropicConnector` → `getConnector('anthropic')`, `geminiConnector` → `getConnector('gemini')`, `aiSdkConnector` → `getConnector('ai-sdk')`, `autoConnector` → `getConnector('auto')` (or `getConnector()`).
 
 ### Unreleased — deprecation candidates
 

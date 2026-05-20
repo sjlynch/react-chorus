@@ -45,6 +45,30 @@ describe('Chorus', () => {
     expect(screen.getByText('plan first')).toBeInTheDocument();
   });
 
+  it('threads connectorOptions through the transport path so a custom reasoning tag is split out', async () => {
+    const user = userEvent.setup();
+    const transport = vi.fn<Transport>(async () => sseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { content: '<reasoning>plan first</reasoning>final answer' } }] }),
+      '[DONE]',
+    ]));
+
+    render(
+      <Chorus
+        transport={transport}
+        connector="openai"
+        connectorOptions={{ thinkTag: { start: '<reasoning>', end: '</reasoning>' } }}
+        minAssistantDelayMs={0}
+      />,
+    );
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'why');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByText('final answer')).toBeInTheDocument();
+    expect(screen.getByText('Reasoning')).toBeInTheDocument();
+    expect(screen.getByText('plan first')).toBeInTheDocument();
+  });
+
   it('renders streamed connector tool calls as visible tool rows by default', async () => {
     const user = userEvent.setup();
     const transport = vi.fn<Transport>(async () => sseResponse([
