@@ -216,6 +216,8 @@ For a non-streaming client, `onSend` may return a complete assistant `Message`. 
 />
 ```
 
+Both paths render the same transcript, so the headless [`useChorusTranscriptActions`](#transcript-search-copy-and-export) hook — transcript-wide search, copy-conversation, and Markdown/JSON export — works the same whether you drive Chorus with `transport` or `onSend`.
+
 ### Next.js App Router route handler
 
 For a production Next.js app, keep `OPENAI_API_KEY` on the server and expose an App Router route handler that speaks SSE to Chorus. Install `openai` in your app for this variant. A runnable version lives in [`examples/with-next`](./examples/with-next).
@@ -961,6 +963,8 @@ Message source modes are mutually exclusive:
 - Uncontrolled with a seed: pass `initialMessages` (or legacy `messages`) and let Chorus manage subsequent updates internally.
 - Uncontrolled with persistence: pass `persistenceKey` without `value`; passing both makes `value` win, so built-in persistence is bypassed without reading the ignored key.
 
+`initialMessages` (and legacy `messages`) follow a **frozen-seed contract**: the seed is captured once at mount and never re-derived. If a parent rebuilds the seed array after mount — for example regenerating welcome messages on a locale, theme, or persona change — the new array is silently ignored: the transcript does not re-seed, and `resetToInitialMessages` still restores the mount-time value. In development Chorus logs a one-time warning when the reference changes. To swap the transcript at runtime, use controlled mode (`value` + `onChange`), call `ChorusRef.clear()`, or force a fresh mount with `key={...}`.
+
 When `persistenceKey` is combined with `initialMessages` (or legacy `messages`), stored history is checked first. If the key has no stored value, Chorus renders and saves the seed so welcome messages still appear with persistence enabled. If the key already exists, the stored value wins. Promise-based storage adapters keep the built-in composer and write actions disabled while the initial read is pending; the seed/empty-state prompts stay hidden until the read resolves so a pre-load Send cannot overwrite an existing transcript.
 
 Persistence writes are debounced while assistant tokens stream, flushed when a message finalizes and on explicit edits/deletes/clears, and serialized for async adapters so older saves cannot overwrite newer transcripts. Pending debounced writes are also flushed on `pagehide` and `visibilitychange` → `hidden`; synchronous adapters such as `localStorage` can complete that final write during tab close, while Promise-based adapters cannot block navigation. If you wire `useChorusPersistence()` into your own controlled state, gate your custom composer on `persist.loaded` (or intentionally queue your own edits) before calling `persist.onChange`. For remote/IndexedDB persistence, prefer a synchronous localStorage fallback plus an async backup when data loss on close is unacceptable.
@@ -976,8 +980,8 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `value` | `Message<TMeta>[]` | — | Controlled message list. Pair with `onChange`; Chorus renders this array as the source of truth. |
 | `onChange` | `(messages: Message<TMeta>[]) => void` | — | Called whenever Chorus wants to change the message list in controlled mode (`value` is provided). Not called for legacy `messages`-only uncontrolled state. |
 | `onMessagesChange` | `(messages, context) => void` | — | Read-only transcript observer for controlled, uncontrolled, and persistence-backed modes. Fires for initial/loaded messages, sends, stream chunks, returned messages, edits, deletes, retry/regenerate truncation, and clear without making Chorus controlled. `context.source` is `'controlled'`, `'uncontrolled'`, or `'persistence'`. |
-| `messages` | `Message<TMeta>[]` | — | Legacy initial-only seed for uncontrolled mode. Read once on mount; later prop changes are ignored. Prefer `initialMessages` for seeding or `value` + `onChange` for controlled mode. |
-| `initialMessages` | `Message<TMeta>[]` | — | Initial-only seed for uncontrolled mode. Useful for welcome messages; `system` messages are hidden by default via `hiddenRoles`. Tool calls remain visible by default. |
+| `messages` | `Message<TMeta>[]` | — | Legacy initial-only seed for uncontrolled mode. Read once on mount; later prop changes are ignored (dev warns once on a reference change). Prefer `initialMessages` for seeding or `value` + `onChange` for controlled mode. |
+| `initialMessages` | `Message<TMeta>[]` | — | Initial-only seed for uncontrolled mode, captured once at mount (frozen-seed contract — later reference changes are ignored and dev-warned once). Useful for welcome messages; `system` messages are hidden by default via `hiddenRoles`. Tool calls remain visible by default. |
 | `emptyState` | `ReactNode` | — | Custom content shown in the transcript when the visible message list is empty and the assistant is not typing. |
 | `suggestedPrompts` | `string[]` | — | Default empty-state prompt buttons. Clicking one fills and focuses the composer without sending. Ignored when `emptyState` is provided. |
 | `placeholder` | `string` | `"Send a message"` | Input placeholder text. |
@@ -1021,7 +1025,7 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `clearLabel` | `string` | `'Clear conversation'` | Label for the built-in clear/reset button. |
 | `confirmClearConversation` | `({ messages, resetToInitialMessages, source, persistenceKey? }) => boolean \| void \| Promise<boolean \| void>` | — | Optional gate for the built-in clear/reset action. Return or resolve `false` to cancel before persistence is flushed. While an async confirmation is pending the clear button is disabled and duplicate clears (button or `ref.clear()`) are ignored. |
 | `onClear` | `(messages: Message<TMeta>[]) => void` | — | Called with the reset message list after the built-in clear action runs. |
-| `resetToInitialMessages` | `boolean` | `false` | When clearing, restore the initial `messages`/`initialMessages` seed instead of saving an empty transcript. |
+| `resetToInitialMessages` | `boolean` | `false` | When clearing, restore the initial `messages`/`initialMessages` seed instead of saving an empty transcript. Restores the mount-time seed (frozen-seed contract) even if the seed prop was swapped after mount. |
 | `showJumpToBottomButton` | `boolean` | `!headless` | Shows the floating “Jump to latest” button when the user scrolls away from the bottom and new activity arrives. Pass `false` to disable it (for example when you own the scroll affordance); the headless exports default `headless={true}` so the button is off by default there. |
 | `headless` | `boolean` | `false` | Strip all default styles and inline style injection. |
 | `renderMessage` | `(message: Message<TMeta>, ctx: RenderMessageContext<TMeta>) => ReactNode` | — | Custom per-message renderer. Return `null` to fall back to default rendering. `ctx` includes `isStreaming`, `isEditing` (true while the built-in inline editor is active — gate your own content on it so the editor replaces the row), `messageProps` for scroll targets, `defaultRender(slots?)`, and action callbacks/default action controls. Existing one-argument renderers continue to work. |
@@ -1415,6 +1419,46 @@ const latestMessages = React.useRef<Message[]>([]);
 ```
 
 For one-off reads from outside React state, call `chorusRef.current?.getMessages()`.
+
+### Transcript search, copy, and export
+
+`useChorusTranscriptActions` is a headless utility hook for building a search box, a "copy conversation" button, or a "download transcript" affordance around `<Chorus>` or a custom headless shell — without writing the indexing, clipboard, and serialization layers yourself. Pass it the same `messages` array you render (from `chorusRef.getMessages()`, `onMessagesChange`, or your own state) and it returns three callbacks with stable identities:
+
+- `searchMessages(query)` — case-insensitive substring search across each message's `text`, `reasoning`, and (for tool messages) `toolCall.name`. Returns the matching `Message[]`; a blank/whitespace-only query returns `[]`. Pair it with `chorusRef.scrollToMessage(id)` to jump to a hit.
+- `copyAll(format?)` — copies the whole transcript to the clipboard. Defaults to `'markdown'`; pass `'json'` for the raw structure. Resolves `false` (and calls the optional `onCopyError`) when the Clipboard API is unavailable or the write rejects.
+- `exportAs(format)` — serializes the transcript to a string. `'markdown'` renders a readable transcript with one heading per message (tool calls include their input/output); `'json'` returns `JSON.stringify(messages, null, 2)`, which round-trips through `JSON.parse`.
+
+```tsx
+import React from 'react';
+import { Chorus, useChorusTranscriptActions, type ChorusRef, type Message } from 'react-chorus';
+
+export function SearchableChat() {
+  const chorusRef = React.useRef<ChorusRef>(null);
+  const [messages, setMessages] = React.useState<Message[]>([]);
+  const { searchMessages, copyAll, exportAs } = useChorusTranscriptActions(messages);
+
+  const jumpToFirstHit = (query: string) => {
+    const [hit] = searchMessages(query);
+    if (hit) chorusRef.current?.scrollToMessage(hit.id);
+  };
+
+  const downloadTranscript = () => {
+    const blob = new Blob([exportAs('markdown')], { type: 'text/markdown' });
+    window.open(URL.createObjectURL(blob), '_blank');
+  };
+
+  return (
+    <>
+      <input type="search" placeholder="Search transcript…" onChange={(e) => jumpToFirstHit(e.target.value)} />
+      <button type="button" onClick={() => copyAll()}>Copy conversation</button>
+      <button type="button" onClick={downloadTranscript}>Download .md</button>
+      <Chorus ref={chorusRef} transport="/api/chat" onMessagesChange={setMessages} />
+    </>
+  );
+}
+```
+
+`useChorusTranscriptActions` is also re-exported from `react-chorus/headless`. Pass `{ roleLabels }` to relabel the Markdown headings (for example `{ user: 'Customer', assistant: 'Agent' }`) and `{ onCopyError }` to observe clipboard failures from `copyAll()`.
 
 ### Attachment composer UX
 

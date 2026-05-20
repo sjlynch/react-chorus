@@ -554,6 +554,26 @@ describe('useChorusPersistence', () => {
       }
     });
 
+    it('drops tool messages whose toolCall.name is whitespace-only and names the message id', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const malformed = [{ id: 'x', role: 'tool', toolCall: { id: 'x', name: ' ' } }];
+        const storage = makeSyncStorage(JSON.stringify(malformed));
+        const { result } = renderHook(() => useChorusPersistence('key', { storage }));
+
+        expect(result.current.value).toEqual([]);
+        expect(result.current.error).toBeNull();
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringContaining('Dropped 1 invalid persisted message'),
+          expect.arrayContaining([
+            expect.objectContaining({ index: 0, id: 'x', reason: expect.stringContaining('toolCall') }),
+          ]),
+        );
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
     it('keeps valid persisted messages and drops invalid neighbors', () => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
       try {

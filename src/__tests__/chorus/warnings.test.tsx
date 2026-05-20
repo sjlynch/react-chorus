@@ -112,4 +112,83 @@ describe('Chorus', () => {
     await waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining('`sending` was provided alongside `transport`')));
     warn.mockRestore();
   });
+
+  it('warns once when the initialMessages reference changes after mount', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    function Harness({ seed }: { seed: Message[] }) {
+      return <Chorus initialMessages={seed} />;
+    }
+
+    const first: Message[] = [{ id: 'w1', role: 'assistant', text: 'Welcome (en)' }];
+    const second: Message[] = [{ id: 'w1', role: 'assistant', text: 'Bienvenue (fr)' }];
+    const third: Message[] = [{ id: 'w1', role: 'assistant', text: 'Willkommen (de)' }];
+
+    const { rerender } = render(<Harness seed={first} />);
+    rerender(<Harness seed={second} />);
+    rerender(<Harness seed={third} />);
+
+    await waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining('`initialMessages` array reference changed after mount')));
+    const seedWarnings = warn.mock.calls.filter(call => String(call[0]).includes('array reference changed after mount'));
+    expect(seedWarnings).toHaveLength(1);
+    warn.mockRestore();
+  });
+
+  it('does not warn when the initialMessages reference is stable across renders', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    const seed: Message[] = [{ id: 'w1', role: 'assistant', text: 'Welcome' }];
+    function Harness() {
+      return <Chorus initialMessages={seed} />;
+    }
+
+    const { rerender } = render(<Harness />);
+    rerender(<Harness />);
+    rerender(<Harness />);
+
+    await waitFor(() => expect(screen.getByText('Welcome')).toBeInTheDocument());
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('array reference changed after mount'));
+    warn.mockRestore();
+  });
+
+  it('keeps resetToInitialMessages on the frozen mount-time seed after an initialMessages reference change', async () => {
+    const user = userEvent.setup();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const onSend = vi.fn<NonNullable<ChorusProps['onSend']>>(async () => ({ id: 'a1', role: 'assistant', text: 'reply' } as Message));
+
+    const mountSeed: Message[] = [{ id: 'w-en', role: 'assistant', text: 'Welcome' }];
+    const swappedSeed: Message[] = [{ id: 'w-fr', role: 'assistant', text: 'Bienvenue' }];
+
+    function Harness({ seed }: { seed: Message[] }) {
+      return (
+        <Chorus
+          initialMessages={seed}
+          onSend={onSend}
+          minAssistantDelayMs={0}
+          showClearButton
+          resetToInitialMessages
+        />
+      );
+    }
+
+    const { rerender } = render(<Harness seed={mountSeed} />);
+
+    // Diverge the transcript from the seed.
+    await user.type(screen.getByPlaceholderText('Send a message'), 'question');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+    expect(await screen.findByText('reply')).toBeInTheDocument();
+
+    // Parent rebuilds initialMessages after mount (e.g. a locale switch).
+    rerender(<Harness seed={swappedSeed} />);
+
+    await user.click(screen.getByRole('button', { name: /clear conversation/i }));
+
+    // Frozen-seed contract: clear restores the mount-time seed, not the swapped one.
+    expect(screen.getByText('Welcome')).toBeInTheDocument();
+    expect(screen.queryByText('Bienvenue')).not.toBeInTheDocument();
+    expect(screen.queryByText('question')).not.toBeInTheDocument();
+    expect(screen.queryByText('reply')).not.toBeInTheDocument();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('`initialMessages` array reference changed after mount'));
+    warn.mockRestore();
+  });
 });
