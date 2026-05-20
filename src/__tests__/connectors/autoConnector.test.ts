@@ -92,6 +92,20 @@ describe('autoConnector', () => {
     expect(autoConnector.extract(data)).toEqual({ done: true });
   });
 
+  it('threads per-send gemini state so a streamed function call keeps one fallback id', () => {
+    const state = autoConnector.createState?.();
+    const frame1 = JSON.stringify({
+      candidates: [{ index: 0, content: { parts: [{ functionCall: { name: 'search', args: { q: 'a' } } }] } }],
+    });
+    const frame2 = JSON.stringify({
+      candidates: [{ index: 0, content: { parts: [{ functionCall: { args: { page: 2 } } }] } }],
+    });
+    const id1 = autoConnector.extract(frame1, state)?.toolDelta?.id;
+    const id2 = autoConnector.extract(frame2, state)?.toolDelta?.id;
+    expect(id1).toBe('gemini-0-function-0-search');
+    expect(id2).toBe(id1);
+  });
+
   it('falls back to plain text for non-JSON', () => {
     expect(autoConnector.extract('plain text chunk')).toEqual({ text: 'plain text chunk' });
   });
