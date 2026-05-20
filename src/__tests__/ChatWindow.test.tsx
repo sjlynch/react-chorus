@@ -166,6 +166,57 @@ describe('ChatWindow', () => {
     expect(screen.queryByRole('button', { name: 'Summarize this' })).not.toBeInTheDocument();
   });
 
+  it('exposes the suggested prompts as a labeled group', () => {
+    render(<ChatWindow messages={[]} suggestedPrompts={['One', 'Two']} onSuggestedPrompt={vi.fn()} />);
+
+    const group = screen.getByRole('group', { name: 'Suggested prompts' });
+    expect(group).toHaveClass('chorus-suggested-prompts');
+  });
+
+  it('renders repeated prompt strings without duplicate-key warnings', () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    render(<ChatWindow messages={[]} suggestedPrompts={['Repeat', 'Repeat']} onSuggestedPrompt={vi.fn()} />);
+
+    expect(screen.getAllByRole('button', { name: 'Repeat' })).toHaveLength(2);
+    expect(errorSpy.mock.calls.some(args => String(args[0]).includes('same key'))).toBe(false);
+    errorSpy.mockRestore();
+  });
+
+  it('routes focus to the transcript when activating a prompt unmounts the empty state', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <ChatWindow messages={[]} suggestedPrompts={['Go']} onSuggestedPrompt={vi.fn()} />,
+    );
+
+    const button = screen.getByRole('button', { name: 'Go' });
+    await user.click(button);
+    expect(button).toHaveFocus();
+
+    rerender(<ChatWindow messages={[USER_MSG]} suggestedPrompts={['Go']} />);
+
+    expect(screen.getByRole('log')).toHaveFocus();
+  });
+
+  it('routes focus to the composer input when the empty state unmounts', async () => {
+    const user = userEvent.setup();
+    function Harness({ messages }: { messages: Message[] }) {
+      return (
+        <div className="chorus">
+          <ChatWindow messages={messages} suggestedPrompts={['Go']} onSuggestedPrompt={vi.fn()} />
+          <div className="chorus-input"><textarea aria-label="composer" /></div>
+        </div>
+      );
+    }
+
+    const { rerender } = render(<Harness messages={[]} />);
+    await user.click(screen.getByRole('button', { name: 'Go' }));
+
+    rerender(<Harness messages={[USER_MSG]} />);
+
+    expect(screen.getByRole('textbox', { name: 'composer' })).toHaveFocus();
+  });
+
   it('renders an alert error message when error is provided', () => {
     render(<ChatWindow messages={[]} error="Network error" />);
     expect(screen.getByRole('alert')).toHaveTextContent('Network error');
