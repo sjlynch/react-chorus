@@ -135,21 +135,65 @@ describe('provider request mappers', () => {
     ]);
   });
 
-  it('falls back to safe context for OpenAI tool messages without provider ids', () => {
-    const body = toOpenAIChatCompletionsBody([
+  it('synthesizes a best-effort id for OpenAI tool messages without provider ids', () => {
+    const toolMessage: Message = {
+      id: 'tool',
+      role: 'tool',
+      text: '',
+      toolCall: { name: 'lookup', input: { q: 'x' }, output: { result: 1 } },
+    };
+
+    // The structured tool call is preserved (not dropped or degraded to prose);
+    // call and output share the synthesized id so they reference each other.
+    expect(toOpenAIChatCompletionsBody([toolMessage]).messages).toEqual([
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [{
+          id: 'chorus_synth_tool',
+          type: 'function',
+          function: { name: 'lookup', arguments: '{"q":"x"}' },
+        }],
+      },
+      { role: 'tool', tool_call_id: 'chorus_synth_tool', content: '{\n  "result": 1\n}' },
+    ]);
+
+    expect(toOpenAIResponsesBody([toolMessage]).input).toEqual([
+      { type: 'function_call', call_id: 'chorus_synth_tool', name: 'lookup', arguments: '{"q":"x"}' },
+      { type: 'function_call_output', call_id: 'chorus_synth_tool', output: '{\n  "result": 1\n}' },
+    ]);
+  });
+
+  it('trims surrounding whitespace from provider tool-call ids', () => {
+    const trimmedHistory = (): Message[] => [
+      { id: 'assistant', role: 'assistant', text: 'Looking.' },
       {
         id: 'tool',
         role: 'tool',
         text: '',
-        toolCall: { name: 'lookup', input: { q: 'x' }, output: { result: 1 } },
+        toolCall: { name: 'lookup', input: { q: 'x' }, output: 'ok' },
+        metadata: { openai: { toolCallId: '  call_padded  ' }, anthropic: { toolUseId: '\ttoolu_padded\n' } },
       },
+    ];
+
+    expect(toOpenAIChatCompletionsBody(trimmedHistory()).messages).toEqual([
+      {
+        role: 'assistant',
+        content: 'Looking.',
+        tool_calls: [{ id: 'call_padded', type: 'function', function: { name: 'lookup', arguments: '{"q":"x"}' } }],
+      },
+      { role: 'tool', tool_call_id: 'call_padded', content: 'ok' },
     ]);
 
-    expect(body.messages).toEqual([
+    expect(toAnthropicMessagesBody(trimmedHistory()).messages).toEqual([
       {
-        role: 'system',
-        content: 'Tool call lookup\nInput:\n{\n  "q": "x"\n}\nOutput:\n{\n  "result": 1\n}',
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'Looking.' },
+          { type: 'tool_use', id: 'toolu_padded', name: 'lookup', input: { q: 'x' } },
+        ],
       },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_padded', content: 'ok' }] },
     ]);
   });
 

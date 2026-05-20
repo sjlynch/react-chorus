@@ -17,14 +17,16 @@ import type {
   OpenAIResponsesSystemInputItem,
   OpenAIResponsesUserInputItem,
 } from '../types/openaiResponses';
-import { openAIToolCallArguments, openAIToolCallId } from './shared';
+import { openAIToolCallArguments, openAIToolCallId, resolveOpenAIToolCallId } from './shared';
 
 function openAIResponsesFunctionCall(message: Message<unknown>): OpenAIResponsesFunctionCallInputItem | null {
-  const callId = openAIToolCallId(message);
-  if (!callId || !message.toolCall) return null;
+  if (!message.toolCall) return null;
+  // Always emit the function_call: when metadata carries no call id,
+  // resolveOpenAIToolCallId synthesizes a best-effort one rather than dropping
+  // the assistant tool call.
   return {
     type: 'function_call',
-    call_id: callId,
+    call_id: resolveOpenAIToolCallId(message),
     name: message.toolCall.name || 'tool',
     arguments: openAIToolCallArguments(message.toolCall.input),
   };
@@ -131,8 +133,9 @@ export function toOpenAIResponsesInput<TMeta = Record<string, unknown>>(
     emitToolGroup: (target, pairs) => {
       for (const entry of pairs) {
         target.push(entry.block);
-        const callId = openAIToolCallId(entry.message as Message<unknown>);
-        if (callId) target.push({ type: 'function_call_output', call_id: callId, output: toolOutputText(entry.message) });
+        // Pair the output with the function_call's own call_id so the two
+        // always reference each other, even when the id was synthesized.
+        target.push({ type: 'function_call_output', call_id: entry.block.call_id, output: toolOutputText(entry.message) });
       }
     },
     fallback: message => toOpenAIResponsesInputItem(message, options),
