@@ -55,6 +55,44 @@ describe('Chorus', () => {
     expect(root).toHaveClass('chorus', 'chorus--always-show-actions');
   });
 
+  it('renders per-message timestamps when showTimestamps is enabled', () => {
+    const { container } = render(
+      <Chorus
+        showTimestamps
+        initialMessages={[
+          { id: 'u1', role: 'user', text: 'Hello', createdAt: '2026-05-20T15:47:06.425Z' },
+          { id: 'a1', role: 'assistant', text: 'Hi there', createdAt: '2026-05-20T15:48:00.000Z' },
+        ]}
+      />
+    );
+
+    const times = container.querySelectorAll('time.chorus-msg-time');
+    expect(times).toHaveLength(2);
+    expect(times[0]).toHaveAttribute('datetime', '2026-05-20T15:47:06.425Z');
+    expect(times[1]).toHaveAttribute('datetime', '2026-05-20T15:48:00.000Z');
+    expect(times[0].textContent?.trim()).not.toBe('');
+  });
+
+  it('does not render per-message timestamps without showTimestamps', () => {
+    const { container } = render(
+      <Chorus initialMessages={[{ id: 'u1', role: 'user', text: 'Hello', createdAt: '2026-05-20T15:47:06.425Z' }]} />
+    );
+
+    expect(container.querySelector('.chorus-msg-time')).not.toBeInTheDocument();
+  });
+
+  it('applies a custom formatTimestamp on the Chorus timestamp path', () => {
+    render(
+      <Chorus
+        showTimestamps
+        formatTimestamp={(timestamp) => `formatted:${timestamp}`}
+        initialMessages={[{ id: 'u1', role: 'user', text: 'Hello', createdAt: '2026-05-20T15:47:06.425Z' }]}
+      />
+    );
+
+    expect(screen.getByText('formatted:2026-05-20T15:47:06.425Z')).toBeInTheDocument();
+  });
+
   it('seeds feedback through getMessageFeedback', () => {
     const message: Message<{ storedFeedback: 'down' | null }> = {
       id: 'stored-feedback',
@@ -315,6 +353,61 @@ describe('Chorus', () => {
       expect.arrayContaining([expect.objectContaining({ id: 'controlled-assistant', text: 'controlled reply' })]),
       expect.objectContaining({ source: 'controlled', reason: 'assistant' }),
     );
+  });
+
+  it('reports each controlled change once when the host derives a new array in onChange', async () => {
+    const user = userEvent.setup();
+    const onMessagesChange = vi.fn();
+
+    function CloningHarness() {
+      const [messages, setMessages] = React.useState<Message[]>([{ id: 'seed', role: 'assistant', text: 'controlled seed' }]);
+      return (
+        <>
+          <button
+            type="button"
+            onClick={() => setMessages((prev) => [...prev, { id: 'host-added', role: 'user', text: 'host added' }])}
+          >
+            host append
+          </button>
+          <Chorus
+            value={messages}
+            // The host normalizes by cloning the emitted array back into a NEW
+            // array — the exact pattern that used to double-report changes.
+            onChange={(next) => setMessages([...next])}
+            onMessagesChange={onMessagesChange}
+            onSend={() => ({ id: 'controlled-assistant', role: 'assistant', text: 'controlled reply' })}
+            minAssistantDelayMs={0}
+          />
+        </>
+      );
+    }
+
+    render(<CloningHarness />);
+
+    await waitFor(() => expect(onMessagesChange).toHaveBeenCalled());
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'controlled send');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+    await waitFor(() => expect(screen.getByText('controlled reply')).toBeInTheDocument());
+
+    const reasonsAfterSend = onMessagesChange.mock.calls.map(([, context]) => context.reason);
+    // The clone in onChange must not turn one logical change into two calls —
+    // once correctly labeled, once mislabeled 'external'.
+    expect(reasonsAfterSend.filter((reason) => reason === 'send')).toHaveLength(1);
+    expect(reasonsAfterSend.filter((reason) => reason === 'assistant').length).toBeGreaterThanOrEqual(1);
+    // Only the initial mount observation is 'external' — no round-trip echoes.
+    expect(reasonsAfterSend.filter((reason) => reason === 'external')).toHaveLength(1);
+
+    // A genuine host-driven change still surfaces as an 'external' observation.
+    await user.click(screen.getByRole('button', { name: 'host append' }));
+    await waitFor(() => expect(onMessagesChange).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ id: 'host-added' })]),
+      expect.objectContaining({ source: 'controlled', reason: 'external' }),
+    ));
+    const externalReasons = onMessagesChange.mock.calls
+      .map(([, context]) => context.reason)
+      .filter((reason) => reason === 'external');
+    expect(externalReasons).toHaveLength(2);
   });
 
   it('fills and focuses the composer when a suggested prompt is clicked', async () => {

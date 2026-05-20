@@ -112,12 +112,11 @@ export function useConversationActions({
     const current = stateRef.current;
     if (!current.loaded || !current.conversations.some(conversation => conversation.id === id)) return;
 
-    const timestamp = getTimestamp(nowRef.current);
-    const conversations = current.conversations.map(conversation => (
-      conversation.id === id ? { ...conversation, updatedAt: timestamp } : conversation
-    ));
-    commit(conversations, id);
-  }, [commit, nowRef, stateRef]);
+    // Selecting a conversation only changes the active ID. updatedAt tracks
+    // last-modified, not last-opened, so merely viewing a conversation must
+    // not bump it — that would corrupt recency sorting of the index.
+    commit(current.conversations, id);
+  }, [commit, stateRef]);
 
   const renameConversation = React.useCallback((id: string, title: string) => {
     const current = stateRef.current;

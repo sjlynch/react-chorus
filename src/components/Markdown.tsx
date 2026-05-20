@@ -5,6 +5,7 @@ import type { ChorusCodeCopyLabels } from '../labels/types';
 import { applyChorusStyleNonce } from '../utils/cspNonce';
 import { normalizeStreamingMarkdown } from '../utils/markdownNormalizer';
 import { addCodeBlockChrome } from './markdown/codeBlockChrome';
+import type { CodeBlockCopy, CodeBlockCopyContext, CodeBlockCopyRenderer } from './markdown/codeBlockChrome';
 import { useHighlightLoader, type CodeTheme } from './markdown/highlight';
 import { resolveMarkedInstance } from './markdown/marked';
 import { renderMarkdown } from './markdown/renderMarkdown';
@@ -12,7 +13,7 @@ import { resolveSanitizer, type MarkdownSanitizer } from './markdown/sanitize';
 import { useCodeCopy } from './markdown/useCodeCopy';
 
 export { normalizeStreamingMarkdown };
-export type { MarkdownSanitizer };
+export type { MarkdownSanitizer, CodeBlockCopy, CodeBlockCopyContext, CodeBlockCopyRenderer };
 
 export interface MarkdownProps {
   text: string;
@@ -34,6 +35,18 @@ export interface MarkdownProps {
   onCopyError?: (error: Error) => void;
   /** Localized labels for the code-block copy button. */
   codeCopyLabels?: ChorusCodeCopyLabels;
+  /**
+   * Controls the per-code-block copy chrome.
+   * - `'default'` / `true` / omitted: the built-in accessible copy `<button>`.
+   * - `false`: opt out — no copy chrome (the styled code-block wrapper remains).
+   * - a function `(ctx) => htmlString`: render your own chrome. The returned
+   *   HTML is inserted ahead of the `<pre>`; include a `chorus-copy-btn`
+   *   element to keep the built-in clipboard wiring. Pass a stable function
+   *   reference (define it outside render or memoize it) to avoid reparsing.
+   *
+   * Ignored in `headless` mode, which never injects code-block chrome.
+   */
+  codeBlockCopy?: CodeBlockCopy;
 }
 
 function useMarkdownStyles(headless: boolean) {
@@ -51,16 +64,17 @@ function useMarkdownStyles(headless: boolean) {
        .chorus-md .chorus-codeblock pre code.hljs{display:block;overflow-x:auto;padding:0;background:transparent}
        .chorus-md .chorus-codeblock-dark{background:#0d1117;--chorus-code-border:#30363d;color:#e6edf3}
        .chorus-md .chorus-codeblock-light{background:#f6f8fa;--chorus-code-border:#d0d7de;color:#24292f}
-       .chorus-md .chorus-copy-btn{position:absolute;top:8px;right:8px;font-size:12px;padding:4px 8px;border-radius:6px;cursor:pointer;user-select:none}
+       .chorus-md .chorus-copy-btn{position:absolute;top:8px;right:8px;margin:0;font:inherit;font-size:12px;line-height:1.4;padding:4px 8px;border-radius:6px;cursor:pointer;user-select:none}
        .chorus-md .chorus-codeblock-dark .chorus-copy-btn{background:rgba(240,246,252,0.08);border:1px solid rgba(240,246,252,0.1);color:#e6edf3}
        .chorus-md .chorus-codeblock-light .chorus-copy-btn{background:#fff;border:1px solid rgba(31,35,40,0.15);color:#24292f}
        .chorus-md .chorus-copy-btn.copied{opacity:.85}
-       .chorus-md .chorus-copy-btn.copy-failed{opacity:.95;color:var(--chorus-error-text,#fca5a5);border-color:var(--chorus-error-border,rgba(220,38,38,0.4));background:var(--chorus-error-bg,rgba(220,38,38,0.15))}`;
+       .chorus-md .chorus-copy-btn.copy-failed{opacity:.95;color:var(--chorus-error-text,#fca5a5);border-color:var(--chorus-error-border,rgba(220,38,38,0.4));background:var(--chorus-error-bg,rgba(220,38,38,0.15))}
+       .chorus-md .chorus-copy-status{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}`;
     document.head.appendChild(style);
   }, [headless]);
 }
 
-export function Markdown({ text, codeTheme = 'dark', headless = false, streaming = false, sanitizer, markedOptions, markedExtensions, onCopyError, codeCopyLabels }: MarkdownProps) {
+export function Markdown({ text, codeTheme = 'dark', headless = false, streaming = false, sanitizer, markedOptions, markedExtensions, onCopyError, codeCopyLabels, codeBlockCopy = 'default' }: MarkdownProps) {
   const containerRef = React.useRef<HTMLDivElement>(null);
   const sanitize = React.useMemo(() => resolveSanitizer(sanitizer), [sanitizer]);
   const safe = !sanitize;
@@ -77,8 +91,8 @@ export function Markdown({ text, codeTheme = 'dark', headless = false, streaming
     const sanitized = renderMarkdown(text, sanitize, marked);
     if (headless) return sanitized;
 
-    return addCodeBlockChrome(sanitized, codeTheme, labels);
-  }, [text, codeTheme, headless, hljsReady, streaming, sanitize, marked, labels]);
+    return addCodeBlockChrome(sanitized, codeTheme, labels, codeBlockCopy);
+  }, [text, codeTheme, headless, hljsReady, streaming, sanitize, marked, labels, codeBlockCopy]);
 
   useCodeCopy(containerRef, onCopyError, labels);
 
