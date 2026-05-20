@@ -16,6 +16,13 @@ describe('autoConnector', () => {
     expect(autoConnector.extract(JSON.stringify(payload))).toEqual({ error: 'stream failed', errorPayload: payload });
   });
 
+  it('does not treat a recognised event frame with an "error" field as a stream error', () => {
+    const choices = JSON.stringify({ choices: [{ delta: { content: 'hi', error: 'ignore-me' } }] });
+    expect(autoConnector.extract(choices)).toEqual({ text: 'hi' });
+    const custom = JSON.stringify({ type: 'message', content: 'world', error: 'none' });
+    expect(autoConnector.extract(custom)).toEqual({ text: 'world' });
+  });
+
   it('delegates to anthropicConnector for Anthropic-shaped JSON', () => {
     const data = JSON.stringify({
       type: 'content_block_delta',

@@ -146,11 +146,15 @@ export function toAnthropicMessages<TMeta = Record<string, unknown>>(
     extractToolBlock: message => anthropicToolUseBlock(message as Message<unknown>),
     emitToolGroup: (target, pairs) => {
       appendAnthropicToolUseBlocks(target, pairs.map(entry => entry.block));
+      // Pair each tool_result with its tool_use block's own id rather than
+      // re-resolving from metadata: the block only exists because the id
+      // resolved non-empty, so this can never emit the empty tool_use_id
+      // (Anthropic rejects empty ids) the prior `?? ''` fallback allowed.
       target.push({
         role: 'user',
         content: pairs.map(entry => anthropicToolResultBlock(
           entry.message as Message<unknown>,
-          anthropicToolUseId(entry.message as Message<unknown>) ?? '',
+          entry.block.id,
         )),
       });
     },
