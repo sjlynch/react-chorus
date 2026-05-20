@@ -98,8 +98,14 @@ export interface ChorusAttachmentLabels {
   completedAnnouncement: (name: string) => string;
   /** Polite live-region announcement when a pending attachment fails. */
   failedAnnouncement: (name: string) => string;
-  /** Aria-label for the remove (X) button on an attachment chip. */
+  /** Aria-label for the remove (X) button on a finished or failed attachment chip. */
   removeAttachment: (name: string) => string;
+  /** Aria-label for the X button on a pending chip, where it cancels an in-progress upload/read. */
+  cancelUpload: (name: string) => string;
+  /** Visible label and title for the Retry button on a failed attachment chip. */
+  retry: string;
+  /** Aria-label for the Retry button on a failed attachment chip. */
+  retryAttachment: (name: string) => string;
   /** Aria-label and title for the attachment-error dismiss button. */
   dismissError: string;
   /** Button label / tooltip for opening the "describe this image" affordance. */

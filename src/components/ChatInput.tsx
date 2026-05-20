@@ -57,7 +57,8 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(funct
     forwardedRef: ref,
   });
   const {
-    attachments,
+    queuedAttachments,
+    sendableAttachments,
     attachmentError,
     announcement,
     dismissAttachmentError,
@@ -72,6 +73,7 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(funct
     markDragOver,
     removeAttachment,
     updateAttachmentAlt,
+    retryAttachment,
   } = useAttachmentQueue({
     resetKey,
     accept,
@@ -97,7 +99,7 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(funct
   };
 
   const { handleSend } = useChatInputSend({
-    attachments,
+    attachments: sendableAttachments,
     canSend,
     onSend,
     onAcceptedSend: resetAfterAcceptedSend,
@@ -176,9 +178,10 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(funct
     >
       {inactiveReason && <span id={reasonId} className="chorus-sr-only">{inactiveReason}</span>}
       <AttachmentChips
-        attachments={attachments}
+        attachments={queuedAttachments}
         disabled={composerInactive}
         onRemove={removeAttachment}
+        onRetry={retryAttachment}
         labels={attachmentLabels}
         onAltChange={canIngestFiles ? updateAttachmentAlt : undefined}
       />
