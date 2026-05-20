@@ -56,7 +56,7 @@ Conversation index persistence is split into focused helpers (see `conversations
 
 ## `useLatestRef`
 
-Small helper that stores the latest callback/value in a ref after each render. It is used by stable callbacks and async closures so they can read current props/state without changing callback identity.
+Small helper that stores the latest callback/value in a ref. The ref is assigned during render (in the hook body), so synchronous reads in the same commit — including layout effects and callbacks fired before passive effects flush — see the latest value rather than lagging one render behind. It is used by stable callbacks and async closures so they can read current props/state without changing callback identity.
 
 ## `useMirroredState`
 

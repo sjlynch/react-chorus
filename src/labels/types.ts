@@ -6,6 +6,8 @@ export interface ChorusComposerLabels {
   placeholder: string;
   ariaLabel: string;
   attachFile: string;
+  /** Text shown in the drag-and-drop overlay while a file is dragged over the chat surface. */
+  dropToAttach: string;
   send: string;
   stop: string;
   disabledReason: string;
@@ -44,6 +46,10 @@ export interface ChorusSpeakerLabels {
 export interface ChorusToolCallLabels {
   input: string;
   output: string;
+  /** Status shown while a tool call is still streaming / awaiting its result. */
+  running: string;
+  /** Status shown when a finished tool call produced no input and no output. */
+  empty: string;
 }
 
 export interface ChorusCodeCopyLabels {
@@ -66,6 +72,12 @@ export interface ChorusConversationListLabels {
   renameAriaLabel: (title: string) => string;
   pinAriaLabel: (title: string, pinned: boolean) => string;
   deleteAriaLabel: (title: string) => string;
+  /** Inline validation message shown when a rename is submitted with an empty title. */
+  renameEmptyError: string;
+  /** Inline validation message shown when a rename title exceeds the documented max length. */
+  renameTooLongError: (maxLength: number) => string;
+  /** Polite live-region announcement after a conversation row is deleted. */
+  deletedAnnouncement: (title: string) => string;
 }
 
 export interface ChorusAttachmentTooLargeContext {
@@ -98,8 +110,14 @@ export interface ChorusAttachmentLabels {
   completedAnnouncement: (name: string) => string;
   /** Polite live-region announcement when a pending attachment fails. */
   failedAnnouncement: (name: string) => string;
-  /** Aria-label for the remove (X) button on an attachment chip. */
+  /** Aria-label for the remove (X) button on a finished or failed attachment chip. */
   removeAttachment: (name: string) => string;
+  /** Aria-label for the X button on a pending chip, where it cancels an in-progress upload/read. */
+  cancelUpload: (name: string) => string;
+  /** Visible label and title for the Retry button on a failed attachment chip. */
+  retry: string;
+  /** Aria-label for the Retry button on a failed attachment chip. */
+  retryAttachment: (name: string) => string;
   /** Aria-label and title for the attachment-error dismiss button. */
   dismissError: string;
   /** Button label / tooltip for opening the "describe this image" affordance. */

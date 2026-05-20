@@ -9,7 +9,12 @@ export function hasOwn(value: object, key: PropertyKey) {
 }
 
 export function nonEmptyString(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() ? value : null;
+  if (typeof value !== 'string') return null;
+  // Trim before the emptiness check AND return the trimmed value: ids carried
+  // in metadata with surrounding whitespace would otherwise silently mismatch
+  // the provider's id space. Downstream callers see the canonical form.
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
 }
 
 function metadataRecord(message: Message<unknown>) {
