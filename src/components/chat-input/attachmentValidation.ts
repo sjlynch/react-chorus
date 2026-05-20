@@ -100,7 +100,9 @@ export function validateAttachmentBatch({
       continue;
     }
 
-    if (maxAttachmentBytes !== undefined && file.size > maxAttachmentBytes) {
+    // `maxAttachmentBytes` of 0 (or negative) means "no files allowed" rather
+    // than "unlimited" — reject every file, including empty ones.
+    if (maxAttachmentBytes !== undefined && (maxAttachmentBytes <= 0 || file.size > maxAttachmentBytes)) {
       errors.push(createAttachmentError({
         reason: 'too-large',
         source,

@@ -129,7 +129,7 @@ describe('Chorus', () => {
 
     expect(await screen.findByRole('button', { name: /search/i })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument());
-    expect(screen.queryByRole('status', { name: /assistant is typing/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/assistant is typing/i)).not.toBeInTheDocument();
   });
 
   it('renders a bridged tool call followed by final assistant text', async () => {

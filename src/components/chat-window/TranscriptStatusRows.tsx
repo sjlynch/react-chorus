@@ -53,8 +53,12 @@ export interface TypingRowProps {
 export function TypingRow({ typing, label }: TypingRowProps) {
   if (!typing) return null;
 
+  // No own live region: the transcript is the single `aria-live` region, so
+  // appearing here is announced once. The label is carried as SR-only text
+  // because the animated dots are decorative (`aria-hidden`).
   return (
-    <div className="chorus-msg chorus-assistant chorus-typing" role="status" aria-label={label}>
+    <div className="chorus-msg chorus-assistant chorus-typing">
+      <span className="chorus-sr-only">{label}</span>
       <div className="chorus-bubble" aria-hidden="true"><span className="chorus-dot"></span><span className="chorus-dot"></span><span className="chorus-dot"></span></div>
     </div>
   );
@@ -76,8 +80,10 @@ export function ErrorRow({ error, rawError, retryLabel, onRetry, onDismissError,
     return <>{renderError({ error, rawError, retry: onRetry ?? noop, dismiss: onDismissError ?? noop })}</>;
   }
 
+  // No own live region: the surrounding transcript is the single `aria-live`
+  // region, so the error text is announced once when this row is added.
   return (
-    <div className="chorus-error" role="alert">
+    <div className="chorus-error">
       <span className="chorus-error-text">{error}</span>
       {onRetry && <button type="button" className="chorus-retry-btn" onClick={onRetry}>{retryLabel}</button>}
     </div>

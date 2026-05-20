@@ -15,7 +15,7 @@ export function messageText<TMeta>(message: Message<TMeta>): string {
   return message.text ?? '';
 }
 
-function toolOutputValue<TMeta>(message: Message<TMeta>) {
+export function toolOutputValue<TMeta>(message: Message<TMeta>) {
   const rawText = messageText(message);
   if (message.toolCall && hasOwn(message.toolCall, 'output')) return message.toolCall.output;
   const text = rawText.trim();

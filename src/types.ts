@@ -53,12 +53,24 @@ export interface ToolCall {
 
 interface ChorusMessageBase<TMeta = Record<string, unknown>> {
   id: string;
+  /**
+   * Optional creation time for the message, as an ISO-8601 string (e.g. `new Date().toISOString()`).
+   * Purely informational: it is ignored unless `<Chorus showTimestamps>` is enabled, in which case the
+   * default renderer shows a locale-aware per-message time. Additive and safe to omit.
+   */
+  createdAt?: string;
   metadata?: TMeta;
 }
 
 export interface UserMessage<TMeta = Record<string, unknown>> extends ChorusMessageBase<TMeta> {
   role: 'user';
   text: string;
+  /**
+   * Reasoning/chain-of-thought is an assistant-only concept. The default renderer only shows the
+   * `Reasoning` disclosure for `assistant` messages, so a value here is carried but never displayed.
+   * It is kept on the non-assistant message shapes for round-trip safety; a future major may move
+   * `reasoning` to `AssistantMessage` only so the union itself forbids it on other roles.
+   */
   reasoning?: string;
   attachments?: Attachment[];
   toolCall?: never;

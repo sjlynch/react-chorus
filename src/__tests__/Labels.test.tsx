@@ -274,7 +274,7 @@ describe('ChatWindow labels', () => {
     render(<ChatWindow messages={[USER_MSG]} typing labels={FR_LABELS} />);
 
     expect(screen.getByRole('log', { name: 'Historique de chat' })).toBeInTheDocument();
-    expect(screen.getByRole('status', { name: "L'assistant écrit" })).toBeInTheDocument();
+    expect(screen.getByText("L'assistant écrit")).toHaveClass('chorus-sr-only');
   });
 
   it('renders the localized retry button text', () => {

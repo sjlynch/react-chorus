@@ -2,7 +2,7 @@ import type { Message } from '../../types';
 import { openAIImageUrlFromAttachment, unsupportedAttachmentText } from '../attachments';
 import { hasOwn, isRecord, metadataArray, nonEmptyString } from '../metadata';
 import { stripOpenAIChatOptions } from '../options';
-import { compactJSONString, messageText, toolContextText, toolOutputText } from '../toolOutput';
+import { messageText, toolContextText, toolOutputText } from '../toolOutput';
 import { mapHistoryWithToolRuns } from '../toolRunMapper';
 import type { ProviderMappingOptions } from '../types/common';
 import type {
@@ -13,7 +13,7 @@ import type {
   OpenAIChatCompletionsToolCall,
   OpenAIChatCompletionsUserContentPart,
 } from '../types/openaiChat';
-import { openAIToolCallId } from './shared';
+import { openAIToolCallArguments, openAIToolCallId, resolveOpenAIToolCallId } from './shared';
 
 function openAIAssistantToolCalls(message: Message<unknown>): OpenAIChatCompletionsToolCall[] | null {
   // Tool call shapes come from caller-supplied metadata; we trust the structure here.
@@ -30,14 +30,16 @@ function openAIChatToolCallIdFromValue(value: unknown) {
 }
 
 function openAIChatToolCall(message: Message<unknown>): OpenAIChatCompletionsToolCall | null {
-  const id = openAIToolCallId(message);
-  if (!id || !message.toolCall) return null;
+  if (!message.toolCall) return null;
+  // Always emit the tool_call: when metadata carries no call id,
+  // resolveOpenAIToolCallId synthesizes a best-effort one rather than dropping
+  // the assistant tool call.
   return {
-    id,
+    id: resolveOpenAIToolCallId(message),
     type: 'function',
     function: {
       name: message.toolCall.name || 'tool',
-      arguments: compactJSONString(message.toolCall.input ?? {}),
+      arguments: openAIToolCallArguments(message.toolCall.input),
     },
   };
 }
@@ -140,8 +142,9 @@ export function toOpenAIChatCompletionsMessages<TMeta = Record<string, unknown>>
     emitToolGroup: (target, pairs) => {
       appendOpenAIChatToolCalls(target, pairs.map(entry => entry.block));
       for (const entry of pairs) {
-        const toolCallId = openAIToolCallId(entry.message as Message<unknown>);
-        if (toolCallId) target.push({ role: 'tool', tool_call_id: toolCallId, content: toolOutputText(entry.message) });
+        // Pair the tool result with the tool_call's own id so the two always
+        // reference each other, even when the id was synthesized.
+        target.push({ role: 'tool', tool_call_id: entry.block.id, content: toolOutputText(entry.message) });
       }
     },
     fallback: message => {
