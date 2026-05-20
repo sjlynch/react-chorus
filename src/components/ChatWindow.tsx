@@ -14,7 +14,7 @@ import type { MessageCopyResult } from './MessageRow';
 export { stringActivityKey } from './chat-window/activityKey';
 export { MessageBubble } from './MessageRow';
 export type { ChatWindowProps, RenderErrorContext, RenderMessageContext, RenderMessageRootProps } from './chat-window/types';
-export type { GetMessageFeedback, MessageBubbleProps, MessageBubbleSlots, MessageCopyResult, MessageFeedback, MessageMarkdownProps, MessageRenderActions } from './MessageRow';
+export type { GetMessageFeedback, MessageBubbleProps, MessageBubbleSlots, MessageCopyResult, MessageFeedback, MessageMarkdownProps, MessageRenderActions, MessageTimestampFormatter } from './MessageRow';
 
 let didWarnShowSystemMessages = false;
 
@@ -52,6 +52,8 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
   renderMessage,
   showJumpToBottomButton = !headless,
   showSystemMessages,
+  showTimestamps = false,
+  formatTimestamp,
   streamingMessageId,
   suggestedPrompts,
   suggestedPromptsDisabled = false,
@@ -109,6 +111,8 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
         markdownSanitizer={markdownSanitizer}
         streamingMessageId={streamingMessageId}
         renderMessage={renderMessage}
+        showTimestamps={showTimestamps}
+        formatTimestamp={formatTimestamp}
         resolvedLabels={resolvedLabels}
         copyAvailable={copyAvailable}
         copyMessage={copyMessage}

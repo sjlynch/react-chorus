@@ -224,6 +224,69 @@ describe('ChatWindow', () => {
     expect(container.querySelector('.chorus-assistant .chorus-bubble')).not.toBeInTheDocument();
   });
 
+  it('does not render a reasoning disclosure on a user message carrying a reasoning field', () => {
+    const { container } = render(<ChatWindow messages={[{ id: 'u-reasoning', role: 'user', text: 'Hello', reasoning: 'sneaky plan' }]} />);
+
+    expect(screen.queryByText('Reasoning')).not.toBeInTheDocument();
+    expect(screen.queryByText('sneaky plan')).not.toBeInTheDocument();
+    expect(container.querySelector('.chorus-reasoning')).not.toBeInTheDocument();
+    expect(screen.getByText('Hello')).toBeInTheDocument();
+  });
+
+  it('does not render a reasoning disclosure on a system message carrying a reasoning field', () => {
+    const { container } = render(
+      <ChatWindow hiddenRoles={[]} messages={[{ id: 's-reasoning', role: 'system', text: 'Be concise.', reasoning: 'system-only plan' }]} />
+    );
+
+    expect(screen.queryByText('Reasoning')).not.toBeInTheDocument();
+    expect(screen.queryByText('system-only plan')).not.toBeInTheDocument();
+    expect(container.querySelector('.chorus-reasoning')).not.toBeInTheDocument();
+  });
+
+  it('still renders the reasoning disclosure on an assistant message', () => {
+    const { container } = render(<ChatWindow messages={[{ ...ASST_MSG, reasoning: 'assistant plan' }]} />);
+
+    expect(screen.getByText('Reasoning')).toBeInTheDocument();
+    expect(screen.getByText('assistant plan')).toBeInTheDocument();
+    expect(container.querySelector('.chorus-reasoning')).toBeInTheDocument();
+  });
+
+  it('renders a per-message timestamp when showTimestamps is set', () => {
+    const { container } = render(<ChatWindow showTimestamps messages={[{ ...USER_MSG, createdAt: '2026-05-20T15:47:06.425Z' }]} />);
+
+    const time = container.querySelector('time.chorus-msg-time');
+    expect(time).toBeInTheDocument();
+    expect(time).toHaveAttribute('datetime', '2026-05-20T15:47:06.425Z');
+    expect(time?.textContent?.trim()).not.toBe('');
+  });
+
+  it('does not render per-message timestamps by default', () => {
+    const { container } = render(<ChatWindow messages={[{ ...USER_MSG, createdAt: '2026-05-20T15:47:06.425Z' }]} />);
+
+    expect(container.querySelector('.chorus-msg-time')).not.toBeInTheDocument();
+  });
+
+  it('omits the timestamp for a message with no createdAt even when showTimestamps is set', () => {
+    const { container } = render(<ChatWindow showTimestamps messages={[USER_MSG]} />);
+
+    expect(container.querySelector('.chorus-msg-time')).not.toBeInTheDocument();
+    expect(screen.getByText('Hello')).toBeInTheDocument();
+  });
+
+  it('uses a custom formatTimestamp override with the message in context', () => {
+    const formatTimestamp = vi.fn((_timestamp: string, message: Message) => `sent by ${message.role}`);
+    render(<ChatWindow showTimestamps formatTimestamp={formatTimestamp} messages={[{ ...USER_MSG, createdAt: '2026-05-20T15:47:06.425Z' }]} />);
+
+    expect(formatTimestamp).toHaveBeenCalledWith('2026-05-20T15:47:06.425Z', expect.objectContaining({ id: 'u1', role: 'user' }));
+    expect(screen.getByText('sent by user')).toBeInTheDocument();
+  });
+
+  it('echoes an unparseable createdAt string through the default timestamp formatter', () => {
+    render(<ChatWindow showTimestamps messages={[{ ...USER_MSG, createdAt: 'definitely-not-a-date' }]} />);
+
+    expect(screen.getByText('definitely-not-a-date')).toBeInTheDocument();
+  });
+
   it('preserves a bubble for attachment-only user messages', () => {
     const { container } = render(<ChatWindow messages={[{
       id: 'u-attachment',

@@ -1,8 +1,17 @@
 import type { ReactNode } from 'react';
-import type { MessageFeedback } from '../../types';
+import type { Message, MessageFeedback } from '../../types';
 import type { MarkdownProps } from '../Markdown';
 
 export type MessageMarkdownProps = Omit<MarkdownProps, 'text' | 'codeTheme' | 'headless' | 'streaming'>;
+
+/**
+ * Formats a message's `createdAt` time for display when `<Chorus showTimestamps>` is enabled.
+ * Receives the raw `createdAt` string and the message it belongs to.
+ */
+export type MessageTimestampFormatter<TMeta = Record<string, unknown>> = (
+  timestamp: string,
+  message: Message<TMeta>,
+) => ReactNode;
 
 export type {
   ChorusCodeCopyLabels,

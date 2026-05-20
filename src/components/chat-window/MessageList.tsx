@@ -3,7 +3,7 @@ import type { ResolvedChorusLabels } from '../../labels/types';
 import type { Message } from '../../types';
 import type { MarkdownSanitizer } from '../Markdown';
 import { MessageActionControls, MessageRenderStateContext, MessageRenderStateProvider, MessageRow, MessageSpeakerLabel } from '../MessageRow';
-import type { MessageBubbleSlots, MessageCopyResult, MessageFeedback, MessageMarkdownProps, MessageRenderActions } from '../MessageRow';
+import type { MessageBubbleSlots, MessageCopyResult, MessageFeedback, MessageMarkdownProps, MessageRenderActions, MessageTimestampFormatter } from '../MessageRow';
 import { ToolCallBlock } from '../ToolCallBlock';
 import { attachMessageRootProps } from './rendering';
 import type { RenderMessageContext, RenderMessageRootProps } from './types';
@@ -36,6 +36,10 @@ export interface MessageListProps<TMeta = Record<string, unknown>> {
   markdownSanitizer?: MarkdownSanitizer;
   streamingMessageId?: string | null;
   renderMessage?: (message: Message<TMeta>, context: RenderMessageContext<TMeta>) => React.ReactNode;
+  /** Render each message's `createdAt` time below its bubble. */
+  showTimestamps: boolean;
+  /** Override the locale-aware default timestamp formatting. */
+  formatTimestamp?: MessageTimestampFormatter<TMeta>;
   resolvedLabels: ResolvedChorusLabels;
   copyAvailable: boolean;
   copyMessage: (message: Message<TMeta>) => MessageCopyResult;
@@ -55,6 +59,8 @@ export function MessageList<TMeta = Record<string, unknown>>({
   markdownSanitizer,
   streamingMessageId,
   renderMessage,
+  showTimestamps,
+  formatTimestamp,
   resolvedLabels,
   copyAvailable,
   copyMessage,
@@ -96,6 +102,8 @@ export function MessageList<TMeta = Record<string, unknown>>({
               reasoningLabel={resolvedLabels.reasoning}
               codeCopyLabels={resolvedLabels.codeCopy}
               attachmentLabels={resolvedLabels.attachments}
+              showTimestamp={showTimestamps}
+              formatTimestamp={formatTimestamp}
               onEdit={onEdit}
               onRegenerate={onRegenerate}
               onDelete={onDelete}

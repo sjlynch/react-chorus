@@ -71,6 +71,8 @@ function ChorusInner<TMeta = Record<string, unknown>>({
   serializeMessages,
   showClearButton = false,
   showJumpToBottomButton,
+  showTimestamps = false,
+  formatTimestamp,
   style,
   suggestedPrompts,
   systemPrompt,
@@ -260,6 +262,8 @@ function ChorusInner<TMeta = Record<string, unknown>>({
         renderError={renderError}
         renderMessage={renderMessage}
         showJumpToBottomButton={resolvedShowJumpToBottomButton}
+        showTimestamps={showTimestamps}
+        formatTimestamp={formatTimestamp}
         streamingMessageId={session.streamingMessageId}
         suggestedPrompts={canRenderEmptyAffordance ? suggestedPrompts : undefined}
         suggestedPromptsDisabled={writesDisabled}

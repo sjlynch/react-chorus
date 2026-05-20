@@ -116,6 +116,9 @@
 .chorus-assistant .chorus-msg-content { align-items: flex-start; }
 .chorus-msg-content .chorus-bubble { max-width: 100%; }
 
+/* Opt-in per-message timestamp (rendered when <Chorus showTimestamps> is set) */
+.chorus-msg-time { margin-top: 3px; color: var(--chorus-action-text, #a3a3a3); font-size: 11px; }
+
 /* Collapsed reasoning/thinking trace */
 .chorus-reasoning { max-width: 100%; margin: 0 0 6px; border: 1px solid var(--chorus-border, #2a2a2a); border-radius: 8px; background: var(--chorus-chat-bg, #161616); color: var(--chorus-chat-text, #f3f4f6); overflow: hidden; }
 .chorus-reasoning-summary { padding: 6px 10px; color: var(--chorus-action-text, #a3a3a3); font-size: 12px; font-weight: 600; cursor: pointer; user-select: none; }

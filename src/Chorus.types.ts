@@ -1,5 +1,5 @@
 import type React from 'react';
-import type { GetMessageFeedback, MessageCopyResult, MessageFeedback, MessageMarkdownProps, RenderErrorContext, RenderMessageContext } from './components/ChatWindow';
+import type { GetMessageFeedback, MessageCopyResult, MessageFeedback, MessageMarkdownProps, MessageTimestampFormatter, RenderErrorContext, RenderMessageContext } from './components/ChatWindow';
 import type { RenderAttachmentErrorContext } from './components/ChatInput';
 import type { Palette } from './components/ChorusTheme';
 import type { Attachment, AttachmentError, ConnectorName, Message, Role, StorageAdapter, UploadAttachment } from './types';
@@ -151,6 +151,17 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
   /** Show a built-in button that clears/resets the conversation. */
   showClearButton?: boolean;
   showJumpToBottomButton?: boolean;
+  /**
+   * Render a locale-aware per-message timestamp under each message bubble, sourced from
+   * `Message.createdAt`. Off by default; messages without a `createdAt` render no time.
+   */
+  showTimestamps?: boolean;
+  /**
+   * Override the built-in locale-aware timestamp formatting used when `showTimestamps` is enabled.
+   * Receives the message's `createdAt` string and the message itself. Defaults to a short,
+   * locale-aware time of day.
+   */
+  formatTimestamp?: MessageTimestampFormatter<TMeta>;
   suggestedPrompts?: string[];
   /** Hidden system prompt. Prepended to transport history; exposed as helpers.systemPrompt on the onSend path. */
   systemPrompt?: string;
