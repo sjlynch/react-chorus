@@ -109,5 +109,8 @@ export function createOpenAIConnector(options: OpenAIConnectorOptions = {}): Con
  * common Responses API text, reasoning-summary, and function-call delta events.
  * When multiple alternatives are present, only the selected alternative
  * (choice index 0) is emitted; alternatives are not concatenated.
+ *
+ * @internal Not part of the public API. Obtain it via `getConnector('openai')`,
+ * or call `createOpenAIConnector(options)` for a customized OpenAI connector.
  */
 export const openaiConnector: Connector<OpenAIConnectorState> = createOpenAIConnector();

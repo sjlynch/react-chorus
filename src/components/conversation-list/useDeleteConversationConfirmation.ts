@@ -25,6 +25,8 @@ interface UseDeleteConversationConfirmationOptions {
   deleteConversation?: (id: string) => void;
   confirmDeleteConversation?: ConfirmDeleteConversation;
   interactionsDisabled: boolean;
+  /** Called right after a delete is committed, so the list can restore focus and announce it. */
+  onConversationDeleted?: (conversation: ConversationSummary) => void;
 }
 
 export function useDeleteConversationConfirmation({
@@ -33,6 +35,7 @@ export function useDeleteConversationConfirmation({
   deleteConversation,
   confirmDeleteConversation,
   interactionsDisabled,
+  onConversationDeleted,
 }: UseDeleteConversationConfirmationOptions) {
   const [pendingDeleteIds, setPendingDeleteIds] = React.useState<ReadonlySet<string>>(() => new Set());
   const mountedRef = React.useRef(true);
@@ -57,7 +60,10 @@ export function useDeleteConversationConfirmation({
   const handleDeleteConversation = React.useCallback((conversation: ConversationSummary) => {
     if (!deleteConversation || interactionsDisabled || pendingDeleteIds.has(conversation.id)) return;
 
-    const commitDelete = () => deleteConversation(conversation.id);
+    const commitDelete = () => {
+      deleteConversation(conversation.id);
+      onConversationDeleted?.(conversation);
+    };
     let confirmation: boolean | void | Promise<boolean | void>;
     try {
       confirmation = confirmDeleteConversation?.({ conversation, conversations: conversations.slice(), activeId });
@@ -80,7 +86,7 @@ export function useDeleteConversationConfirmation({
 
     if (confirmation === false) return;
     commitDelete();
-  }, [activeId, confirmDeleteConversation, conversations, deleteConversation, interactionsDisabled, pendingDeleteIds, setDeletePending]);
+  }, [activeId, confirmDeleteConversation, conversations, deleteConversation, interactionsDisabled, onConversationDeleted, pendingDeleteIds, setDeletePending]);
 
   return { pendingDeleteIds, handleDeleteConversation };
 }

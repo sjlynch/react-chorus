@@ -47,11 +47,45 @@ describe('ToolCallBlock', () => {
     expect(document.getElementById(controls!)).toHaveClass('chorus-tool-call-body');
   });
 
-  it('does not show a chevron or allow expand when no input/output', () => {
+  it('shows a settled "no output" status instead of a dead button when no input/output', () => {
     render(<ToolCallBlock toolCall={CALL_NAME_ONLY} />);
-    expect(screen.getByRole('button')).toBeDisabled();
+    // No interactive control: nothing to expand, so it must not look clickable.
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
     expect(screen.queryByText('▼')).not.toBeInTheDocument();
     expect(screen.queryByText('▲')).not.toBeInTheDocument();
+    expect(screen.getByText('do_something')).toBeInTheDocument();
+    expect(screen.getByText('No output')).toBeInTheDocument();
+  });
+
+  it('shows a running status for an empty tool call while the turn is still streaming', () => {
+    render(<ToolCallBlock toolCall={CALL_NAME_ONLY} streaming />);
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    expect(screen.getByText('Running…')).toBeInTheDocument();
+    expect(screen.queryByText('No output')).not.toBeInTheDocument();
+  });
+
+  it('treats an empty tool call as settled once streaming has finished', () => {
+    render(<ToolCallBlock toolCall={CALL_NAME_ONLY} streaming={false} />);
+    expect(screen.getByText('No output')).toBeInTheDocument();
+    expect(screen.queryByText('Running…')).not.toBeInTheDocument();
+  });
+
+  it('does not show a running status once the call has a body to expand', () => {
+    render(<ToolCallBlock toolCall={CALL_WITH_IO} streaming />);
+    // A call with input/output is intentional on its own — the streaming flag
+    // must not turn its expandable header into a status row.
+    expect(screen.getByRole('button')).toBeInTheDocument();
+    expect(screen.queryByText('Running…')).not.toBeInTheDocument();
+  });
+
+  it('honors an overridden running label', () => {
+    render(<ToolCallBlock toolCall={CALL_NAME_ONLY} streaming labels={{ running: 'Working' }} />);
+    expect(screen.getByText('Working')).toBeInTheDocument();
+  });
+
+  it('honors an overridden empty label', () => {
+    render(<ToolCallBlock toolCall={CALL_NAME_ONLY} labels={{ empty: 'Nothing' }} />);
+    expect(screen.getByText('Nothing')).toBeInTheDocument();
   });
 
   it('body is hidden before expansion', () => {
