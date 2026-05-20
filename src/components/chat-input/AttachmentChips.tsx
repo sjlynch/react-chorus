@@ -1,59 +1,71 @@
 import React from 'react';
 import { X } from 'lucide-react';
-import type { Attachment } from '../../types';
 import { DEFAULT_ATTACHMENT_LABELS } from '../../labels/attachments';
 import type { ChorusAttachmentLabels } from '../../labels/types';
 import { getAttachmentPreviewSource } from '../../utils/attachmentPreview';
-import { getPendingAttachmentId, getPendingAttachmentOperation, isPendingAttachment } from './attachmentUtils';
+import type { QueuedAttachment } from './attachmentUtils';
 
 export interface AttachmentChipsProps {
-  attachments: Attachment[];
+  attachments: QueuedAttachment[];
   disabled: boolean;
-  onRemove: (index: number) => void;
+  /** Removes (or, for a pending chip, cancels) the attachment with this uid. */
+  onRemove: (uid: string) => void;
+  /** Re-runs the read/upload for a `failed` chip. */
+  onRetry: (uid: string) => void;
   labels?: ChorusAttachmentLabels;
   /**
    * Called when the user edits the alt-text input for an image attachment.
    * Omit to hide the "describe this image" affordance.
    */
-  onAltChange?: (index: number, alt: string) => void;
+  onAltChange?: (uid: string, alt: string) => void;
 }
 
-export function AttachmentChips({ attachments, disabled, onRemove, labels = DEFAULT_ATTACHMENT_LABELS, onAltChange }: AttachmentChipsProps) {
+export function AttachmentChips({ attachments, disabled, onRemove, onRetry, labels = DEFAULT_ATTACHMENT_LABELS, onAltChange }: AttachmentChipsProps) {
   const [openAltEditor, setOpenAltEditor] = React.useState<string | null>(null);
   if (attachments.length === 0) return null;
 
   return (
     <div className="chorus-attachments">
-      {attachments.map((att, i) => {
+      {attachments.map(({ uid, attachment: att, status, operation }) => {
         const previewSource = getAttachmentPreviewSource(att);
-        const pending = isPendingAttachment(att);
-        const pendingOperation = getPendingAttachmentOperation(att);
-        const pendingLabel = pendingOperation === 'read' ? labels.readingStatus(att.name) : labels.uploadingStatus(att.name);
-        const chipKey = getPendingAttachmentId(att) ?? att.id ?? `${att.name}-${i}`;
+        const pending = status === 'pending';
+        const failed = status === 'failed';
+        const ready = status === 'ready';
+        const pendingLabel = operation === 'read' ? labels.readingStatus(att.name) : labels.uploadingStatus(att.name);
         const isImage = att.type.startsWith('image/');
-        const allowAltEditor = !pending && isImage && !disabled && onAltChange;
-        const altEditorOpen = openAltEditor === chipKey || (allowAltEditor && typeof att.alt === 'string' && att.alt.length > 0);
+        // Alt text is only meaningful for an attachment that actually resolved.
+        const allowAltEditor = ready && isImage && !disabled && onAltChange;
+        const altEditorOpen = openAltEditor === uid || (allowAltEditor && typeof att.alt === 'string' && att.alt.length > 0);
         const chipImageAlt = att.alt && att.alt.length > 0 ? att.alt : att.name;
+        // Drives `aria-describedby` so a screen-reader user hears the pending/failed
+        // status when they focus the chip's button — without polling the live region.
+        const statusId = `chorus-attachment-status-${uid}`;
+        const hasStatusText = pending || failed;
         return (
           <div
-            key={chipKey}
-            className={`chorus-attachment-chip${pending ? ' chorus-attachment-chip--pending' : ''}`}
+            key={uid}
+            className={`chorus-attachment-chip${pending ? ' chorus-attachment-chip--pending' : ''}${failed ? ' chorus-attachment-chip--failed' : ''}`}
             aria-busy={pending || undefined}
           >
             {pending ? (
               <span className="chorus-attachment-spinner" aria-hidden="true" />
+            ) : failed ? (
+              <span className="chorus-attachment-failed-icon" aria-hidden="true">!</span>
             ) : isImage && previewSource && (
               <img src={previewSource} alt={chipImageAlt} className="chorus-attachment-thumb" loading="lazy" decoding="async" />
             )}
             <span className="chorus-attachment-name">{att.name}</span>
             {pending && (
-              <span className="chorus-sr-only" aria-live="polite">{pendingLabel}</span>
+              <span id={statusId} className="chorus-sr-only" aria-live="polite">{pendingLabel}</span>
+            )}
+            {failed && (
+              <span id={statusId} className="chorus-sr-only">{labels.failedAnnouncement(att.name)}</span>
             )}
             {allowAltEditor && !altEditorOpen && (
               <button
                 type="button"
                 className="chorus-attachment-describe"
-                onClick={() => setOpenAltEditor(chipKey)}
+                onClick={() => setOpenAltEditor(uid)}
                 aria-label={labels.describeImageInputAriaLabel(att.name)}
                 title={labels.describeImage}
               >
@@ -65,17 +77,32 @@ export function AttachmentChips({ attachments, disabled, onRemove, labels = DEFA
                 type="text"
                 className="chorus-attachment-alt-input"
                 value={att.alt ?? ''}
-                onChange={(e) => onAltChange(i, e.target.value)}
+                onChange={(e) => onAltChange(uid, e.target.value)}
                 placeholder={labels.describeImagePlaceholder}
                 aria-label={labels.describeImageInputAriaLabel(att.name)}
-                autoFocus={openAltEditor === chipKey}
+                autoFocus={openAltEditor === uid}
               />
+            )}
+            {failed && (
+              <button
+                type="button"
+                className="chorus-attachment-retry"
+                onClick={() => onRetry(uid)}
+                aria-label={labels.retryAttachment(att.name)}
+                aria-describedby={statusId}
+                title={labels.retry}
+                disabled={disabled}
+                aria-disabled={disabled || undefined}
+              >
+                {labels.retry}
+              </button>
             )}
             <button
               type="button"
               className="chorus-attachment-remove"
-              onClick={() => onRemove(i)}
-              aria-label={labels.removeAttachment(att.name)}
+              onClick={() => onRemove(uid)}
+              aria-label={pending ? labels.cancelUpload(att.name) : labels.removeAttachment(att.name)}
+              aria-describedby={hasStatusText ? statusId : undefined}
               disabled={disabled}
               aria-disabled={disabled || undefined}
             >

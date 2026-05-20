@@ -67,6 +67,24 @@ describe('ChatWindow', () => {
     expect(transcript).toHaveAttribute('id', 'transcript');
   });
 
+  it('applies the palette as --chorus-* variables on the root and merges an explicit style', () => {
+    render(
+      <ChatWindow
+        messages={[USER_MSG]}
+        data-testid="chat-window"
+        palette={{ chatBg: '#101010', assistantText: '#fafafa' }}
+        style={{ borderRadius: '4px' }}
+      />,
+    );
+
+    const transcript = screen.getByTestId('chat-window');
+    expect(transcript.style.getPropertyValue('--chorus-chat-bg')).toBe('#101010');
+    expect(transcript.style.getPropertyValue('--chorus-assistant-text')).toBe('#fafafa');
+    // Unset palette keys emit no variable so an ancestor theme can still cascade in.
+    expect(transcript.style.getPropertyValue('--chorus-user-bg')).toBe('');
+    expect(transcript.style.borderRadius).toBe('4px');
+  });
+
   it('builds activity keys for trailing emoji without lone surrogates', () => {
     const value = `${'x'.repeat(23)}\u{1F44B}`;
     const key = stringActivityKey(value);
@@ -164,6 +182,57 @@ describe('ChatWindow', () => {
     rerender(<ChatWindow messages={[USER_MSG]} suggestedPrompts={['Summarize this', 'Write tests']} />);
 
     expect(screen.queryByRole('button', { name: 'Summarize this' })).not.toBeInTheDocument();
+  });
+
+  it('exposes the suggested prompts as a labeled group', () => {
+    render(<ChatWindow messages={[]} suggestedPrompts={['One', 'Two']} onSuggestedPrompt={vi.fn()} />);
+
+    const group = screen.getByRole('group', { name: 'Suggested prompts' });
+    expect(group).toHaveClass('chorus-suggested-prompts');
+  });
+
+  it('renders repeated prompt strings without duplicate-key warnings', () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    render(<ChatWindow messages={[]} suggestedPrompts={['Repeat', 'Repeat']} onSuggestedPrompt={vi.fn()} />);
+
+    expect(screen.getAllByRole('button', { name: 'Repeat' })).toHaveLength(2);
+    expect(errorSpy.mock.calls.some(args => String(args[0]).includes('same key'))).toBe(false);
+    errorSpy.mockRestore();
+  });
+
+  it('routes focus to the transcript when activating a prompt unmounts the empty state', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <ChatWindow messages={[]} suggestedPrompts={['Go']} onSuggestedPrompt={vi.fn()} />,
+    );
+
+    const button = screen.getByRole('button', { name: 'Go' });
+    await user.click(button);
+    expect(button).toHaveFocus();
+
+    rerender(<ChatWindow messages={[USER_MSG]} suggestedPrompts={['Go']} />);
+
+    expect(screen.getByRole('log')).toHaveFocus();
+  });
+
+  it('routes focus to the composer input when the empty state unmounts', async () => {
+    const user = userEvent.setup();
+    function Harness({ messages }: { messages: Message[] }) {
+      return (
+        <div className="chorus">
+          <ChatWindow messages={messages} suggestedPrompts={['Go']} onSuggestedPrompt={vi.fn()} />
+          <div className="chorus-input"><textarea aria-label="composer" /></div>
+        </div>
+      );
+    }
+
+    const { rerender } = render(<Harness messages={[]} />);
+    await user.click(screen.getByRole('button', { name: 'Go' }));
+
+    rerender(<Harness messages={[USER_MSG]} />);
+
+    expect(screen.getByRole('textbox', { name: 'composer' })).toHaveFocus();
   });
 
   it('renders an alert error message when error is provided', () => {
@@ -609,6 +678,46 @@ describe('ChatWindow', () => {
     expect(screen.getByText('Seeded reply')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Thumbs up' })).toHaveAttribute('aria-pressed', 'true');
     expect(onFeedback).not.toHaveBeenCalled();
+  });
+
+  it('evicts a clicked feedback override when getMessageFeedback later changes it', async () => {
+    const user = userEvent.setup();
+    const onFeedback = vi.fn();
+    const renderWith = (getMessageFeedback: (message: Message) => MessageFeedback | null) =>
+      <ChatWindow messages={[ASST_MSG]} onFeedback={onFeedback} getMessageFeedback={getMessageFeedback} />;
+
+    const { rerender } = render(renderWith(() => null));
+
+    // User clicks thumbs up — the local override shadows host state.
+    await user.click(screen.getByRole('button', { name: 'Thumbs up' }));
+    expect(screen.getByRole('button', { name: 'Thumbs up' })).toHaveAttribute('aria-pressed', 'true');
+
+    // The host persists a correction and reports the new feedback value.
+    rerender(renderWith(() => 'down'));
+    expect(screen.getByRole('button', { name: 'Thumbs down' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Thumbs up' })).toHaveAttribute('aria-pressed', 'false');
+
+    // The host clears the feedback — the UI follows host state, not the override.
+    rerender(renderWith(() => null));
+    expect(screen.getByRole('button', { name: 'Thumbs up' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: 'Thumbs down' })).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('evicts a clicked feedback override when message metadata feedback later changes', async () => {
+    type FeedbackMeta = { feedback?: MessageFeedback | null };
+    const user = userEvent.setup();
+    const onFeedback = vi.fn();
+    const base: Message<FeedbackMeta> = { id: 'a1', role: 'assistant', text: 'Hi there' };
+
+    const { rerender } = render(<ChatWindow messages={[base]} onFeedback={onFeedback} />);
+
+    await user.click(screen.getByRole('button', { name: 'Thumbs up' }));
+    expect(screen.getByRole('button', { name: 'Thumbs up' })).toHaveAttribute('aria-pressed', 'true');
+
+    // Host syncs a different persisted value for the same still-present message.
+    rerender(<ChatWindow messages={[{ ...base, metadata: { feedback: 'down' } }]} onFeedback={onFeedback} />);
+    expect(screen.getByRole('button', { name: 'Thumbs down' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Thumbs up' })).toHaveAttribute('aria-pressed', 'false');
   });
 
   it('copies with navigator.clipboard by default when available', async () => {

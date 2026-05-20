@@ -53,4 +53,28 @@ describe('getConnector', () => {
   it('returns the default openaiConnector when no options are provided', () => {
     expect(getConnector('openai')).toBe(openaiConnector);
   });
+
+  it('applies options only to the "openai" connector and warns once per ignoring connector', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const options = { thinkTag: { start: '<r>', end: '</r>' } };
+
+    // Non-openai connectors do not consume options: the connector is unchanged
+    // and a single dev warning explains the ignored argument, deduped per target.
+    expect(getConnector('anthropic', options).name).toBe('anthropic');
+    getConnector('anthropic', options); // deduped — no second warning
+    getConnector(undefined, options); // default auto connector
+    getConnector({ name: 'custom', extract: vi.fn() }, options); // custom object
+
+    expect(warn).toHaveBeenCalledTimes(3);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('the `anthropic` connector does not accept them'));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('the default `auto` connector does not accept them'));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('a custom connector object does not accept them'));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("only apply to `getConnector('openai', ...)`"));
+
+    // The "openai" connector consumes options without warning.
+    expect(getConnector('openai', options).name).toBe('openai');
+    expect(warn).toHaveBeenCalledTimes(3);
+
+    warn.mockRestore();
+  });
 });

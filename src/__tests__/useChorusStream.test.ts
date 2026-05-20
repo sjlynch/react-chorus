@@ -215,6 +215,43 @@ describe('useChorusStream', () => {
     expect(onToolDelta).toHaveBeenNthCalledWith(2, expect.objectContaining({ id: 'call_1', name: 'search', input: { q: 'test' }, provider: 'openai', providerId: 'call_1' }));
   });
 
+  it('forwards connectorOptions to the resolved built-in connector', async () => {
+    const transport = vi.fn<Transport>(() => Promise.resolve(makeSseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { content: '<reasoning>plan</reasoning>answer' } }] }),
+      '[DONE]',
+    ])));
+    const onChunk = vi.fn();
+    const onReasoning = vi.fn();
+    const { result } = renderHook(() => useChorusStream(transport, {
+      connector: 'openai',
+      connectorOptions: { thinkTag: { start: '<reasoning>', end: '</reasoning>' } },
+    }));
+
+    await act(async () => {
+      await result.current.send('hello', [], { onChunk, onReasoning });
+    });
+
+    expect(onReasoning).toHaveBeenCalledWith('plan');
+    expect(onChunk).toHaveBeenCalledWith('answer');
+  });
+
+  it('leaves a custom tag in visible text when connectorOptions is omitted', async () => {
+    const transport = vi.fn<Transport>(() => Promise.resolve(makeSseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { content: '<reasoning>plan</reasoning>answer' } }] }),
+      '[DONE]',
+    ])));
+    const onChunk = vi.fn();
+    const onReasoning = vi.fn();
+    const { result } = renderHook(() => useChorusStream(transport, { connector: 'openai' }));
+
+    await act(async () => {
+      await result.current.send('hello', [], { onChunk, onReasoning });
+    });
+
+    expect(onReasoning).not.toHaveBeenCalled();
+    expect(onChunk).toHaveBeenCalledWith('<reasoning>plan</reasoning>answer');
+  });
+
   it('emits every tool delta when one connector result contains multiple calls', async () => {
     const transport = vi.fn<Transport>(() => Promise.resolve(makeSseResponse([
       JSON.stringify({ choices: [{ index: 0, delta: { content: 'tools:', tool_calls: [
@@ -435,6 +472,56 @@ describe('useChorusStream', () => {
     });
 
     expect(onError.mock.calls[0][0].errorPayload).toEqual(payload);
+  });
+
+  it('surfaces a connector error even when the error string is empty', async () => {
+    // A provider that emits `error: ''` is still reporting a failure; the empty
+    // string must not be treated as 'no error' or the stream completes silently.
+    const emptyErrorConnector = {
+      name: 'empty-error-test',
+      extract: () => ({ error: '' }),
+    };
+    const transport = vi.fn<Transport>(() => Promise.resolve(makeSseResponse(['anything'])));
+    const onChunk = vi.fn();
+    const onDone = vi.fn();
+    const onError = vi.fn();
+    const { result } = renderHook(() => useChorusStream(transport, { connector: emptyErrorConnector }));
+
+    let rejection: unknown;
+    await act(async () => {
+      rejection = await result.current.send('hello', [], { onChunk, onDone, onError }).then(
+        () => undefined,
+        (err) => err,
+      );
+    });
+
+    expect(rejection).toBeInstanceOf(ChorusStreamError);
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError.mock.calls[0][0]).toBeInstanceOf(ChorusStreamError);
+    expect(onDone).not.toHaveBeenCalled();
+    expect(result.current.sending).toBe(false);
+  });
+
+  it('does not raise a connector error when the result has no error field', async () => {
+    // Contrast with the empty-string case: a missing `error` key is genuinely
+    // 'no error' and the stream must complete normally.
+    const noErrorConnector = {
+      name: 'no-error-test',
+      extract: (data: string) => (data === '[DONE]' ? { done: true } : { text: data }),
+    };
+    const transport = vi.fn<Transport>(() => Promise.resolve(makeSseResponse(['hi', '[DONE]'])));
+    const onChunk = vi.fn();
+    const onDone = vi.fn();
+    const onError = vi.fn();
+    const { result } = renderHook(() => useChorusStream(transport, { connector: noErrorConnector }));
+
+    await act(async () => {
+      await result.current.send('hello', [], { onChunk, onDone, onError });
+    });
+
+    expect(onChunk).toHaveBeenCalledWith('hi');
+    expect(onDone).toHaveBeenCalledTimes(1);
+    expect(onError).not.toHaveBeenCalled();
   });
 
   it('flushes OpenAI think-tag buffers when the response body closes without [DONE]', async () => {
@@ -775,6 +862,60 @@ describe('useChorusStream', () => {
       expect(warn).toHaveBeenCalledTimes(1);
       expect(warn.mock.calls[0][0]).toMatch(/unmounted/);
       expect(warn.mock.calls[0][0]).toMatch(/externalSignal/);
+    } finally {
+      warn.mockRestore();
+      externalController.abort();
+    }
+  });
+
+  it('removes the forwardAbort listener from a caller-owned externalSignal when the hook unmounts mid-send', async () => {
+    const transport = vi.fn<Transport>(() => new Promise<Response>(() => undefined));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const externalController = new AbortController();
+    const addSpy = vi.spyOn(externalController.signal, 'addEventListener');
+    const removeSpy = vi.spyOn(externalController.signal, 'removeEventListener');
+    const { result, unmount } = renderHook(() => useChorusStream(transport));
+
+    try {
+      await act(async () => {
+        void result.current.send('hello', [], { onChunk: vi.fn() }, externalController.signal);
+      });
+
+      const forwardAbort = addSpy.mock.calls.find(([type]) => type === 'abort')?.[1];
+      expect(forwardAbort).toBeTypeOf('function');
+
+      unmount();
+
+      // The hook does not own the externalSignal, so its in-flight send keeps
+      // running — but the forwardAbort listener it installed must be detached
+      // so a long-lived signal does not leak listeners across mount/unmount.
+      expect(removeSpy).toHaveBeenCalledWith('abort', forwardAbort);
+    } finally {
+      warn.mockRestore();
+      externalController.abort();
+    }
+  });
+
+  it('balances forwardAbort listener registrations across repeated mount/unmount cycles on one externalSignal', async () => {
+    const transport = vi.fn<Transport>(() => new Promise<Response>(() => undefined));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const externalController = new AbortController();
+    const addSpy = vi.spyOn(externalController.signal, 'addEventListener');
+    const removeSpy = vi.spyOn(externalController.signal, 'removeEventListener');
+
+    try {
+      for (let i = 0; i < 3; i += 1) {
+        const { result, unmount } = renderHook(() => useChorusStream(transport));
+        await act(async () => {
+          void result.current.send('hello', [], { onChunk: vi.fn() }, externalController.signal);
+        });
+        unmount();
+      }
+
+      const added = addSpy.mock.calls.filter(([type]) => type === 'abort').length;
+      const removed = removeSpy.mock.calls.filter(([type]) => type === 'abort').length;
+      expect(added).toBe(3);
+      expect(removed).toBe(added);
     } finally {
       warn.mockRestore();
       externalController.abort();

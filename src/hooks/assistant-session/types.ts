@@ -14,6 +14,15 @@ export interface ChorusSendHelpers {
   systemPrompt?: string;
 }
 
+/**
+ * Custom send implementation for the advanced (non-`transport`) path.
+ *
+ * To produce an assistant turn, `onSend` must do exactly one of: stream via
+ * `helpers.appendAssistant()` (then `helpers.finalizeAssistant()`), or return
+ * a `Message`. An `onSend` that resolves without appending or returning a
+ * message closes the turn silently — `sending` flips back off but no
+ * `onFinish`/`onAbort`/`onError` observer fires (Chorus warns once in dev).
+ */
 export type ChorusOnSend<TMeta = Record<string, unknown>> = (
   text: string,
   messages: Message<TMeta>[],

@@ -117,7 +117,7 @@ export function useChorusPersistence<TMeta = Record<string, unknown>>(
     if (mountedRef.current && writeVersion === writeVersionRef.current) setError(null);
   }, []);
 
-  const { flush, flushForPageLifecycle, queueWrite } = usePersistenceWriteQueue<TMeta>({
+  const { flush, flushForPageLifecycle, queueWrite, writeCoordination } = usePersistenceWriteQueue<TMeta>({
     keyRef,
     storageRef,
     serializeMessagesRef,
@@ -154,6 +154,7 @@ export function useChorusPersistence<TMeta = Record<string, unknown>>(
     serializeMessagesRef,
     deserializeMessagesRef,
     reportPersistenceError,
+    writeCoordination,
   );
 
   usePersistenceReadLifecycle(

@@ -10,6 +10,7 @@ import type { DeserializeMessages, SerializeMessages } from './hooks/useChorusPe
 import type { ChorusMessagesChangeContext } from './hooks/useChorusMessages';
 import type { ChorusAbortContext, ChorusAbortReason, ChorusAbortSource, ChorusClearConversationContext, ChorusConfirmClearConversation, ChorusConfirmDeleteMessage, ChorusDeleteMessageContext, ChorusFinishContext, ChorusOnAbort, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusSendHelpers, ChorusSendPath, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusStreamDoneReason, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolLoopContext, ChorusToolRegistry } from './hooks/useAssistantSession';
 import type { Connector } from './connectors/connectors';
+import type { OpenAIConnectorOptions } from './connectors/openai';
 import type { MarkdownSanitizer } from './components/Markdown';
 
 export type { Transport };
@@ -65,6 +66,14 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
   clearLabel?: string;
   codeBlockTheme?: 'dark' | 'light';
   connector?: Connector | ConnectorName;
+  /**
+   * Options forwarded to the built-in connector resolved from a `connector`
+   * string. Currently only the `'openai'` connector consumes options (e.g.
+   * `{ thinkTag: { start: '<reasoning>', end: '</reasoning>' } }` for a custom
+   * reasoning tag pair). Ignored when `connector` is a custom `Connector`
+   * object — build that object with `createOpenAIConnector(options)` instead.
+   */
+  connectorOptions?: OpenAIConnectorOptions;
   /** Optional gate for built-in message deletes. Return or resolve false to cancel. */
   confirmDeleteMessage?: ChorusConfirmDeleteMessage<TMeta>;
   /** Optional gate for the built-in clear/reset action. Return or resolve false to cancel before persistence is touched. While an async confirmation is pending, the clear button is disabled and duplicate clears are ignored. */
@@ -73,6 +82,14 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
   autoContinueTools?: boolean;
   /** Maximum automatic tool iterations when autoContinueTools is enabled. Defaults to 4; pass Infinity to explicitly disable the safety cap. */
   maxToolIterations?: number;
+  /**
+   * Treat a thrown tool handler (or `onToolCall`) error as a normal tool result instead of a
+   * terminal turn failure. The error is still recorded on the tool row (`{ error: message }`
+   * output plus `metadata.isError`); with `autoContinueTools` enabled the loop then continues,
+   * feeding the error tool result back to the model so it can self-recover. Abort errors (Stop)
+   * always end the turn regardless. Defaults to `false`.
+   */
+  continueOnToolError?: boolean;
   /** Optional gate for each automatic tool continuation. Return false to stop before the next model request. */
   shouldContinueToolLoop?: ChorusShouldContinueToolLoop<TMeta>;
   /** Disable composer input, attachment ingestion, prompt fills, and write actions. Stop remains available while sending. */
@@ -87,7 +104,17 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
   hiddenRoles?: Role[];
   /** Return a persisted feedback selection for a message. If omitted or undefined, message.metadata.feedback seeds built-in thumbs when it is 'up' or 'down'. */
   getMessageFeedback?: GetMessageFeedback<TMeta>;
-  /** Initial messages for uncontrolled mode. Useful for welcome messages. */
+  /**
+   * Initial messages for uncontrolled mode. Useful for welcome messages.
+   *
+   * Frozen-seed contract: the seed (`messages ?? initialMessages`) is captured
+   * once at mount and never re-derived. Swapping this array after mount (e.g.
+   * rebuilding welcome messages on a locale/theme change) is ignored — the
+   * transcript does not re-seed and `resetToInitialMessages` still restores the
+   * mount-time value. In development a one-time warning fires when the
+   * reference changes. To replace the transcript, use `value` + `onChange`,
+   * call `ChorusRef.clear()`, or remount via `key={...}`.
+   */
   initialMessages?: Message<TMeta>[];
   /** Props forwarded to the built-in Markdown renderer for message text. */
   markdownProps?: MessageMarkdownProps;
@@ -97,6 +124,12 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
   maxAttachments?: number;
   /** Render only the latest N visible messages. Typing and error rows still render outside this message window. */
   maxRenderedMessages?: number;
+  /**
+   * Legacy initial-only seed for uncontrolled mode; prefer `initialMessages`.
+   * Wins over `initialMessages` when both are set and follows the same
+   * frozen-seed contract — captured once at mount, later reference changes are
+   * ignored and warned about once in development.
+   */
   messages?: Message<TMeta>[];
   minAssistantDelayMs?: number;
   onAttachmentError?: (error: AttachmentError) => void;
@@ -143,7 +176,15 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
   renderMessage?: (message: Message<TMeta>, context: RenderMessageContext<TMeta>) => React.ReactNode;
   /** Prevent compose/edit/regenerate/delete/retry/clear while leaving read-only actions like copy and scroll available. */
   readOnly?: boolean;
-  /** When clearing, restore initialMessages/messages instead of clearing to []. Defaults to false. */
+  /**
+   * When clearing, restore the `initialMessages`/`messages` seed instead of
+   * clearing to `[]`. Defaults to false.
+   *
+   * The restored seed is the mount-time value (frozen-seed contract): if a
+   * parent swapped `initialMessages`/`messages` after mount, `clear()` still
+   * restores the original seed, not the latest array. Remount via `key={...}`
+   * to reset the seed.
+   */
   resetToInitialMessages?: boolean;
   sending?: boolean;
   /** Override built-in JSON persistence serialization. */

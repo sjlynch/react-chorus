@@ -1,6 +1,7 @@
 import type * as React from 'react';
 import type { Attachment, AttachmentError, UploadAttachment } from '../../types';
 import type { ChorusAttachmentLabels, ChorusComposerLabels } from '../../labels/types';
+import type { Palette } from '../ChorusTheme';
 
 export interface RenderAttachmentErrorContext {
   error: AttachmentError;
@@ -69,4 +70,11 @@ export interface ChatInputProps extends Omit<React.HTMLAttributes<HTMLDivElement
    * polite live-region status/completion announcements. Defaults to English.
    */
   attachmentLabels?: ChorusAttachmentLabels;
+  /**
+   * Theme palette applied as `--chorus-*` CSS variables on the composer root.
+   * Equivalent to wrapping this component in `<ChorusTheme palette={…}>`. When
+   * it is nested inside another `<Chorus palette>` or `<ChorusTheme>`, the
+   * nearest ancestor that sets a given variable wins per the normal CSS cascade.
+   */
+  palette?: Palette;
 }
