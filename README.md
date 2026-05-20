@@ -1172,13 +1172,16 @@ export function SupportChat() {
 }
 ```
 
-The ref exposes `send(text, attachments?)`, `stop()`, `clear()`, `focus()`, `getMessages()`, and `scrollToMessage(id)`.
+The ref exposes `send(text, attachments?)`, `stop()`, `clear()`, `retry()`, `regenerate(messageId)`, `dismissError()`, `focus()`, `getMessages()`, and `scrollToMessage(id)`.
 
 ```ts
 interface ChorusRef<TMeta = Record<string, unknown>> {
   send(text: string, attachments?: Attachment[]): boolean;
   stop(): void;
   clear(): boolean;
+  retry(): boolean;
+  regenerate(messageId: string): boolean;
+  dismissError(): boolean;
   focus(): void;
   getMessages(): Message<TMeta>[];
   scrollToMessage(id: string): boolean;
@@ -1200,6 +1203,16 @@ interface ChorusRef<TMeta = Record<string, unknown>> {
 - Controlled mode (`value` provided) with no `onChange` prop.
 
 When `confirmClearConversation` is configured, `true` means the confirmation flow was started — the actual reset still depends on the callback resolving to anything other than `false`.
+
+On an accepted send, `send()` also resets the composer the same way a UI-driven send does — the draft text is cleared, the textarea collapses to a single line, and any attachment chips the user had staged are discarded. (`send()` sends its own explicit `attachments` argument; staged chips are never sent by an imperative call.) An accepted `clear()` resets the composer the same way.
+
+`retry()`, `regenerate(messageId)`, and `dismissError()` are the imperative equivalents of the built-in error-banner Retry / message-toolbar Regenerate / banner-dismiss controls, so a fully custom chat shell can drive them without simulating clicks on chrome it has hidden:
+
+- `retry()` re-runs the last assistant turn after a stream error. It returns `false` when there is no current error to retry.
+- `regenerate(messageId)` regenerates a specific assistant message, replaying from the user turn that preceded it. It returns `false` when `messageId` does not match a message or no user message precedes it.
+- `dismissError()` clears the current stream error state. It returns `false` when there is no error to dismiss.
+
+All three also return `false` for the shared rejection cases — `<Chorus disabled>`, `<Chorus readOnly>`, an async built-in persistence load still pending, or controlled mode (`value` provided) with no `onChange` prop.
 
 `scrollToMessage(id)` returns `true` when it finds a rendered message row and `false` when the id is not currently mounted; check `hiddenRoles`, `maxRenderedMessages`, and custom `renderMessage` implementations that return a fragment/custom component without spreading `ctx.messageProps`. `stop()` always remains available for active responses.
 

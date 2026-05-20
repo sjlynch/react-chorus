@@ -33,6 +33,10 @@ export interface ChorusRef<TMeta = Record<string, unknown>> {
    * - a send/tool turn is already in flight;
    * - the text is empty and no attachments were supplied;
    * - neither `transport` nor `onSend` is configured.
+   *
+   * On an accepted send the composer is reset the same way a UI-driven send
+   * resets it: the draft is cleared, the textarea collapses to a single line,
+   * and any attachment chips the user had staged are discarded.
    */
   send(text: string, attachments?: Attachment[]): boolean;
   stop(): void;
@@ -48,6 +52,34 @@ export interface ChorusRef<TMeta = Record<string, unknown>> {
    * callback resolving to anything other than `false`.
    */
   clear(): boolean;
+  /**
+   * Re-run the last assistant turn after a stream error — the imperative
+   * equivalent of the built-in error banner's Retry control. Returns `true`
+   * when a retry was started and `false` when it was rejected. Rejection cases
+   * are:
+   * - there is no current stream error to retry;
+   * - `disabled` / `readOnly`, or an async built-in persistence load is pending;
+   * - controlled mode (`value` provided) with no `onChange` prop.
+   */
+  retry(): boolean;
+  /**
+   * Regenerate a specific assistant message, replaying the conversation from
+   * the user turn that preceded it. Returns `true` when regeneration was
+   * started and `false` when it was rejected. Rejection cases are:
+   * - `messageId` does not match a message, or no user message precedes it;
+   * - `disabled` / `readOnly`, or an async built-in persistence load is pending;
+   * - controlled mode (`value` provided) with no `onChange` prop.
+   */
+  regenerate(messageId: string): boolean;
+  /**
+   * Clear the current stream error state — the imperative equivalent of
+   * dismissing the built-in error banner. Returns `true` when an error was
+   * cleared and `false` when it was rejected. Rejection cases are:
+   * - there is no current stream error to dismiss;
+   * - `disabled` / `readOnly`, or an async built-in persistence load is pending;
+   * - controlled mode (`value` provided) with no `onChange` prop.
+   */
+  dismissError(): boolean;
   focus(): void;
   getMessages(): Message<TMeta>[];
   scrollToMessage(id: string): boolean;

@@ -220,7 +220,7 @@ function ChorusInner<TMeta = Record<string, unknown>>({
 
   useChorusRef<TMeta>(ref, {
     session,
-    setDraft,
+    resetComposer,
     messagesRef,
     rootRef,
     inputRef,
