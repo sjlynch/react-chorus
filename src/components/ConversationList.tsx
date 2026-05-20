@@ -66,7 +66,7 @@ export function ConversationList({
         </button>
       )}
 
-      <div className="chorus-conversation-items" role="list">
+      <div className="chorus-conversation-items" role={conversations.length === 0 ? undefined : 'list'}>
         {conversations.length === 0 && <div className="chorus-conversation-empty">{resolvedEmpty}</div>}
         {orderedConversations.map(conversation => {
           const active = conversation.id === activeId;
