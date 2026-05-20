@@ -247,7 +247,7 @@ function commandForLog(command, args) {
   return [command, ...args].join(' ');
 }
 
-async function runCommand(command, args, { cwd, env = {} }) {
+async function runCommand(command, args, { cwd, env = {}, shell = process.platform === 'win32' }) {
   return new Promise((resolve) => {
     const child = spawn(command, args, {
       cwd,
@@ -257,7 +257,10 @@ async function runCommand(command, args, { cwd, env = {} }) {
         npm_config_update_notifier: 'false',
         ...env,
       },
-      shell: process.platform === 'win32',
+      // npm is invoked as `npm.cmd` on Windows and needs a shell; direct node
+      // invocations pass `shell: false` so an executable path containing spaces
+      // (e.g. C:\Program Files\nodejs\node.exe) is not re-parsed by cmd.exe.
+      shell,
     });
 
     let stdout = '';
@@ -288,6 +291,21 @@ async function runNpm(args, { cwd, logger }) {
   return result;
 }
 
+/**
+ * npm install args for an example package. Examples that ship a committed
+ * package-lock.json install reproducibly with `npm ci`; the rest fall back to
+ * `npm install`. `--package-lock=false` is intentionally NOT passed: it would
+ * make npm ignore a committed lockfile, so every CI run would re-resolve the
+ * dependency tree fresh against the registry and a registry-side release could
+ * change what CI builds with no source change.
+ */
+function exampleInstallArgs(packageDir) {
+  const base = ['--prefer-offline', '--no-audit', '--no-fund'];
+  return existsSync(path.join(packageDir, 'package-lock.json'))
+    ? ['ci', ...base]
+    : ['install', ...base];
+}
+
 export async function runExampleBuilds({ cwd = rootDir, logger = console } = {}) {
   const runnablePackages = await findRunnableExamplePackages({ cwd });
   const problems = [];
@@ -307,7 +325,7 @@ export async function runExampleBuilds({ cwd = rootDir, logger = console } = {})
     const relativeDir = toRelative(cwd, example.packageDir);
     logger.log(`Verifying runnable example ${relativeDir}...`);
 
-    const install = await runNpm(['install', '--prefer-offline', '--no-audit', '--no-fund', '--package-lock=false'], {
+    const install = await runNpm(exampleInstallArgs(example.packageDir), {
       cwd: example.packageDir,
       logger,
     });
@@ -338,10 +356,116 @@ export async function runExampleBuilds({ cwd = rootDir, logger = console } = {})
   return problems;
 }
 
+/**
+ * Start-only example packages declare a `start` script but no `build` script,
+ * so `runExampleBuilds` never installs their deps or exercises their entry
+ * file. The Express/WebSocket proxy servers under examples/ are start-only.
+ */
+export async function findStartOnlyExamplePackages({ cwd = rootDir } = {}) {
+  const packages = await findExamplePackages({ cwd });
+  return packages.filter(
+    (record) => Boolean(record.pkg?.scripts?.start) && !record.pkg?.scripts?.build,
+  );
+}
+
+/** Resolve the entry file a package's `start` script runs (falling back to `main`). */
+function resolveStartEntry(record) {
+  const startScript = typeof record.pkg?.scripts?.start === 'string' ? record.pkg.scripts.start : '';
+  const scriptMatch = startScript.match(/(?:^|\s)([\w./-]+\.[mc]?js)(?:\s|$)/);
+  const candidate = scriptMatch
+    ? scriptMatch[1]
+    : (typeof record.pkg?.main === 'string' ? record.pkg.main : null);
+  if (!candidate) return null;
+  const absolutePath = path.join(record.packageDir, candidate);
+  return existsSync(absolutePath) ? { absolutePath, relative: candidate } : null;
+}
+
+/** Collect every `react-chorus/<subpath>` specifier referenced by a source file. */
+export function extractReactChorusSubpaths(source) {
+  const found = new Set();
+  const re = /['"`](react-chorus\/[A-Za-z0-9._\-/]+)['"`]/g;
+  let match;
+  while ((match = re.exec(source)) !== null) {
+    found.add(match[1]);
+  }
+  return Array.from(found).sort();
+}
+
+/**
+ * Verify start-only example packages without running their long-lived servers:
+ * `node --check` catches syntax errors in the entry file, and every
+ * `react-chorus/<subpath>` it imports is import-resolved so a breaking change
+ * to a subpath export (e.g. `react-chorus/server`, `react-chorus/provider-requests`)
+ * fails CI instead of silently breaking the documented example server.
+ */
+export async function runStartOnlyExampleChecks({ cwd = rootDir, logger = console } = {}) {
+  const startOnlyPackages = await findStartOnlyExamplePackages({ cwd });
+  const problems = [];
+  if (startOnlyPackages.length === 0) return problems;
+
+  const rootBuilt = ensureRootBuild({ cwd }).length === 0;
+
+  for (const record of startOnlyPackages) {
+    const relativeDir = toRelative(cwd, record.packageDir);
+    const entry = resolveStartEntry(record);
+    if (!entry) {
+      problems.push(`${relativeDir}: could not resolve the entry file from its "start" script; add a runnable entry or a "main" field.`);
+      continue;
+    }
+
+    logger.log(`Checking start-only example ${relativeDir} (${entry.relative})...`);
+
+    const syntax = await runCommand(process.execPath, ['--check', entry.absolutePath], {
+      cwd: record.packageDir,
+      shell: false,
+    });
+    if (syntax.exitCode !== 0) {
+      if (syntax.stderr.trim()) logger.error(syntax.stderr.trimEnd());
+      problems.push(`${relativeDir}/${entry.relative} failed \`node --check\` (syntax error).`);
+      continue;
+    }
+
+    const source = await fs.readFile(entry.absolutePath, 'utf8');
+    const subpaths = extractReactChorusSubpaths(source);
+    if (subpaths.length === 0) {
+      logger.log(`Start-only example OK: ${relativeDir}`);
+      continue;
+    }
+
+    if (!rootBuilt) {
+      problems.push(`${relativeDir} imports ${subpaths.join(', ')} but the root library build is missing. Run \`npm run build\` before \`npm run verify:examples\`.`);
+      continue;
+    }
+
+    const install = await runNpm(exampleInstallArgs(record.packageDir), { cwd: record.packageDir, logger });
+    if (install.exitCode !== 0) {
+      problems.push(`${relativeDir} dependencies failed to install.`);
+      continue;
+    }
+
+    const probeSource = subpaths.map((subpath) => `await import(${JSON.stringify(subpath)});`).join('\n');
+    const probe = await runCommand(process.execPath, ['--input-type=module', '--eval', probeSource], {
+      cwd: record.packageDir,
+      shell: false,
+    });
+    if (probe.exitCode !== 0) {
+      if (probe.stderr.trim()) logger.error(probe.stderr.trimEnd());
+      problems.push(`${relativeDir}: import-resolving ${subpaths.join(', ')} failed — a react-chorus subpath export used by this example server is broken.`);
+      continue;
+    }
+
+    logger.log(`Start-only example OK: ${relativeDir} (verified ${subpaths.join(', ')})`);
+  }
+
+  return problems;
+}
+
 export async function runCheckExampleMetadata({ cwd = rootDir, logger = console } = {}) {
   const metadataProblems = await findExampleMetadataProblems({ cwd, logger });
-  const buildProblems = metadataProblems.length === 0 ? await runExampleBuilds({ cwd, logger }) : [];
-  const problems = [...metadataProblems, ...buildProblems];
+  const canRunExamples = metadataProblems.length === 0;
+  const buildProblems = canRunExamples ? await runExampleBuilds({ cwd, logger }) : [];
+  const startOnlyProblems = canRunExamples ? await runStartOnlyExampleChecks({ cwd, logger }) : [];
+  const problems = [...metadataProblems, ...buildProblems, ...startOnlyProblems];
 
   if (problems.length > 0) {
     logger.error('Example verification problems:');

@@ -1,5 +1,5 @@
 {
-  "name": "react-chorus-example-multi-conversation",
+  "name": "react-chorus-example-websocket",
   "version": "0.0.1",
   "private": true,
   "type": "module",

@@ -8,6 +8,29 @@ Drop a polished, streaming AI chat experience into React — then peel back the 
 
 The live demo runs entirely in your browser — no backend needed. It drives `<Chorus>` through a mock OpenAI-format SSE transport so you can see streaming replies, reasoning traces, tool calls, multi-conversation persistence, and palette theming with one click. Open it in StackBlitz if you want to edit the source side-by-side, or run `npm run dev` locally.
 
+## Contents
+
+- [Why react-chorus?](#why-react-chorus)
+- [Install](#install)
+- [Quick start](#quick-start)
+- [Two usage paths](#two-usage-paths) — the `transport` prop, the `onSend` callback, and auth headers
+- [Provider request/body helpers](#provider-requestbody-helpers)
+- [Connectors](#connectors)
+- Streaming formats — [OpenAI](#openai-sse-format) · [Anthropic](#anthropic-sse-format) · [Gemini](#gemini-sse-format) · [Vercel AI SDK](#vercel-ai-sdk-stream-format)
+- [Examples](#examples)
+- [Bundle size](#bundle-size)
+- [SSR and Markdown sanitization](#ssr-and-markdown-sanitization)
+- [Security and CSP](#security-and-csp)
+- [API](#api) — `<Chorus>` props, `ChorusRef`, persistence, `useChorusStream`, and the transport factories
+- [Serializing multimodal and tool-call history](#serializing-multimodal-and-tool-call-history)
+- [Tool calls and agent steps](#tool-calls-and-agent-steps)
+- [Theming](#theming)
+- [Individual Components](#individual-components)
+- [Message Shape](#message-shape)
+- [Migration and Upgrading](#migration-and-upgrading)
+- [Development and release](#development-and-release)
+- [License](#license)
+
 ## Why react-chorus?
 
 react-chorus is for React developers who want a drop-in AI chat UI that stays composable. Use the batteries-included `<Chorus>` widget for a production-ready shell, or import the headless/hooks/components when your product needs a custom layout.
@@ -31,6 +54,29 @@ import 'react-chorus/styles.css';
 ```
 
 ## Quick start
+
+Start with the **simple `transport` path**: point Chorus at a server-side SSE endpoint and name the connector that matches your model provider.
+
+```tsx
+import 'react-chorus/styles.css';
+import { Chorus } from 'react-chorus';
+
+export default function App() {
+  return (
+    <div style={{ height: '100dvh' }}>
+      <Chorus transport="/api/chat" connector="openai" />
+    </div>
+  );
+}
+```
+
+`transport` requires an endpoint that returns Server-Sent Events. Chorus POSTs `{ prompt: string, history: Message[] }` to the URL and streams the SSE response into the assistant message automatically. **`history` already includes the latest user turn** — `prompt` is a duplicate convenience copy of that same text, not the next message to append. Map `history` directly on the server and ignore `prompt`; appending `prompt` to `history` will send the new user message to the model twice. See the [Next.js App Router route handler](#nextjs-app-router-route-handler), the [Minimal Express + OpenAI backend](#minimal-express--openai-backend), or the runnable [`examples/with-next`](./examples/with-next) and [`examples/with-openai`](./examples/with-openai) apps for server-safe proxies.
+
+> **Layout footgun — give Chorus an explicit height.** `<Chorus>` fills its parent, so the wrapper needs an explicit height (for example `100dvh`) for the transcript to scroll internally instead of growing the page. Two things commonly break this when you embed `<Chorus>` in a flex parent. First, the browser-default `margin` on `<body>` makes a `100dvh` child overflow the viewport by exactly that margin and show a stray outer scrollbar — reset it with `body { margin: 0 }`. Second, a flex child will not shrink below its content size by default: inside a `display: flex` parent, give the Chorus wrapper `flex: 1; min-height: 0` rather than a fixed `100dvh` so it fills the remaining space without overflowing.
+
+### Advanced — customize the request with `onSend`
+
+When you need direct control — proxying through a custom client, a non-SSE transport, or modifying messages before they are sent — use the advanced `onSend` callback instead of `transport`. Because `onSend` is just a function, it can also stream a reply with no backend at all, which is handy for prototypes, demos, and tests:
 
 ```tsx
 import 'react-chorus/styles.css';
@@ -61,24 +107,7 @@ export default function App() {
 }
 ```
 
-Chorus fills its parent, so give the wrapper an explicit height (for example `100dvh`) to make the transcript scroll internally. When the transcript is empty, `suggestedPrompts` renders starter buttons that fill and focus the composer without auto-sending.
-
-For production, point Chorus at your server-side SSE proxy:
-
-```tsx
-import 'react-chorus/styles.css';
-import { Chorus } from 'react-chorus';
-
-export default function App() {
-  return (
-    <div style={{ height: '100dvh' }}>
-      <Chorus transport="/api/chat" connector="openai" />
-    </div>
-  );
-}
-```
-
-`transport` requires an endpoint that returns Server-Sent Events. Chorus POSTs `{ prompt: string, history: Message[] }` to the URL and streams the SSE response into the assistant message automatically. **`history` already includes the latest user turn** — `prompt` is a duplicate convenience copy of that same text, not the next message to append. Map `history` directly on the server and ignore `prompt`; appending `prompt` to `history` will send the new user message to the model twice. See the [Next.js App Router route handler](#nextjs-app-router-route-handler), the [Minimal Express + OpenAI backend](#minimal-express--openai-backend), or the runnable [`examples/with-next`](./examples/with-next) and [`examples/with-openai`](./examples/with-openai) apps for server-safe proxies.
+When the transcript is empty, `suggestedPrompts` renders starter buttons that fill and focus the composer without auto-sending. The [Two usage paths](#two-usage-paths) section documents `transport` and `onSend` in full — including auth headers, the WebSocket transport, and driving Chorus with `useChorusStream` directly.
 
 ## Two usage paths
 
@@ -448,6 +477,8 @@ Like the Express/OpenAI and Next.js App Router examples above, the backend cance
 
 The front-end pairs this with `connector: 'anthropic'` (see the React snippet above) so it reads `content_block_delta` / `message_stop` events out of each WebSocket frame the same way it would over an SSE stream.
 
+> **Runnable example:** [`examples/with-websocket`](./examples/with-websocket) wires `createWebSocketTransport` to a tiny local `ws` server that streams canned Claude-style frames, so you can see this recipe end-to-end without an API key — and its README shows the one-line swap to the real Anthropic backend above.
+
 ## Provider request/body helpers
 
 Connectors parse provider streams on the way back; request helpers serialize Chorus `Message[]` on the way out. Use them on your server proxy (recommended) or as `createFetchSSETransport(..., { formatBody })` body formatters when posting to your own backend.
@@ -606,6 +637,8 @@ data: {"type":"message_stop"}
 
 Anthropic `tool_use` maps to a Chorus tool message by `content_block.id` (`toolDelta.id`), `content_block.name` (`toolCall.name`), and accumulated `input_json_delta.partial_json` (`toolCall.input`).
 
+> **Runnable example:** [`examples/with-anthropic`](./examples/with-anthropic) drives the `anthropic` connector from a built-in mock that streams the events above, so it runs with no API key; its README documents the matching Express + `@anthropic-ai/sdk` proxy.
+
 ## Gemini SSE format
 
 The Google Gemini streaming API (Google AI and Vertex AI) sends server-sent events where each chunk contains a `candidates` array. The `geminiConnector` reads only candidate index `0`, collects text from `content.parts[*].text`, maps `thought: true` text/thinking fields to reasoning, maps every `functionCall` part to a tool message, and signals completion for normal `STOP` / `MAX_TOKENS` finish reasons:
@@ -620,7 +653,9 @@ data: {"candidates":[{"index":0,"content":{"parts":[{"text":"Hello world"}]},"fi
 
 Gemini `functionCall.name` maps to `toolCall.name`, `functionCall.args` maps to `toolCall.input`, and the connector generates a stable tool delta id from the candidate/part index when Gemini does not provide one.
 
-Gemini blocked finish reasons such as `SAFETY`, `RECITATION`, `BLOCKLIST`, or `PROHIBITED_CONTENT` are treated as stream errors instead of silent completion. The `Error` passed to `onError` includes the raw `finishReason` (for example `finishReason: SAFETY`); the default UI still shows the generic `errorMessage`. `MAX_TOKENS` is treated as a completed response and additionally emits a non-fatal `warning` with `code: 'truncated'` (alongside `metadata.finishReason: 'MAX_TOKENS'`) so consumers wired to `onWarning` or dev-mode warning logs are notified that the response was cut off at the model's token limit.
+> **Runnable example:** [`examples/with-gemini`](./examples/with-gemini) drives the `gemini` connector from a built-in mock that streams the `candidates` chunks above, so it runs with no API key; its README documents the matching Express + `@google/generative-ai` proxy.
+
+Gemini blocked finish reasons such as `SAFETY`, `RECITATION`, `BLOCKLIST`, or `PROHIBITED_CONTENT` are treated as stream errors instead of silent completion. The `Error` passed to `onError` includes the raw `finishReason` (for example `finishReason: SAFETY`); the default UI still shows the generic `errorMessage`. `MAX_TOKENS` is treated as a completed response and additionally produces a non-fatal connector `warning` (a `ConnectorWarning` with `code: 'truncated'`) and sets `metadata.finishReason: 'MAX_TOKENS'` on the finalized assistant message. There is no `onWarning` host callback today: connector warnings are not routed to a typed prop or `useChorusStream` callback — they surface only as a one-line dev-mode `console.warn`. To react to truncation in app code, read `metadata.finishReason` from the finalized message (see [Message Shape](#message-shape)).
 
 Example backend proxy (Express + `@google/generative-ai`):
 
@@ -755,9 +790,11 @@ export async function POST(request: Request) {
 
 With either route the client just needs `<Chorus transport="/api/chat" connector="ai-sdk" />`. The connector returns the same `text` / `reasoning` / `toolDelta` / `done` / `error` shape as the other built-in connectors, so retry/stop/edit/regenerate, `<ToolCallBlock>`, and `onError` all work unchanged.
 
+> **Runnable example:** [`examples/with-vercel-ai-sdk`](./examples/with-vercel-ai-sdk) drives the `ai-sdk` connector from a built-in mock that streams UI-message-stream frames, so it runs with no API key; its README documents the matching Next.js App Router route shown above.
+
 ## Examples
 
-Runnable examples live in the [`/examples`](./examples) directory. They declare the same Node.js 20+ floor as the root package and consume the local build after `npm run build`. `npm run verify:examples` recursively checks example `package.json` metadata (including nested packages such as `examples/with-openai/server`) and build-smokes every example with a `build` script, including the Next.js App Router example.
+Runnable examples live in the [`/examples`](./examples) directory. They declare the same Node.js 20+ floor as the root package and consume the local build after `npm run build`. `npm run verify:examples` recursively checks example `package.json` metadata (including nested packages such as `examples/with-openai/server`), build-smokes every example with a `build` script (including the Next.js App Router example), and, for start-only example packages (such as the Express proxy server), syntax-checks the entry file and import-resolves any `react-chorus` subpath exports it uses so a breaking change to `react-chorus/server` or `react-chorus/provider-requests` fails CI. Each example that ships a committed `package-lock.json` is installed with `npm ci`, so a registry-side dependency release cannot silently change what CI builds.
 
 | Example | Description |
 |---------|-------------|
@@ -765,6 +802,10 @@ Runnable examples live in the [`/examples`](./examples) directory. They declare 
 | [`examples/multi-conversation`](./examples/multi-conversation/README.md) | Sidebar-driven local conversations with pinned chats, per-chat persistence, and first-message auto-titles |
 | [`examples/with-next`](./examples/with-next/README.md) | Next.js App Router example with a serverless `/api/chat` SSE route handler proxying to OpenAI |
 | [`examples/with-openai`](./examples/with-openai/README.md) | Full-stack example: Vite frontend + Express backend proxying to OpenAI |
+| [`examples/with-websocket`](./examples/with-websocket/README.md) | `createWebSocketTransport` + the `anthropic` connector talking to a tiny local `ws` server (canned Claude-style frames; README shows the real Anthropic swap) |
+| [`examples/with-anthropic`](./examples/with-anthropic/README.md) | The `anthropic` connector parsing Anthropic Messages SSE — runs with a built-in mock stream, README documents the Express proxy |
+| [`examples/with-gemini`](./examples/with-gemini/README.md) | The `gemini` connector parsing Gemini `generateContent` SSE — runs with a built-in mock stream, README documents the Express proxy |
+| [`examples/with-vercel-ai-sdk`](./examples/with-vercel-ai-sdk/README.md) | The `ai-sdk` connector parsing a Vercel AI SDK UI-message stream — runs with a built-in mock stream, README documents the Next.js route |
 
 ### Running the basic example
 
@@ -859,6 +900,19 @@ npm run dev
 ```
 
 The Vite examples intentionally allow react-chorus's lazy `highlight.js` code-fence chunk up to the same 950 kB documented budget as the playground. The verification script fails if Vite emits a large-chunk warning above that limit, so example builds stay warning-clean while the lazy Markdown cost remains visible.
+
+### Running the WebSocket, Anthropic, Gemini, and Vercel AI SDK examples
+
+[`examples/with-anthropic`](./examples/with-anthropic), [`examples/with-gemini`](./examples/with-gemini), and [`examples/with-vercel-ai-sdk`](./examples/with-vercel-ai-sdk) are zero-backend Vite apps. Each ships a built-in mock transport that streams provider-shaped frames, so you can see the matching connector (`anthropic`, `gemini`, `ai-sdk`) parse a real stream without an API key. Each example's README documents how to swap the mock for the live proxy described in the sections above.
+
+```bash
+npm run build               # build react-chorus from the repository root first
+cd examples/with-anthropic  # or with-gemini / with-vercel-ai-sdk
+npm install
+npm run dev
+```
+
+[`examples/with-websocket`](./examples/with-websocket) additionally ships a tiny `ws` server so you can exercise `createWebSocketTransport` end-to-end. Run the server in one terminal and the Vite app in another — see [`examples/with-websocket/README.md`](./examples/with-websocket/README.md) for the two-terminal walkthrough.
 
 ## Bundle size
 
@@ -2313,7 +2367,7 @@ This section is the canonical place to look up breaking changes and deprecations
 
 **Status:** still emitted today; planned removal in the next major.
 
-**What ships today.** `createFetchSSETransport`, `createWebSocketTransport`, and `createDefaultFetchSSETransport` all POST/send the body `{ prompt, history }` by default, where `prompt` equals `history[history.length - 1].text`. It is a convenience duplicate of the latest user turn — useful for very small toy backends, redundant for everything else. Every example backend in this repo (`examples/with-openai/server`, `examples/with-next`, the Express/Next.js/Gemini/WebSocket snippets in this README) already reads `history` only and explicitly ignores `prompt`.
+**What ships today.** `createFetchSSETransport` and `createWebSocketTransport` (and the default `transport="/api/chat"` shorthand, which builds a `createFetchSSETransport` internally) all POST/send the body `{ prompt, history }` by default, where `prompt` equals `history[history.length - 1].text`. It is a convenience duplicate of the latest user turn — useful for very small toy backends, redundant for everything else. Every example backend in this repo (`examples/with-openai/server`, `examples/with-next`, the Express/Next.js/Gemini/WebSocket snippets in this README) already reads `history` only and explicitly ignores `prompt`.
 
 **What changes in the next major.** The default request body will be `{ history }` — `prompt` will no longer be present, and the inline comments warning backends not to re-append `body.prompt` will be removed. The `formatBody` override remains the supported escape hatch for any backend that still wants a separate field.
 
