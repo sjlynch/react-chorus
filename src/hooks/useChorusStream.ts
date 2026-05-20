@@ -14,8 +14,13 @@ export { ChorusStreamError } from '../streaming/errors';
 
 export interface SendCallbacks {
   /**
-   * Optional notification fired when the first non-empty text stream chunk is delivered.
-   * The same first text chunk is also delivered to onChunk.
+   * Optional notification fired once when the first stream event of any kind is
+   * delivered — text, reasoning, or a tool-call delta. This fires even for
+   * reasoning-first or tool-only turns that never emit answer text, so it is a
+   * reliable signal to clear a thinking placeholder or mark the assistant
+   * message live. `firstChunk` carries the first text chunk when that first
+   * event is text (the same chunk is also delivered to onChunk); for a
+   * reasoning- or tool-first turn it is an empty string.
    */
   onStart?: (firstChunk: string) => void;
   /** Receives every non-empty text stream chunk, including the first one. */

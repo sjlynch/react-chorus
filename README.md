@@ -1344,7 +1344,7 @@ const tokensRef = React.useRef(0);
 
 When you drive `useChorusStream` directly, callbacks fire in this order for a single send:
 
-1. `onStart(firstChunk)` — fires once on the first non-empty text chunk (the same chunk is also delivered to `onChunk`).
+1. `onStart(firstChunk)` — fires once on the first delivered event of any kind (text, reasoning, or tool-call delta), so reasoning-first and tool-only turns still get the signal. `firstChunk` carries the first text chunk when that event is text (also delivered to `onChunk`); otherwise it is an empty string.
 2. `onChunk(chunk)` — fires for every non-empty text chunk in stream order.
 3. `onDone(response?)` or `onError(error)` — exactly one of these after the stream finalizes (an aborted send rejects without calling `onError`).
 

@@ -161,6 +161,29 @@ describe('useChorusStream', () => {
     expect(onChunk).toHaveBeenNthCalledWith(2, 'second');
   });
 
+  it('fires onStart once for a reasoning-then-tool turn that emits no answer text', async () => {
+    const transport = vi.fn<Transport>(() => Promise.resolve(makeSseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { reasoning_content: 'thinking' } }] }),
+      JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'search', arguments: '{"q":"test"}' } }] } }] }),
+      '[DONE]',
+    ])));
+    const onStart = vi.fn();
+    const onChunk = vi.fn();
+    const onReasoning = vi.fn();
+    const onToolDelta = vi.fn();
+    const { result } = renderHook(() => useChorusStream(transport, { connector: 'openai' }));
+
+    await act(async () => {
+      await result.current.send('hello', [], { onStart, onChunk, onReasoning, onToolDelta });
+    });
+
+    expect(onStart).toHaveBeenCalledTimes(1);
+    expect(onStart).toHaveBeenCalledWith('');
+    expect(onChunk).not.toHaveBeenCalled();
+    expect(onReasoning).toHaveBeenCalledWith('thinking');
+    expect(onToolDelta).toHaveBeenCalled();
+  });
+
   it('calls onDone after all tokens', async () => {
     const transport = vi.fn<Transport>(() => Promise.resolve(makeSseResponse(['first', 'last'])));
     const calls: string[] = [];
