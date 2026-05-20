@@ -44,6 +44,10 @@ export interface ChorusSpeakerLabels {
 export interface ChorusToolCallLabels {
   input: string;
   output: string;
+  /** Status shown while a tool call is still streaming / awaiting its result. */
+  running: string;
+  /** Status shown when a finished tool call produced no input and no output. */
+  empty: string;
 }
 
 export interface ChorusCodeCopyLabels {

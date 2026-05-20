@@ -152,8 +152,12 @@
 .chorus-tool-call-header:hover:not(:disabled) { background: var(--chorus-tool-header-hover, #222222); }
 .chorus-tool-call-header:focus-visible { outline: 2px solid var(--chorus-send-bg, #ffffff); outline-offset: -2px; }
 .chorus-tool-call-header:disabled { cursor: default; }
+.chorus-tool-call-header--static { cursor: default; }
 .chorus-tool-call-name { flex: 1; font-family: monospace; font-weight: 600; color: var(--chorus-tool-name-text, #e6edf3); }
 .chorus-tool-call-chevron { font-size: 10px; }
+.chorus-tool-call-status { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--chorus-tool-label-text, #666666); }
+.chorus-tool-call-status[data-chorus-tool-call-state="running"] { color: var(--chorus-tool-running-text, #a3a3a3); animation: chorus-tool-call-running 1.4s infinite ease-in-out; }
+@keyframes chorus-tool-call-running { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
 .chorus-tool-call-body { background: var(--chorus-tool-body-bg, #111111); }
 .chorus-tool-call-section { border-top: 1px solid var(--chorus-tool-border, #2a2a2a); padding: 8px 12px; }
 .chorus-tool-call-label { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--chorus-tool-label-text, #666666); margin-bottom: 6px; }
@@ -176,6 +180,7 @@
    and drop non-essential hover/focus transitions in the chorus widget. */
 @media (prefers-reduced-motion: reduce) {
   .chorus-attachment-spinner { animation: none; }
+  .chorus-tool-call-status[data-chorus-tool-call-state="running"] { animation: none; opacity: 1; }
   .chorus-dot { animation: none; opacity: 1; }
   .chorus-dot:nth-child(2), .chorus-dot:nth-child(3) { animation-delay: 0s; }
   .chorus-input-row textarea,

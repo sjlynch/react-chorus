@@ -1073,7 +1073,7 @@ const fr: ChorusLabels = {
     system: 'Message système',
     tool: 'Message outil',
   },
-  toolCall: { input: 'Entrée', output: 'Sortie' },
+  toolCall: { input: 'Entrée', output: 'Sortie', running: 'En cours…', empty: 'Aucune sortie' },
   reasoning: 'Raisonnement',
   codeCopy: { copy: 'Copier', copied: 'Copié !', failed: 'Échec', ariaLabel: 'Copier le code' },
   conversationList: {
@@ -1780,6 +1780,8 @@ For agentic UIs, react-chorus provides first-class support for tool call renderi
 ### Streaming and execution lifecycle
 
 On the built-in `transport` path, connector `toolDelta` events are display-only by default: Chorus creates or updates a visible `role: 'tool'` message and leaves execution to your app. A streamed tool call is considered complete when the provider stream ends (`[DONE]`, `message_stop`, a normal Gemini finish reason, or the response body closing). Tool-only turns end the sending state cleanly; because there is no assistant message, `onFinish` does not fire, but `onStreamDone` and/or `onToolCall` can observe the completed tool context.
+
+The default `<ToolCallBlock>` renders an expandable input/output panel once a call has either. Before its arguments arrive — or for a call that legitimately produces no input and no output — it shows an explicit status row instead of an empty control: `Running…` while the turn is still streaming, `No output` once it has settled. Both strings are localizable via `labels.toolCall.running` / `labels.toolCall.empty`.
 
 To observe deltas without executing tools:
 
