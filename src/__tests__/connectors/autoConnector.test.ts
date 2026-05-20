@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { autoConnector } from '../../connectors/connectors';
+import { autoConnector, aiSdkConnector } from '../../connectors/connectors';
 
 describe('autoConnector', () => {
   it('returns done for [DONE] sentinel', () => {
@@ -110,5 +110,47 @@ describe('autoConnector', () => {
     const state = autoConnector.createState?.();
     expect(autoConnector.extract('<think>scratch', state)).toEqual({ reasoning: 'scratch' });
     expect(autoConnector.extract('ing head</think>visible', state)).toEqual({ reasoning: 'ing head', text: 'visible' });
+  });
+
+  it('renders plain-text lines starting with [a-z0-9]: as visible text instead of routing them to the data-stream parser', () => {
+    expect(autoConnector.extract('a: see the list below')).toEqual({ text: 'a: see the list below' });
+    expect(autoConnector.extract('e: for example')).toEqual({ text: 'e: for example' });
+    expect(autoConnector.extract('c: minor')).toEqual({ text: 'c: minor' });
+  });
+
+  it('does not let plain-text d:/e: lines terminate an auto stream', () => {
+    expect(autoConnector.extract('d:0')).toEqual({ text: 'd:0' });
+    expect(autoConnector.extract('e:"note"')).toEqual({ text: 'e:"note"' });
+  });
+
+  it('still routes genuine data-stream frames after tightening the auto dispatch', () => {
+    expect(autoConnector.extract('0:"hello"')).toEqual({ text: 'hello' });
+    expect(autoConnector.extract('e:{"finishReason":"stop","usage":{}}')).toEqual({ done: true });
+  });
+
+  it('parses an AI SDK frame carrying a stray top-level error key as its frame type, matching aiSdkConnector', () => {
+    const textFrame = JSON.stringify({ type: 'text-delta', id: 't', delta: 'hi', error: 'stray' });
+    expect(autoConnector.extract(textFrame)).toEqual({ text: 'hi' });
+    expect(autoConnector.extract(textFrame)).toEqual(aiSdkConnector.extract(textFrame));
+
+    const finishFrame = JSON.stringify({ type: 'finish', error: 'stray' });
+    expect(autoConnector.extract(finishFrame)).toEqual({ done: true });
+    expect(autoConnector.extract(finishFrame)).toEqual(aiSdkConnector.extract(finishFrame));
+  });
+
+  it('routes flush() to the sub-connector that first consumed the stream, not always OpenAI', () => {
+    // Stream auto-detected as AI SDK on its first frame.
+    const aiSdkState = autoConnector.createState?.();
+    expect(autoConnector.extract(JSON.stringify({ type: 'text-delta', delta: 'hi' }), aiSdkState)).toEqual({ text: 'hi' });
+    // A later plain-text fragment buffers a partial `<think` tag inside the
+    // OpenAI sub-connector, but the stream was consumed by AI SDK — flush() must
+    // route to the AI SDK connector (no flush) rather than draining the buffer.
+    autoConnector.extract('<th', aiSdkState);
+    expect(autoConnector.flush?.(aiSdkState)).toBeNull();
+
+    // A plain-text stream is still flushed through the OpenAI sub-connector.
+    const plainState = autoConnector.createState?.();
+    autoConnector.extract('answer <th', plainState);
+    expect(autoConnector.flush?.(plainState)).toEqual({ text: '<th' });
   });
 });
