@@ -16,6 +16,7 @@ type RefValues<TMeta> = {
   tools: UseAssistantSessionOptions<TMeta>['tools'];
   autoContinueTools: boolean;
   maxToolIterations: number;
+  continueOnToolError: boolean;
   shouldContinueToolLoop: UseAssistantSessionOptions<TMeta>['shouldContinueToolLoop'];
   confirmDeleteMessage: UseAssistantSessionOptions<TMeta>['confirmDeleteMessage'];
   confirmClearConversation: UseAssistantSessionOptions<TMeta>['confirmClearConversation'];
@@ -43,6 +44,7 @@ export function useAssistantSessionRefs<TMeta>(v: RefValues<TMeta>) {
     tools: useLatestRef(v.tools),
     autoContinueTools: useLatestRef(v.autoContinueTools),
     maxToolIterations: useLatestRef(v.maxToolIterations),
+    continueOnToolError: useLatestRef(v.continueOnToolError),
     shouldContinueToolLoop: useLatestRef(v.shouldContinueToolLoop),
     confirmDeleteMessage: useLatestRef(v.confirmDeleteMessage),
     confirmClearConversation: useLatestRef(v.confirmClearConversation),

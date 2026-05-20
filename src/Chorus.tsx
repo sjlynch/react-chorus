@@ -3,7 +3,7 @@ import './Chorus.css';
 import { ChatWindow } from './components/ChatWindow';
 import { ChatInput } from './components/ChatInput';
 import type { ChatInputHandle } from './components/ChatInput';
-import { styleVarsFromPalette } from './components/ChorusTheme';
+import { styleVarsFromPalette } from './utils/paletteVars';
 import type { Attachment, Message } from './types';
 import { resolveChorusLabels } from './labels/resolve';
 import { useChorusPersistence } from './hooks/useChorusPersistence';
@@ -22,10 +22,12 @@ function ChorusInner<TMeta = Record<string, unknown>>({
   clearLabel,
   codeBlockTheme = 'dark',
   connector,
+  connectorOptions,
   confirmDeleteMessage,
   confirmClearConversation,
   autoContinueTools,
   maxToolIterations,
+  continueOnToolError,
   shouldContinueToolLoop,
   disabled = false,
   disabledReason,
@@ -72,6 +74,8 @@ function ChorusInner<TMeta = Record<string, unknown>>({
   serializeMessages,
   showClearButton = false,
   showJumpToBottomButton,
+  showTimestamps = false,
+  formatTimestamp,
   style,
   suggestedPrompts,
   systemPrompt,
@@ -120,9 +124,13 @@ function ChorusInner<TMeta = Record<string, unknown>>({
     value,
     persistenceKey,
     connector,
+    connectorOptions,
     transport,
     onSend,
     sending: sendingProp,
+    autoContinueTools,
+    maxToolIterations,
+    shouldContinueToolLoop,
   });
 
   const resetComposer = React.useCallback(() => {
@@ -147,6 +155,7 @@ function ChorusInner<TMeta = Record<string, unknown>>({
     transport,
     systemPrompt,
     connector,
+    connectorOptions,
     onSend,
     minAssistantDelayMs,
     fallbackErrorMessage,
@@ -161,6 +170,7 @@ function ChorusInner<TMeta = Record<string, unknown>>({
     tools,
     autoContinueTools,
     maxToolIterations,
+    continueOnToolError,
     shouldContinueToolLoop,
     confirmDeleteMessage,
     confirmClearConversation,
@@ -262,6 +272,8 @@ function ChorusInner<TMeta = Record<string, unknown>>({
         renderError={renderError}
         renderMessage={renderMessage}
         showJumpToBottomButton={resolvedShowJumpToBottomButton}
+        showTimestamps={showTimestamps}
+        formatTimestamp={formatTimestamp}
         streamingMessageId={session.streamingMessageId}
         suggestedPrompts={canRenderEmptyAffordance ? suggestedPrompts : undefined}
         suggestedPromptsDisabled={writesDisabled}
