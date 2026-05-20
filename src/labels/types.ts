@@ -6,6 +6,8 @@ export interface ChorusComposerLabels {
   placeholder: string;
   ariaLabel: string;
   attachFile: string;
+  /** Text shown in the drag-and-drop overlay while a file is dragged over the chat surface. */
+  dropToAttach: string;
   send: string;
   stop: string;
   disabledReason: string;
@@ -66,6 +68,12 @@ export interface ChorusConversationListLabels {
   renameAriaLabel: (title: string) => string;
   pinAriaLabel: (title: string, pinned: boolean) => string;
   deleteAriaLabel: (title: string) => string;
+  /** Inline validation message shown when a rename is submitted with an empty title. */
+  renameEmptyError: string;
+  /** Inline validation message shown when a rename title exceeds the documented max length. */
+  renameTooLongError: (maxLength: number) => string;
+  /** Polite live-region announcement after a conversation row is deleted. */
+  deletedAnnouncement: (title: string) => string;
 }
 
 export interface ChorusAttachmentTooLargeContext {
