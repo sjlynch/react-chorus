@@ -9,12 +9,12 @@ import type { FetchTransportInit } from './hooks/assistant-session/transport';
 import type { DeserializeMessages, SerializeMessages } from './hooks/useChorusPersistence';
 import type { ChorusMessagesChangeContext } from './hooks/useChorusMessages';
 import type { ChorusAbortContext, ChorusAbortReason, ChorusAbortSource, ChorusClearConversationContext, ChorusConfirmClearConversation, ChorusConfirmDeleteMessage, ChorusDeleteMessageContext, ChorusFinishContext, ChorusOnAbort, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusSendHelpers, ChorusSendPath, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusStreamDoneReason, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolLoopContext, ChorusToolRegistry } from './hooks/useAssistantSession';
-import type { Connector } from './connectors/connectors';
+import type { Connector, ConnectorWarning } from './connectors/connectors';
 import type { MarkdownSanitizer } from './components/Markdown';
 
 export type { Transport };
 export type { FetchTransportInit };
-export type { Connector };
+export type { Connector, ConnectorWarning };
 export type { RenderAttachmentErrorContext };
 export type { ChorusAbortContext, ChorusAbortReason, ChorusAbortSource, ChorusClearConversationContext, ChorusConfirmClearConversation, ChorusConfirmDeleteMessage, ChorusDeleteMessageContext, ChorusFinishContext, ChorusMessagesChangeContext, ChorusOnAbort, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusSendHelpers, ChorusSendPath, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusStreamDoneReason, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolLoopContext, ChorusToolRegistry };
 
@@ -126,6 +126,14 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
   onMessagesChange?: (messages: Message<TMeta>[], context: ChorusMessagesChangeContext) => void;
   /** Called when a transport stream completes normally, including tool-only turns. */
   onStreamDone?: ChorusOnStreamDone<TMeta>;
+  /**
+   * Called for non-fatal connector warnings on the `transport` path — e.g. a
+   * `truncated` warning when the model hit its max-token limit, or safety-rating
+   * notices. The stream still completes normally (`onFinish`/`onStreamDone` fire as
+   * usual); use this to tell the user the response may be cut off or partially
+   * blocked. A throwing handler is warned in development and otherwise ignored.
+   */
+  onStreamWarning?: (warning: ConnectorWarning) => void;
   /** Called when a completed streamed tool call is ready; return a value to append it as tool output. */
   onToolCall?: ChorusOnToolCall<TMeta>;
   /** Observes every accumulated streamed tool-call delta on the transport path. */

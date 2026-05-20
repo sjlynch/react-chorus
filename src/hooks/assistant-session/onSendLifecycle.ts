@@ -31,7 +31,7 @@ export interface OnSendLifecycleDeps<TMeta> {
   invalidateAssistantSession: (sessionId?: number) => void;
   removePendingAssistant: () => void;
   updateSessionMessages: UpdateSessionMessages<TMeta>;
-  observers: Pick<ObserverCallbacks<TMeta>, 'safeOnError'>;
+  observers: Pick<ObserverCallbacks<TMeta>, 'safeOnError' | 'safeOnStreamWarning'>;
   showStreamError: (rawError: Error) => void;
 }
 
@@ -84,6 +84,7 @@ export function startOnSendLifecycle<TMeta>({
     appendAssistantNow,
     appendAssistantReasoningNow,
     appendToolDeltaNow,
+    safeOnStreamWarning: observers.safeOnStreamWarning,
     completeActiveSession,
     isAssistantSessionActive,
     minAssistantDelayMsRef,

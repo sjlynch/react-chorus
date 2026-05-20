@@ -89,6 +89,33 @@ describe('Chorus', () => {
     }));
   });
 
+  it('routes a non-fatal connector warning to onStreamWarning while the stream still completes', async () => {
+    const user = userEvent.setup();
+    const onStreamWarning = vi.fn();
+    const onFinish = vi.fn();
+    const transport = vi.fn<Transport>(async () => sseResponse([
+      JSON.stringify({ candidates: [{ finishReason: 'MAX_TOKENS', content: { parts: [{ text: 'cut off here' }] } }] }),
+    ]));
+
+    render(
+      <Chorus
+        transport={transport}
+        connector="gemini"
+        minAssistantDelayMs={0}
+        onStreamWarning={onStreamWarning}
+        onFinish={onFinish}
+      />,
+    );
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'long answer');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByText('cut off here')).toBeInTheDocument();
+    await waitFor(() => expect(onStreamWarning).toHaveBeenCalledTimes(1));
+    expect(onStreamWarning).toHaveBeenCalledWith(expect.objectContaining({ code: 'truncated' }));
+    expect(onFinish).toHaveBeenCalled();
+  });
+
   it('finishes a tool-only Anthropic stream and invokes onToolCall with actionable context', async () => {
     const user = userEvent.setup();
     const onToolCall = vi.fn();

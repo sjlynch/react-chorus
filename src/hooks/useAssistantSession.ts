@@ -1,6 +1,6 @@
 import React from 'react';
 import type { Attachment, Message } from '../types';
-import type { Connector } from '../connectors/connectors';
+import type { Connector, ConnectorWarning } from '../connectors/connectors';
 import type { ConnectorName } from '../types';
 import { useChorusStream, type Transport } from './useChorusStream';
 import { useLatestRef } from './useLatestRef';
@@ -72,6 +72,7 @@ export interface UseAssistantSessionOptions<TMeta = Record<string, unknown>> {
   onFinish?: ChorusOnFinish<TMeta>;
   onAbort?: ChorusOnAbort<TMeta>;
   onStreamDone?: ChorusOnStreamDone<TMeta>;
+  onStreamWarning?: (warning: ConnectorWarning) => void;
   onToolCall?: ChorusOnToolCall<TMeta>;
   onToolDelta?: ChorusOnToolDelta<TMeta>;
   tools?: ChorusToolRegistry<TMeta>;
@@ -118,6 +119,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
   onFinish,
   onAbort,
   onStreamDone,
+  onStreamWarning,
   onToolCall,
   onToolDelta,
   tools,
@@ -139,6 +141,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     onFinish: onFinishRef,
     onAbort: onAbortRef,
     onStreamDone: onStreamDoneRef,
+    onStreamWarning: onStreamWarningRef,
     onToolCall: onToolCallRef,
     onToolDelta: onToolDeltaRef,
     tools: toolsRef,
@@ -162,6 +165,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     onFinish,
     onAbort,
     onStreamDone,
+    onStreamWarning,
     onToolCall,
     onToolDelta,
     tools,
@@ -216,9 +220,10 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     onFinishRef,
     onAbortRef,
     onStreamDoneRef,
+    onStreamWarningRef,
     onToolDeltaRef,
     onToolCallRef,
-  }), [onAbortRef, onChunkRef, onErrorRef, onFinishRef, onStreamDoneRef, onToolCallRef, onToolDeltaRef]);
+  }), [onAbortRef, onChunkRef, onErrorRef, onFinishRef, onStreamDoneRef, onStreamWarningRef, onToolCallRef, onToolDeltaRef]);
 
   const buffer = useAssistantBuffer<TMeta>({
     updateSessionMessages,

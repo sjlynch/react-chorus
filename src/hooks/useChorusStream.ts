@@ -1,6 +1,6 @@
 import React from 'react';
 import type { ConnectorName, Message } from '../types';
-import { getConnector, type Connector, type ConnectorResult, type ConnectorToolDelta } from '../connectors/connectors';
+import { getConnector, type Connector, type ConnectorResult, type ConnectorToolDelta, type ConnectorWarning } from '../connectors/connectors';
 import { useLatestRef } from './useLatestRef';
 import { readSSEStream } from '../streaming/readSSEStream';
 import { createDelayedChunkEmitter } from '../streaming/delayedStreamEvents';
@@ -25,6 +25,14 @@ export interface SendCallbacks {
   /** Receives accumulated tool-call deltas when the connector exposes them. */
   onToolDelta?: (toolDelta: ConnectorToolDelta) => void;
   /**
+   * Receives non-fatal connector warnings (truncation, safety ratings, telemetry) as the
+   * connector emits them. Unlike onError, a warning does not abort the stream — delivery
+   * continues after the callback returns. If this callback throws, the error is warned in
+   * development and otherwise ignored, so a misbehaving warning observer cannot fail an
+   * otherwise-successful send.
+   */
+  onWarning?: (warning: ConnectorWarning) => void;
+  /**
    * Called after a successful stream completes. If this callback throws, send() rejects
    * with that callback error; onError is not invoked because no stream error occurred.
    */
@@ -47,6 +55,24 @@ export interface StreamOptions {
 
 function safeOnObserverError(callbackName: string, error: unknown) {
   warnInDev(`[Chorus] \`${callbackName}\` callback threw and was ignored so the original stream error could be re-thrown.`, error);
+}
+
+/**
+ * Deliver a non-fatal connector warning. When the host wired `onWarning`, the
+ * warning is routed there; a throw is warned-and-ignored so it can never fail
+ * an otherwise-successful send. Without an observer the warning is logged in
+ * dev so the signal stays discoverable. The stream keeps flowing either way.
+ */
+function deliverConnectorWarning(cb: SendCallbacks, warning: ConnectorWarning) {
+  if (cb.onWarning) {
+    try {
+      cb.onWarning(warning);
+    } catch (callbackError) {
+      safeOnObserverError('onWarning', callbackError);
+    }
+    return;
+  }
+  warnInDev(`[Chorus] connector warning (${warning.code}): ${warning.message}`, warning.payload);
 }
 
 function connectorErrorFromResult(out: ConnectorResult) {
@@ -107,6 +133,7 @@ function endStreamSession(
 }
 
 function createConnectorResultDeliverer(
+  cb: SendCallbacks,
   delayedChunks: DelayedChunkEmitter,
   accumulateToolDelta: ToolDeltaAccumulator,
 ) {
@@ -122,9 +149,10 @@ function createConnectorResultDeliverer(
     const toolDeltas = out.toolDeltas?.length ? out.toolDeltas : out.toolDelta ? [out.toolDelta] : [];
     for (const toolDelta of toolDeltas) delayedChunks.handleToolDelta(accumulateToolDelta(toolDelta));
 
-    // Non-fatal connector signals (truncation, safety ratings, telemetry events). Logged in
-    // dev so they're discoverable; not yet routed to a typed callback. Stream keeps flowing.
-    if (out.warning) warnInDev(`[Chorus] connector warning (${out.warning.code}): ${out.warning.message}`, out.warning.payload);
+    // Non-fatal connector signals (truncation, safety ratings, telemetry events). Routed to
+    // the optional onWarning observer; without one they are logged in dev so they stay
+    // discoverable. Either way the stream keeps flowing.
+    if (out.warning) deliverConnectorWarning(cb, out.warning);
 
     const connectorError = connectorErrorFromResult(out);
     if (connectorError) throw connectorError;
@@ -273,7 +301,7 @@ export function useChorusStream<TMeta = Record<string, unknown>>(transport: Tran
     const delayedChunks = createDelayedChunkEmitter(cb, startedAt, session.signal);
     const accumulateToolDelta = createToolDeltaAccumulator();
     const activeConnector = connectorRef.current;
-    const deliverConnectorResult = createConnectorResultDeliverer(delayedChunks, accumulateToolDelta);
+    const deliverConnectorResult = createConnectorResultDeliverer(cb, delayedChunks, accumulateToolDelta);
 
     const streamPromiseRef: StreamPromiseRef = { current: null };
     let errorToThrow: unknown;

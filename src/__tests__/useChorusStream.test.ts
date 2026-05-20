@@ -215,6 +215,61 @@ describe('useChorusStream', () => {
     expect(onToolDelta).toHaveBeenNthCalledWith(2, expect.objectContaining({ id: 'call_1', name: 'search', input: { q: 'test' }, provider: 'openai', providerId: 'call_1' }));
   });
 
+  it('routes non-fatal connector warnings to onWarning', async () => {
+    const transport = vi.fn<Transport>(() => Promise.resolve(makeSseResponse([
+      JSON.stringify({ candidates: [{ finishReason: 'MAX_TOKENS', content: { parts: [{ text: 'cut off' }] } }] }),
+    ])));
+    const onChunk = vi.fn();
+    const onWarning = vi.fn();
+    const onDone = vi.fn();
+    const { result } = renderHook(() => useChorusStream(transport, { connector: 'gemini' }));
+
+    await act(async () => {
+      await result.current.send('hello', [], { onChunk, onWarning, onDone });
+    });
+
+    expect(onChunk).toHaveBeenCalledWith('cut off');
+    expect(onWarning).toHaveBeenCalledTimes(1);
+    expect(onWarning).toHaveBeenCalledWith(expect.objectContaining({ code: 'truncated' }));
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
+  it('warns in dev rather than throwing when onWarning is omitted', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const transport = vi.fn<Transport>(() => Promise.resolve(makeSseResponse([
+      JSON.stringify({ candidates: [{ finishReason: 'MAX_TOKENS', content: { parts: [{ text: 'cut off' }] } }] }),
+    ])));
+    const onDone = vi.fn();
+    const { result } = renderHook(() => useChorusStream(transport, { connector: 'gemini' }));
+
+    await act(async () => {
+      await result.current.send('hello', [], { onChunk: vi.fn(), onDone });
+    });
+
+    expect(onDone).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('connector warning (truncated)'), expect.anything());
+  });
+
+  it('keeps the send successful when onWarning throws', async () => {
+    const transport = vi.fn<Transport>(() => Promise.resolve(makeSseResponse([
+      JSON.stringify({ candidates: [{ finishReason: 'MAX_TOKENS', content: { parts: [{ text: 'cut off' }] } }] }),
+    ])));
+    const onWarning = vi.fn(() => { throw new Error('warning observer boom'); });
+    const onDone = vi.fn();
+    const onError = vi.fn();
+    const { result } = renderHook(() => useChorusStream(transport, { connector: 'gemini' }));
+
+    await act(async () => {
+      await expect(
+        result.current.send('hello', [], { onChunk: vi.fn(), onWarning, onDone, onError }),
+      ).resolves.toBeUndefined();
+    });
+
+    expect(onWarning).toHaveBeenCalledTimes(1);
+    expect(onDone).toHaveBeenCalledTimes(1);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
   it('emits every tool delta when one connector result contains multiple calls', async () => {
     const transport = vi.fn<Transport>(() => Promise.resolve(makeSseResponse([
       JSON.stringify({ choices: [{ index: 0, delta: { content: 'tools:', tool_calls: [
