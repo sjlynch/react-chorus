@@ -317,6 +317,61 @@ describe('Chorus', () => {
     );
   });
 
+  it('reports each controlled change once when the host derives a new array in onChange', async () => {
+    const user = userEvent.setup();
+    const onMessagesChange = vi.fn();
+
+    function CloningHarness() {
+      const [messages, setMessages] = React.useState<Message[]>([{ id: 'seed', role: 'assistant', text: 'controlled seed' }]);
+      return (
+        <>
+          <button
+            type="button"
+            onClick={() => setMessages((prev) => [...prev, { id: 'host-added', role: 'user', text: 'host added' }])}
+          >
+            host append
+          </button>
+          <Chorus
+            value={messages}
+            // The host normalizes by cloning the emitted array back into a NEW
+            // array — the exact pattern that used to double-report changes.
+            onChange={(next) => setMessages([...next])}
+            onMessagesChange={onMessagesChange}
+            onSend={() => ({ id: 'controlled-assistant', role: 'assistant', text: 'controlled reply' })}
+            minAssistantDelayMs={0}
+          />
+        </>
+      );
+    }
+
+    render(<CloningHarness />);
+
+    await waitFor(() => expect(onMessagesChange).toHaveBeenCalled());
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'controlled send');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+    await waitFor(() => expect(screen.getByText('controlled reply')).toBeInTheDocument());
+
+    const reasonsAfterSend = onMessagesChange.mock.calls.map(([, context]) => context.reason);
+    // The clone in onChange must not turn one logical change into two calls —
+    // once correctly labeled, once mislabeled 'external'.
+    expect(reasonsAfterSend.filter((reason) => reason === 'send')).toHaveLength(1);
+    expect(reasonsAfterSend.filter((reason) => reason === 'assistant').length).toBeGreaterThanOrEqual(1);
+    // Only the initial mount observation is 'external' — no round-trip echoes.
+    expect(reasonsAfterSend.filter((reason) => reason === 'external')).toHaveLength(1);
+
+    // A genuine host-driven change still surfaces as an 'external' observation.
+    await user.click(screen.getByRole('button', { name: 'host append' }));
+    await waitFor(() => expect(onMessagesChange).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ id: 'host-added' })]),
+      expect.objectContaining({ source: 'controlled', reason: 'external' }),
+    ));
+    const externalReasons = onMessagesChange.mock.calls
+      .map(([, context]) => context.reason)
+      .filter((reason) => reason === 'external');
+    expect(externalReasons).toHaveLength(2);
+  });
+
   it('fills and focuses the composer when a suggested prompt is clicked', async () => {
     const user = userEvent.setup();
 
