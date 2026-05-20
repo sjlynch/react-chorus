@@ -55,6 +55,44 @@ describe('Chorus', () => {
     expect(root).toHaveClass('chorus', 'chorus--always-show-actions');
   });
 
+  it('renders per-message timestamps when showTimestamps is enabled', () => {
+    const { container } = render(
+      <Chorus
+        showTimestamps
+        initialMessages={[
+          { id: 'u1', role: 'user', text: 'Hello', createdAt: '2026-05-20T15:47:06.425Z' },
+          { id: 'a1', role: 'assistant', text: 'Hi there', createdAt: '2026-05-20T15:48:00.000Z' },
+        ]}
+      />
+    );
+
+    const times = container.querySelectorAll('time.chorus-msg-time');
+    expect(times).toHaveLength(2);
+    expect(times[0]).toHaveAttribute('datetime', '2026-05-20T15:47:06.425Z');
+    expect(times[1]).toHaveAttribute('datetime', '2026-05-20T15:48:00.000Z');
+    expect(times[0].textContent?.trim()).not.toBe('');
+  });
+
+  it('does not render per-message timestamps without showTimestamps', () => {
+    const { container } = render(
+      <Chorus initialMessages={[{ id: 'u1', role: 'user', text: 'Hello', createdAt: '2026-05-20T15:47:06.425Z' }]} />
+    );
+
+    expect(container.querySelector('.chorus-msg-time')).not.toBeInTheDocument();
+  });
+
+  it('applies a custom formatTimestamp on the Chorus timestamp path', () => {
+    render(
+      <Chorus
+        showTimestamps
+        formatTimestamp={(timestamp) => `formatted:${timestamp}`}
+        initialMessages={[{ id: 'u1', role: 'user', text: 'Hello', createdAt: '2026-05-20T15:47:06.425Z' }]}
+      />
+    );
+
+    expect(screen.getByText('formatted:2026-05-20T15:47:06.425Z')).toBeInTheDocument();
+  });
+
   it('seeds feedback through getMessageFeedback', () => {
     const message: Message<{ storedFeedback: 'down' | null }> = {
       id: 'stored-feedback',

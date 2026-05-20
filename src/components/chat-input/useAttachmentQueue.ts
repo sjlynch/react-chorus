@@ -2,12 +2,13 @@ import React from 'react';
 import type { Attachment, AttachmentError, AttachmentSource, UploadAttachment } from '../../types';
 import { DEFAULT_ATTACHMENT_LABELS } from '../../labels/attachments';
 import type { ChorusAttachmentLabels } from '../../labels/types';
-import { getPendingAttachmentId, isPendingAttachment, listFiles } from './attachmentUtils';
+import { listFiles, updateQueuedAttachment, type QueuedAttachment } from './attachmentUtils';
 import { useAttachmentDragState } from './useAttachmentDragState';
 import { usePendingAttachmentWork, type AttachmentAnnouncement } from './attachmentPendingWork';
 import { validateAttachmentBatch } from './attachmentValidation';
 
 export type { AttachmentAnnouncement } from './attachmentPendingWork';
+export type { QueuedAttachment } from './attachmentUtils';
 
 export interface UseAttachmentQueueOptions {
   resetKey?: unknown;
@@ -32,10 +33,10 @@ export function useAttachmentQueue({
   composerInactive,
   labels = DEFAULT_ATTACHMENT_LABELS,
 }: UseAttachmentQueueOptions) {
-  const [attachments, setAttachments] = React.useState<Attachment[]>([]);
+  const [queuedAttachments, setQueuedAttachments] = React.useState<QueuedAttachment[]>([]);
   const [attachmentError, setAttachmentError] = React.useState<AttachmentError | null>(null);
   const [announcement, setAnnouncement] = React.useState<AttachmentAnnouncement | null>(null);
-  const attachmentsRef = React.useRef(attachments);
+  const queuedAttachmentsRef = React.useRef(queuedAttachments);
   const previousResetKeyRef = React.useRef(resetKey);
   const {
     draggingFiles,
@@ -46,8 +47,8 @@ export function useAttachmentQueue({
   } = useAttachmentDragState();
 
   React.useEffect(() => {
-    attachmentsRef.current = attachments;
-  }, [attachments]);
+    queuedAttachmentsRef.current = queuedAttachments;
+  }, [queuedAttachments]);
 
   const dismissAttachmentError = React.useCallback(() => {
     setAttachmentError(null);
@@ -60,6 +61,7 @@ export function useAttachmentQueue({
 
   const {
     startPendingAttachmentWork,
+    retryAttachmentWork,
     abortPendingAttachment,
     abortAllPendingAttachments,
   } = usePendingAttachmentWork({
@@ -68,14 +70,14 @@ export function useAttachmentQueue({
     accept,
     maxAttachmentBytes,
     maxAttachments,
-    setAttachments,
+    setQueuedAttachments,
     setAnnouncement,
     reportAttachmentError,
   });
 
   const clearAttachmentsAndPendingWork = React.useCallback(() => {
     abortAllPendingAttachments();
-    setAttachments([]);
+    setQueuedAttachments([]);
     setAttachmentError(null);
     setAnnouncement(null);
   }, [abortAllPendingAttachments]);
@@ -92,7 +94,11 @@ export function useAttachmentQueue({
     if (!composerInactive) return;
     abortAllPendingAttachments();
     clearDragState();
-    setAttachments(prev => prev.filter(att => !isPendingAttachment(att)));
+    // Clear ALL staged attachments, not just pending ones: keeping completed
+    // attachments here while dropping pending ones is an internally inconsistent
+    // half-clear that carries stale files into the next, unrelated send once the
+    // composer is re-enabled.
+    setQueuedAttachments([]);
     setAttachmentError(null);
   }, [abortAllPendingAttachments, clearDragState, composerInactive]);
 
@@ -109,7 +115,7 @@ export function useAttachmentQueue({
     const { acceptedFiles, errors } = validateAttachmentBatch({
       files,
       source,
-      currentAttachmentCount: attachmentsRef.current.length,
+      currentAttachmentCount: queuedAttachmentsRef.current.length,
       labels,
       accept,
       maxAttachmentBytes,
@@ -123,32 +129,45 @@ export function useAttachmentQueue({
     await startPendingAttachmentWork(acceptedFiles, source);
   }, [accept, canIngestFiles, labels, maxAttachmentBytes, maxAttachments, reportAttachmentError, startPendingAttachmentWork]);
 
-  const removeAttachment = React.useCallback((idx: number) => {
+  const removeAttachment = React.useCallback((uid: string) => {
     if (composerInactive) return;
-    const attachment = attachmentsRef.current[idx];
-    const pendingId = attachment ? getPendingAttachmentId(attachment) : undefined;
-    if (pendingId) abortPendingAttachment(pendingId);
-    setAttachments(prev => prev.filter((_, i) => i !== idx));
+    // Aborts in-flight work when the chip is pending; a no-op for ready/failed chips.
+    abortPendingAttachment(uid);
+    setQueuedAttachments(prev => prev.filter(item => item.uid !== uid));
   }, [abortPendingAttachment, composerInactive]);
 
-  const updateAttachmentAlt = React.useCallback((idx: number, alt: string) => {
+  const updateAttachmentAlt = React.useCallback((uid: string, alt: string) => {
     if (composerInactive) return;
-    setAttachments(prev => prev.map((att, i) => {
-      if (i !== idx) return att;
-      const next: Attachment = alt.length > 0 ? { ...att, alt } : { ...att };
+    setQueuedAttachments(prev => updateQueuedAttachment(prev, uid, item => {
+      const next: Attachment = alt.length > 0 ? { ...item.attachment, alt } : { ...item.attachment };
       if (alt.length === 0) delete next.alt;
-      return next;
+      return { ...item, attachment: next };
     }));
   }, [composerInactive]);
 
+  const retryAttachment = React.useCallback((uid: string) => {
+    if (composerInactive) return;
+    const item = queuedAttachmentsRef.current.find(entry => entry.uid === uid);
+    if (!item || item.status !== 'failed') return;
+    // Fresh attempt — drop the prior failure so this retry's outcome is surfaced.
+    setAttachmentError(null);
+    void retryAttachmentWork(uid, item.file, item.source);
+  }, [composerInactive, retryAttachmentWork]);
+
+  const sendableAttachments = React.useMemo(
+    () => queuedAttachments.filter(item => item.status === 'ready').map(item => item.attachment),
+    [queuedAttachments],
+  );
+
   return {
-    attachments,
+    queuedAttachments,
+    sendableAttachments,
     attachmentError,
     announcement,
     dismissAttachmentError,
     draggingFiles,
-    hasPendingAttachments: attachments.some(isPendingAttachment),
-    hasSendableAttachment: attachments.some(att => !isPendingAttachment(att)),
+    hasPendingAttachments: queuedAttachments.some(item => item.status === 'pending'),
+    hasSendableAttachment: sendableAttachments.length > 0,
     clearAttachmentsAndPendingWork,
     clearDragState,
     handleFiles,
@@ -157,5 +176,6 @@ export function useAttachmentQueue({
     markDragOver,
     removeAttachment,
     updateAttachmentAlt,
+    retryAttachment,
   };
 }

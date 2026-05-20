@@ -1,6 +1,7 @@
 import React from 'react';
 import type { ConnectorName, Message } from '../types';
 import { getConnector, type Connector, type ConnectorResult, type ConnectorToolDelta } from '../connectors/connectors';
+import type { OpenAIConnectorOptions } from '../connectors/openai';
 import { useLatestRef } from './useLatestRef';
 import { readSSEStream } from '../streaming/readSSEStream';
 import { createDelayedChunkEmitter } from '../streaming/delayedStreamEvents';
@@ -48,6 +49,13 @@ export type Transport<TMeta = Record<string, unknown>> = (text: string, history:
 
 export interface StreamOptions {
   connector?: Connector | ConnectorName;
+  /**
+   * Options forwarded to the built-in connector resolved from a `connector`
+   * string. Currently only the `'openai'` connector consumes options (e.g. a
+   * custom `thinkTag` delimiter pair). Ignored when `connector` is a custom
+   * `Connector` object — build that object with `createOpenAIConnector(options)`.
+   */
+  connectorOptions?: OpenAIConnectorOptions;
 }
 
 function safeOnObserverError(callbackName: string, error: unknown) {
@@ -55,7 +63,12 @@ function safeOnObserverError(callbackName: string, error: unknown) {
 }
 
 function connectorErrorFromResult(out: ConnectorResult) {
-  return out.error ? createConnectorStreamError(out.error, out.errorPayload) : null;
+  // Any present `error` field is a connector error — including `error: ''`. A
+  // provider that emits an empty error string is still reporting a failure, so
+  // a truthiness check would silently complete the stream with no error
+  // surfaced. Use `'error' in out` as the sentinel so a missing key (no error)
+  // stays distinct from a present-but-empty value.
+  return 'error' in out ? createConnectorStreamError(out.error ?? '', out.errorPayload) : null;
 }
 
 type DelayedChunkEmitter = ReturnType<typeof createDelayedChunkEmitter>;
@@ -103,12 +116,27 @@ function startStreamSession(
   return { signal, controller, readerController, forwardAbort };
 }
 
+/**
+ * Detach the `forwardAbort` listener from the (possibly caller-owned) outer
+ * signal and forget it so the registration is dropped exactly once. Safe to
+ * call repeatedly: both the per-send teardown and the unmount cleanup invoke
+ * it, and the second call is a no-op.
+ */
+function removeForwardAbort(session: StreamSession) {
+  if (session.forwardAbort) {
+    session.signal.removeEventListener('abort', session.forwardAbort);
+    session.forwardAbort = null;
+  }
+}
+
 function endStreamSession(
   session: StreamSession,
   controllerRef: React.MutableRefObject<AbortController | null>,
+  sessionRef: React.MutableRefObject<StreamSession | null>,
 ) {
-  if (session.forwardAbort) session.signal.removeEventListener('abort', session.forwardAbort);
+  removeForwardAbort(session);
   if (controllerRef.current === session.controller) controllerRef.current = null;
+  if (sessionRef.current === session) sessionRef.current = null;
 }
 
 function createConnectorResultDeliverer(
@@ -225,19 +253,27 @@ async function handleSendError(args: {
 }
 
 export function useChorusStream<TMeta = Record<string, unknown>>(transport: Transport<TMeta>, opts?: StreamOptions) {
-  const connector = getConnector(opts?.connector);
+  const connector = getConnector(opts?.connector, opts?.connectorOptions);
   const transportRef = useLatestRef(transport);
   const connectorRef = useLatestRef(connector);
 
   const [sending, setSending] = React.useState(false);
   const isSendingRef = React.useRef(false);
   const controllerRef = React.useRef<AbortController | null>(null);
+  const sessionRef = React.useRef<StreamSession | null>(null);
 
   React.useEffect(() => () => {
     if (isSendingRef.current && !controllerRef.current) {
       warnInDev('[Chorus] useChorusStream unmounted while a send started with an externalSignal was in flight; the hook cannot cancel it. Abort the externalSignal you passed to send() from your own cleanup to stop the stream.');
     }
     controllerRef.current?.abort();
+    // Aborting a hook-owned controller above already fires `forwardAbort` (a
+    // `{ once: true }` listener that self-removes). With a caller-owned
+    // externalSignal there is no hook controller to abort, so `forwardAbort`
+    // stays attached to that signal — drop it here so a long-lived signal does
+    // not accumulate listeners across repeated mount/unmount cycles. The
+    // in-flight send's own teardown also calls this; it is idempotent.
+    if (sessionRef.current) removeForwardAbort(sessionRef.current);
   }, []);
 
   /**
@@ -272,6 +308,7 @@ export function useChorusStream<TMeta = Record<string, unknown>>(transport: Tran
 
     isSendingRef.current = true;
     const session = startStreamSession(externalSignal, controllerRef);
+    sessionRef.current = session;
     setSending(true);
 
     const startedAt = Date.now();
@@ -304,7 +341,7 @@ export function useChorusStream<TMeta = Record<string, unknown>>(transport: Tran
         cb,
       });
     } finally {
-      endStreamSession(session, controllerRef);
+      endStreamSession(session, controllerRef, sessionRef);
       isSendingRef.current = false;
       setSending(false);
     }

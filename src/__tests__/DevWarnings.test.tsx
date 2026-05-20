@@ -67,6 +67,30 @@ describe('development warnings', () => {
     await waitFor(() => expect(warn).toHaveBeenCalledWith('[Chorus] `connector` only applies to the `transport` send path. With `onSend` you parse the response yourself — pass `connector` into the `useChorusStream` call inside your `onSend` if you need it.'));
   });
 
+  it('warns when connectorOptions is provided for an onSend-only flow', async () => {
+    process.env.NODE_ENV = 'development';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    render(<Chorus connectorOptions={{ thinkTag: { start: '<r>', end: '</r>' } }} onSend={vi.fn()} />);
+
+    await waitFor(() => expect(warn).toHaveBeenCalledWith('[Chorus] `connectorOptions` only applies to the `transport` send path. With `onSend` you parse the response yourself — pass `connectorOptions` into the `useChorusStream` call inside your `onSend` if you need it.'));
+  });
+
+  it('warns that connectorOptions are ignored when connector is not "openai"', async () => {
+    process.env.NODE_ENV = 'development';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    render(
+      <Chorus
+        transport={async () => new Response(null, { status: 200 })}
+        connector="anthropic"
+        connectorOptions={{ thinkTag: { start: '<r>', end: '</r>' } }}
+      />,
+    );
+
+    await waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining('the `anthropic` connector does not accept them')));
+  });
+
   it('warns when value is provided without onChange', async () => {
     process.env.NODE_ENV = 'development';
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
