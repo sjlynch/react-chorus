@@ -78,6 +78,15 @@ describe('anthropicConnector', () => {
     expect(anthropicConnector.extract(JSON.stringify(payload))).toEqual({ error: 'anthropic failed', errorPayload: payload });
   });
 
+  it('does not treat a stray "error" string on a content_block_delta as terminal', () => {
+    const data = JSON.stringify({
+      type: 'content_block_delta',
+      error: 'none',
+      delta: { type: 'text_delta', text: 'hello' },
+    });
+    expect(anthropicConnector.extract(data)).toEqual({ text: 'hello' });
+  });
+
   it('surfaces message_delta.stop_reason=end_turn as metadata only', () => {
     const data = JSON.stringify({
       type: 'message_delta',

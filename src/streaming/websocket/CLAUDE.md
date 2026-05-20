@@ -17,12 +17,21 @@ Without `correlate`, every inbound frame is broadcast to every active stream —
 
 ## Close-code semantics
 
-`isNormalCloseCode` treats only `1000` as a clean end-of-stream. On `close`:
+`isNormalCloseCode` treats only `1000` as a clean end-of-stream. On a *server*-initiated `ws.onclose`:
 
 - Normal code → call `stream.close()` on active streams (clean EOF).
 - Abnormal code (1001/1006/1011/etc.) → call `stream.error(createAbnormalCloseError(event))` so callers/telemetry can distinguish truncation from completion.
 
 A close that fires while the socket is still `connecting` rejects pending `openWaiters` with `createClosedBeforeOpenError` instead.
+
+### Client `transport.close()` vs server close
+
+A *client*-initiated `transport.close()` is **not** a clean end-of-stream — the response was still streaming when the caller tore the socket down. It closes the socket with code 1000 by default, so the `ws.onclose` handler alone cannot tell it apart from a real server EOF. Both modes therefore settle in-flight sends explicitly when `transport.close()` is called, rather than relying on `onclose`:
+
+- `transient.ts` keeps a `WebSocket → fail` map (`activeSends`) and calls each `fail` with `createTransportClosedError`. `fail` errors the response stream if the send already resolved, otherwise rejects its outer promise.
+- `persistent.ts` calls `errorActiveStreams(createTransportClosedError(...))` from `closePersistentSocket` instead of `closeActiveStreams()`.
+
+Net contract: **server closed normally → reader sees `done`; client called `close()` → reader rejects** with a transport-closed error. The `code`/`reason` passed to `transport.close()` are still forwarded to the socket close frame.
 
 ## Dev-mode duplication (do not "fix")
 
