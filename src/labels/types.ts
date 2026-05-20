@@ -6,6 +6,8 @@ export interface ChorusComposerLabels {
   placeholder: string;
   ariaLabel: string;
   attachFile: string;
+  /** Text shown in the drag-and-drop overlay while a file is dragged over the chat surface. */
+  dropToAttach: string;
   send: string;
   stop: string;
   disabledReason: string;

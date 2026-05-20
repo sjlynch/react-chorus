@@ -868,11 +868,11 @@ react-chorus keeps React/ReactDOM as peer dependencies and externalizes runtime 
 
 | Entry | Initial JS | gzip | Notes |
 |-------|------------|------|-------|
-| `react-chorus` (`<Chorus>`) | 187.1 kB | 61.3 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
-| `react-chorus/headless` | 187.4 kB | 61.5 kB | Headless defaults, same behavior surface. |
+| `react-chorus` (`<Chorus>`) | 188.4 kB | 61.7 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
+| `react-chorus/headless` | 188.7 kB | 61.9 kB | Headless defaults, same behavior surface. |
 | `react-chorus` (`useChorusStream`) | 52.7 kB | 16.1 kB | Root hook import; CI fails if it pulls UI, Markdown, or icon dependencies. |
 | `react-chorus` (`Markdown`) | 75.2 kB | 25.4 kB | Standalone Markdown renderer; includes Markdown parsing/sanitization, not chat icons. |
-| `react-chorus` (`ChatWindow`) | 119.0 kB | 39.7 kB | Transcript renderer with Markdown and message action icons, without the composer/widget shell. |
+| `react-chorus` (`ChatWindow`) | 120.3 kB | 40.1 kB | Transcript renderer with Markdown and message action icons, without the composer/widget shell. |
 | `react-chorus` (`ConversationList`) | 7.2 kB | 2.4 kB | Conversation sidebar component only; no Markdown/icon graph. |
 | `react-chorus/transport` | 5.6 kB | 2.4 kB | Transport factories only; no React/UI/Markdown runtime. |
 | `react-chorus/provider-requests` | 10.1 kB | 3.1 kB | Provider request mappers and tool serializers; no React/UI/Markdown runtime. |
@@ -1028,7 +1028,7 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `markdownProps` | `Omit<MarkdownProps, 'text' \| 'codeTheme' \| 'headless' \| 'streaming'>` | — | Props forwarded to the built-in Markdown renderer for every message, including `sanitizer`, `markedOptions`, `markedExtensions`, and `onCopyError`. |
 | `markdownSanitizer` | `MarkdownSanitizer` | — | Convenience alias for `markdownProps.sanitizer`; takes precedence when both are provided. |
 | `hiddenRoles` | `Role[]` | `['system']` | Message roles hidden from the transcript. Tool calls are visible by default in `<Chorus>`; pass `['system', 'tool']` to hide them, or `[]` to show all roles. `<Chorus>` accepts `hiddenRoles` only — `showSystemMessages` exists on `<ChatWindow>` for backwards compatibility. |
-| `labels` | `ChorusLabels` | English defaults | Localized strings for every built-in UI surface: composer placeholder/aria-labels/attach/send/stop, transcript aria-label/typing/retry/jump-to-latest/empty-state title, message actions (edit/regenerate/copy/copy-failed/thumbs up/down/delete/save/cancel), per-role speaker SR labels, tool-call section headers, reasoning summary, code-fence copy chrome, conversation-list affordances, and the clear button. See [Localizing built-in strings](#localizing-built-in-strings). |
+| `labels` | `ChorusLabels` | English defaults | Localized strings for every built-in UI surface: composer placeholder/aria-labels/attach/drop-to-attach/send/stop, transcript aria-label/typing/retry/jump-to-latest/empty-state title, message actions (edit/regenerate/copy/copy-failed/thumbs up/down/delete/save/cancel), per-role speaker SR labels, tool-call section headers, reasoning summary, code-fence copy chrome, conversation-list affordances, and the clear button. See [Localizing built-in strings](#localizing-built-in-strings). |
 
 ### Localizing built-in strings
 
@@ -1042,6 +1042,7 @@ const fr: ChorusLabels = {
     placeholder: 'Écrivez un message',
     ariaLabel: 'Champ de message',
     attachFile: 'Joindre un fichier',
+    dropToAttach: 'Déposer pour joindre',
     send: 'Envoyer',
     stop: 'Arrêter',
     disabledReason: 'Composer désactivé.',
@@ -1418,7 +1419,7 @@ For one-off reads from outside React state, call `chorusRef.current?.getMessages
 
 ### Attachment composer UX
 
-Passing `accept` enables the built-in attachment composer. Users can pick files, paste files from the clipboard, or drag/drop files onto the composer; all three paths use the same `accept` matching (`image/*`, exact MIME types, and extensions such as `.pdf`).
+Passing `accept` enables the built-in attachment composer. Users can pick files, paste files from the clipboard, or drag/drop files anywhere over the chat surface — the transcript as well as the composer — and a "Drop to attach" overlay confirms the drop target while a file is dragged over it. All paths use the same `accept` matching (`image/*`, exact MIME types, and extensions such as `.pdf`). An empty or whitespace-only `accept` (and `maxAttachmentBytes={0}`) means "no attachments allowed": the attach button is hidden and stray drops are still neutralized so the browser never navigates away to a dropped file's URL.
 
 By default, react-chorus reads accepted files into base64 **data URLs** and stores them in `Message.attachments`. That makes local demos and simple persistence easy, but data URLs can inflate request bodies and persisted history. For production, set size/count limits and consider `uploadAttachment` so large files are uploaded to your storage/provider before the message is sent.
 
