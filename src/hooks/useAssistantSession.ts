@@ -262,6 +262,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     finalizeAssistantNow,
     resetPendingAssistantState,
     resetStreamState,
+    persistenceKey,
     observers,
   });
   const {
