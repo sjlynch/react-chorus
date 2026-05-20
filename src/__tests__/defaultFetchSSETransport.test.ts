@@ -128,6 +128,53 @@ describe('createDefaultFetchSSETransport', () => {
     expect(options.method).toBe('POST');
   });
 
+  it('object form supports method: "GET" and skips body + default Content-Type', async () => {
+    const formatBody = vi.fn(() => 'should-not-be-called');
+    const transport = createDefaultFetchSSETransport({
+      url: '/api/chat?conversation=42',
+      method: 'GET',
+      formatBody,
+    });
+
+    await transport('hello', [], new AbortController().signal);
+
+    const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/chat?conversation=42');
+    expect(options.method).toBe('GET');
+    expect(options.body).toBeUndefined();
+    expect(sentHeaders(options).has('content-type')).toBe(false);
+    expect(formatBody).not.toHaveBeenCalled();
+  });
+
+  it('object form supports method: "HEAD" without a body', async () => {
+    const transport = createDefaultFetchSSETransport({
+      url: '/api/chat',
+      method: 'HEAD',
+    });
+
+    await transport('hello', [], new AbortController().signal);
+
+    const [, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(options.method).toBe('HEAD');
+    expect(options.body).toBeUndefined();
+    expect(sentHeaders(options).has('content-type')).toBe(false);
+  });
+
+  it('object form honors an explicit non-default body method (PUT)', async () => {
+    const transport = createDefaultFetchSSETransport({
+      url: '/api/chat',
+      method: 'PUT',
+    });
+    const history: Message[] = [{ id: '1', role: 'user', text: 'hi' }];
+
+    await transport('hello', history, new AbortController().signal);
+
+    const [, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(options.method).toBe('PUT');
+    expect(options.body).toBe(JSON.stringify({ prompt: 'hello', history }));
+    expect(sentHeaders(options).get('content-type')).toBe('application/json');
+  });
+
   it('forwards the AbortSignal to fetch', async () => {
     const transport = createDefaultFetchSSETransport({ url: '/api/chat' });
     const controller = new AbortController();

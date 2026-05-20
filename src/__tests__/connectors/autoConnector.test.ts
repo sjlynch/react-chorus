@@ -16,6 +16,13 @@ describe('autoConnector', () => {
     expect(autoConnector.extract(JSON.stringify(payload))).toEqual({ error: 'stream failed', errorPayload: payload });
   });
 
+  it('does not treat a recognised event frame with an "error" field as a stream error', () => {
+    const choices = JSON.stringify({ choices: [{ delta: { content: 'hi', error: 'ignore-me' } }] });
+    expect(autoConnector.extract(choices)).toEqual({ text: 'hi' });
+    const custom = JSON.stringify({ type: 'message', content: 'world', error: 'none' });
+    expect(autoConnector.extract(custom)).toEqual({ text: 'world' });
+  });
+
   it('delegates to anthropicConnector for Anthropic-shaped JSON', () => {
     const data = JSON.stringify({
       type: 'content_block_delta',
@@ -90,6 +97,20 @@ describe('autoConnector', () => {
       candidates: [{ finishReason: 'STOP', content: { parts: [] } }],
     });
     expect(autoConnector.extract(data)).toEqual({ done: true });
+  });
+
+  it('threads per-send gemini state so a streamed function call keeps one fallback id', () => {
+    const state = autoConnector.createState?.();
+    const frame1 = JSON.stringify({
+      candidates: [{ index: 0, content: { parts: [{ functionCall: { name: 'search', args: { q: 'a' } } }] } }],
+    });
+    const frame2 = JSON.stringify({
+      candidates: [{ index: 0, content: { parts: [{ functionCall: { args: { page: 2 } } }] } }],
+    });
+    const id1 = autoConnector.extract(frame1, state)?.toolDelta?.id;
+    const id2 = autoConnector.extract(frame2, state)?.toolDelta?.id;
+    expect(id1).toBe('gemini-0-function-0-search');
+    expect(id2).toBe(id1);
   });
 
   it('falls back to plain text for non-JSON', () => {

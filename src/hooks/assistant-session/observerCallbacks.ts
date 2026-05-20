@@ -1,4 +1,5 @@
 import type React from 'react';
+import type { ConnectorWarning } from '../../connectors/connectors';
 import type {
   ChorusAbortContext,
   ChorusFinishContext,
@@ -19,6 +20,7 @@ export interface ObserverCallbackRefs<TMeta> {
   onFinishRef: React.MutableRefObject<ChorusOnFinish<TMeta> | undefined>;
   onAbortRef: React.MutableRefObject<ChorusOnAbort<TMeta> | undefined>;
   onStreamDoneRef: React.MutableRefObject<ChorusOnStreamDone<TMeta> | undefined>;
+  onStreamWarningRef: React.MutableRefObject<((warning: ConnectorWarning) => void) | undefined>;
   onToolDeltaRef: React.MutableRefObject<ChorusOnToolDelta<TMeta> | undefined>;
   onToolCallRef: React.MutableRefObject<ChorusOnToolCall<TMeta> | undefined>;
 }
@@ -29,6 +31,7 @@ export interface ObserverCallbacks<TMeta> {
   safeOnFinish: (context: ChorusFinishContext<TMeta>) => void;
   safeOnAbort: (context: ChorusAbortContext<TMeta>) => void;
   safeOnStreamDone: (context: ChorusStreamDoneContext<TMeta>) => void;
+  safeOnStreamWarning: (warning: ConnectorWarning) => void;
   safeOnToolDelta: (context: ChorusToolDeltaContext<TMeta>) => void;
   safeNotifyToolCall: (context: ChorusToolCallContext<TMeta>) => Promise<void>;
 }
@@ -39,7 +42,7 @@ export interface ObserverCallbacks<TMeta> {
  * the factory can be invoked once per `useAssistantSession` instance.
  */
 export function createObserverCallbacks<TMeta>(refs: ObserverCallbackRefs<TMeta>): ObserverCallbacks<TMeta> {
-  const { onChunkRef, onErrorRef, onFinishRef, onAbortRef, onStreamDoneRef, onToolDeltaRef, onToolCallRef } = refs;
+  const { onChunkRef, onErrorRef, onFinishRef, onAbortRef, onStreamDoneRef, onStreamWarningRef, onToolDeltaRef, onToolCallRef } = refs;
 
   return {
     safeOnChunk: (chunk, messageId) => {
@@ -61,6 +64,10 @@ export function createObserverCallbacks<TMeta>(refs: ObserverCallbackRefs<TMeta>
     safeOnStreamDone: (context) => {
       try { onStreamDoneRef.current?.(context); }
       catch (error) { warnObserverError('onStreamDone', error); }
+    },
+    safeOnStreamWarning: (warning) => {
+      try { onStreamWarningRef.current?.(warning); }
+      catch (error) { warnObserverError('onStreamWarning', error); }
     },
     safeOnToolDelta: (context) => {
       try { onToolDeltaRef.current?.(context); }
