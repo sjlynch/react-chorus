@@ -22,6 +22,9 @@ export function InlineMessageEditor({ initialText, onSubmit, onCancel, labels = 
     el.selectionStart = el.value.length;
   }, []);
 
+  // Single source of truth for edit trimming: every default edit path (MessageRow
+  // and MessageActionControls) routes its save through here, so callers receive a
+  // non-empty trimmed string and an all-whitespace edit cancels instead of saving.
   const submitEdit = () => {
     const trimmed = editText.trim();
     if (trimmed) onSubmit(trimmed);
@@ -37,8 +40,19 @@ export function InlineMessageEditor({ initialText, onSubmit, onCancel, labels = 
         value={editText}
         onChange={e => setEditText(e.target.value)}
         onKeyDown={e => {
-          if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitEdit(); }
-          if (e.key === 'Escape') onCancel();
+          // Ignore Enter while an IME candidate is being composed (e.g. Japanese/
+          // Chinese/Korean input) so confirming a candidate does not submit the
+          // half-composed text. keyCode 229 covers browsers that omit isComposing.
+          if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) {
+            e.preventDefault();
+            submitEdit();
+          }
+          // Stop Escape from bubbling so cancelling an inline edit inside a
+          // modal/dialog/drawer does not also close the surrounding ancestor.
+          if (e.key === 'Escape') {
+            e.stopPropagation();
+            onCancel();
+          }
         }}
       />
       <div className="chorus-edit-actions">

@@ -48,7 +48,12 @@ function libraryManualChunks(id: string) {
   if (normalizedId.endsWith('/src/hooks/useConversations.ts') || normalizedId.includes('/src/hooks/conversations/')) return 'conversations';
   if (normalizedId.endsWith('/src/components/Markdown.tsx') || normalizedId.endsWith('/src/utils/hljsLoader.ts') || normalizedId.includes('/src/utils/hljs/') || normalizedId.endsWith('/src/utils/markdownNormalizer.ts')) return 'markdown';
   if (normalizedId.endsWith('/src/components/ChatInput.tsx') || normalizedId.includes('/src/components/chat-input/') || normalizedId.endsWith('/src/utils/attachmentPreview.ts')) return 'chat-input';
-  if (normalizedId.endsWith('/src/components/ConversationList.tsx') || normalizedId.endsWith('/src/components/ChorusTheme.tsx')) return 'conversation-list';
+  if (normalizedId.endsWith('/src/components/ConversationList.tsx')) return 'conversation-list';
+  // ChorusTheme rides with the chat-input chunk: it is only reached through the
+  // full-widget/root exports (which already pull that chunk), and grouping it
+  // with conversation-list would drag the shared `paletteVars` graph — and with
+  // it the icon chunk — into a standalone `ConversationList` import.
+  if (normalizedId.endsWith('/src/components/ChorusTheme.tsx')) return 'chat-input';
   if (normalizedId.endsWith('/src/hooks/useAssistantSession.ts') || normalizedId.includes('/src/hooks/assistant-session/') || normalizedId.endsWith('/src/hooks/useChorusMessages.ts') || normalizedId.endsWith('/src/hooks/useRAFQueue.ts')) return 'chorus-session';
   // tools.ts is shared by the chorus-session graph (handler lookup) and the
   // provider-requests subpath (defineTool, tool-definition serialization).

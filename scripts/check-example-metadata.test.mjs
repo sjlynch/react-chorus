@@ -3,10 +3,13 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  extractReactChorusSubpaths,
   findExampleMetadataProblems,
   findExampleReactProblems,
   findRunnableExamplePackages,
+  findStartOnlyExamplePackages,
   parsePeerMajors,
+  runStartOnlyExampleChecks,
 } from './check-example-metadata.mjs';
 
 const tempDirs = [];
@@ -85,6 +88,95 @@ describe('example metadata verification', () => {
 
     const runnable = await findRunnableExamplePackages({ cwd });
     expect(runnable.map((record) => record.relativePath)).toEqual(['examples/basic/package.json']);
+  });
+
+  it('discovers start-only example packages (start script, no build script)', async () => {
+    const cwd = await makeTempRepo();
+    await writePackage(cwd, 'examples/basic', {
+      name: 'basic',
+      engines: { node: '>=20' },
+      scripts: { build: 'vite build' },
+    });
+    await writePackage(cwd, 'examples/with-openai/server', {
+      name: 'server',
+      engines: { node: '>=20' },
+      scripts: { start: 'node index.js' },
+    });
+
+    const startOnly = await findStartOnlyExamplePackages({ cwd });
+    expect(startOnly.map((record) => record.relativePath)).toEqual([
+      'examples/with-openai/server/package.json',
+    ]);
+  });
+});
+
+describe('extractReactChorusSubpaths', () => {
+  it('collects unique react-chorus subpath specifiers from source', () => {
+    const source = [
+      "import { sseHeaders } from 'react-chorus/server';",
+      'import { toOpenAIChatCompletionsBody } from "react-chorus/provider-requests";',
+      "const dynamic = await import('react-chorus/server');",
+      "import { Chorus } from 'react-chorus';",
+    ].join('\n');
+    expect(extractReactChorusSubpaths(source)).toEqual([
+      'react-chorus/provider-requests',
+      'react-chorus/server',
+    ]);
+  });
+
+  it('returns an empty array when no react-chorus subpaths appear', () => {
+    expect(extractReactChorusSubpaths("import { WebSocketServer } from 'ws';")).toEqual([]);
+  });
+});
+
+describe('runStartOnlyExampleChecks', () => {
+  const silentLogger = { log() {}, error() {}, warn() {} };
+
+  async function writeStartOnlyExample(cwd, relativeDir, entrySource, entry = 'index.js') {
+    await writePackage(cwd, relativeDir, {
+      name: relativeDir.replace(/\W+/g, '-'),
+      type: 'module',
+      engines: { node: '>=20' },
+      scripts: { start: `node ${entry}` },
+    });
+    await fs.writeFile(path.join(cwd, relativeDir, entry), entrySource);
+  }
+
+  it('passes a start-only package with a valid entry and no react-chorus imports', async () => {
+    const cwd = await makeTempRepo();
+    await writeStartOnlyExample(cwd, 'examples/proxy', 'const port = 3001;\nconsole.log(port);\n');
+    await expect(runStartOnlyExampleChecks({ cwd, logger: silentLogger })).resolves.toEqual([]);
+  });
+
+  it('flags a syntax error in the start entry file via node --check', async () => {
+    const cwd = await makeTempRepo();
+    await writeStartOnlyExample(cwd, 'examples/proxy', 'const broken = (\n');
+    const problems = await runStartOnlyExampleChecks({ cwd, logger: silentLogger });
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatch(/examples\/proxy\/index\.js failed `node --check`/);
+  });
+
+  it('flags react-chorus subpath imports when the root library build is missing', async () => {
+    const cwd = await makeTempRepo();
+    await writeStartOnlyExample(
+      cwd,
+      'examples/proxy',
+      "import { sseHeaders } from 'react-chorus/server';\nconsole.log(sseHeaders);\n",
+    );
+    const problems = await runStartOnlyExampleChecks({ cwd, logger: silentLogger });
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatch(/react-chorus\/server/);
+    expect(problems[0]).toMatch(/root library build is missing/);
+  });
+
+  it('returns no problems when there are no start-only packages', async () => {
+    const cwd = await makeTempRepo();
+    await writePackage(cwd, 'examples/basic', {
+      name: 'basic',
+      engines: { node: '>=20' },
+      scripts: { build: 'vite build' },
+    });
+    await expect(runStartOnlyExampleChecks({ cwd, logger: silentLogger })).resolves.toEqual([]);
   });
 });
 

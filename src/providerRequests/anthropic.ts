@@ -1,7 +1,7 @@
 import type { Attachment, Message } from '../types';
-import { dataUrlFromAttachment, unsupportedAttachmentText } from './attachments';
+import { dataUrlFromAttachment, resolveDataUrlMimeType, unsupportedAttachmentText } from './attachments';
 import { metadataBoolean, metadataString } from './metadata';
-import { stripAnthropicOptions } from './options';
+import { resolveProviderSystem, stripAnthropicOptions } from './options';
 import { messageText, objectToolInput, toolContextText, toolOutputText } from './toolOutput';
 import { mapHistoryWithToolRuns } from './toolRunMapper';
 import type { ProviderMappingOptions } from './types/common';
@@ -69,16 +69,27 @@ function anthropicSystem(history: Message<unknown>[]) {
   return system || undefined;
 }
 
+// The Anthropic Messages API accepts image blocks only for this MIME set. Any
+// other `image/*` attachment (svg, bmp, tiff, heic, …) must fall through to an
+// unsupported-attachment text block rather than a 400-producing image block.
+const ANTHROPIC_IMAGE_MIME_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+]);
+
 function anthropicAttachmentBlock(attachment: Attachment): AnthropicImageBlock | AnthropicDocumentBlock | null {
   const dataUrl = dataUrlFromAttachment(attachment);
   if (!dataUrl) return null;
-  if (attachment.type.startsWith('image/')) {
+  const mimeType = resolveDataUrlMimeType(attachment, dataUrl);
+  if (ANTHROPIC_IMAGE_MIME_TYPES.has(mimeType)) {
     return {
       type: 'image',
-      source: { type: 'base64', media_type: attachment.type || dataUrl.mimeType, data: dataUrl.base64 },
+      source: { type: 'base64', media_type: mimeType, data: dataUrl.base64 },
     };
   }
-  if (attachment.type === 'application/pdf') {
+  if (mimeType === 'application/pdf') {
     return {
       type: 'document',
       source: { type: 'base64', media_type: 'application/pdf', data: dataUrl.base64 },
@@ -146,11 +157,15 @@ export function toAnthropicMessages<TMeta = Record<string, unknown>>(
     extractToolBlock: message => anthropicToolUseBlock(message as Message<unknown>),
     emitToolGroup: (target, pairs) => {
       appendAnthropicToolUseBlocks(target, pairs.map(entry => entry.block));
+      // Pair each tool_result with its tool_use block's own id rather than
+      // re-resolving from metadata: the block only exists because the id
+      // resolved non-empty, so this can never emit the empty tool_use_id
+      // (Anthropic rejects empty ids) the prior `?? ''` fallback allowed.
       target.push({
         role: 'user',
         content: pairs.map(entry => anthropicToolResultBlock(
           entry.message as Message<unknown>,
-          anthropicToolUseId(entry.message as Message<unknown>) ?? '',
+          entry.block.id,
         )),
       });
     },
@@ -167,8 +182,15 @@ export function toAnthropicMessagesBody<
   TOptions extends AnthropicMessagesBodyOptions<TMeta> = AnthropicMessagesBodyOptions<TMeta>,
 >(history: Message<TMeta>[], options?: TOptions): AnthropicMessagesBody<TOptions> {
   const opts = (options ?? {}) as TOptions;
-  const { bodyOptions, stream } = stripAnthropicOptions(opts);
-  const system = anthropicSystem(history as Message<unknown>[]);
+  const { bodyOptions, stream, system: callerSystem } = stripAnthropicOptions(opts);
+  // A caller-supplied `system` wins over history-derived system text
+  // (documented precedence); a dev warn-once fires when both are present.
+  const system = resolveProviderSystem(
+    'Anthropic',
+    'system',
+    callerSystem,
+    anthropicSystem(history as Message<unknown>[]),
+  );
   const body = {
     ...bodyOptions,
     ...(system ? { system } : {}),

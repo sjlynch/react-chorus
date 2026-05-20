@@ -47,7 +47,13 @@ export function dataStreamProtocolResult(state: AiSdkConnectorState, data: strin
     case 'c': {
       if (!parsed || typeof parsed !== 'object') return null;
       const record = parsed as Record<string, unknown>;
-      const fragment = record.argsTextDelta ?? record.inputTextDelta;
+      // Prefer the first non-empty alias: `??` only falls through on
+      // null/undefined, so a mixed-alias frame like
+      // `{argsTextDelta:'', inputTextDelta:'hi'}` would otherwise keep the
+      // empty string and drop the real delta on the guard below.
+      const fragment = (typeof record.argsTextDelta === 'string' && record.argsTextDelta)
+        ? record.argsTextDelta
+        : record.inputTextDelta;
       if (typeof fragment !== 'string' || fragment === '') return null;
       const toolDelta = toolDeltaFromToolCall(state, 'c:', record.toolCallId, undefined, fragment, true);
       return toolDelta ? { toolDelta } : null;

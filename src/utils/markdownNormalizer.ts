@@ -13,7 +13,10 @@ export function normalizeStreamingMarkdown(text: string) {
       if (isAtLineStart(pos)) count++;
       i = pos + fence.length;
     }
-    if (count % 2 === 1) out += `\n${fence}`;
+    // Reuse the existing trailing newline when present so we emit `\n```
+    // rather than `\n\n``` — a doubled newline ends the preceding block and
+    // renders as a visible blank line that the streaming view never shows.
+    if (count % 2 === 1) out += out.endsWith('\n') ? fence : `\n${fence}`;
   };
   patchFence('```'); patchFence('~~~');
   return out;
