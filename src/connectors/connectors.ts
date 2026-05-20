@@ -135,6 +135,9 @@ function isAutoDataStreamFrame(data: string): boolean {
  *
  * `flush()` is routed to whichever sub-connector first consumed the stream so a
  * connector-buffered tail is drained by the connector that parsed the stream.
+ *
+ * @internal Not part of the public API. Obtain it via `getConnector('auto')` or
+ * `getConnector()` (auto is the default when no connector is specified).
  */
 export const autoConnector: Connector<AutoConnectorState> = {
   name: 'auto',
@@ -207,6 +210,7 @@ export const autoConnector: Connector<AutoConnectorState> = {
 
 const VALID_CONNECTOR_NAMES = ['auto', 'openai', 'anthropic', 'gemini', 'ai-sdk'] as const;
 const warnedUnknownConnectorNames = new Set<string>();
+const warnedIgnoredOptionsConnectors = new Set<string>();
 
 function isConnectorDevMode() {
   // Local to keep connector-only chunks independent from widget dev helpers.
@@ -217,7 +221,38 @@ function isConnectorDevMode() {
   }
 }
 
+/**
+ * Warn (once per connector) when `getConnector` is handed options it cannot
+ * apply. Only the `'openai'` string connector consumes the `options` argument;
+ * for every other connector the argument is silently dropped, which is the
+ * exact "dead option" footgun this guard surfaces in development.
+ */
+function warnIgnoredConnectorOptions(connector: Connector | ConnectorName | undefined) {
+  if (!isConnectorDevMode()) return;
+  const key = typeof connector === 'string' ? connector : connector ? `object:${connector.name}` : 'auto';
+  if (warnedIgnoredOptionsConnectors.has(key)) return;
+  warnedIgnoredOptionsConnectors.add(key);
+  const target = typeof connector === 'string'
+    ? `the \`${connector}\` connector`
+    : connector
+      ? 'a custom connector object'
+      : 'the default `auto` connector';
+  console.warn(`[Chorus] getConnector() received connector options, but ${target} does not accept them. Connector options currently only apply to \`getConnector('openai', ...)\` (or \`connector="openai"\` with \`connectorOptions\`).`);
+}
+
+/**
+ * Resolve a connector. This is the single public way to obtain a built-in
+ * connector: pass a name (`'auto'` | `'openai'` | `'anthropic'` | `'gemini'` |
+ * `'ai-sdk'`) and Chorus returns the matching connector; pass a custom
+ * `Connector` object and it is returned unchanged; pass nothing for the
+ * auto-detecting connector.
+ *
+ * `options` customizes the resolved connector and is currently consumed only by
+ * the `'openai'` connector (e.g. a custom `thinkTag` delimiter pair). It is
+ * ignored — with a dev-mode warning — for every other connector.
+ */
 export function getConnector(connector?: Connector | ConnectorName, options?: OpenAIConnectorOptions): Connector {
+  if (options && connector !== 'openai') warnIgnoredConnectorOptions(connector);
   if (!connector) return autoConnector;
   if (typeof connector === 'string') {
     if (connector === 'auto') return autoConnector;

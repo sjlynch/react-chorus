@@ -45,7 +45,10 @@ function isValidAttachment(value: unknown): value is Attachment {
 
 function isValidToolCall(value: unknown): value is ToolCall {
   if (!isPlainObject(value)) return false;
-  return typeof value.name === 'string' && value.name.length > 0;
+  // Trim before the emptiness check: a whitespace-only name (e.g. '   ') survives
+  // a bare `.length > 0` test but is useless downstream — `metadataWithToolError`
+  // and `runCompletedToolCalls` look up handlers by name and would silently miss.
+  return typeof value.name === 'string' && value.name.trim().length > 0;
 }
 
 /**
@@ -56,7 +59,7 @@ function isValidToolCall(value: unknown): value is ToolCall {
  * - id missing or not a non-empty string
  * - role not one of 'user' | 'assistant' | 'system' | 'tool'
  * - non-tool message has non-string `text`
- * - tool message missing a valid `toolCall` (must be an object with a non-empty `name`)
+ * - tool message missing a valid `toolCall` (must be an object with a non-blank `name`)
  * - attachments on a role that does not support them (system, tool), or not an Attachment[]
  * - `toolCall` set on a non-tool role
  */
@@ -95,12 +98,18 @@ function validateStoredMessages<TMeta>(parsed: unknown): Message<TMeta>[] {
   if (!Array.isArray(parsed)) return [];
 
   const valid: Message<TMeta>[] = [];
-  const dropped: Array<{ index: number; reason: string }> = [];
+  const dropped: Array<{ index: number; id?: string; reason: string }> = [];
 
   parsed.forEach((entry, index) => {
     const result = validateStoredMessage<TMeta>(entry);
-    if (result.ok) valid.push(result.message);
-    else dropped.push({ index, reason: result.reason });
+    if (result.ok) {
+      valid.push(result.message);
+      return;
+    }
+    // Surface the message id alongside the index so the dev warning identifies
+    // *which* persisted entry was dropped, not just its array position.
+    const id = isPlainObject(entry) && typeof entry.id === 'string' ? entry.id : undefined;
+    dropped.push(id === undefined ? { index, reason: result.reason } : { index, id, reason: result.reason });
   });
 
   if (dropped.length > 0) {
@@ -120,7 +129,7 @@ function validateStoredMessages<TMeta>(parsed: unknown): Message<TMeta>[] {
  *
  * Invalid entries dropped here include: non-object entries, missing or empty `id`,
  * unknown `role`, non-string `text` on non-tool messages, tool messages without a
- * valid `toolCall` (object with non-empty `name`), and attachments on roles that do
+ * valid `toolCall` (object with non-blank `name`), and attachments on roles that do
  * not support them. Pass a custom `deserializeMessages` to take over validation; the
  * persistence hook still applies an array guard to whatever the custom hook returns.
  */
