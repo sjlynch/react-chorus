@@ -83,7 +83,7 @@ export function App() {
         {' · '}
         <a href="https://www.npmjs.com/package/react-chorus" target="_blank" rel="noreferrer">npm</a>
         {' · '}
-        Every tab streams through a mock OpenAI-format SSE transport and the real <code>autoConnector</code>. No API keys or backend.
+        Every tab streams through a mock OpenAI-format SSE transport and the real <code>'auto'</code> connector. No API keys or backend.
       </p>
     </main>
   );

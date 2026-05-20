@@ -59,6 +59,20 @@ describe('ConversationList', () => {
     expect(support.getByRole('button', { name: /delete support chat/i })).toBeInTheDocument();
   });
 
+  it('applies the palette as --chorus-* variables on the root in both default and headless renders', () => {
+    const { rerender } = render(
+      <ConversationList conversations={CONVERSATIONS} palette={{ chatBg: '#101010' }} style={{ borderRadius: '4px' }} />,
+    );
+    let nav = screen.getByRole('navigation');
+    expect(nav.style.getPropertyValue('--chorus-chat-bg')).toBe('#101010');
+    expect(nav.style.borderRadius).toBe('4px');
+
+    // A host-supplied palette is a theme, not default styling, so headless renders honor it too.
+    rerender(<ConversationList conversations={CONVERSATIONS} palette={{ chatBg: '#202020' }} headless />);
+    nav = screen.getByRole('navigation');
+    expect(nav.style.getPropertyValue('--chorus-chat-bg')).toBe('#202020');
+  });
+
   it('supports select, rename, delete, and create affordances', () => {
     const createConversation = vi.fn();
     const selectConversation = vi.fn();
@@ -262,5 +276,139 @@ describe('ConversationList', () => {
 
     await user.click(screen.getByRole('button', { name: /unpin pinned new/i }));
     expect(pinConversation).toHaveBeenCalledWith('new-pin', false);
+  });
+
+  it('stops Escape propagation in the rename input and restores focus to the row trigger on cancel', () => {
+    const onParentKeyDown = vi.fn();
+    render(
+      <div onKeyDown={onParentKeyDown}>
+        <ConversationList
+          conversations={CONVERSATIONS}
+          activeId="a"
+          renameConversation={vi.fn()}
+        />
+      </div>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /rename support chat/i }));
+    const input = screen.getByLabelText(/rename support chat/i);
+    fireEvent.keyDown(input, { key: 'Escape' });
+
+    // Escape must not bubble out to an enclosing modal/dialog handler.
+    expect(onParentKeyDown).not.toHaveBeenCalled();
+    // Rename mode exited and focus landed back on the row trigger, not <body>.
+    expect(screen.queryByRole('textbox', { name: /rename support chat/i })).toBeNull();
+    expect(screen.getByRole('button', { name: /rename support chat/i })).toHaveFocus();
+  });
+
+  it('restores focus to the rename trigger after a successful rename submit', () => {
+    const renameConversation = vi.fn();
+    render(
+      <ConversationList
+        conversations={CONVERSATIONS}
+        activeId="a"
+        renameConversation={renameConversation}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /rename support chat/i }));
+    const input = screen.getByLabelText(/rename support chat/i);
+    fireEvent.change(input, { target: { value: 'Renamed support' } });
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+
+    expect(renameConversation).toHaveBeenCalledWith('a', 'Renamed support');
+    expect(screen.getByRole('button', { name: /rename support chat/i })).toHaveFocus();
+  });
+
+  it('shows an inline validation message and enforces maxLength when submitting an empty rename draft', () => {
+    const renameConversation = vi.fn();
+    render(
+      <ConversationList
+        conversations={CONVERSATIONS}
+        activeId="a"
+        renameConversation={renameConversation}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /rename support chat/i }));
+    const input = screen.getByLabelText(/rename support chat/i) as HTMLInputElement;
+    expect(input).toHaveAttribute('maxlength', '120');
+    expect(screen.queryByRole('alert')).toBeNull();
+
+    fireEvent.change(input, { target: { value: '   ' } });
+    fireEvent.submit(input.closest('form')!);
+
+    expect(renameConversation).not.toHaveBeenCalled();
+    const alert = screen.getByRole('alert');
+    expect(alert).toHaveTextContent(/enter a name/i);
+    expect(input).toHaveAttribute('aria-describedby', alert.id);
+    // Focus stays in the input so the validation message is reachable.
+    expect(input).toHaveFocus();
+
+    fireEvent.change(input, { target: { value: 'Recovered title' } });
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(input).not.toHaveAttribute('aria-describedby');
+  });
+
+  it('blocks an over-long rename draft with an inline message and a disabled Save control', () => {
+    const renameConversation = vi.fn();
+    render(
+      <ConversationList
+        conversations={CONVERSATIONS}
+        activeId="a"
+        renameConversation={renameConversation}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /rename support chat/i }));
+    const input = screen.getByLabelText(/rename support chat/i) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'x'.repeat(200) } });
+
+    expect(screen.getByRole('button', { name: /^save$/i })).toBeDisabled();
+    expect(screen.getByRole('alert')).toHaveTextContent(/120 characters or fewer/i);
+
+    fireEvent.submit(input.closest('form')!);
+    expect(renameConversation).not.toHaveBeenCalled();
+  });
+
+  it('moves focus to a sibling row and announces the deletion when a conversation is deleted', () => {
+    function Harness() {
+      const [items, setItems] = React.useState(CONVERSATIONS);
+      return (
+        <ConversationList
+          conversations={items}
+          activeId="a"
+          deleteConversation={id => setItems(prev => prev.filter(c => c.id !== id))}
+        />
+      );
+    }
+    render(<Harness />);
+
+    fireEvent.click(screen.getByRole('button', { name: /delete roadmap ideas/i }));
+
+    expect(screen.queryByText('Roadmap ideas')).toBeNull();
+    // Focus moved to the surviving row instead of falling back to <body>.
+    expect(screen.getByText('Support chat').closest('button')).toHaveFocus();
+    const status = screen.getByRole('status');
+    expect(status).toHaveTextContent(/deleted/i);
+    expect(status).toHaveTextContent(/roadmap ideas/i);
+  });
+
+  it('moves focus to the list container when the last conversation is deleted', () => {
+    function Harness() {
+      const [items, setItems] = React.useState<ConversationSummary[]>([CONVERSATIONS[0]]);
+      return (
+        <ConversationList
+          conversations={items}
+          deleteConversation={id => setItems(prev => prev.filter(c => c.id !== id))}
+        />
+      );
+    }
+    const { container } = render(<Harness />);
+
+    fireEvent.click(screen.getByRole('button', { name: /delete support chat/i }));
+
+    expect(screen.queryByText('Support chat')).toBeNull();
+    expect(container.querySelector('.chorus-conversation-items')).toHaveFocus();
   });
 });

@@ -43,7 +43,7 @@ export interface TransportLifecycleDeps<TMeta> {
   getToolMessagesByIds: (ids: Set<string>) => ToolMessage<TMeta>[];
   runCompletedToolCalls: (sessionId: number, toolMessages: ToolMessage<TMeta>[], signal: AbortSignal) => Promise<void>;
   showStreamError: (error: Error) => void;
-  observers: Pick<ObserverCallbacks<TMeta>, 'safeOnError' | 'safeOnFinish' | 'safeOnStreamDone'>;
+  observers: Pick<ObserverCallbacks<TMeta>, 'safeOnError' | 'safeOnFinish' | 'safeOnStreamDone' | 'safeOnStreamWarning'>;
   doStream: DoStream<TMeta>;
   forceRender: () => void;
 }
@@ -120,6 +120,9 @@ export function useTransportLifecycle<TMeta>(deps: TransportLifecycleDeps<TMeta>
       },
       onToolDelta: (delta) => {
         if (isAssistantSessionActive(sessionId)) appendToolDeltaNow(delta);
+      },
+      onWarning: (warning) => {
+        if (isAssistantSessionActive(sessionId)) observers.safeOnStreamWarning(warning);
       },
       onDone: (response) => {
         if (!isAssistantSessionActive(sessionId)) return;

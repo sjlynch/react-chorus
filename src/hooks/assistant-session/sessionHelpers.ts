@@ -1,5 +1,5 @@
 import type React from 'react';
-import type { ConnectorToolDelta } from '../../connectors/connectors';
+import type { ConnectorToolDelta, ConnectorWarning } from '../../connectors/connectors';
 import type { SendCallbacks } from '../useChorusStream';
 import type { ChorusFinishContext, ChorusSendHelpers } from './types';
 
@@ -7,6 +7,7 @@ export interface SessionHelpersDeps<TMeta> {
   appendAssistantNow: (chunk: string) => void;
   appendAssistantReasoningNow: (chunk: string) => void;
   appendToolDeltaNow: (delta: ConnectorToolDelta) => void;
+  safeOnStreamWarning: (warning: ConnectorWarning) => void;
   completeActiveSession: (
     sessionId: number,
     finish?: { reason: ChorusFinishContext<TMeta>['reason']; response?: Response; message?: import('../../types').Message<TMeta> },
@@ -40,6 +41,7 @@ export function createSessionHelpers<TMeta>(
     appendAssistantNow,
     appendAssistantReasoningNow,
     appendToolDeltaNow,
+    safeOnStreamWarning,
     completeActiveSession,
     isAssistantSessionActive,
     minAssistantDelayMsRef,
@@ -143,6 +145,7 @@ export function createSessionHelpers<TMeta>(
     onChunk: appendAssistant,
     onReasoning: appendReasoning,
     onToolDelta: appendToolDelta,
+    onWarning: safeOnStreamWarning,
     onDone: finalizeAssistant,
   });
 

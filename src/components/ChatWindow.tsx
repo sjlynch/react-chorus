@@ -9,12 +9,13 @@ import { createHiddenRoleSet, filterVisibleMessages, getEffectiveHiddenRoles, no
 import { ErrorRow, JumpToBottomButton, TranscriptEmptyState, TypingRow } from './chat-window/TranscriptStatusRows';
 import type { ChatWindowProps } from './chat-window/types';
 import { useAutoScroll } from './chat-window/useAutoScroll';
+import { styleVarsFromPalette } from '../utils/paletteVars';
 import type { MessageCopyResult } from './MessageRow';
 
 export { stringActivityKey } from './chat-window/activityKey';
 export { MessageBubble } from './MessageRow';
 export type { ChatWindowProps, RenderErrorContext, RenderMessageContext, RenderMessageRootProps } from './chat-window/types';
-export type { GetMessageFeedback, MessageBubbleProps, MessageBubbleSlots, MessageCopyResult, MessageFeedback, MessageMarkdownProps, MessageRenderActions } from './MessageRow';
+export type { GetMessageFeedback, MessageBubbleProps, MessageBubbleSlots, MessageCopyResult, MessageFeedback, MessageMarkdownProps, MessageRenderActions, MessageTimestampFormatter } from './MessageRow';
 
 let didWarnShowSystemMessages = false;
 
@@ -52,16 +53,20 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
   renderMessage,
   showJumpToBottomButton = !headless,
   showSystemMessages,
+  showTimestamps = false,
+  formatTimestamp,
   streamingMessageId,
   suggestedPrompts,
   suggestedPromptsDisabled = false,
   suggestedPromptsDisabledReason,
   labels,
+  palette,
   className,
   style,
   ...rest
 }: ChatWindowProps<TMeta>, ref: React.ForwardedRef<HTMLDivElement>) {
   const resolvedLabels = React.useMemo(() => resolveChorusLabels(labels), [labels]);
+  const paletteVars = React.useMemo(() => styleVarsFromPalette(palette), [palette]);
   React.useEffect(() => {
     if (!isChorusDevMode() || showSystemMessages === undefined || didWarnShowSystemMessages) return;
     console.warn('[Chorus] `showSystemMessages` is deprecated. Use `hiddenRoles` instead (for example hiddenRoles={[\'system\']} to show tool messages while hiding system prompts).');
@@ -95,7 +100,7 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
     <div
       {...rest}
       className={["chorus-window", className].filter(Boolean).join(" ")}
-      style={style}
+      style={{ ...paletteVars, ...style }}
       ref={windowRef}
       role="log"
       aria-live="polite"
@@ -109,6 +114,8 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
         markdownSanitizer={markdownSanitizer}
         streamingMessageId={streamingMessageId}
         renderMessage={renderMessage}
+        showTimestamps={showTimestamps}
+        formatTimestamp={formatTimestamp}
         resolvedLabels={resolvedLabels}
         copyAvailable={copyAvailable}
         copyMessage={copyMessage}

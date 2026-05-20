@@ -70,7 +70,7 @@ describe('useConversations', () => {
     expect(result.current.activeId).toBe('two');
   });
 
-  it('bumps updatedAt when selecting an older conversation so recency sorting can promote it', () => {
+  it('changes only activeId when selecting a conversation, leaving updatedAt untouched', () => {
     const storage = makeSyncStorage();
     const ids = ['old', 'new'];
     const times = [
@@ -87,16 +87,24 @@ describe('useConversations', () => {
 
     act(() => { result.current.createConversation('Older'); });
     act(() => { result.current.createConversation('Newer'); });
+
+    const updatedAtBefore = result.current.conversations.map(conversation => [conversation.id, conversation.updatedAt]);
+
     act(() => result.current.selectConversation('old'));
 
+    expect(result.current.activeId).toBe('old');
+    expect(result.current.conversations.map(conversation => [conversation.id, conversation.updatedAt]))
+      .toEqual(updatedAtBefore);
     expect(result.current.conversations.find(conversation => conversation.id === 'old')?.updatedAt)
-      .toBe('2026-05-14T00:02:00.000Z');
+      .toBe('2026-05-14T00:00:00.000Z');
 
+    // Recency sorting must keep the most-recently-modified conversation on top,
+    // not the one that was just opened.
     const sortedIds = result.current.conversations
       .slice()
       .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
       .map(conversation => conversation.id);
-    expect(sortedIds).toEqual(['old', 'new']);
+    expect(sortedIds).toEqual(['new', 'old']);
   });
 
   it('does not bump updatedAt when pinning or unpinning a conversation', () => {

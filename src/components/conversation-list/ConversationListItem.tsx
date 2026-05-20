@@ -1,7 +1,8 @@
-import type React from 'react';
+import React from 'react';
 import type { ConversationSummary } from '../../hooks/useConversations';
 import type { ChorusConversationListLabels } from '../../labels/types';
 import { conversationClasses } from './classes';
+import { CONVERSATION_RENAME_MAX_LENGTH } from './useConversationRename';
 
 interface ConversationListItemProps {
   conversation: ConversationSummary;
@@ -20,6 +21,7 @@ interface ConversationListItemProps {
   setDraftTitle: React.Dispatch<React.SetStateAction<string>>;
   renameInputRef: React.RefObject<HTMLInputElement | null>;
   isDraftEmpty: boolean;
+  isDraftTooLong: boolean;
   startRename: (conversation: ConversationSummary) => void;
   cancelRename: () => void;
   submitRename: (id: string) => void;
@@ -43,13 +45,28 @@ export function ConversationListItem({
   setDraftTitle,
   renameInputRef,
   isDraftEmpty,
+  isDraftTooLong,
   startRename,
   cancelRename,
   submitRename,
   onDelete,
 }: ConversationListItemProps) {
+  const errorId = React.useId();
+  const isDraftInvalid = isDraftEmpty || isDraftTooLong;
+  const renameError = isDraftEmpty
+    ? labels.renameEmptyError
+    : isDraftTooLong
+      ? labels.renameTooLongError(CONVERSATION_RENAME_MAX_LENGTH)
+      : null;
+
   return (
-    <div className={conversationClasses(active, pinned)} role="listitem" data-active={active || undefined} data-pinned={pinned || undefined}>
+    <div
+      className={conversationClasses(active, pinned)}
+      role="listitem"
+      data-conversation-id={conversation.id}
+      data-active={active || undefined}
+      data-pinned={pinned || undefined}
+    >
       {editing ? (
         <form
           className="chorus-conversation-rename"
@@ -62,22 +79,32 @@ export function ConversationListItem({
             ref={renameInputRef}
             className="chorus-conversation-rename-input"
             aria-label={labels.renameAriaLabel(conversation.title)}
-            aria-invalid={isDraftEmpty || undefined}
+            aria-invalid={isDraftInvalid || undefined}
+            aria-describedby={renameError ? errorId : undefined}
+            maxLength={CONVERSATION_RENAME_MAX_LENGTH}
             value={draftTitle}
             onChange={event => setDraftTitle(event.target.value)}
             onKeyDown={event => {
-              if (event.key === 'Escape') cancelRename();
+              if (event.key === 'Escape') {
+                // Keep Escape from bubbling to an enclosing modal/dialog that
+                // would otherwise treat it as a request to close itself.
+                event.stopPropagation();
+                cancelRename();
+              }
             }}
           />
           <button
             type="submit"
             className="chorus-conversation-action"
-            disabled={isDraftEmpty}
-            aria-disabled={isDraftEmpty || undefined}
+            disabled={isDraftInvalid}
+            aria-disabled={isDraftInvalid || undefined}
           >
             {labels.save}
           </button>
           <button type="button" className="chorus-conversation-action" onClick={cancelRename}>{labels.cancel}</button>
+          {renameError && (
+            <p id={errorId} className="chorus-conversation-rename-error" role="alert">{renameError}</p>
+          )}
         </form>
       ) : (
         <>
@@ -110,7 +137,7 @@ export function ConversationListItem({
               </button>
             )}
             {renameConversation && (
-              <button type="button" className="chorus-conversation-action" onClick={() => startRename(conversation)} aria-label={labels.renameAriaLabel(conversation.title)} disabled={disabled} aria-disabled={disabled || undefined}>
+              <button type="button" className="chorus-conversation-action chorus-conversation-rename-trigger" onClick={() => startRename(conversation)} aria-label={labels.renameAriaLabel(conversation.title)} disabled={disabled} aria-disabled={disabled || undefined}>
                 {labels.rename}
               </button>
             )}

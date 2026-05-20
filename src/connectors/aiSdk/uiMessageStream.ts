@@ -74,7 +74,13 @@ export function uiMessageStreamResult(state: AiSdkConnectorState, obj: Record<st
   }
 
   if (type === 'tool-input-delta' || type === 'tool-call-delta') {
-    const fragment = obj.inputTextDelta ?? obj.argsTextDelta;
+    // Prefer the first non-empty alias: `??` only falls through on
+    // null/undefined, so a mixed-alias frame like
+    // `{inputTextDelta:'', argsTextDelta:'hi'}` would otherwise keep the empty
+    // string and drop the real delta on the guard below.
+    const fragment = (typeof obj.inputTextDelta === 'string' && obj.inputTextDelta)
+      ? obj.inputTextDelta
+      : obj.argsTextDelta;
     if (typeof fragment !== 'string' || fragment === '') return null;
     const toolDelta = toolDeltaFromToolCall(state, type, obj.toolCallId, obj.toolName, fragment, true);
     return toolDelta ? { toolDelta } : null;
