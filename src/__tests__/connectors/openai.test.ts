@@ -193,6 +193,62 @@ describe('openaiConnector', () => {
     const data = JSON.stringify({ choices: [{ index: 0, delta: { content: '<Think>plan</Think>answer' } }] });
     expect(openaiConnector.extract(data)).toEqual({ reasoning: 'plan', text: 'answer' });
   });
+
+  it('resolves the stream via finish_reason "length" with a truncated warning when [DONE] is absent', () => {
+    const state = openaiConnector.createState?.();
+    openaiConnector.extract(JSON.stringify({ choices: [{ index: 0, delta: { content: 'partial answer' } }] }), state);
+    const final = openaiConnector.extract(JSON.stringify({ choices: [{ finish_reason: 'length', delta: {} }] }), state);
+    expect(final?.done).toBe(true);
+    expect(final?.warning?.code).toBe('truncated');
+    expect(final?.metadata?.finishReason).toBe('length');
+  });
+
+  it('surfaces a content_filter finish_reason as a content_filter warning', () => {
+    const result = openaiConnector.extract(JSON.stringify({ choices: [{ finish_reason: 'content_filter', delta: {} }] }));
+    expect(result?.done).toBe(true);
+    expect(result?.warning?.code).toBe('content_filter');
+  });
+
+  it('emits done without a warning for a normal stop finish_reason', () => {
+    const result = openaiConnector.extract(JSON.stringify({ choices: [{ finish_reason: 'stop', delta: {} }] }));
+    expect(result).toEqual({ done: true, metadata: { finishReason: 'stop' } });
+  });
+
+  it('emits final content and done together when one chunk carries both', () => {
+    const result = openaiConnector.extract(JSON.stringify({ choices: [{ delta: { content: 'last words' }, finish_reason: 'stop' }] }));
+    expect(result?.text).toBe('last words');
+    expect(result?.done).toBe(true);
+  });
+
+  it('flushes a buffered partial think tag when finish_reason ends the stream', () => {
+    const state = openaiConnector.createState?.();
+    expect(openaiConnector.extract(JSON.stringify({ choices: [{ index: 0, delta: { content: 'hi <' } }] }), state)).toEqual({ text: 'hi ' });
+    const final = openaiConnector.extract(JSON.stringify({ choices: [{ finish_reason: 'stop', delta: {} }] }), state);
+    expect(final).toEqual({ text: '<', done: true, metadata: { finishReason: 'stop' } });
+  });
+
+  it('compiles the think-tag regexes once per stream, not per streamed chunk', () => {
+    const RealRegExp = RegExp;
+    let constructed = 0;
+    class CountingRegExp extends RealRegExp {
+      constructor(...args: ConstructorParameters<typeof RegExp>) {
+        constructed++;
+        super(...args);
+      }
+    }
+    vi.stubGlobal('RegExp', CountingRegExp);
+    try {
+      const connector = createOpenAIConnector();
+      const state = connector.createState?.();
+      const afterCreate = constructed;
+      for (let i = 0; i < 25; i++) {
+        connector.extract(JSON.stringify({ choices: [{ index: 0, delta: { content: `chunk ${i} ` } }] }), state);
+      }
+      expect(constructed).toBe(afterCreate);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });
 
 describe('createOpenAIConnector', () => {
@@ -267,5 +323,76 @@ describe('openaiConnector (Responses API)', () => {
       error: 'OpenAI model refused to respond',
       errorPayload: donePayload,
     });
+  });
+
+  it('keeps refusals with distinct numeric output_index values in separate keys', () => {
+    const state = openaiConnector.createState?.();
+    openaiConnector.extract(JSON.stringify({ type: 'response.refusal.added', output_index: 0 }), state);
+    openaiConnector.extract(JSON.stringify({ type: 'response.refusal.added', output_index: 1 }), state);
+    openaiConnector.extract(JSON.stringify({ type: 'response.refusal.delta', output_index: 0, delta: 'first refusal' }), state);
+    openaiConnector.extract(JSON.stringify({ type: 'response.refusal.delta', output_index: 1, delta: 'second refusal' }), state);
+    const done0 = { type: 'response.refusal.done', output_index: 0 };
+    const done1 = { type: 'response.refusal.done', output_index: 1 };
+    expect(openaiConnector.extract(JSON.stringify(done0), state)).toEqual({ error: 'first refusal', errorPayload: done0 });
+    expect(openaiConnector.extract(JSON.stringify(done1), state)).toEqual({ error: 'second refusal', errorPayload: done1 });
+  });
+
+  it('collapses function_call_arguments deltas that precede output_item.added into one tool block', () => {
+    const state = openaiConnector.createState?.();
+    const delta1 = JSON.stringify({ type: 'response.function_call_arguments.delta', item_id: 'fc_1', output_index: 0, delta: '{"q":' });
+    const delta2 = JSON.stringify({ type: 'response.function_call_arguments.delta', item_id: 'fc_1', output_index: 0, delta: '"react"}' });
+    // Deltas arrive before output_item.added — buffered, nothing emitted yet.
+    expect(openaiConnector.extract(delta1, state)).toBeNull();
+    expect(openaiConnector.extract(delta2, state)).toBeNull();
+
+    const added = JSON.stringify({
+      type: 'response.output_item.added',
+      output_index: 0,
+      item: { type: 'function_call', id: 'fc_1', call_id: 'call_1', name: 'search', arguments: '' },
+    });
+    const result = openaiConnector.extract(added, state);
+    const deltas = result?.toolDeltas ?? (result?.toolDelta ? [result.toolDelta] : []);
+    // The added block plus the two replayed deltas — every one keyed to call_1.
+    expect(deltas.length).toBeGreaterThanOrEqual(3);
+    expect(deltas.every(d => d.id === 'call_1')).toBe(true);
+    expect(deltas.map(d => d.input).join('')).toBe('{"q":"react"}');
+
+    // A later delta also resolves to the same id.
+    const delta3 = JSON.stringify({ type: 'response.function_call_arguments.delta', item_id: 'fc_1', output_index: 0, delta: ' done' });
+    expect(openaiConnector.extract(delta3, state)?.toolDelta?.id).toBe('call_1');
+  });
+
+  it('replays orphaned function_call_arguments deltas on response.completed when output_item.added never arrives', () => {
+    const state = openaiConnector.createState?.();
+    openaiConnector.extract(JSON.stringify({ type: 'response.function_call_arguments.delta', item_id: 'fc_9', delta: '{"a":1}' }), state);
+    const completed = openaiConnector.extract(JSON.stringify({ type: 'response.completed', response: {} }), state);
+    expect(completed?.done).toBe(true);
+    expect(completed?.toolDelta?.id).toBe('fc_9');
+    expect(completed?.toolDelta?.input).toBe('{"a":1}');
+  });
+
+  it('surfaces incomplete_details and token usage from response.completed', () => {
+    const payload = {
+      type: 'response.completed',
+      response: {
+        incomplete_details: { reason: 'max_output_tokens' },
+        usage: { input_tokens: 12, output_tokens: 7, total_tokens: 19 },
+      },
+    };
+    const result = openaiConnector.extract(JSON.stringify(payload));
+    expect(result?.done).toBe(true);
+    expect(result?.warning?.code).toBe('truncated');
+    expect(result?.metadata?.finishReason).toBe('max_output_tokens');
+    expect(result?.metadata?.usage).toEqual({ promptTokens: 12, completionTokens: 7, totalTokens: 19 });
+  });
+
+  it('treats response.completed without incomplete_details as a clean done with usage', () => {
+    const result = openaiConnector.extract(JSON.stringify({
+      type: 'response.completed',
+      response: { usage: { input_tokens: 3, output_tokens: 4 } },
+    }));
+    expect(result?.done).toBe(true);
+    expect(result?.warning).toBeUndefined();
+    expect(result?.metadata?.usage).toEqual({ promptTokens: 3, completionTokens: 4 });
   });
 });

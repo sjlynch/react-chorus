@@ -39,6 +39,24 @@ export function stringFromUnknown(value: unknown): string {
   return '';
 }
 
+export function numberFromUnknown(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+/**
+ * Resolved identity of a Responses API function call, recorded once
+ * `response.output_item.added`/`.done` reveals the call id. Every
+ * `function_call_arguments.delta` for the same call is replayed/emitted under
+ * this single id so a late `output_item.added` does not split one logical tool
+ * call into two rendered blocks.
+ */
+export interface ResponseToolRef {
+  /** Canonical tool-block id reused for every delta of this call. */
+  id: string;
+  /** Real provider call id, when the provider supplied one. */
+  providerId?: string;
+}
+
 export function collectTextFragments(value: unknown): string {
   if (typeof value === 'string') return value;
   if (Array.isArray(value)) {
