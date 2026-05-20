@@ -3,7 +3,7 @@ import type { ResolvedChorusLabels } from '../../labels/types';
 import type { Message } from '../../types';
 import type { MarkdownSanitizer } from '../Markdown';
 import { MessageActionControls, MessageRenderStateContext, MessageRenderStateProvider, MessageRow, MessageSpeakerLabel } from '../MessageRow';
-import type { MessageBubbleSlots, MessageCopyResult, MessageFeedback, MessageMarkdownProps, MessageRenderActions } from '../MessageRow';
+import type { MessageBubbleSlots, MessageCopyResult, MessageFeedback, MessageMarkdownProps, MessageRenderActions, MessageTimestampFormatter } from '../MessageRow';
 import { ToolCallBlock } from '../ToolCallBlock';
 import { attachMessageRootProps } from './rendering';
 import type { RenderMessageContext, RenderMessageRootProps } from './types';
@@ -36,6 +36,10 @@ export interface MessageListProps<TMeta = Record<string, unknown>> {
   markdownSanitizer?: MarkdownSanitizer;
   streamingMessageId?: string | null;
   renderMessage?: (message: Message<TMeta>, context: RenderMessageContext<TMeta>) => React.ReactNode;
+  /** Render each message's `createdAt` time below its bubble. */
+  showTimestamps: boolean;
+  /** Override the locale-aware default timestamp formatting. */
+  formatTimestamp?: MessageTimestampFormatter<TMeta>;
   resolvedLabels: ResolvedChorusLabels;
   copyAvailable: boolean;
   copyMessage: (message: Message<TMeta>) => MessageCopyResult;
@@ -55,6 +59,8 @@ export function MessageList<TMeta = Record<string, unknown>>({
   markdownSanitizer,
   streamingMessageId,
   renderMessage,
+  showTimestamps,
+  formatTimestamp,
   resolvedLabels,
   copyAvailable,
   copyMessage,
@@ -65,6 +71,12 @@ export function MessageList<TMeta = Record<string, unknown>>({
   onEdit,
   onRegenerate,
 }: MessageListProps<TMeta>) {
+  // A tool call belongs to a turn that is still streaming whenever any
+  // assistant turn is in flight — its arguments/result may not have arrived
+  // yet. Tool messages never carry the `streamingMessageId` themselves (that
+  // tracks the pending assistant message), so derive it from session activity.
+  const sessionStreaming = streamingMessageId != null;
+
   return (
     <>
       {messages.map(message => {
@@ -77,7 +89,7 @@ export function MessageList<TMeta = Record<string, unknown>>({
               <div className="chorus-msg chorus-tool" data-chorus-message-id={message.id}>
                 <MessageSpeakerLabel role={message.role} speakers={resolvedLabels.speakers} />
                 {slots?.before}
-                <ToolCallBlock toolCall={message.toolCall} labels={resolvedLabels.toolCall} />
+                <ToolCallBlock toolCall={message.toolCall} labels={resolvedLabels.toolCall} streaming={sessionStreaming} />
                 {slots?.after}
               </div>
             );
@@ -96,6 +108,8 @@ export function MessageList<TMeta = Record<string, unknown>>({
               reasoningLabel={resolvedLabels.reasoning}
               codeCopyLabels={resolvedLabels.codeCopy}
               attachmentLabels={resolvedLabels.attachments}
+              showTimestamp={showTimestamps}
+              formatTimestamp={formatTimestamp}
               onEdit={onEdit}
               onRegenerate={onRegenerate}
               onDelete={onDelete}
