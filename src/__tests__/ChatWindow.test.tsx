@@ -548,6 +548,46 @@ describe('ChatWindow', () => {
     expect(onFeedback).not.toHaveBeenCalled();
   });
 
+  it('evicts a clicked feedback override when getMessageFeedback later changes it', async () => {
+    const user = userEvent.setup();
+    const onFeedback = vi.fn();
+    const renderWith = (getMessageFeedback: (message: Message) => MessageFeedback | null) =>
+      <ChatWindow messages={[ASST_MSG]} onFeedback={onFeedback} getMessageFeedback={getMessageFeedback} />;
+
+    const { rerender } = render(renderWith(() => null));
+
+    // User clicks thumbs up — the local override shadows host state.
+    await user.click(screen.getByRole('button', { name: 'Thumbs up' }));
+    expect(screen.getByRole('button', { name: 'Thumbs up' })).toHaveAttribute('aria-pressed', 'true');
+
+    // The host persists a correction and reports the new feedback value.
+    rerender(renderWith(() => 'down'));
+    expect(screen.getByRole('button', { name: 'Thumbs down' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Thumbs up' })).toHaveAttribute('aria-pressed', 'false');
+
+    // The host clears the feedback — the UI follows host state, not the override.
+    rerender(renderWith(() => null));
+    expect(screen.getByRole('button', { name: 'Thumbs up' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: 'Thumbs down' })).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('evicts a clicked feedback override when message metadata feedback later changes', async () => {
+    type FeedbackMeta = { feedback?: MessageFeedback | null };
+    const user = userEvent.setup();
+    const onFeedback = vi.fn();
+    const base: Message<FeedbackMeta> = { id: 'a1', role: 'assistant', text: 'Hi there' };
+
+    const { rerender } = render(<ChatWindow messages={[base]} onFeedback={onFeedback} />);
+
+    await user.click(screen.getByRole('button', { name: 'Thumbs up' }));
+    expect(screen.getByRole('button', { name: 'Thumbs up' })).toHaveAttribute('aria-pressed', 'true');
+
+    // Host syncs a different persisted value for the same still-present message.
+    rerender(<ChatWindow messages={[{ ...base, metadata: { feedback: 'down' } }]} onFeedback={onFeedback} />);
+    expect(screen.getByRole('button', { name: 'Thumbs down' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Thumbs up' })).toHaveAttribute('aria-pressed', 'false');
+  });
+
   it('copies with navigator.clipboard by default when available', async () => {
     const user = userEvent.setup();
     const writeText = vi.fn().mockResolvedValue(undefined);
