@@ -77,6 +77,7 @@ export interface UseAssistantSessionOptions<TMeta = Record<string, unknown>> {
   tools?: ChorusToolRegistry<TMeta>;
   autoContinueTools?: boolean;
   maxToolIterations?: number;
+  continueOnToolError?: boolean;
   shouldContinueToolLoop?: ChorusShouldContinueToolLoop<TMeta>;
   confirmDeleteMessage?: ChorusConfirmDeleteMessage<TMeta>;
   confirmClearConversation?: ChorusConfirmClearConversation<TMeta>;
@@ -123,6 +124,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
   tools,
   autoContinueTools = false,
   maxToolIterations = DEFAULT_MAX_TOOL_ITERATIONS,
+  continueOnToolError = false,
   shouldContinueToolLoop,
   confirmDeleteMessage,
   confirmClearConversation,
@@ -144,6 +146,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     tools: toolsRef,
     autoContinueTools: autoContinueToolsRef,
     maxToolIterations: maxToolIterationsRef,
+    continueOnToolError: continueOnToolErrorRef,
     shouldContinueToolLoop: shouldContinueToolLoopRef,
     confirmDeleteMessage: confirmDeleteMessageRef,
     confirmClearConversation: confirmClearConversationRef,
@@ -167,6 +170,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     tools,
     autoContinueTools,
     maxToolIterations,
+    continueOnToolError,
     shouldContinueToolLoop,
     confirmDeleteMessage,
     confirmClearConversation,
@@ -281,6 +285,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     hasStartedAssistantRef,
     toolsRef,
     onToolCallRef,
+    continueOnToolErrorRef,
     safeOnToolDelta: observers.safeOnToolDelta,
     safeNotifyToolCall: observers.safeNotifyToolCall,
     isAssistantSessionActive,

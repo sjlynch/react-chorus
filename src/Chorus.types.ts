@@ -73,6 +73,14 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
   autoContinueTools?: boolean;
   /** Maximum automatic tool iterations when autoContinueTools is enabled. Defaults to 4; pass Infinity to explicitly disable the safety cap. */
   maxToolIterations?: number;
+  /**
+   * Treat a thrown tool handler (or `onToolCall`) error as a normal tool result instead of a
+   * terminal turn failure. The error is still recorded on the tool row (`{ error: message }`
+   * output plus `metadata.isError`); with `autoContinueTools` enabled the loop then continues,
+   * feeding the error tool result back to the model so it can self-recover. Abort errors (Stop)
+   * always end the turn regardless. Defaults to `false`.
+   */
+  continueOnToolError?: boolean;
   /** Optional gate for each automatic tool continuation. Return false to stop before the next model request. */
   shouldContinueToolLoop?: ChorusShouldContinueToolLoop<TMeta>;
   /** Disable composer input, attachment ingestion, prompt fills, and write actions. Stop remains available while sending. */

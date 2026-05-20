@@ -250,6 +250,99 @@ describe('Chorus', () => {
     expect(transport).toHaveBeenCalledTimes(2);
   });
 
+  it('continues the auto tool loop after a handler throws when continueOnToolError is set', async () => {
+    const user = userEvent.setup();
+    const onError = vi.fn();
+    const onStreamDone = vi.fn();
+    const search = vi.fn(async () => {
+      if (search.mock.calls.length === 1) throw new Error('tool failed');
+      return { result: 'found' };
+    });
+    const transport = vi.fn<Transport>(async () => {
+      const call = transport.mock.calls.length;
+      if (call === 1) {
+        return sseResponse([
+          JSON.stringify({ choices: [{ index: 0, delta: { content: 'Let me search.', tool_calls: [{ index: 0, id: 'call_1', function: { name: 'search', arguments: '{"q":"react"}' } }] } }] }),
+          '[DONE]',
+        ]);
+      }
+      if (call === 2) {
+        return sseResponse([
+          JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_2', function: { name: 'search', arguments: '{"q":"react"}' } }] } }] }),
+          '[DONE]',
+        ]);
+      }
+      return sseResponse([
+        JSON.stringify({ choices: [{ index: 0, delta: { content: 'All good now.' } }] }),
+        '[DONE]',
+      ]);
+    });
+
+    render(<Chorus
+      transport={transport}
+      connector="openai"
+      minAssistantDelayMs={0}
+      autoContinueTools
+      continueOnToolError
+      tools={{ search }}
+      onError={onError}
+      onStreamDone={onStreamDone}
+    />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'search react');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByText('All good now.')).toBeInTheDocument();
+    await waitFor(() => expect(transport).toHaveBeenCalledTimes(3));
+    expect(search).toHaveBeenCalledTimes(2);
+    // The throw is fed back to the model, not surfaced as a terminal turn error.
+    expect(onError).not.toHaveBeenCalled();
+    expect(screen.queryByText('Something went wrong. Please try again.')).not.toBeInTheDocument();
+    // Assistant text streamed in the failing iteration is kept, not discarded.
+    expect(screen.getByText('Let me search.')).toBeInTheDocument();
+    // The loop continued past the throw rather than ending the turn.
+    expect(onStreamDone).toHaveBeenNthCalledWith(1, expect.objectContaining({ reason: 'tool-loop-continue', willContinue: true }));
+
+    // The continuation request after the throw carries the error tool_result.
+    const continuationBody = toOpenAIChatCompletionsBody(transport.mock.calls[1][1]);
+    expect(continuationBody.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: 'tool', tool_call_id: 'call_1', content: expect.stringContaining('tool failed') }),
+    ]));
+
+    // The errored tool row stays inspectable.
+    await user.click(screen.getAllByRole('button', { name: /search/i })[0]);
+    expect(screen.getByText(/tool failed/)).toBeInTheDocument();
+  });
+
+  it('records a thrown tool error without the banner when continueOnToolError is set but autoContinueTools is off', async () => {
+    const user = userEvent.setup();
+    const onError = vi.fn();
+    const transport = vi.fn<Transport>(async () => sseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'search', arguments: '{"q":"react"}' } }] } }] }),
+      '[DONE]',
+    ]));
+
+    render(<Chorus
+      transport={transport}
+      connector="openai"
+      minAssistantDelayMs={0}
+      continueOnToolError
+      tools={{ search: async () => { throw new Error('tool failed'); } }}
+      onError={onError}
+    />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'search react');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByRole('button', { name: /search/i })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument());
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(onError).not.toHaveBeenCalled();
+    expect(screen.queryByText('Something went wrong. Please try again.')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /search/i }));
+    expect(screen.getByText(/tool failed/)).toBeInTheDocument();
+  });
+
   it('aborts during tool execution without showing an error', async () => {
     const user = userEvent.setup();
     let capturedSignal!: AbortSignal;

@@ -11,6 +11,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 #### Tool agent loop
 - Added a `tools` registry prop and `ChorusToolRegistry` type for declaring client-side tool implementations.
 - Added `autoContinueTools`, `maxToolIterations`, and `shouldContinueToolLoop` props for controlling automatic tool-call → result → resume cycles.
+- Added `continueOnToolError`: when a tool handler (or `onToolCall`) throws a non-abort error, the error is recorded on the tool row and — with `autoContinueTools` enabled — fed back to the model as the tool result so the loop self-recovers instead of ending the turn with the error banner.
 - Added `onToolCall`, `onToolDelta`, `onStreamDone`, and `onAbort` callbacks with `ChorusToolCallContext`, `ChorusToolDeltaContext`, `ChorusToolLoopContext`, `ChorusStreamDoneContext`, and `ChorusAbortContext` payload types.
 
 #### Multi-conversation
