@@ -1,14 +1,22 @@
 import type { Message } from '../../types';
 import type { FormatMessageResult, WebSocketTransport, WebSocketTransportOptions } from '../createWebSocketTransport';
 import { createManagedResponseStream } from './managedResponseStream';
-import { createAbnormalCloseError, createAbortError, createClosedBeforeOpenError, encodeSSEDataEvent, isNormalCloseCode, normalizeFormatMessageResult, safeCloseSocket, toError, webSocketMessageToText } from './shared';
+import { createAbnormalCloseError, createAbortError, createClosedBeforeOpenError, createTransportClosedError, encodeSSEDataEvent, isNormalCloseCode, normalizeFormatMessageResult, safeCloseSocket, toError, webSocketMessageToText } from './shared';
+
+// Per-send handler that settles an in-flight send with an error: it errors the
+// response stream if the send already resolved, otherwise rejects the outer
+// promise. `closeCode`/`closeReason` are forwarded to the socket close frame.
+type TransientFailHandler = (error: unknown, closeCode?: number, closeReason?: string) => void;
 
 export function createTransientWebSocketTransport<TMeta = Record<string, unknown>>(
   url: string,
   opts: WebSocketTransportOptions<TMeta> | undefined,
   formatMessage: (text: string, history: Message<TMeta>[]) => FormatMessageResult,
 ): WebSocketTransport<TMeta> {
-  const activeSockets = new Set<WebSocket>();
+  // Each in-flight send registers its `fail` handler here, keyed by socket, so
+  // `transport.close()` can settle every active send with an explicit
+  // transport-closed error instead of leaving the socket to close as a clean EOF.
+  const activeSends = new Map<WebSocket, TransientFailHandler>();
   const encoder = new TextEncoder();
 
   const transport = ((text: string, history: Message<TMeta>[], signal: AbortSignal) =>
@@ -19,26 +27,25 @@ export function createTransientWebSocketTransport<TMeta = Record<string, unknown
       }
 
       const ws = new WebSocket(url, opts?.protocols);
-      activeSockets.add(ws);
       let resolved = false;
       let settled = false;
 
       const cleanup = () => {
         signal.removeEventListener('abort', onAbort);
-        activeSockets.delete(ws);
+        activeSends.delete(ws);
       };
 
-      const safeCloseCurrentSocket = () => safeCloseSocket(ws);
+      const safeCloseCurrentSocket = (code?: number, reason?: string) => safeCloseSocket(ws, code, reason);
       const responseStream = createManagedResponseStream(() => {
         cleanup();
         safeCloseCurrentSocket();
       });
       responseStream.setCleanup(cleanup);
 
-      const fail = (error: unknown) => {
+      const fail: TransientFailHandler = (error, closeCode, closeReason) => {
         const err = toError(error);
         cleanup();
-        safeCloseCurrentSocket();
+        safeCloseCurrentSocket(closeCode, closeReason);
         if (resolved) {
           responseStream.error(err);
           return;
@@ -54,6 +61,7 @@ export function createTransientWebSocketTransport<TMeta = Record<string, unknown
       }
 
       signal.addEventListener('abort', onAbort, { once: true });
+      activeSends.set(ws, fail);
 
       ws.onopen = () => {
         if (signal.aborted) { safeCloseCurrentSocket(); return; }
@@ -99,9 +107,15 @@ export function createTransientWebSocketTransport<TMeta = Record<string, unknown
       };
     })) as WebSocketTransport<TMeta>;
 
+  // A client-initiated close is *not* a clean end-of-stream: unlike a server
+  // close (code 1000 → done), the response was still streaming. Surface an
+  // explicit transport-closed error to every in-flight send so a reader
+  // mid-stream rejects instead of seeing a silent `done` (a truncated message).
   transport.close = (code?: number, reason?: string) => {
-    for (const ws of Array.from(activeSockets)) safeCloseSocket(ws, code, reason);
-    activeSockets.clear();
+    for (const fail of Array.from(activeSends.values())) {
+      fail(createTransportClosedError(code, reason), code, reason);
+    }
+    activeSends.clear();
   };
 
   return transport;

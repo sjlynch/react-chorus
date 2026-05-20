@@ -14,7 +14,10 @@ function createHighlightExtension() {
 
 function createMarkedInstance(options?: MarkedOptions) {
   const instance = new Marked();
-  instance.setOptions(options ?? { ...DEFAULT_MARKED_OPTIONS });
+  // Always layer caller options on top of the defaults so a partial override
+  // (e.g. `{ breaks: false }`) does not silently drop `gfm`, which would
+  // disable tables, task lists, autolinks, etc.
+  instance.setOptions({ ...DEFAULT_MARKED_OPTIONS, ...options });
   instance.use(createHighlightExtension());
   return instance;
 }
@@ -45,7 +48,12 @@ const safeRendererExtension: MarkedExtension = {
 safeMarkedInstance.use(safeRendererExtension);
 
 function hasCustomMarkedConfig(markedOptions?: MarkedOptions, markedExtensions?: MarkedExtension[]) {
-  return markedOptions !== undefined || (markedExtensions?.length ?? 0) > 0;
+  // Treat empty objects/arrays as "no override" so a parent that inlines
+  // `markedOptions={{}}` or `markedExtensions={[]}` keeps reusing the shared
+  // singleton instead of rebuilding (and re-`use`-ing) Marked on every render.
+  const hasOptions = markedOptions !== undefined && Object.keys(markedOptions).length > 0;
+  const hasExtensions = (markedExtensions?.length ?? 0) > 0;
+  return hasOptions || hasExtensions;
 }
 
 function createConfiguredMarkedInstance(markedOptions: MarkedOptions | undefined, markedExtensions: MarkedExtension[] | undefined, safe: boolean) {

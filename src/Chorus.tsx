@@ -3,7 +3,7 @@ import './Chorus.css';
 import { ChatWindow } from './components/ChatWindow';
 import { ChatInput } from './components/ChatInput';
 import type { ChatInputHandle } from './components/ChatInput';
-import { styleVarsFromPalette } from './components/ChorusTheme';
+import { styleVarsFromPalette } from './utils/paletteVars';
 import type { Attachment, Message } from './types';
 import { resolveChorusLabels } from './labels/resolve';
 import { useChorusPersistence } from './hooks/useChorusPersistence';
@@ -26,6 +26,7 @@ function ChorusInner<TMeta = Record<string, unknown>>({
   confirmClearConversation,
   autoContinueTools,
   maxToolIterations,
+  continueOnToolError,
   shouldContinueToolLoop,
   disabled = false,
   disabledReason,
@@ -159,6 +160,7 @@ function ChorusInner<TMeta = Record<string, unknown>>({
     tools,
     autoContinueTools,
     maxToolIterations,
+    continueOnToolError,
     shouldContinueToolLoop,
     confirmDeleteMessage,
     confirmClearConversation,
