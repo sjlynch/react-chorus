@@ -10,14 +10,32 @@ export function useAutoScroll<TElement extends HTMLElement>(activityKey: string,
   const windowRef = React.useRef<TElement>(null);
   const shouldAutoScrollRef = React.useRef(true);
   const previousActivityKeyRef = React.useRef(activityKey);
+  // Set just before an automatic pin so the scroll event the browser fires in
+  // response is not mistaken for the user choosing to leave/rejoin the bottom.
+  const programmaticScrollRef = React.useRef(false);
   const [hasUnreadActivity, setHasUnreadActivity] = React.useState(false);
   const [isAutoScrollPaused, setIsAutoScrollPaused] = React.useState(false);
 
   React.useImperativeHandle(forwardedRef, () => windowRef.current!);
 
+  // Pin the transcript to the bottom for an automatic (non-user) reason. The
+  // programmatic flag is only armed when scrollTop actually moves, so the very
+  // scroll event it produces clears it again — a no-op pin never leaves a
+  // stale flag that would swallow the user's next real scroll.
+  const pinToBottom = React.useCallback(() => {
+    const el = windowRef.current;
+    if (!el) return;
+    const before = el.scrollTop;
+    el.scrollTop = el.scrollHeight;
+    if (el.scrollTop !== before) programmaticScrollRef.current = true;
+  }, []);
+
   const scrollToBottom = React.useCallback(() => {
     const el = windowRef.current;
     if (!el) return;
+    // Jump-to-latest is an explicit user action: let the echoed scroll event
+    // run through the detector normally — it simply reaffirms the at-bottom
+    // state we set here, so it never needs programmatic suppression.
     el.scrollTop = el.scrollHeight;
     shouldAutoScrollRef.current = true;
     setIsAutoScrollPaused(false);
@@ -29,6 +47,12 @@ export function useAutoScroll<TElement extends HTMLElement>(activityKey: string,
     if (!el) return;
 
     const onScroll = () => {
+      // Skip detection for the frame our own pin caused, so an auto-pin does
+      // not re-arm auto-scroll after the user has deliberately scrolled away.
+      if (programmaticScrollRef.current) {
+        programmaticScrollRef.current = false;
+        return;
+      }
       const nearBottom = isNearBottom(el);
       shouldAutoScrollRef.current = nearBottom;
       setIsAutoScrollPaused(!nearBottom);
@@ -48,10 +72,8 @@ export function useAutoScroll<TElement extends HTMLElement>(activityKey: string,
 
   React.useLayoutEffect(() => {
     if (!shouldAutoScrollRef.current) return;
-    const el = windowRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-  }, [activityKey]);
+    pinToBottom();
+  }, [activityKey, pinToBottom]);
 
   React.useEffect(() => {
     const el = windowRef.current;
@@ -59,9 +81,11 @@ export function useAutoScroll<TElement extends HTMLElement>(activityKey: string,
     if (typeof ResizeObserver === 'undefined') return;
 
     const repin = () => {
+      // Never re-pin once the user has scrolled away; the jump-to-bottom
+      // button (driven by hasUnreadActivity) is their way back instead.
       if (!shouldAutoScrollRef.current) return;
       if (!el.isConnected) return;
-      el.scrollTop = el.scrollHeight;
+      pinToBottom();
     };
 
     const resizeObserver = new ResizeObserver(repin);
@@ -86,7 +110,7 @@ export function useAutoScroll<TElement extends HTMLElement>(activityKey: string,
       resizeObserver.disconnect();
       mutationObserver?.disconnect();
     };
-  }, []);
+  }, [pinToBottom]);
 
   return {
     windowRef,

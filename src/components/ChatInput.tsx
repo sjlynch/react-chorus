@@ -210,7 +210,10 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(funct
           aria-describedby={inactiveReason ? reasonId : undefined}
           disabled={disabled}
           readOnly={readOnly || disabled}
-          aria-readonly={readOnly || disabled ? true : undefined}
+          // A natively disabled control must not also advertise aria-readonly:
+          // the two ARIA states are mutually exclusive, so only expose it for
+          // a purely read-only (not disabled) textarea.
+          aria-readonly={readOnly && !disabled ? true : undefined}
         />
         <button type="button" className="chorus-send" onClick={handleClick} aria-label={sendActionLabel} title={sendActionLabel} disabled={sending ? !stopAvailable : !canSend}>
           {sending ? <span className="chorus-stop-fill" /> : <ArrowUp size={18} strokeWidth={2} />}

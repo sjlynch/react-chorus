@@ -224,6 +224,8 @@ describe('ChatInput', () => {
 
     const textbox = screen.getByRole('textbox');
     expect(textbox).toBeDisabled();
+    // A natively disabled control must not also advertise aria-readonly.
+    expect(textbox).not.toHaveAttribute('aria-readonly');
     expect(textbox).toHaveAttribute('placeholder', 'Choose a conversation first');
     expect(screen.getByRole('button', { name: /send/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /attach file/i })).toBeDisabled();
@@ -262,6 +264,8 @@ describe('ChatInput', () => {
     const textbox = screen.getByRole('textbox');
     expect(textbox).not.toBeDisabled();
     expect(textbox).toHaveAttribute('readonly');
+    // A purely read-only (not disabled) textarea should advertise aria-readonly.
+    expect(textbox).toHaveAttribute('aria-readonly', 'true');
     expect(screen.getByRole('button', { name: /send/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /attach file/i })).toBeDisabled();
 

@@ -40,6 +40,8 @@ export interface MessageListProps<TMeta = Record<string, unknown>> {
   copyAvailable: boolean;
   copyMessage: (message: Message<TMeta>) => MessageCopyResult;
   feedbackEnabled: boolean;
+  /** Render recorded feedback as inert thumbs (getMessageFeedback set, no onFeedback). */
+  feedbackReadOnly: boolean;
   getSelectedFeedback: (message: Message<TMeta>) => MessageFeedback | null;
   onMessageFeedback: (message: Message<TMeta>, feedback: MessageFeedback) => void;
   onDelete?: (id: string) => void;
@@ -59,6 +61,7 @@ export function MessageList<TMeta = Record<string, unknown>>({
   copyAvailable,
   copyMessage,
   feedbackEnabled,
+  feedbackReadOnly,
   getSelectedFeedback,
   onMessageFeedback,
   onDelete,
@@ -102,6 +105,7 @@ export function MessageList<TMeta = Record<string, unknown>>({
               onCopy={copyAvailable ? copyMessage : undefined}
               onFeedback={feedback ? (_message, variant) => feedback(variant) : undefined}
               initialFeedback={initialFeedback}
+              feedbackReadOnly={feedbackReadOnly}
               {...slots}
             />
           );
@@ -119,6 +123,7 @@ export function MessageList<TMeta = Record<string, unknown>>({
           copy: copyAvailable ? () => copyMessage(message) : undefined,
           feedback,
           initialFeedback,
+          feedbackReadOnly,
           defaultRender: () => <MessageActionControls message={message} actions={actions} labels={resolvedLabels.messageActions} speakerLabels={resolvedLabels.speakers} />,
         };
         const messageProps: RenderMessageRootProps = { 'data-chorus-message-id': message.id };

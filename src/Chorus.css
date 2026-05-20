@@ -6,7 +6,6 @@
 .chorus-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 .chorus { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden; }
 .chorus-window { position: relative; flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; background: var(--chorus-chat-bg, #161616); border: 1px solid var(--chorus-border, #2a2a2a); border-radius: 12px; padding: 12px; color: var(--chorus-chat-text, #f3f4f6); }
-.chorus-scroll-sentinel { height: 1px; }
 
 /* Empty transcript state + starter prompts */
 .chorus-empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: min(320px, 100%); padding: 32px 16px; text-align: center; color: var(--chorus-chat-text, #f3f4f6); }
@@ -137,6 +136,8 @@
 .chorus-action-btn:hover, .chorus-action-btn--active { background: var(--chorus-action-hover-bg, rgba(255,255,255,0.15)); color: var(--chorus-action-hover-text, #eee); }
 .chorus-action-btn:focus-visible { outline: 2px solid var(--chorus-send-bg, #ffffff); outline-offset: 1px; }
 .chorus-action-btn--copy-failed { background: var(--chorus-error-bg, rgba(220, 38, 38, 0.15)); color: var(--chorus-error-text, #fca5a5); line-height: 1; white-space: nowrap; }
+/* Read-only feedback indicator: shows a recorded reaction, not a control. */
+.chorus-action-btn--readonly { cursor: default; }
 
 /* Inline message editing */
 .chorus-edit-wrap { display: flex; flex-direction: column; gap: 6px; width: min(80%, 520px); }

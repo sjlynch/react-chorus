@@ -80,7 +80,7 @@ describe('Chorus', () => {
 
     expect(await screen.findByRole('button', { name: /search/i })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument());
-    expect(screen.queryByRole('status', { name: /assistant is typing/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/assistant is typing/i)).not.toBeInTheDocument();
     expect(onFinish).not.toHaveBeenCalled();
     expect(onStreamDone).toHaveBeenCalledWith(expect.objectContaining({
       assistantMessage: null,
@@ -113,7 +113,7 @@ describe('Chorus', () => {
       message: expect.objectContaining({ role: 'tool' }),
       messages: expect.any(Array),
     }));
-    expect(screen.queryByRole('status', { name: /assistant is typing/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/assistant is typing/i)).not.toBeInTheDocument();
   });
 
   it('executes a streamed tool call and keeps final assistant text', async () => {

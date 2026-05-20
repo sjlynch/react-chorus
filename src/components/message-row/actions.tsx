@@ -14,7 +14,10 @@ export function actionButtonClass(active?: boolean, extraClass?: string) {
 }
 
 function hasRenderableActions(actions: MessageRenderActions) {
-  return actions.canEdit || actions.canRegenerate || actions.canDelete || Boolean(actions.copy) || Boolean(actions.feedback);
+  // Read-only feedback only counts as renderable when there is a recorded
+  // reaction to show — an empty inert thumb is nothing worth a row.
+  const hasReadOnlyFeedback = Boolean(actions.feedbackReadOnly && actions.initialFeedback);
+  return actions.canEdit || actions.canRegenerate || actions.canDelete || Boolean(actions.copy) || Boolean(actions.feedback) || hasReadOnlyFeedback;
 }
 
 export interface MessageActionsProps {
@@ -81,12 +84,23 @@ export function MessageActions({ actions, onEditRequested, labels = DEFAULT_MESS
       {actions.copy && (
         <button type="button" className={actionButtonClass(copyFailed, copyFailed ? 'chorus-action-btn--copy-failed' : undefined)} onClick={handleCopy} title={copyLabel} aria-label={copyLabel}>{copyFailed ? labels.copyFailed : <Copy size={13} />}</button>
       )}
-      {actions.feedback && (
+      {actions.feedback ? (
         <>
           <button type="button" className={actionButtonClass(selectedFeedback === 'up')} onClick={() => handleFeedback('up')} title={labels.thumbsUp} aria-label={labels.thumbsUp} aria-pressed={selectedFeedback === 'up'}><ThumbsUp size={13} /></button>
           <button type="button" className={actionButtonClass(selectedFeedback === 'down')} onClick={() => handleFeedback('down')} title={labels.thumbsDown} aria-label={labels.thumbsDown} aria-pressed={selectedFeedback === 'down'}><ThumbsDown size={13} /></button>
         </>
-      )}
+      ) : actions.feedbackReadOnly && selectedFeedback ? (
+        // Read-only mode: surface the recorded reaction as an inert indicator
+        // (no button, no feedback wiring) so historical feedback stays visible.
+        <span
+          className={actionButtonClass(true, 'chorus-action-btn--readonly')}
+          role="img"
+          aria-label={selectedFeedback === 'up' ? labels.thumbsUp : labels.thumbsDown}
+          title={selectedFeedback === 'up' ? labels.thumbsUp : labels.thumbsDown}
+        >
+          {selectedFeedback === 'up' ? <ThumbsUp size={13} /> : <ThumbsDown size={13} />}
+        </span>
+      ) : null}
       {actions.canDelete && actions.delete && (
         <button type="button" className="chorus-action-btn" onClick={actions.delete} title={labels.delete} aria-label={labels.delete}><Trash2 size={13} /></button>
       )}
@@ -115,8 +129,11 @@ export function MessageActionControls<TMeta = Record<string, unknown>>({ message
   if (!hasActions) return null;
 
   if (editing && actions.edit) {
+    // No `data-chorus-message-id` here: the row root / MessageBubble already
+    // carry it, and a second live element with the same id would surface as a
+    // duplicate to host code querying `[data-chorus-message-id]`.
     return (
-      <div className={`chorus-msg chorus-${message.role}`} data-chorus-message-id={message.id}>
+      <div className={`chorus-msg chorus-${message.role}`}>
         <MessageSpeakerLabel role={message.role} speakers={speakerLabels} />
         <InlineMessageEditor
           initialText={message.text ?? ''}

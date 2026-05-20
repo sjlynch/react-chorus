@@ -87,11 +87,17 @@ describe('ChatWindow', () => {
     expect(stringActivityKey(edited)).not.toBe(stringActivityKey(original));
   });
 
-  it('exposes the transcript as a polite live log region', () => {
-    render(<ChatWindow messages={[USER_MSG, ASST_MSG]} />);
+  it('exposes the transcript as the single polite live log region', () => {
+    render(<ChatWindow messages={[USER_MSG, ASST_MSG]} typing error="boom" />);
     const transcript = screen.getByRole('log', { name: /chat transcript/i });
     expect(transcript).toHaveAttribute('aria-live', 'polite');
+    // aria-atomic=false keeps streaming additions incremental rather than
+    // re-announcing the whole transcript per chunk.
+    expect(transcript).toHaveAttribute('aria-atomic', 'false');
     expect(transcript).toHaveClass('chorus-window');
+    // No nested live regions: typing/error rows must not wrap their own.
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('hides system and tool messages by default', () => {
@@ -126,7 +132,9 @@ describe('ChatWindow', () => {
   it('renders the typing indicator when typing=true', () => {
     const { container } = render(<ChatWindow messages={[]} typing />);
     expect(container.querySelector('.chorus-typing')).toBeInTheDocument();
-    expect(screen.getByRole('status', { name: /assistant is typing/i })).toBeInTheDocument();
+    // The typing label is SR-only text announced by the transcript live
+    // region (the row no longer carries its own role="status").
+    expect(screen.getByText(/assistant is typing/i)).toHaveClass('chorus-sr-only');
   });
 
   it('does not render the typing indicator when typing=false', () => {
@@ -166,16 +174,16 @@ describe('ChatWindow', () => {
     expect(screen.queryByRole('button', { name: 'Summarize this' })).not.toBeInTheDocument();
   });
 
-  it('renders an alert error message when error is provided', () => {
-    render(<ChatWindow messages={[]} error="Network error" />);
-    expect(screen.getByRole('alert')).toHaveTextContent('Network error');
+  it('renders an error message when error is provided', () => {
+    const { container } = render(<ChatWindow messages={[]} error="Network error" />);
+    expect(container.querySelector('.chorus-error')).toHaveTextContent('Network error');
   });
 
   it('renders errors alongside an active empty state', () => {
-    render(<ChatWindow messages={[]} emptyState={<p>Empty welcome</p>} error="Network error" />);
+    const { container } = render(<ChatWindow messages={[]} emptyState={<p>Empty welcome</p>} error="Network error" />);
 
     expect(screen.getByText('Empty welcome')).toBeInTheDocument();
-    expect(screen.getByRole('alert')).toHaveTextContent('Network error');
+    expect(container.querySelector('.chorus-error')).toHaveTextContent('Network error');
   });
 
   it('shows a retry button when onRetry is provided alongside an error', () => {
@@ -665,6 +673,32 @@ describe('ChatWindow', () => {
     expect(onFeedback).toHaveBeenCalledTimes(1);
   });
 
+  it('renders recorded feedback as read-only thumbs when getMessageFeedback is set without onFeedback', () => {
+    const getMessageFeedback = vi.fn((message: Message) => (message.id === 'a1' ? 'up' : null));
+    render(<ChatWindow messages={[USER_MSG, ASST_MSG]} getMessageFeedback={getMessageFeedback} />);
+
+    // The recorded reaction renders as an inert indicator, not a control.
+    const thumb = screen.getByRole('img', { name: 'Thumbs up' });
+    expect(thumb.tagName).toBe('SPAN');
+    expect(thumb).toHaveClass('chorus-action-btn--readonly');
+    // No interactive feedback buttons and no down-thumb for the unrated message.
+    expect(screen.queryByRole('button', { name: 'Thumbs up' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Thumbs down' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: 'Thumbs down' })).not.toBeInTheDocument();
+  });
+
+  it('keeps feedback interactive when both getMessageFeedback and onFeedback are provided', async () => {
+    const user = userEvent.setup();
+    const onFeedback = vi.fn();
+    const getMessageFeedback = (message: Message) => (message.id === 'a1' ? 'up' : null);
+    render(<ChatWindow messages={[ASST_MSG]} getMessageFeedback={getMessageFeedback} onFeedback={onFeedback} />);
+
+    const thumbsUp = screen.getByRole('button', { name: 'Thumbs up' });
+    expect(thumbsUp).toHaveAttribute('aria-pressed', 'true');
+    await user.click(screen.getByRole('button', { name: 'Thumbs down' }));
+    expect(onFeedback).toHaveBeenCalledWith(ASST_MSG, 'down');
+  });
+
   it('preserves local edit state when messages stream in', async () => {
     const user = userEvent.setup();
     const onEdit = vi.fn();
@@ -903,14 +937,14 @@ describe('ChatWindow', () => {
       text: `Message ${i}`,
     }));
 
-    render(<ChatWindow messages={messages} maxRenderedMessages={5} typing error="Still accessible" />);
+    const { container } = render(<ChatWindow messages={messages} maxRenderedMessages={5} typing error="Still accessible" />);
 
     expect(screen.getAllByTestId('markdown')).toHaveLength(5);
     expect(screen.queryByText('Message 94')).not.toBeInTheDocument();
     expect(screen.getByText('Message 95')).toBeInTheDocument();
     expect(screen.getByText('Message 99')).toBeInTheDocument();
-    expect(screen.getByRole('status', { name: /assistant is typing/i })).toBeInTheDocument();
-    expect(screen.getByRole('alert')).toHaveTextContent('Still accessible');
+    expect(screen.getByText(/assistant is typing/i)).toBeInTheDocument();
+    expect(container.querySelector('.chorus-error')).toHaveTextContent('Still accessible');
   });
 
   it('keeps actions wired to original message ids when a render window is active', async () => {
@@ -1076,6 +1110,34 @@ describe('ChatWindow', () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  it('treats the scroll event echoed by an auto-pin as programmatic, not a user scroll-away', () => {
+    const { rerender } = render(<ChatWindow messages={[ASST_MSG]} />);
+    const transcript = screen.getByRole('log', { name: /chat transcript/i });
+
+    Object.defineProperty(transcript, 'clientHeight', { configurable: true, value: 200 });
+    Object.defineProperty(transcript, 'scrollHeight', { configurable: true, value: 1000 });
+    transcript.scrollTop = 1000;
+    fireEvent.scroll(transcript); // user sits at the bottom -> auto-scroll engaged
+
+    // A streamed chunk grows the transcript; the layout effect pins to the new
+    // bottom, which is a programmatic scroll.
+    Object.defineProperty(transcript, 'scrollHeight', { configurable: true, value: 1400 });
+    rerender(<ChatWindow messages={[{ ...ASST_MSG, text: 'streamed chunk' }]} />);
+    expect(transcript.scrollTop).toBe(1400);
+
+    // The browser then echoes a scroll event for that pin. Even if it reports a
+    // stale, scrolled-up position, it must not be read as the user leaving.
+    transcript.scrollTop = 0;
+    fireEvent.scroll(transcript);
+
+    // The next chunk should still auto-pin (no jump-to-bottom button), proving
+    // the echoed event did not pause auto-scroll.
+    Object.defineProperty(transcript, 'scrollHeight', { configurable: true, value: 1800 });
+    rerender(<ChatWindow messages={[{ ...ASST_MSG, text: 'streamed chunk two' }]} />);
+    expect(transcript.scrollTop).toBe(1800);
+    expect(screen.queryByRole('button', { name: /jump to latest/i })).not.toBeInTheDocument();
   });
 
   it('produces a hydration-stable initial tree when navigator.clipboard is only available client-side', () => {

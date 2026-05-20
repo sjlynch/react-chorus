@@ -32,5 +32,11 @@ export interface MessageRenderActions {
   feedback?: (variant: MessageFeedback) => void;
   /** Current persisted feedback selection used to seed the built-in thumb state. */
   initialFeedback?: MessageFeedback | null;
+  /**
+   * When true, built-in controls render `initialFeedback` as an inert thumb
+   * (no button, no `feedback` wiring) so historical reactions stay visible
+   * even though there is no handler to record new ones.
+   */
+  feedbackReadOnly?: boolean;
   defaultRender: () => ReactNode;
 }

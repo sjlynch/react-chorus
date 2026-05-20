@@ -84,9 +84,11 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
     return writeTextToClipboard(message.text ?? '');
   }, [onCopy]);
   const { getSelectedFeedback, handleMessageFeedback } = useMessageFeedbackState({ messages, getMessageFeedback, onFeedback });
+  // Read-only feedback: historical reactions are available (getMessageFeedback)
+  // but there is no handler to record new ones, so render the thumbs inert.
+  const feedbackReadOnly = Boolean(getMessageFeedback) && !onFeedback;
   const activityKey = React.useMemo(() => visibleActivityKey(visible, typing, streamingMessageId, error), [visible, typing, streamingMessageId, error]);
   const { windowRef, hasUnreadActivity, isAutoScrollPaused, scrollToBottom } = useAutoScroll<HTMLDivElement>(activityKey, ref);
-  const bottomRef = React.useRef<HTMLDivElement>(null);
 
   const hasEmptyTranscript = visible.length === 0 && !typing;
   const shouldRenderJumpToBottom = showJumpToBottomButton && isAutoScrollPaused && hasUnreadActivity;
@@ -99,6 +101,7 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
       ref={windowRef}
       role="log"
       aria-live="polite"
+      aria-atomic="false"
       aria-label={resolvedLabels.transcript.ariaLabel}
     >
       <MessageList
@@ -113,6 +116,7 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
         copyAvailable={copyAvailable}
         copyMessage={copyMessage}
         feedbackEnabled={Boolean(onFeedback)}
+        feedbackReadOnly={feedbackReadOnly}
         getSelectedFeedback={getSelectedFeedback}
         onMessageFeedback={handleMessageFeedback}
         onDelete={onDelete}
@@ -143,7 +147,6 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
         label={resolvedLabels.transcript.jumpToLatest}
         onClick={scrollToBottom}
       />
-      <div ref={bottomRef} className="chorus-scroll-sentinel" aria-hidden="true" />
     </div>
   );
 }

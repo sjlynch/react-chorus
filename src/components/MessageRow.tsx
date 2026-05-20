@@ -41,6 +41,8 @@ export interface MessageRowProps<TMeta = Record<string, unknown>> extends Messag
   onFeedback?: (message: Message<TMeta>, feedback: MessageFeedback) => void;
   /** Seeds the pressed thumb state. When omitted, message.metadata.feedback is used if it is 'up' or 'down'. */
   initialFeedback?: MessageFeedback | null;
+  /** Renders `initialFeedback` as an inert thumb when no `onFeedback` handler is wired. */
+  feedbackReadOnly?: boolean;
   streaming?: boolean;
   markdownProps?: MessageMarkdownProps;
   markdownSanitizer?: MarkdownSanitizer;
@@ -51,7 +53,7 @@ export interface MessageRowProps<TMeta = Record<string, unknown>> extends Messag
   attachmentLabels?: ChorusAttachmentLabels;
 }
 
-export function MessageRow<TMeta = Record<string, unknown>>({ m, codeTheme, headless, onEdit, onRegenerate, onDelete, onCopy, onFeedback, initialFeedback, streaming = false, markdownProps, markdownSanitizer, messageActionLabels, speakerLabels, reasoningLabel, codeCopyLabels, attachmentLabels, before, headerSlot, footerSlot, after }: MessageRowProps<TMeta>) {
+export function MessageRow<TMeta = Record<string, unknown>>({ m, codeTheme, headless, onEdit, onRegenerate, onDelete, onCopy, onFeedback, initialFeedback, feedbackReadOnly, streaming = false, markdownProps, markdownSanitizer, messageActionLabels, speakerLabels, reasoningLabel, codeCopyLabels, attachmentLabels, before, headerSlot, footerSlot, after }: MessageRowProps<TMeta>) {
   const [editing, setEditing] = React.useState(false);
   const editButtonRef = useReturnFocusAfterEditing<HTMLButtonElement>(editing);
   // Defer the navigator.clipboard fallback so the SSR tree (no clipboard)
@@ -74,6 +76,7 @@ export function MessageRow<TMeta = Record<string, unknown>>({ m, codeTheme, head
     copy,
     feedback: onFeedback ? (variant) => onFeedback(m, variant) : undefined,
     initialFeedback: resolvedInitialFeedback,
+    feedbackReadOnly,
     defaultRender: () => null,
   };
 
