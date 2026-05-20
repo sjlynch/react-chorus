@@ -35,6 +35,17 @@ Re-pinning is gated by `shouldAutoScrollRef.current`, so a user who
 scrolled away still sees the jump-to-bottom button (via
 `hasUnreadActivity`) instead of getting yanked back.
 
+Every automatic pin (the `activityKey` layout effect and the
+`ResizeObserver` repin) runs through `pinToBottom`, which arms a
+`programmaticScrollRef` flag — but only when `scrollTop` actually moves,
+so the flag is always consumed by the scroll event it produces and
+never leaks onto a later genuine user scroll. The `onScroll` detector
+skips the frame the flag is set for, so an auto-pin can't be misread as
+the user re-joining the bottom while they are trying to scroll away.
+The explicit `scrollToBottom` (Jump to latest) deliberately does **not**
+set the flag: it is a user action, and its echoed scroll event simply
+reaffirms the at-bottom state it already committed.
+
 ResizeObserver / MutationObserver guards (`typeof X === 'undefined'`)
 keep the hook SSR-safe and let jsdom-based tests opt in via stubs
 without exploding when neither global is present.

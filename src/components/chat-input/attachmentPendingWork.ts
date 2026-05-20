@@ -2,12 +2,13 @@ import React from 'react';
 import type { Attachment, AttachmentError, AttachmentSource, UploadAttachment } from '../../types';
 import type { ChorusAttachmentLabels } from '../../labels/types';
 import {
-  createPendingAttachment,
-  createPendingAttachmentId,
-  getPendingAttachmentId,
+  createAttachmentUid,
+  createPlaceholderAttachment,
   normalizeAttachment,
   readFileAsDataURL,
+  updateQueuedAttachment,
   type PendingAttachmentOperation,
+  type QueuedAttachment,
 } from './attachmentUtils';
 import { createAttachmentWorkError } from './attachmentValidation';
 
@@ -17,20 +18,12 @@ function isAbortError(error: unknown) {
 }
 
 export interface AttachmentAnnouncement {
-  /** Stable id used as the announcement key (mirrors pending chip ids when applicable). */
+  /** Stable id used as the announcement key (mirrors the attachment uid). */
   id: string;
   /** Type of announcement so callers can vary tone/role if desired. */
   kind: 'completed' | 'failed';
   /** Localized text to render inside a polite live region. */
   message: string;
-}
-
-interface PendingAttachmentWork {
-  file: File;
-  pendingId: string;
-  controller: AbortController;
-  operation: PendingAttachmentOperation;
-  placeholder: Attachment;
 }
 
 interface UsePendingAttachmentWorkOptions {
@@ -39,7 +32,7 @@ interface UsePendingAttachmentWorkOptions {
   accept?: string;
   maxAttachmentBytes?: number;
   maxAttachments?: number;
-  setAttachments: React.Dispatch<React.SetStateAction<Attachment[]>>;
+  setQueuedAttachments: React.Dispatch<React.SetStateAction<QueuedAttachment[]>>;
   setAnnouncement: React.Dispatch<React.SetStateAction<AttachmentAnnouncement | null>>;
   reportAttachmentError: (error: AttachmentError) => void;
   /**
@@ -60,11 +53,13 @@ export function usePendingAttachmentWork({
   accept,
   maxAttachmentBytes,
   maxAttachments,
-  setAttachments,
+  setQueuedAttachments,
   setAnnouncement,
   reportAttachmentError,
   errorRegionRendered,
 }: UsePendingAttachmentWorkOptions) {
+  // Abort controllers are keyed by the stable attachment uid so cancel/retry
+  // always target the right in-flight work regardless of chip ordering.
   const pendingControllersRef = React.useRef<Map<string, AbortController>>(new Map());
   // Latest labels are tracked via a ref so async completion handlers always use the freshest
   // localized text without re-creating pending work callbacks each render.
@@ -82,10 +77,10 @@ export function usePendingAttachmentWork({
     };
   }, [uploadAttachment]);
 
-  const abortPendingAttachment = React.useCallback((pendingId: string) => {
-    const controller = pendingControllersRef.current.get(pendingId);
+  const abortPendingAttachment = React.useCallback((uid: string) => {
+    const controller = pendingControllersRef.current.get(uid);
     if (controller && !controller.signal.aborted) controller.abort();
-    pendingControllersRef.current.delete(pendingId);
+    pendingControllersRef.current.delete(uid);
   }, []);
 
   const abortAllPendingAttachments = React.useCallback(() => {
@@ -95,78 +90,87 @@ export function usePendingAttachmentWork({
     pendingControllersRef.current.clear();
   }, []);
 
+  // Runs (or re-runs) the read/upload for one queued attachment, keyed by uid.
+  // Resolution targets the chip by uid, so a chip removed or cleared while the
+  // work was in flight is never resurrected and an aborted chip is left alone.
+  const runAttachmentWork = React.useCallback(async (uid: string, file: File, source: AttachmentSource) => {
+    const operation: PendingAttachmentOperation = uploadAttachment ? 'upload' : 'read';
+    const controller = new AbortController();
+    pendingControllersRef.current.set(uid, controller);
+    try {
+      const attachment = await convertFile(file, controller.signal);
+      if (controller.signal.aborted) return;
+      setQueuedAttachments(prev => updateQueuedAttachment(prev, uid, item => ({ ...item, status: 'ready', attachment })));
+      setAnnouncement({
+        id: uid,
+        kind: 'completed',
+        message: labelsRef.current.completedAnnouncement(file.name),
+      });
+    } catch (error) {
+      const wasCancelled = controller.signal.aborted || isAbortError(error);
+      if (!wasCancelled) {
+        const detail = error instanceof Error ? error.message : String(error);
+        const errorLabels = labelsRef.current;
+        reportAttachmentError(createAttachmentWorkError({
+          operation,
+          source,
+          file,
+          detail,
+          labels: errorLabels,
+          accept,
+          maxAttachmentBytes,
+          maxAttachments,
+        }));
+        // The error region rendered by `reportAttachmentError` is itself a polite
+        // live region that announces this failure. Only emit the separate `failed`
+        // announcement when no error region exists, so one failure is announced once.
+        if (!errorRegionRendered) {
+          setAnnouncement({
+            id: uid,
+            kind: 'failed',
+            message: errorLabels.failedAnnouncement(file.name),
+          });
+        }
+        // Keep the chip in the row in a `failed` state so the user can retry or remove it.
+        setQueuedAttachments(prev => updateQueuedAttachment(prev, uid, item => ({ ...item, status: 'failed' })));
+      }
+    } finally {
+      pendingControllersRef.current.delete(uid);
+    }
+  }, [accept, convertFile, errorRegionRendered, maxAttachmentBytes, maxAttachments, reportAttachmentError, setAnnouncement, setQueuedAttachments, uploadAttachment]);
+
   const startPendingAttachmentWork = React.useCallback(async (acceptedFiles: File[], source: AttachmentSource) => {
     if (acceptedFiles.length === 0) return;
 
     const operation: PendingAttachmentOperation = uploadAttachment ? 'upload' : 'read';
-    const pendingWork = acceptedFiles.map((file): PendingAttachmentWork => {
-      const pendingId = createPendingAttachmentId();
-      const controller = new AbortController();
-      pendingControllersRef.current.set(pendingId, controller);
-      return {
-        file,
-        pendingId,
-        controller,
-        operation,
-        placeholder: createPendingAttachment(file, pendingId, operation),
-      };
-    });
-
-    setAttachments(prev => [...prev, ...pendingWork.map(work => work.placeholder)]);
-
-    await Promise.all(pendingWork.map(async ({ file, pendingId, controller, operation: pendingOperation }) => {
-      try {
-        const attachment = await convertFile(file, controller.signal);
-        if (controller.signal.aborted) return;
-        setAttachments(prev => {
-          let replaced = false;
-          const next = prev.map(att => {
-            if (getPendingAttachmentId(att) !== pendingId) return att;
-            replaced = true;
-            return attachment;
-          });
-          return replaced ? next : prev;
-        });
-        setAnnouncement({
-          id: pendingId,
-          kind: 'completed',
-          message: labelsRef.current.completedAnnouncement(file.name),
-        });
-      } catch (error) {
-        const wasCancelled = controller.signal.aborted || isAbortError(error);
-        if (!wasCancelled) {
-          const detail = error instanceof Error ? error.message : String(error);
-          const errorLabels = labelsRef.current;
-          reportAttachmentError(createAttachmentWorkError({
-            operation: pendingOperation,
-            source,
-            file,
-            detail,
-            labels: errorLabels,
-            accept,
-            maxAttachmentBytes,
-            maxAttachments,
-          }));
-          // The error region rendered by `reportAttachmentError` is itself a polite
-          // live region that announces this failure. Only emit the separate `failed`
-          // announcement when no error region exists, so one failure is announced once.
-          if (!errorRegionRendered) {
-            setAnnouncement({
-              id: pendingId,
-              kind: 'failed',
-              message: errorLabels.failedAnnouncement(file.name),
-            });
-          }
-        }
-        setAttachments(prev => prev.filter(att => getPendingAttachmentId(att) !== pendingId));
-      } finally {
-        pendingControllersRef.current.delete(pendingId);
-      }
+    const newItems: QueuedAttachment[] = acceptedFiles.map(file => ({
+      uid: createAttachmentUid(),
+      status: 'pending',
+      operation,
+      source,
+      file,
+      attachment: createPlaceholderAttachment(file),
     }));
-  }, [accept, convertFile, errorRegionRendered, maxAttachmentBytes, maxAttachments, reportAttachmentError, setAnnouncement, setAttachments, uploadAttachment]);
+
+    setQueuedAttachments(prev => [...prev, ...newItems]);
+
+    await Promise.all(newItems.map(item => runAttachmentWork(item.uid, item.file, item.source)));
+  }, [runAttachmentWork, uploadAttachment, setQueuedAttachments]);
+
+  // Re-runs the work for a `failed` chip, reusing its stable uid so the chip
+  // transitions failed → pending → ready/failed in place.
+  const retryAttachmentWork = React.useCallback(async (uid: string, file: File, source: AttachmentSource) => {
+    setQueuedAttachments(prev => updateQueuedAttachment(prev, uid, item => ({
+      ...item,
+      status: 'pending',
+      attachment: createPlaceholderAttachment(file),
+    })));
+    await runAttachmentWork(uid, file, source);
+  }, [runAttachmentWork, setQueuedAttachments]);
 
   return {
     startPendingAttachmentWork,
+    retryAttachmentWork,
     abortPendingAttachment,
     abortAllPendingAttachments,
   };

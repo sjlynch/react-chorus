@@ -2,7 +2,7 @@
 
 ## `attachmentPreview.ts`
 
-`getAttachmentPreviewSource()` returns the first renderable attachment source (`url` before `data`) for image thumbnails in `MessageRow` and `ChatInput`. Use it before assigning attachment data to `src`; it deliberately allows only `data:`, `blob:`, and `http(s):` values so provider file ids or local file URIs are not rendered as URLs.
+`getAttachmentPreviewSource()` returns the first renderable attachment source (`url` before `data`, skipping a defined-but-unrenderable `url` so a valid `data:` URL still previews) for image thumbnails in `MessageRow` and `ChatInput`. Use it before assigning attachment data to `src`. `isRenderableAttachmentSource()` allows `blob:`/`http(s):` values (no inline MIME, rendered via `<img>`) and only a curated set of `data:` MIME types — safe raster images, PDF, `audio/*`, `video/*`. Script-capable `data:` types (`image/svg+xml`, `text/html`, `application/xhtml+xml`) and malformed `data:` URLs are routed to no preview, so provider file ids, local file URIs, and XSS-prone payloads are never rendered.
 
 ## `devMode.ts`
 

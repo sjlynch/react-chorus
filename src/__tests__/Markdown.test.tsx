@@ -4,6 +4,8 @@ import type { MarkedExtension } from 'marked';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { Markdown, normalizeStreamingMarkdown } from '../components/Markdown';
+import { resolveMarkedInstance } from '../components/markdown/marked';
+import { renderMarkdown } from '../components/markdown/renderMarkdown';
 import { scopeHljsThemeCss } from '../utils/hljsLoader';
 
 const mocks = vi.hoisted(() => {
@@ -91,6 +93,40 @@ describe('normalizeStreamingMarkdown', () => {
     const text = 'Use ``` on its own line, like:\n```ts\nconst x = 1;';
 
     expect(normalizeStreamingMarkdown(text)).toBe(`${text}\n\`\`\``);
+  });
+
+  it('reuses an existing trailing newline instead of doubling it before the closing backtick fence', () => {
+    const text = 'Before\n```ts\nconst x = 1;\n';
+
+    expect(normalizeStreamingMarkdown(text)).toBe(`${text}\`\`\``);
+  });
+
+  it('reuses an existing trailing newline instead of doubling it before the closing tilde fence', () => {
+    const text = 'Before\n~~~ts\nconst x = 1;\n';
+
+    expect(normalizeStreamingMarkdown(text)).toBe(`${text}~~~`);
+  });
+
+  it('finalizes a trailing fence with the same paragraph spacing the stream rendered', () => {
+    // A streamed assistant message that stops mid-fence: the last code line
+    // ends in '\n', so `text` ends in '\n'. When the model emits its own
+    // closing fence it just adds '```' on the next line, so finalizing the
+    // stream must produce that exact document — not a doubled '\n\n```' that
+    // adds a visible blank line and shifts the transcript on finalize.
+    const streamed = 'First paragraph.\n\nSecond paragraph.\n\n```ts\nconst x = 1;\n';
+    const modelClosed = `${streamed}\`\`\``;
+    const marked = resolveMarkedInstance(true);
+
+    const finalized = renderMarkdown(normalizeStreamingMarkdown(streamed), undefined, marked);
+    const explicitlyClosed = renderMarkdown(modelClosed, undefined, marked);
+
+    expect(finalized).toBe(explicitlyClosed);
+    expect(finalized).toMatchInlineSnapshot(`
+      "<p>First paragraph.</p>
+      <p>Second paragraph.</p>
+      <pre><code class="hljs language-ts">const x = 1;
+      </code></pre>"
+    `);
   });
 });
 
@@ -286,42 +322,55 @@ describe('Markdown', () => {
     await waitFor(() => expect(mocks.hljsMock.getLanguage).toHaveBeenCalledWith('ts'));
   });
 
-  it('injects copy chrome for pre/code HTML with whitespace between tags', () => {
+  it('injects copy chrome as a real, focusable <button> with a polite live region', () => {
     const { container } = render(<Markdown text={'<pre>\n<code class="hljs">x</code>\n</pre>'} />);
 
-    expect(screen.getByRole('button', { name: 'Copy code' })).toHaveTextContent('Copy');
-    expect(container.querySelector('.chorus-codeblock .chorus-copy-btn + pre > code.hljs')).toHaveTextContent('x');
-  });
-
-  it.each([
-    ['Enter', 'Enter'],
-    ['Space', ' '],
-  ])('copies fenced code from the keyboard with %s and resets the button label', async (_label, key) => {
-    vi.useFakeTimers();
-    const writeText = mockClipboardWriteText();
-    render(<Markdown text={'```ts\nconst x = 1;\n```'} />);
     const button = screen.getByRole('button', { name: 'Copy code' });
-
+    expect(button.tagName).toBe('BUTTON');
+    expect(button).toHaveAttribute('type', 'button');
+    expect(button).toHaveTextContent('Copy');
     button.focus();
     expect(button).toHaveFocus();
-    expect(fireEvent.keyDown(button, { key, cancelable: true })).toBe(false);
+
+    const status = container.querySelector('.chorus-copy-status');
+    expect(status).toHaveAttribute('role', 'status');
+    expect(status).toHaveAttribute('aria-live', 'polite');
+    expect(container.querySelector('.chorus-codeblock .chorus-copy-status + pre > code.hljs')).toHaveTextContent('x');
+  });
+
+  it('copies fenced code on activation, announces the state, and resets it', async () => {
+    vi.useFakeTimers();
+    const writeText = mockClipboardWriteText();
+    const { container } = render(<Markdown text={'```ts\nconst x = 1;\n```'} />);
+    const button = screen.getByRole('button', { name: 'Copy code' });
+    const status = container.querySelector('.chorus-copy-status') as HTMLElement;
+
+    expect(status).toHaveTextContent('');
+
+    // A real <button> activates on click for both pointer and keyboard input.
+    fireEvent.click(button);
     await act(async () => { await Promise.resolve(); });
 
     expect(writeText).toHaveBeenCalledWith('const x = 1;');
     expect(button).toHaveTextContent('Copied!');
+    expect(button).toHaveAttribute('aria-label', 'Copied!');
+    expect(status).toHaveTextContent('Copied!');
 
     await act(async () => { await vi.advanceTimersByTimeAsync(1200); });
 
     expect(button).toHaveTextContent('Copy');
+    expect(button).toHaveAttribute('aria-label', 'Copy code');
+    expect(status).toHaveTextContent('');
   });
 
-  it('shows copy failure feedback and calls onCopyError when clipboard write rejects', async () => {
+  it('shows copy failure feedback in the aria-label and live region and calls onCopyError', async () => {
     vi.useFakeTimers();
     const clipboardError = new Error('Permission denied');
     const writeText = mockClipboardWriteText(vi.fn((_text: string) => Promise.reject(clipboardError)));
     const onCopyError = vi.fn();
-    render(<Markdown text={'```ts\nconst x = 1;\n```'} onCopyError={onCopyError} />);
+    const { container } = render(<Markdown text={'```ts\nconst x = 1;\n```'} onCopyError={onCopyError} />);
     const button = screen.getByRole('button', { name: 'Copy code' });
+    const status = container.querySelector('.chorus-copy-status') as HTMLElement;
 
     fireEvent.click(button);
     await act(async () => {
@@ -332,11 +381,42 @@ describe('Markdown', () => {
     expect(writeText).toHaveBeenCalledWith('const x = 1;');
     expect(onCopyError).toHaveBeenCalledWith(clipboardError);
     expect(button).toHaveTextContent('Copy failed');
+    expect(button).toHaveAttribute('aria-label', 'Copy failed');
     expect(button).toHaveClass('copy-failed');
+    expect(status).toHaveTextContent('Copy failed');
 
     await act(async () => { await vi.advanceTimersByTimeAsync(1200); });
 
     expect(button).toHaveTextContent('Copy');
+    expect(button).toHaveAttribute('aria-label', 'Copy code');
     expect(button).not.toHaveClass('copy-failed');
+    expect(status).toHaveTextContent('');
+  });
+
+  it('omits the copy chrome but keeps the styled wrapper when codeBlockCopy is false', () => {
+    const { container } = render(<Markdown text={'```ts\nconst x = 1;\n```'} codeBlockCopy={false} />);
+
+    expect(container.querySelector('.chorus-codeblock')).toBeInTheDocument();
+    expect(container.querySelector('.chorus-copy-btn')).not.toBeInTheDocument();
+    expect(container.querySelector('.chorus-copy-status')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it('renders custom copy chrome from a codeBlockCopy function and keeps the clipboard wiring', async () => {
+    const writeText = mockClipboardWriteText();
+    const renderCopy = ({ theme, labels }: { theme: string; labels: { copy: string } }) =>
+      `<span class="chorus-copy-btn" role="button" tabindex="0" data-theme="${theme}">${labels.copy} it</span>`;
+    render(<Markdown text={'```ts\nconst x = 1;\n```'} codeBlockCopy={renderCopy} />);
+
+    const button = screen.getByRole('button', { name: 'Copy it' });
+    expect(button.tagName).toBe('SPAN');
+    expect(button).toHaveAttribute('data-theme', 'dark');
+
+    // Non-button custom chrome still gets keyboard activation polyfilled.
+    button.focus();
+    expect(fireEvent.keyDown(button, { key: 'Enter', cancelable: true })).toBe(false);
+    await act(async () => { await Promise.resolve(); });
+
+    expect(writeText).toHaveBeenCalledWith('const x = 1;');
   });
 });

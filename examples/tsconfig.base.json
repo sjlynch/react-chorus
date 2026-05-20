@@ -1,0 +1,19 @@
+// Shared TypeScript base for the Vite examples. Each Vite example extends this
+// with its own tsconfig.json so `tsc --noEmit` and IDE typechecking work. Vite
+// still performs the actual transpile/build; this config is type-only (noEmit).
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "useDefineForClassFields": true
+  }
+}

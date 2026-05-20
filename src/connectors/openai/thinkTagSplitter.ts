@@ -17,9 +17,20 @@ export interface ThinkTagSplitterState {
   buffer: string;
 }
 
-interface CompiledTag {
+export interface CompiledTag {
   literal: string;
   regex: RegExp;
+}
+
+/**
+ * Start/end tags compiled from a `ThinkTagSplitterOptions` object. Compilation
+ * builds two RegExps, so callers that stream many chunks should compile once
+ * and reuse the result rather than recompiling per chunk.
+ */
+export interface CompiledThinkTags {
+  caseInsensitive: boolean;
+  startTag: CompiledTag;
+  endTag: CompiledTag;
 }
 
 function escapeRegex(value: string) {
@@ -46,6 +57,25 @@ export function createThinkTagSplitterState(): ThinkTagSplitterState {
   return { inThink: false, buffer: '' };
 }
 
+/**
+ * Pre-compile the start/end tag RegExps for an options object. The compiled
+ * forms depend only on `options`, so connectors should call this once when
+ * per-stream state is created and reuse the result across `feed()` calls
+ * instead of recompiling the regexes for every streamed chunk.
+ */
+export function compileThinkTags(options: ThinkTagSplitterOptions = {}): CompiledThinkTags {
+  const caseInsensitive = options.caseInsensitive !== false;
+  return {
+    caseInsensitive,
+    startTag: compileTag(options.start ?? DEFAULT_START, caseInsensitive),
+    endTag: compileTag(options.end ?? DEFAULT_END, caseInsensitive),
+  };
+}
+
+function isCompiledThinkTags(value: ThinkTagSplitterOptions | CompiledThinkTags): value is CompiledThinkTags {
+  return 'startTag' in value && 'endTag' in value;
+}
+
 function appendField(target: Pick<ConnectorResult, 'text' | 'reasoning'>, key: 'text' | 'reasoning', value: string) {
   if (!value) return;
   target[key] = `${target[key] ?? ''}${value}`;
@@ -69,11 +99,12 @@ function findFirstMatch(source: string, compiled: CompiledTag): { index: number;
 
 export function createThinkTagSplitter(
   state: ThinkTagSplitterState = createThinkTagSplitterState(),
-  options: ThinkTagSplitterOptions = {},
+  tags: ThinkTagSplitterOptions | CompiledThinkTags = {},
 ) {
-  const caseInsensitive = options.caseInsensitive !== false;
-  const startTag = compileTag(options.start ?? DEFAULT_START, caseInsensitive);
-  const endTag = compileTag(options.end ?? DEFAULT_END, caseInsensitive);
+  // Accept either raw options (compiled here) or already-compiled tags so hot
+  // streaming paths can pass a once-compiled `CompiledThinkTags` and skip the
+  // per-chunk regex builds.
+  const { caseInsensitive, startTag, endTag } = isCompiledThinkTags(tags) ? tags : compileThinkTags(tags);
 
   const feed = (chunk: string) => {
     let source = state.buffer + chunk;

@@ -67,6 +67,30 @@ describe('development warnings', () => {
     await waitFor(() => expect(warn).toHaveBeenCalledWith('[Chorus] `connector` only applies to the `transport` send path. With `onSend` you parse the response yourself — pass `connector` into the `useChorusStream` call inside your `onSend` if you need it.'));
   });
 
+  it('warns when connectorOptions is provided for an onSend-only flow', async () => {
+    process.env.NODE_ENV = 'development';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    render(<Chorus connectorOptions={{ thinkTag: { start: '<r>', end: '</r>' } }} onSend={vi.fn()} />);
+
+    await waitFor(() => expect(warn).toHaveBeenCalledWith('[Chorus] `connectorOptions` only applies to the `transport` send path. With `onSend` you parse the response yourself — pass `connectorOptions` into the `useChorusStream` call inside your `onSend` if you need it.'));
+  });
+
+  it('warns that connectorOptions are ignored when connector is not "openai"', async () => {
+    process.env.NODE_ENV = 'development';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    render(
+      <Chorus
+        transport={async () => new Response(null, { status: 200 })}
+        connector="anthropic"
+        connectorOptions={{ thinkTag: { start: '<r>', end: '</r>' } }}
+      />,
+    );
+
+    await waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining('the `anthropic` connector does not accept them')));
+  });
+
   it('warns when value is provided without onChange', async () => {
     process.env.NODE_ENV = 'development';
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -74,6 +98,74 @@ describe('development warnings', () => {
     render(<Chorus value={[]} />);
 
     await waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining('`value` makes Chorus controlled')));
+  });
+
+  it('warns when shouldContinueToolLoop is provided without autoContinueTools', async () => {
+    process.env.NODE_ENV = 'development';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    render(
+      <Chorus
+        transport={async () => new Response(null, { status: 200 })}
+        shouldContinueToolLoop={() => true}
+      />,
+    );
+
+    await waitFor(() => expect(warn).toHaveBeenCalledWith(
+      expect.stringMatching(/`shouldContinueToolLoop` is ignored unless `autoContinueTools` is enabled/),
+    ));
+  });
+
+  it('warns when maxToolIterations is provided without autoContinueTools', async () => {
+    process.env.NODE_ENV = 'development';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    render(
+      <Chorus
+        transport={async () => new Response(null, { status: 200 })}
+        maxToolIterations={8}
+      />,
+    );
+
+    await waitFor(() => expect(warn).toHaveBeenCalledWith(
+      expect.stringMatching(/`maxToolIterations` is ignored unless `autoContinueTools` is enabled/),
+    ));
+  });
+
+  it('warns when tool-loop props require transport on the onSend path', async () => {
+    process.env.NODE_ENV = 'development';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    render(
+      <Chorus
+        onSend={vi.fn()}
+        autoContinueTools
+        shouldContinueToolLoop={() => true}
+        maxToolIterations={8}
+      />,
+    );
+
+    await waitFor(() => expect(warn).toHaveBeenCalledWith(
+      expect.stringMatching(/`shouldContinueToolLoop` and `maxToolIterations` are ignored without `transport`/),
+    ));
+  });
+
+  it('does not warn about tool-loop props when autoContinueTools and transport are both set', async () => {
+    process.env.NODE_ENV = 'development';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    render(
+      <Chorus
+        transport={async () => new Response(null, { status: 200 })}
+        autoContinueTools
+        shouldContinueToolLoop={() => true}
+        maxToolIterations={8}
+      />,
+    );
+
+    await waitFor(() => expect(warn).not.toHaveBeenCalledWith(
+      expect.stringMatching(/`shouldContinueToolLoop`|`maxToolIterations`/),
+    ));
   });
 
   it('warns when an unknown connector string falls back to auto', async () => {

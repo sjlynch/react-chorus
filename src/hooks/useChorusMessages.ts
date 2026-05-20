@@ -71,6 +71,22 @@ function warnObserverError(error: unknown) {
   console.warn('[Chorus] `onMessagesChange` callback threw and was ignored so it could not interrupt message rendering.', error);
 }
 
+/**
+ * Shallow value-equality for message arrays: same length and identical element
+ * references. A controlled host whose `onChange` clones/spreads the array Chorus
+ * just emitted feeds back a NEW array that still holds the same message objects,
+ * so this returns true for that round-trip echo while a genuine external change
+ * (different messages) returns false.
+ */
+function messagesArraysEqual<TMeta>(a: Message<TMeta>[] | null, b: Message<TMeta>[]): boolean {
+  if (a === b) return true;
+  if (a === null || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
 export function useChorusMessages<TMeta = Record<string, unknown>>({
   value,
   messages,
@@ -111,7 +127,14 @@ export function useChorusMessages<TMeta = Record<string, unknown>>({
   const emitMessagesChange = React.useCallback((next: Message<TMeta>[], reason: ChorusMessagesChangeReason) => {
     const callback = onMessagesChangeRef.current;
     if (!callback) return;
-    if (lastEmittedMessagesRef.current === next && lastEmittedCallbackRef.current === callback) return;
+    if (lastEmittedCallbackRef.current === callback) {
+      if (lastEmittedMessagesRef.current === next) return;
+      // Controlled round-trip: a host whose `onChange` clones/spreads the array
+      // Chorus just emitted feeds back a value-equal copy, so the 'external'
+      // effect re-fires with msgs !== next. Suppress that echo instead of
+      // reporting the same logical change a second time (mislabeled 'external').
+      if (reason === 'external' && messagesArraysEqual(lastEmittedMessagesRef.current, next)) return;
+    }
 
     lastEmittedMessagesRef.current = next;
     lastEmittedCallbackRef.current = callback;

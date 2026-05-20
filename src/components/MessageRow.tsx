@@ -1,4 +1,3 @@
-import React from 'react';
 import type { Message, MessageFeedback } from '../types';
 import type { ChorusAttachmentLabels, ChorusCodeCopyLabels, ChorusMessageActionLabels, ChorusSpeakerLabels } from '../labels/types';
 import { useCanWriteTextToClipboard, writeTextToClipboard } from '../utils/messageCopy';
@@ -7,15 +6,15 @@ import { MessageActions, createCopyAction } from './message-row/actions';
 import { MessageBubbleLayout } from './message-row/bubble';
 import { getInitialMessageFeedback } from './message-row/feedback';
 import { InlineMessageEditor } from './message-row/InlineMessageEditor';
-import { useReturnFocusAfterEditing } from './message-row/renderState';
+import { useActionEditing, useReturnFocusAfterEditing } from './message-row/renderState';
 import { MessageSpeakerLabel } from './message-row/speaker';
-import type { MessageBubbleSlots, MessageCopyResult, MessageMarkdownProps, MessageRenderActions } from './message-row/types';
+import type { MessageBubbleSlots, MessageCopyResult, MessageMarkdownProps, MessageRenderActions, MessageTimestampFormatter } from './message-row/types';
 
 export type { MessageFeedback } from '../types';
 export { MessageActionControls, MessageActions, actionButtonClass, createCopyAction } from './message-row/actions';
 export type { MessageActionsProps } from './message-row/actions';
-export { MessageAttachments, MessageBubble, MessageBubbleLayout, MessageReasoning } from './message-row/bubble';
-export type { MessageBubbleLayoutProps, MessageBubbleProps, MessageReasoningProps } from './message-row/bubble';
+export { MessageAttachments, MessageBubble, MessageBubbleLayout, MessageReasoning, MessageTimestamp } from './message-row/bubble';
+export type { MessageBubbleLayoutProps, MessageBubbleProps, MessageReasoningProps, MessageTimestampProps } from './message-row/bubble';
 export { getInitialMessageFeedback, getMetadataFeedback, isMessageFeedback } from './message-row/feedback';
 export type { GetMessageFeedback } from './message-row/feedback';
 export { InlineMessageEditor } from './message-row/InlineMessageEditor';
@@ -23,12 +22,18 @@ export type { InlineMessageEditorProps } from './message-row/InlineMessageEditor
 export { MessageRenderStateContext, MessageRenderStateProvider, useActionEditing } from './message-row/renderState';
 export type { MessageRenderStateValue } from './message-row/renderState';
 export { getMessageSpeakerLabel, MessageSpeakerLabel } from './message-row/speaker';
-export type { MessageBubbleSlots, MessageCopyResult, MessageMarkdownProps, MessageRenderActions } from './message-row/types';
+export { defaultFormatMessageTimestamp } from './message-row/formatTimestamp';
+export type { MessageBubbleSlots, MessageCopyResult, MessageMarkdownProps, MessageRenderActions, MessageTimestampFormatter } from './message-row/types';
 
 export interface MessageRowProps<TMeta = Record<string, unknown>> extends MessageBubbleSlots {
   m: Message<TMeta>;
   codeTheme: 'dark' | 'light';
   headless?: boolean;
+  /**
+   * Called when a message edit is saved. `newText` is always a non-empty trimmed
+   * string — the inline editor trims input and cancels (without calling this) when
+   * the result is empty.
+   */
   onEdit?: (id: string, newText: string) => void;
   onRegenerate?: (id: string) => void;
   onDelete?: (id: string) => void;
@@ -37,10 +42,12 @@ export interface MessageRowProps<TMeta = Record<string, unknown>> extends Messag
    * to show the Copy failed indicator; return void to keep historical assume-success behavior.
    */
   onCopy?: (message: Message<TMeta>) => MessageCopyResult;
-  /** Built-in controls call this only when the chosen variant differs from the current selection. */
-  onFeedback?: (message: Message<TMeta>, feedback: MessageFeedback) => void;
+  /** Called when feedback changes. Receives `null` when the active thumb is clicked again to clear the rating. */
+  onFeedback?: (message: Message<TMeta>, feedback: MessageFeedback | null) => void;
   /** Seeds the pressed thumb state. When omitted, message.metadata.feedback is used if it is 'up' or 'down'. */
   initialFeedback?: MessageFeedback | null;
+  /** Renders `initialFeedback` as an inert thumb when no `onFeedback` handler is wired. */
+  feedbackReadOnly?: boolean;
   streaming?: boolean;
   markdownProps?: MessageMarkdownProps;
   markdownSanitizer?: MarkdownSanitizer;
@@ -49,10 +56,18 @@ export interface MessageRowProps<TMeta = Record<string, unknown>> extends Messag
   reasoningLabel?: string;
   codeCopyLabels?: ChorusCodeCopyLabels;
   attachmentLabels?: ChorusAttachmentLabels;
+  /** Render the message's `createdAt` time below the bubble. Off by default. */
+  showTimestamp?: boolean;
+  /** Override the locale-aware default timestamp formatting. Only used when `showTimestamp` is true. */
+  formatTimestamp?: MessageTimestampFormatter<TMeta>;
 }
 
-export function MessageRow<TMeta = Record<string, unknown>>({ m, codeTheme, headless, onEdit, onRegenerate, onDelete, onCopy, onFeedback, initialFeedback, streaming = false, markdownProps, markdownSanitizer, messageActionLabels, speakerLabels, reasoningLabel, codeCopyLabels, attachmentLabels, before, headerSlot, footerSlot, after }: MessageRowProps<TMeta>) {
-  const [editing, setEditing] = React.useState(false);
+export function MessageRow<TMeta = Record<string, unknown>>({ m, codeTheme, headless, onEdit, onRegenerate, onDelete, onCopy, onFeedback, initialFeedback, feedbackReadOnly, streaming = false, markdownProps, markdownSanitizer, messageActionLabels, speakerLabels, reasoningLabel, codeCopyLabels, attachmentLabels, showTimestamp, formatTimestamp, before, headerSlot, footerSlot, after }: MessageRowProps<TMeta>) {
+  // Drive editing state through MessageRenderStateContext when a provider is present
+  // (the default ChatWindow path wraps every row in one) so a custom renderer's
+  // `ctx.isEditing` reflects the row's inline editor. Falls back to local state when
+  // MessageRow is used standalone without a provider.
+  const [editing, setEditing] = useActionEditing(m.id);
   const editButtonRef = useReturnFocusAfterEditing<HTMLButtonElement>(editing);
   // Defer the navigator.clipboard fallback so the SSR tree (no clipboard)
   // matches the initial client tree. The button appears after the mount
@@ -74,6 +89,7 @@ export function MessageRow<TMeta = Record<string, unknown>>({ m, codeTheme, head
     copy,
     feedback: onFeedback ? (variant) => onFeedback(m, variant) : undefined,
     initialFeedback: resolvedInitialFeedback,
+    feedbackReadOnly,
     defaultRender: () => null,
   };
 
@@ -101,6 +117,8 @@ export function MessageRow<TMeta = Record<string, unknown>>({ m, codeTheme, head
           reasoningLabel={reasoningLabel}
           codeCopyLabels={codeCopyLabels}
           attachmentLabels={attachmentLabels}
+          showTimestamp={showTimestamp}
+          formatTimestamp={formatTimestamp}
           before={before}
           headerSlot={headerSlot}
           footerSlot={footerSlot}

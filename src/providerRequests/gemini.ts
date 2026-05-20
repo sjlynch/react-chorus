@@ -1,8 +1,8 @@
 import type { Message, ToolMessage } from '../types';
-import { dataUrlFromAttachment, fileUriFromAttachment, unsupportedAttachmentText } from './attachments';
+import { dataUrlFromAttachment, fileUriFromAttachment, resolveDataUrlMimeType, unsupportedAttachmentText } from './attachments';
 import { isRecord } from './metadata';
-import { stripGeminiOptions } from './options';
-import { messageText, objectToolInput, safeStringify, toolContextText } from './toolOutput';
+import { resolveProviderSystem, stripGeminiOptions } from './options';
+import { messageText, objectToolInput, safeStringify, toolContextText, toolOutputValue } from './toolOutput';
 import { mapHistoryWithToolRuns } from './toolRunMapper';
 import type { ProviderMappingOptions } from './types/common';
 import type {
@@ -13,6 +13,33 @@ import type {
   GeminiGenerateContentBodyOptions,
   GeminiPart,
 } from './types/gemini';
+
+// Gemini accepts base64 `inlineData` only for this documented image / audio /
+// video / PDF MIME set. Any other data-URL attachment must be routed through
+// `unsupportedAttachmentText` instead of an `inlineData` part the API rejects.
+const GEMINI_INLINE_DATA_MIME_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'image/heic',
+  'image/heif',
+  'audio/wav',
+  'audio/mp3',
+  'audio/aiff',
+  'audio/aac',
+  'audio/ogg',
+  'audio/flac',
+  'video/mp4',
+  'video/mpeg',
+  'video/mov',
+  'video/avi',
+  'video/x-flv',
+  'video/mpg',
+  'video/webm',
+  'video/wmv',
+  'video/3gpp',
+  'application/pdf',
+]);
 
 function geminiSystemInstruction(history: Message<unknown>[]) {
   const system = history
@@ -31,7 +58,12 @@ function geminiParts<TMeta>(message: Message<TMeta>, options: ProviderMappingOpt
     for (const attachment of message.attachments ?? []) {
       const dataUrl = dataUrlFromAttachment(attachment);
       if (dataUrl) {
-        parts.push({ inlineData: { mimeType: attachment.type || dataUrl.mimeType, data: dataUrl.base64 } });
+        const mimeType = resolveDataUrlMimeType(attachment, dataUrl);
+        if (GEMINI_INLINE_DATA_MIME_TYPES.has(mimeType)) {
+          parts.push({ inlineData: { mimeType, data: dataUrl.base64 } });
+        } else {
+          parts.push({ text: unsupportedAttachmentText(attachment, message, options) });
+        }
         continue;
       }
 
@@ -59,9 +91,10 @@ function geminiFunctionCallPart<TMeta>(message: ToolMessage<TMeta>, name: string
 }
 
 function geminiFunctionResponsePart<TMeta>(message: ToolMessage<TMeta>, name: string): GeminiFunctionResponsePart {
-  const text = messageText(message);
-  const value = message.toolCall.output ?? (text.trim() ? text : undefined);
-  return { functionResponse: { name, response: geminiFunctionResponsePayload(value) } };
+  // Reuse the shared `toolOutputValue` helper (which keys off `hasOwn`, not
+  // `??`) so an explicit `output: null` is honored instead of falling through
+  // to message text — the same value resolution OpenAI and Anthropic use.
+  return { functionResponse: { name, response: geminiFunctionResponsePayload(toolOutputValue(message)) } };
 }
 
 function appendGeminiFunctionCalls(target: GeminiContent[], parts: GeminiPart[]) {
@@ -120,8 +153,15 @@ export function toGeminiGenerateContentBody<
   TOptions extends GeminiGenerateContentBodyOptions<TMeta> = GeminiGenerateContentBodyOptions<TMeta>,
 >(history: Message<TMeta>[], options?: TOptions): GeminiGenerateContentBody<TOptions> {
   const opts = (options ?? {}) as TOptions;
-  const bodyOptions = stripGeminiOptions(opts);
-  const systemInstruction = geminiSystemInstruction(history as Message<unknown>[]);
+  const { bodyOptions, systemInstruction: callerSystemInstruction } = stripGeminiOptions(opts);
+  // A caller-supplied `systemInstruction` wins over history-derived system
+  // text (documented precedence); a dev warn-once fires when both are present.
+  const systemInstruction = resolveProviderSystem(
+    'Gemini',
+    'systemInstruction',
+    callerSystemInstruction,
+    geminiSystemInstruction(history as Message<unknown>[]),
+  );
   const body = {
     ...bodyOptions,
     ...(systemInstruction ? { systemInstruction } : {}),

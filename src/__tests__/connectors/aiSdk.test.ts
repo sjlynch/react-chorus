@@ -62,6 +62,18 @@ describe('aiSdkConnector', () => {
       expect(aiSdkConnector.extract(emptyAlias, state)).toBeNull();
     });
 
+    it('keeps the populated alias when a mixed-alias tool-input-delta carries an empty argsTextDelta', () => {
+      const state = aiSdkConnector.createState?.();
+      const frame = JSON.stringify({ type: 'tool-input-delta', toolCallId: 'call_1', argsTextDelta: '', inputTextDelta: 'hello world' });
+      expect(aiSdkConnector.extract(frame, state)).toEqual({ toolDelta: { id: 'call_1', providerId: 'call_1', input: 'hello world' } });
+    });
+
+    it('keeps the populated alias when a mixed-alias tool-call-delta carries an empty inputTextDelta', () => {
+      const state = aiSdkConnector.createState?.();
+      const frame = JSON.stringify({ type: 'tool-call-delta', toolCallId: 'call_1', inputTextDelta: '', argsTextDelta: 'hello world' });
+      expect(aiSdkConnector.extract(frame, state)).toEqual({ toolDelta: { id: 'call_1', providerId: 'call_1', input: 'hello world' } });
+    });
+
     it('warns once in dev when a tool frame is missing toolCallId and stays silent on the second identical frame', () => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
       try {
@@ -135,6 +147,18 @@ describe('aiSdkConnector', () => {
     it('drops empty argsTextDelta on c: frames', () => {
       const state = aiSdkConnector.createState?.();
       expect(aiSdkConnector.extract('c:{"toolCallId":"call_1","argsTextDelta":""}', state)).toBeNull();
+    });
+
+    it('keeps the populated alias on a mixed-alias c: frame with an empty argsTextDelta', () => {
+      const state = aiSdkConnector.createState?.();
+      expect(aiSdkConnector.extract('c:{"toolCallId":"call_1","argsTextDelta":"","inputTextDelta":"hello world"}', state))
+        .toEqual({ toolDelta: { id: 'call_1', providerId: 'call_1', input: 'hello world' } });
+    });
+
+    it('keeps the populated alias on a mixed-alias c: frame with an empty inputTextDelta', () => {
+      const state = aiSdkConnector.createState?.();
+      expect(aiSdkConnector.extract('c:{"toolCallId":"call_1","inputTextDelta":"","argsTextDelta":"hello world"}', state))
+        .toEqual({ toolDelta: { id: 'call_1', providerId: 'call_1', input: 'hello world' } });
     });
   });
 });
