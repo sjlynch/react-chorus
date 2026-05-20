@@ -1135,7 +1135,7 @@ Call `finalizeAssistant()` when your custom stream is done. In development, Chor
 ### Keyboard shortcuts
 
 - Composer textarea: **Enter** sends, **Shift+Enter** inserts a newline.
-- Inline edit textarea: **Enter** saves, **Shift+Enter** inserts a newline, and **Escape** cancels editing.
+- Inline edit textarea: **Enter** saves, **Shift+Enter** inserts a newline, and **Escape** cancels editing. Enter is ignored while an IME candidate is being composed, and Escape stops propagating so cancelling an edit inside a modal/drawer does not also close the ancestor.
 
 ### Imperative `ChorusRef`
 
@@ -1924,6 +1924,7 @@ interface MessageRenderActions {
   canEdit: boolean;
   canRegenerate: boolean;
   canDelete: boolean;
+  /** Saves a message edit. The built-in inline editor calls this with a non-empty trimmed string. */
   edit?: (newText: string) => void;
   regenerate?: () => void;
   delete?: () => void;
@@ -1949,6 +1950,8 @@ interface RenderMessageRootProps {
 ```
 
 `edit`, `regenerate`, `delete`, and `feedback` are only set when those actions are available for the message and the current Chorus state — for example `edit` is omitted while the chat is disabled/read-only or for non-user messages. Repeating the current `initialFeedback` variant is a no-op. `actions.defaultRender()` renders the built-in control row exactly as `defaultRender()` would.
+
+The built-in inline editor owns edit trimming: when it saves, `edit` (and the underlying `onEdit`) receives a non-empty trimmed string, and an all-whitespace edit cancels instead of firing the callback. This holds for both default rendering and custom `renderMessage` rows, so optimistic UI can use the value directly. A fully custom editor that calls `ctx.actions.edit` itself is responsible for its own trimming.
 
 #### Editing inside a custom row
 

@@ -24,6 +24,7 @@ export interface MessageRenderActions {
   canEdit: boolean;
   canRegenerate: boolean;
   canDelete: boolean;
+  /** Saves a message edit. The built-in inline editor calls this with a non-empty trimmed string. */
   edit?: (newText: string) => void;
   regenerate?: () => void;
   delete?: () => void;

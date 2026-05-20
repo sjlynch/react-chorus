@@ -52,6 +52,11 @@ export interface ChatWindowProps<TMeta = Record<string, unknown>> extends Omit<R
   onCopy?: (message: Message<TMeta>) => MessageCopyResult;
   onDelete?: (id: string) => void;
   onDismissError?: () => void;
+  /**
+   * Called when a message edit is saved. `newText` is always a non-empty trimmed
+   * string — the inline editor trims input and cancels (without calling this) when
+   * the result is empty. Safe to drive optimistic UI directly with the value.
+   */
   onEdit?: (id: string, newText: string) => void;
   /** Built-in controls call this only when the chosen variant differs from the current selection; clicks do not toggle feedback off. */
   onFeedback?: (message: Message<TMeta>, feedback: MessageFeedback) => void;

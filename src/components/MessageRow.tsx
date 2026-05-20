@@ -29,6 +29,11 @@ export interface MessageRowProps<TMeta = Record<string, unknown>> extends Messag
   m: Message<TMeta>;
   codeTheme: 'dark' | 'light';
   headless?: boolean;
+  /**
+   * Called when a message edit is saved. `newText` is always a non-empty trimmed
+   * string — the inline editor trims input and cancels (without calling this) when
+   * the result is empty.
+   */
   onEdit?: (id: string, newText: string) => void;
   onRegenerate?: (id: string) => void;
   onDelete?: (id: string) => void;

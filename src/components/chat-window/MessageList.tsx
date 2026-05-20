@@ -110,10 +110,9 @@ export function MessageList<TMeta = Record<string, unknown>>({
           canEdit: Boolean(message.role === 'user' && onEdit),
           canRegenerate: Boolean(message.role === 'assistant' && onRegenerate),
           canDelete: Boolean(onDelete),
-          edit: message.role === 'user' && onEdit ? (newText) => {
-            const trimmed = newText.trim();
-            if (trimmed) onEdit(message.id, trimmed);
-          } : undefined,
+          // Pass through unchanged: trimming/empty-drop is owned solely by
+          // InlineMessageEditor.submitEdit so onEdit's contract is consistent.
+          edit: message.role === 'user' && onEdit ? (newText) => onEdit(message.id, newText) : undefined,
           regenerate: message.role === 'assistant' && onRegenerate ? () => onRegenerate(message.id) : undefined,
           delete: onDelete ? () => onDelete(message.id) : undefined,
           copy: copyAvailable ? () => copyMessage(message) : undefined,

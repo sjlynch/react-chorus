@@ -719,6 +719,62 @@ describe('ChatWindow', () => {
       expect(onEdit).toHaveBeenCalledWith('u1', 'Saved');
       expect(screen.queryByRole('textbox', { name: 'Edit message' })).not.toBeInTheDocument();
     });
+
+    it(`trims edit input before calling onEdit and cancels all-whitespace edits in the ${variant.name}`, () => {
+      const onEdit = vi.fn();
+      render(<ChatWindow messages={[USER_MSG]} onEdit={onEdit} renderMessage={variant.renderMessage} />);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+      fireEvent.change(screen.getByRole('textbox', { name: 'Edit message' }), { target: { value: '  hello  ' } });
+      fireEvent.keyDown(screen.getByRole('textbox', { name: 'Edit message' }), { key: 'Enter' });
+
+      expect(onEdit).toHaveBeenCalledTimes(1);
+      expect(onEdit).toHaveBeenCalledWith('u1', 'hello');
+
+      fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+      fireEvent.change(screen.getByRole('textbox', { name: 'Edit message' }), { target: { value: '   ' } });
+      fireEvent.keyDown(screen.getByRole('textbox', { name: 'Edit message' }), { key: 'Enter' });
+
+      // An all-whitespace edit cancels instead of firing onEdit a second time.
+      expect(onEdit).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole('textbox', { name: 'Edit message' })).not.toBeInTheDocument();
+    });
+
+    it(`does not submit on Enter while an IME candidate is composing in the ${variant.name}`, () => {
+      const onEdit = vi.fn();
+      render(<ChatWindow messages={[USER_MSG]} onEdit={onEdit} renderMessage={variant.renderMessage} />);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+      const textarea = screen.getByRole('textbox', { name: 'Edit message' });
+      fireEvent.change(textarea, { target: { value: 'にほんご' } });
+
+      // Enter pressed to confirm an IME candidate: isComposing true / keyCode 229.
+      fireEvent.keyDown(textarea, { key: 'Enter', isComposing: true });
+      fireEvent.keyDown(textarea, { key: 'Enter', keyCode: 229 });
+      expect(onEdit).not.toHaveBeenCalled();
+      expect(textarea).toBeInTheDocument();
+
+      // A plain Enter on the now-committed text submits.
+      fireEvent.keyDown(textarea, { key: 'Enter' });
+      expect(onEdit).toHaveBeenCalledWith('u1', 'にほんご');
+    });
+
+    it(`stops Escape from propagating to ancestor handlers in the ${variant.name}`, () => {
+      const onEdit = vi.fn();
+      const ancestorEscape = vi.fn();
+      render(
+        <div onKeyDown={e => { if (e.key === 'Escape') ancestorEscape(); }}>
+          <ChatWindow messages={[USER_MSG]} onEdit={onEdit} renderMessage={variant.renderMessage} />
+        </div>
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+      fireEvent.keyDown(screen.getByRole('textbox', { name: 'Edit message' }), { key: 'Escape' });
+
+      expect(screen.queryByRole('textbox', { name: 'Edit message' })).not.toBeInTheDocument();
+      expect(ancestorEscape).not.toHaveBeenCalled();
+      expect(onEdit).not.toHaveBeenCalled();
+    });
   }
 
   it('supports the README MessageBubble plus actions.defaultRender pattern without duplicate bubbles', async () => {
