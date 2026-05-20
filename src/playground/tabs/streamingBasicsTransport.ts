@@ -21,10 +21,39 @@ interface StreamPlan {
   errorMessage?: string;
 }
 
-function planFor(prompt: string): StreamPlan {
+/**
+ * Substrings that select the in-band error demo. The list includes the words
+ * of the shipped "Force a transport error" suggested-prompt chip ('transport
+ * error' / 'force a transport') so clicking the chip actually reaches the
+ * error path instead of falling through to a normal streamed reply.
+ */
+function isErrorPrompt(p: string): boolean {
+  return p.includes('force error')
+    || p.includes('make this fail')
+    || p.includes('trigger error')
+    || p.includes('transport error')
+    || p.includes('force a transport');
+}
+
+/**
+ * Error-triggering prompts that have already streamed the in-band error once.
+ * The next resend of the same prompt — clicking Retry, or re-sending the chip
+ * after dismissing the error — streams REPLY_TEXTS.retry instead of erroring
+ * again, so the tab demonstrates recovery as well as failure. The entry is
+ * cleared on that resend so a later send can show the error again.
+ */
+const erroredPrompts = new Set<string>();
+
+function planFor(prompt: string, isErrorResend: boolean): StreamPlan {
   const p = prompt.toLowerCase();
 
-  if (p.includes('force error') || p.includes('make this fail') || p.includes('trigger error')) {
+  if (isErrorPrompt(p)) {
+    if (isErrorResend) {
+      return {
+        reasoning: 'Resending after the dismissed error — this attempt streams normally so you can watch the turn recover.',
+        text: REPLY_TEXTS.retry,
+      };
+    }
     return {
       reasoning: 'Demonstrating the in-band error path — the transport will emit an OpenAI-shape error payload instead of finishing normally.',
       errorMessage: 'Rate limit exceeded — try again in a moment.',
@@ -81,6 +110,16 @@ async function* streamSSE(plan: StreamPlan, signal: AbortSignal): AsyncGenerator
               name: plan.toolCall.name,
               arguments: JSON.stringify(plan.toolCall.input),
             },
+            // `output` is a react-chorus connector extension, not part of
+            // OpenAI's Chat Completions wire format. The OpenAI connector
+            // intentionally reads it from a tool_calls delta — see
+            // `extractChatToolDelta` in connectors/openai/chatCompletions.ts
+            // and the documented `toolDelta.output` contract in
+            // connectors/CLAUDE.md — and populates the rendered tool-call
+            // block's output section. It lets this basics tab show a
+            // *completed* tool call in a single streamed turn without wiring
+            // a tools registry; the Tool agent tab demonstrates the full
+            // execute-and-continue loop a real backend would use instead.
             output: plan.toolCall.output,
           }],
         },
@@ -101,6 +140,15 @@ async function* streamSSE(plan: StreamPlan, signal: AbortSignal): AsyncGenerator
 }
 
 export const streamingBasicsTransport: Transport = (text, _history, signal) => {
-  const plan = planFor(text);
+  // Toggle the error/retry demo: the first error-triggering send streams the
+  // in-band error; the immediate resend streams the recovery reply instead.
+  const key = text.toLowerCase();
+  let isErrorResend = false;
+  if (isErrorPrompt(key)) {
+    isErrorResend = erroredPrompts.has(key);
+    if (isErrorResend) erroredPrompts.delete(key);
+    else erroredPrompts.add(key);
+  }
+  const plan = planFor(text, isErrorResend);
   return makeSSEResponse((sig) => streamSSE(plan, sig), signal);
 };
