@@ -13,6 +13,9 @@ interface UseChorusPropWarningsArgs<TMeta> {
   transport: ChorusProps<TMeta>['transport'];
   onSend: ChorusProps<TMeta>['onSend'];
   sending: boolean | undefined;
+  autoContinueTools: ChorusProps<TMeta>['autoContinueTools'];
+  maxToolIterations: ChorusProps<TMeta>['maxToolIterations'];
+  shouldContinueToolLoop: ChorusProps<TMeta>['shouldContinueToolLoop'];
 }
 
 export function useChorusPropWarnings<TMeta>({
@@ -25,6 +28,9 @@ export function useChorusPropWarnings<TMeta>({
   transport,
   onSend,
   sending,
+  autoContinueTools,
+  maxToolIterations,
+  shouldContinueToolLoop,
 }: UseChorusPropWarningsArgs<TMeta>): void {
   React.useEffect(() => {
     if (!isChorusDevMode()) return;
@@ -52,5 +58,23 @@ export function useChorusPropWarnings<TMeta>({
     if (sending !== undefined && transport) {
       console.warn('[Chorus] `sending` was provided alongside `transport`. Chorus owns the transport send state; `sending` is primarily for fully custom `onSend`/`useChorusStream` integrations.');
     }
-  }, [messages, initialMessages, onChange, value, persistenceKey, connector, transport, onSend, sending]);
+
+    const toolLoopProps = [
+      shouldContinueToolLoop !== undefined && 'shouldContinueToolLoop',
+      maxToolIterations !== undefined && 'maxToolIterations',
+    ].filter((name): name is string => typeof name === 'string');
+
+    if (toolLoopProps.length > 0) {
+      const propList = toolLoopProps.map(name => `\`${name}\``).join(' and ');
+      const verb = toolLoopProps.length > 1 ? 'are' : 'is';
+
+      if (!autoContinueTools) {
+        console.warn(`[Chorus] ${propList} ${verb} ignored unless \`autoContinueTools\` is enabled. The automatic tool loop only runs when \`autoContinueTools\` is truthy on the \`transport\` send path, so \`shouldContinueToolLoop\` is never invoked and \`maxToolIterations\` is never consulted. Set \`autoContinueTools\`, or remove ${propList}.`);
+      }
+
+      if (transport === undefined) {
+        console.warn(`[Chorus] ${propList} ${verb} ignored without \`transport\`. The automatic tool loop runs only on the \`transport\` send path; with \`onSend\` you drive tool continuations yourself. Pass \`transport\`, or gate continuations inside your \`onSend\` client.`);
+      }
+    }
+  }, [messages, initialMessages, onChange, value, persistenceKey, connector, transport, onSend, sending, autoContinueTools, maxToolIterations, shouldContinueToolLoop]);
 }

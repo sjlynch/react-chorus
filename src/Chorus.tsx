@@ -122,6 +122,9 @@ function ChorusInner<TMeta = Record<string, unknown>>({
     transport,
     onSend,
     sending: sendingProp,
+    autoContinueTools,
+    maxToolIterations,
+    shouldContinueToolLoop,
   });
 
   const resetComposer = React.useCallback(() => {
