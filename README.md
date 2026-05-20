@@ -1955,6 +1955,7 @@ interface RenderMessageRootProps {
 `ctx.actions.defaultRender()` swaps the action row out for the built-in inline editor while editing is active, then restores keyboard focus to the originating Edit button after Save or Cancel (including Escape). To keep that contract working in a custom row, the renderer needs to hide its own bubble/content while editing so the editor replaces the original message instead of rendering alongside it:
 
 - The exported `<MessageBubble>` already opts in automatically — it reads `ctx.isEditing` from context and returns `null` while its own message is being edited, so the README pattern (`<MessageBubble />` + `ctx.actions.defaultRender()`) needs no extra wiring.
+- The built-in `ctx.defaultRender()` row drives `ctx.isEditing` too — clicking its own Edit button flips the context flag, so `{!ctx.isEditing && <MyBubble />}{ctx.defaultRender()}` hides the custom content instead of stacking it above the row's inline editor.
 - Custom DOM rows should gate their content on `ctx.isEditing`, e.g. `{!ctx.isEditing && <MyBubble message={msg} />}`. While `ctx.isEditing` is true, render only `ctx.actions.defaultRender()` (or your own editor) for that message.
 
 ```tsx

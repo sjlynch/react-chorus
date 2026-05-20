@@ -865,6 +865,54 @@ describe('ChatWindow', () => {
     expect(screen.getByTestId('ctx-footer')).toHaveTextContent('sent');
   });
 
+  it('passes decoration slots through ctx.defaultRender for a tool message', () => {
+    const { container } = render(
+      <ChatWindow
+        messages={[TOOL_MSG]}
+        hiddenRoles={[]}
+        renderMessage={(_message, ctx) => ctx.defaultRender({
+          headerSlot: <span data-testid="tool-ctx-header">search · now</span>,
+          footerSlot: <span data-testid="tool-ctx-footer">done</span>,
+        })}
+      />
+    );
+
+    expect(screen.getByTestId('tool-ctx-header')).toHaveTextContent('search · now');
+    expect(screen.getByTestId('tool-ctx-footer')).toHaveTextContent('done');
+
+    // Mirror MessageBubbleLayout ordering: headerSlot before the tool call, footerSlot after.
+    const toolCall = container.querySelector('.chorus-tool .chorus-tool-call')!;
+    expect(toolCall.previousElementSibling).toHaveAttribute('data-testid', 'tool-ctx-header');
+    expect(toolCall.nextElementSibling).toHaveAttribute('data-testid', 'tool-ctx-footer');
+  });
+
+  it('flips ctx.isEditing when Edit is clicked on a row from ctx.defaultRender()', async () => {
+    const user = userEvent.setup();
+    render(
+      <ChatWindow
+        messages={[USER_MSG]}
+        onEdit={vi.fn()}
+        renderMessage={(msg, ctx) => (
+          <div {...ctx.messageProps}>
+            {!ctx.isEditing && <p data-testid="custom-text">{msg.text}</p>}
+            {ctx.defaultRender()}
+          </div>
+        )}
+      />
+    );
+
+    expect(screen.getByTestId('custom-text')).toHaveTextContent('Hello');
+
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+
+    expect(screen.queryByTestId('custom-text')).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Edit message' })).toHaveValue('Hello');
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.getByTestId('custom-text')).toHaveTextContent('Hello');
+  });
+
   it('MessageBubble renders message attachments', () => {
     const message: Message = {
       id: 'u2',

@@ -1,4 +1,3 @@
-import React from 'react';
 import type { Message, MessageFeedback } from '../types';
 import type { ChorusAttachmentLabels, ChorusCodeCopyLabels, ChorusMessageActionLabels, ChorusSpeakerLabels } from '../labels/types';
 import { useCanWriteTextToClipboard, writeTextToClipboard } from '../utils/messageCopy';
@@ -7,7 +6,7 @@ import { MessageActions, createCopyAction } from './message-row/actions';
 import { MessageBubbleLayout } from './message-row/bubble';
 import { getInitialMessageFeedback } from './message-row/feedback';
 import { InlineMessageEditor } from './message-row/InlineMessageEditor';
-import { useReturnFocusAfterEditing } from './message-row/renderState';
+import { useActionEditing, useReturnFocusAfterEditing } from './message-row/renderState';
 import { MessageSpeakerLabel } from './message-row/speaker';
 import type { MessageBubbleSlots, MessageCopyResult, MessageMarkdownProps, MessageRenderActions } from './message-row/types';
 
@@ -52,7 +51,11 @@ export interface MessageRowProps<TMeta = Record<string, unknown>> extends Messag
 }
 
 export function MessageRow<TMeta = Record<string, unknown>>({ m, codeTheme, headless, onEdit, onRegenerate, onDelete, onCopy, onFeedback, initialFeedback, streaming = false, markdownProps, markdownSanitizer, messageActionLabels, speakerLabels, reasoningLabel, codeCopyLabels, attachmentLabels, before, headerSlot, footerSlot, after }: MessageRowProps<TMeta>) {
-  const [editing, setEditing] = React.useState(false);
+  // Drive editing state through MessageRenderStateContext when a provider is present
+  // (the default ChatWindow path wraps every row in one) so a custom renderer's
+  // `ctx.isEditing` reflects the row's inline editor. Falls back to local state when
+  // MessageRow is used standalone without a provider.
+  const [editing, setEditing] = useActionEditing(m.id);
   const editButtonRef = useReturnFocusAfterEditing<HTMLButtonElement>(editing);
   // Defer the navigator.clipboard fallback so the SSR tree (no clipboard)
   // matches the initial client tree. The button appears after the mount

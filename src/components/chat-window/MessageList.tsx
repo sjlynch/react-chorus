@@ -77,7 +77,9 @@ export function MessageList<TMeta = Record<string, unknown>>({
               <div className="chorus-msg chorus-tool" data-chorus-message-id={message.id}>
                 <MessageSpeakerLabel role={message.role} speakers={resolvedLabels.speakers} />
                 {slots?.before}
+                {slots?.headerSlot}
                 <ToolCallBlock toolCall={message.toolCall} labels={resolvedLabels.toolCall} />
+                {slots?.footerSlot}
                 {slots?.after}
               </div>
             );
