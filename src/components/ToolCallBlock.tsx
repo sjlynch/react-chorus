@@ -49,12 +49,21 @@ function hasOwn(value: object, key: PropertyKey) {
 
 export interface ToolCallBlockProps {
   toolCall: ToolCall;
-  labels?: ChorusToolCallLabels;
+  /** Partial label overrides; omitted keys fall back to the English defaults. */
+  labels?: Partial<ChorusToolCallLabels>;
+  /**
+   * True while this tool call belongs to the message turn that is still
+   * streaming. Drives the "running" affordance for a call whose arguments
+   * and result have not arrived yet, so an in-flight call is never mistaken
+   * for a finished one with empty results.
+   */
+  streaming?: boolean;
 }
 
-export function ToolCallBlock({ toolCall, labels = DEFAULT_TOOL_CALL_LABELS }: ToolCallBlockProps) {
+export function ToolCallBlock({ toolCall, labels, streaming = false }: ToolCallBlockProps) {
   const [open, setOpen] = React.useState(false);
   const bodyId = React.useId();
+  const resolvedLabels: ChorusToolCallLabels = { ...DEFAULT_TOOL_CALL_LABELS, ...labels };
   // Defensive: persisted/custom message arrays may bypass the validating default
   // deserializer and produce a tool-role message without a `toolCall`. Render an
   // empty placeholder rather than throwing inside hasOwn.
@@ -63,6 +72,26 @@ export function ToolCallBlock({ toolCall, labels = DEFAULT_TOOL_CALL_LABELS }: T
   const hasOutput = hasOwn(safeToolCall, 'output');
   const hasBody = hasInput || hasOutput;
 
+  // A call with neither input nor output has nothing to expand. Rather than a
+  // dead, disabled-looking button, show an explicit status: "running" while the
+  // turn is still streaming (arguments may still arrive), "no output" once it
+  // has settled with genuinely empty results. Either way it reads as intentional.
+  if (!hasBody) {
+    return (
+      <div className="chorus-tool-call">
+        <div className="chorus-tool-call-header chorus-tool-call-header--static">
+          <span className="chorus-tool-call-name">{safeToolCall.name}</span>
+          <span
+            className="chorus-tool-call-status"
+            data-chorus-tool-call-state={streaming ? 'running' : 'empty'}
+          >
+            {streaming ? resolvedLabels.running : resolvedLabels.empty}
+          </span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="chorus-tool-call">
       <button
@@ -70,32 +99,29 @@ export function ToolCallBlock({ toolCall, labels = DEFAULT_TOOL_CALL_LABELS }: T
         className="chorus-tool-call-header"
         onClick={() => setOpen(o => !o)}
         aria-expanded={open}
-        aria-controls={hasBody ? bodyId : undefined}
-        disabled={!hasBody}
+        aria-controls={bodyId}
       >
         <span className="chorus-tool-call-name">{safeToolCall.name}</span>
-        {hasBody && <span className="chorus-tool-call-chevron" aria-hidden="true">{open ? '▲' : '▼'}</span>}
+        <span className="chorus-tool-call-chevron" aria-hidden="true">{open ? '▲' : '▼'}</span>
       </button>
-      {hasBody && (
-        <div className="chorus-tool-call-body" id={bodyId} hidden={!open}>
-          {open && (
-            <>
-              {hasInput && (
-                <div className="chorus-tool-call-section">
-                  <div className="chorus-tool-call-label">{labels.input}</div>
-                  <pre className="chorus-tool-call-pre">{fmt(safeToolCall.input)}</pre>
-                </div>
-              )}
-              {hasOutput && (
-                <div className="chorus-tool-call-section">
-                  <div className="chorus-tool-call-label">{labels.output}</div>
-                  <pre className="chorus-tool-call-pre">{fmt(safeToolCall.output)}</pre>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      )}
+      <div className="chorus-tool-call-body" id={bodyId} hidden={!open}>
+        {open && (
+          <>
+            {hasInput && (
+              <div className="chorus-tool-call-section">
+                <div className="chorus-tool-call-label">{resolvedLabels.input}</div>
+                <pre className="chorus-tool-call-pre">{fmt(safeToolCall.input)}</pre>
+              </div>
+            )}
+            {hasOutput && (
+              <div className="chorus-tool-call-section">
+                <div className="chorus-tool-call-label">{resolvedLabels.output}</div>
+                <pre className="chorus-tool-call-pre">{fmt(safeToolCall.output)}</pre>
+              </div>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }
