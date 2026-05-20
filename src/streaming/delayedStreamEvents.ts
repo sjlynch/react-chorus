@@ -80,7 +80,7 @@ export function createDelayedChunkEmitter(cb: SendCallbacks, startedAt: number, 
   // invariants ('callbackError is set at most once', 'once cancelled, no
   // further events flow', 'releasePromise/deliveryPromise are settled exactly
   // once') can be checked locally.
-  let hasDeliveredFirstTextChunk = false;
+  let hasFiredOnStart = false;
   let released = minDelayMs === 0;
   let cancelled = false;
   let bufferedEvents: DelayedStreamEvent[] = [];
@@ -121,11 +121,16 @@ export function createDelayedChunkEmitter(cb: SendCallbacks, startedAt: number, 
   const deliverEvent = (event: DelayedStreamEvent) => {
     if (cancelled) return;
 
+    // onStart fires once on the first delivered event of ANY type so consumers
+    // get the signal even for reasoning-first or tool-only turns that emit no
+    // answer text. The first text chunk is passed through; non-text first
+    // events pass '' since there is no text content to forward yet.
+    if (!hasFiredOnStart) {
+      hasFiredOnStart = true;
+      cb.onStart?.(event.type === 'text' ? event.chunk : '');
+    }
+
     if (event.type === 'text') {
-      if (!hasDeliveredFirstTextChunk) {
-        hasDeliveredFirstTextChunk = true;
-        cb.onStart?.(event.chunk);
-      }
       cb.onChunk(event.chunk);
       return;
     }

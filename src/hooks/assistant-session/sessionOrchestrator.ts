@@ -24,7 +24,6 @@ interface CompleteActiveSessionFinish<TMeta> {
 
 export interface SessionOrchestratorLateDeps<TMeta> {
   appendToolDeltaNow: (delta: ConnectorToolDelta) => void;
-  streamAbort: () => void;
   startTransportStream: StartTransportStream<TMeta>;
 }
 
@@ -55,6 +54,13 @@ export interface SessionOrchestratorDeps<TMeta> {
   resetPendingAssistantState: () => void;
   resetStreamState: () => void;
 
+  /**
+   * The current `persistenceKey`. The orchestrator's cleanup effect aborts
+   * the active assistant session whenever this changes (a conversation
+   * switch) so a stale stream cannot append into the newly-opened chat.
+   */
+  persistenceKey: string | undefined;
+
   observers: ObserverCallbacks<TMeta>;
 }
 
@@ -78,10 +84,10 @@ export interface SessionOrchestrator<TMeta> {
  * begin/active/invalidate/complete/remove/abort/trigger callbacks that drive
  * a Chorus assistant turn.
  *
- * Three late-bound deps (`appendToolDeltaNow`, `streamAbort`,
- * `startTransportStream`) come from hooks (`useToolExecution`,
- * `useChorusStream`, `useTransportLifecycle`) that the facade creates AFTER
- * this orchestrator because they consume `isAssistantSessionActive` /
+ * Two late-bound deps (`appendToolDeltaNow`, `startTransportStream`) come
+ * from hooks (`useToolExecution`, `useTransportLifecycle`) that the facade
+ * creates AFTER this orchestrator because they consume
+ * `isAssistantSessionActive` /
  * `invalidateAssistantSession` / `removePendingAssistant` from it. The facade
  * wires them in via `bindLateDeps` once those hooks exist; the orchestrator's
  * trigger/abort callbacks read them through a ref at call time.
@@ -111,6 +117,7 @@ export function useSessionOrchestrator<TMeta>(deps: SessionOrchestratorDeps<TMet
     finalizeAssistantNow,
     resetPendingAssistantState,
     resetStreamState,
+    persistenceKey,
     observers,
   } = deps;
 
@@ -119,6 +126,7 @@ export function useSessionOrchestrator<TMeta>(deps: SessionOrchestratorDeps<TMet
   const activeSendPathRef = React.useRef<ChorusSendPath | null>(null);
   const warnedMissingHandlerRef = React.useRef(false);
   const warnedTransportOnSendRef = React.useRef(false);
+  const warnedEmptyOnSendRef = React.useRef(false);
   const lateDepsRef = React.useRef<SessionOrchestratorLateDeps<TMeta> | null>(null);
 
   const bindLateDeps = React.useCallback((next: SessionOrchestratorLateDeps<TMeta>) => {
@@ -129,6 +137,13 @@ export function useSessionOrchestrator<TMeta>(deps: SessionOrchestratorDeps<TMet
     if (isChorusDevMode() && !warnedMissingHandlerRef.current) {
       warnedMissingHandlerRef.current = true;
       console.warn('[Chorus] `send` was called but neither `transport` nor `onSend` was provided. Pass one of these props to produce an assistant response.');
+    }
+  }, []);
+
+  const warnEmptyOnSend = React.useCallback(() => {
+    if (isChorusDevMode() && !warnedEmptyOnSendRef.current) {
+      warnedEmptyOnSendRef.current = true;
+      console.warn('[Chorus] `onSend` resolved without appending assistant chunks or returning a message; no `onFinish`/`onAbort` observer fires for this turn. Call `helpers.finalizeAssistant()` or return a `Message` from `onSend`.');
     }
   }, []);
 
@@ -195,9 +210,13 @@ export function useSessionOrchestrator<TMeta>(deps: SessionOrchestratorDeps<TMet
     const path = activeSendPathRef.current ?? (transportRef.current ? 'transport' : 'onSend');
 
     invalidateAssistantSession();
+    // On the transport path `controllerRef.current` IS the external signal
+    // passed to `useChorusStream.send`, so aborting it cancels the stream.
+    // `useChorusStream.abort()` is intentionally not called here: the hook
+    // does not own that signal, and calling abort() would log a spurious
+    // dev warning telling the host to abort a signal they never passed.
     controllerRef.current?.abort();
     if (path === 'transport') {
-      lateDepsRef.current?.streamAbort();
       setTransportBusy(false);
     }
     controllerRef.current = null;
@@ -262,12 +281,37 @@ export function useSessionOrchestrator<TMeta>(deps: SessionOrchestratorDeps<TMet
       updateSessionMessages,
       observers,
       showStreamError,
+      warnEmptyOnSend,
       sessionId,
       text,
       history,
       onSend: currentOnSend,
     });
-  }, [abortActiveAssistant, appendAssistantNow, appendAssistantReasoningNow, beginAssistantSession, clearStreamError, completeActiveSession, hasStartedAssistantRef, invalidateAssistantSession, isAssistantSessionActive, messagesRef, minAssistantDelayMsRef, observers, onSendRef, rememberSubmittedTurn, removePendingAssistant, resetStreamState, setInternalSending, setTransportBusy, showStreamError, systemPromptRef, transportRef, updateSessionMessages, warnMissingResponseHandler]);
+  }, [abortActiveAssistant, appendAssistantNow, appendAssistantReasoningNow, beginAssistantSession, clearStreamError, completeActiveSession, hasStartedAssistantRef, invalidateAssistantSession, isAssistantSessionActive, messagesRef, minAssistantDelayMsRef, observers, onSendRef, rememberSubmittedTurn, removePendingAssistant, resetStreamState, setInternalSending, setTransportBusy, showStreamError, systemPromptRef, transportRef, updateSessionMessages, warnEmptyOnSend, warnMissingResponseHandler]);
+
+  // `abortActiveAssistant` is stable in real <Chorus> usage, but a hook-level
+  // consumer can pass an unstable `flushPersistence` whose identity ripples
+  // through the buffer into it. Read it from a ref so the cleanup effect below
+  // can depend ONLY on `persistenceKey`: its cleanup must run on unmount and on
+  // a conversation switch, never because an unrelated callback churned (that
+  // would abort a healthy in-flight turn on every render).
+  const abortActiveAssistantRef = React.useRef(abortActiveAssistant);
+  abortActiveAssistantRef.current = abortActiveAssistant;
+
+  // Abort whatever assistant turn is in flight when <Chorus> unmounts or the
+  // conversation switches (`persistenceKey` change). The assistant-session
+  // layer has no other unmount cleanup: without this an `onSend` promise keeps
+  // resolving against a dead component — its `helpers.signal` never aborts and
+  // the host-registered `onAbort` never fires — and a transport/SSE fetch
+  // keeps streaming. On a `persistenceKey` switch it also stops the previous
+  // conversation's stream from appending its assistant reply into the chat the
+  // user just opened. One effect covers both cases because the mechanism is
+  // identical (abort the in-flight controller); the cleanup runs on unmount
+  // AND on every `persistenceKey` change. `activeSendPathRef` gates the abort
+  // so a teardown with nothing in flight does not emit a spurious `onAbort`.
+  React.useEffect(() => () => {
+    if (activeSendPathRef.current) abortActiveAssistantRef.current('superseded', 'programmatic');
+  }, [persistenceKey]);
 
   return {
     beginAssistantSession,
