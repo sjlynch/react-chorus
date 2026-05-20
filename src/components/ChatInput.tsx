@@ -9,6 +9,7 @@ import { useChatInputSend } from './chat-input/useChatInputSend';
 import { useComposerTextarea } from './chat-input/useComposerTextarea';
 import { useFileIngestionHandlers } from './chat-input/useFileIngestionHandlers';
 import type { ChatInputHandle, ChatInputProps } from './chat-input/types';
+import { styleVarsFromPalette } from '../utils/paletteVars';
 
 export type { ChatInputFocusOptions, ChatInputHandle, ChatInputProps, RenderAttachmentErrorContext } from './chat-input/types';
 
@@ -31,6 +32,7 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(funct
   uploadAttachment,
   labels = DEFAULT_COMPOSER_LABELS,
   attachmentLabels = DEFAULT_ATTACHMENT_LABELS,
+  palette,
   className,
   style,
   onPaste: onPasteProp,
@@ -43,12 +45,18 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(funct
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const reasonId = React.useId();
   const composerInactive = disabled || readOnly;
-  const showAttachBtn = accept !== undefined;
+  // An empty / whitespace-only `accept` means "no attachments allowed" — treat
+  // it the same as omitting `accept` rather than presenting an unfiltered picker.
+  const showAttachBtn = typeof accept === 'string' && accept.trim().length > 0;
   const canIngestFiles = showAttachBtn && !composerInactive;
   const {
     rootRef,
     textareaRef,
     handleTextareaChange,
+    handleCompositionStart,
+    handleCompositionEnd,
+    isComposingRef,
+    composerGenerationRef,
     resetTextareaHeight,
   } = useComposerTextarea({
     value,
@@ -103,6 +111,7 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(funct
     canSend,
     onSend,
     onAcceptedSend: resetAfterAcceptedSend,
+    composerGenerationRef,
   });
 
   const {
@@ -116,6 +125,7 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(funct
     showAttachBtn,
     canIngestFiles,
     fileInputRef,
+    rootRef,
     handleFiles,
     clearDragState,
     markDragEnter,
@@ -129,10 +139,12 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(funct
   });
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      if (!sending && canSend) handleSend();
-    }
+    if (e.key !== 'Enter' || e.shiftKey) return;
+    // Let the IME consume Enter while a composition is active (CJK / accented
+    // input) instead of sending a half-composed message.
+    if (isComposingRef.current || e.nativeEvent.isComposing) return;
+    e.preventDefault();
+    if (!sending && canSend) handleSend();
   };
 
   const handleClick = () => {
@@ -149,6 +161,8 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(funct
     readOnly && 'chorus-input--readonly',
     className,
   ].filter(Boolean).join(' ');
+
+  const paletteVars = React.useMemo(() => styleVarsFromPalette(palette), [palette]);
 
   const attachmentErrorNode = attachmentError && renderAttachmentError !== null
     ? (renderAttachmentError
@@ -167,7 +181,7 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(funct
       {...rest}
       ref={rootRef}
       className={rootClassName}
-      style={style}
+      style={{ ...paletteVars, ...style }}
       onPaste={handleRootPaste}
       onDragEnter={handleRootDragEnter}
       onDragOver={handleRootDragOver}
@@ -208,6 +222,8 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(funct
           value={value}
           onChange={handleTextareaChange}
           onKeyDown={onKeyDown}
+          onCompositionStart={handleCompositionStart}
+          onCompositionEnd={handleCompositionEnd}
           placeholder={placeholderText}
           aria-label={textareaAriaLabel}
           aria-describedby={inactiveReason ? reasonId : undefined}
@@ -219,6 +235,11 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(funct
           {sending ? <span className="chorus-stop-fill" /> : <ArrowUp size={18} strokeWidth={2} />}
         </button>
       </div>
+      {draggingFiles && canIngestFiles && (
+        <div className="chorus-drop-overlay" aria-hidden="true">
+          <span className="chorus-drop-overlay-label">{labels.dropToAttach}</span>
+        </div>
+      )}
     </div>
   );
 });

@@ -216,6 +216,8 @@ For a non-streaming client, `onSend` may return a complete assistant `Message`. 
 />
 ```
 
+Both paths render the same transcript, so the headless [`useChorusTranscriptActions`](#transcript-search-copy-and-export) hook — transcript-wide search, copy-conversation, and Markdown/JSON export — works the same whether you drive Chorus with `transport` or `onSend`.
+
 ### Next.js App Router route handler
 
 For a production Next.js app, keep `OPENAI_API_KEY` on the server and expose an App Router route handler that speaks SSE to Chorus. Install `openai` in your app for this variant. A runnable version lives in [`examples/with-next`](./examples/with-next).
@@ -868,20 +870,20 @@ react-chorus keeps React/ReactDOM as peer dependencies and externalizes runtime 
 
 | Entry | Initial JS | gzip | Notes |
 |-------|------------|------|-------|
-| `react-chorus` (`<Chorus>`) | 187.9 kB | 61.5 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
-| `react-chorus/headless` | 188.3 kB | 61.7 kB | Headless defaults, same behavior surface. |
-| `react-chorus` (`useChorusStream`) | 52.7 kB | 16.1 kB | Root hook import; CI fails if it pulls UI, Markdown, or icon dependencies. |
-| `react-chorus` (`Markdown`) | 75.2 kB | 25.4 kB | Standalone Markdown renderer; includes Markdown parsing/sanitization, not chat icons. |
-| `react-chorus` (`ChatWindow`) | 119.8 kB | 39.9 kB | Transcript renderer with Markdown and message action icons, without the composer/widget shell. |
-| `react-chorus` (`ConversationList`) | 7.2 kB | 2.4 kB | Conversation sidebar component only; no Markdown/icon graph. |
-| `react-chorus/transport` | 5.6 kB | 2.4 kB | Transport factories only; no React/UI/Markdown runtime. |
+| `react-chorus` (`<Chorus>`) | 196.7 kB | 64.4 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
+| `react-chorus/headless` | 197.1 kB | 64.6 kB | Headless defaults, same behavior surface. |
+| `react-chorus` (`useChorusStream`) | 55.0 kB | 16.9 kB | Root hook import; CI fails if it pulls UI, Markdown, or icon dependencies. |
+| `react-chorus` (`Markdown`) | 75.7 kB | 25.6 kB | Standalone Markdown renderer; includes Markdown parsing/sanitization, not chat icons. |
+| `react-chorus` (`ChatWindow`) | 125.5 kB | 41.7 kB | Transcript renderer with Markdown and message action icons, without the composer/widget shell. |
+| `react-chorus` (`ConversationList`) | 8.7 kB | 3.0 kB | Conversation sidebar component only; no Markdown/icon graph. |
+| `react-chorus/transport` | 5.8 kB | 2.5 kB | Transport factories only; no React/UI/Markdown runtime. |
 | `react-chorus/provider-requests` | 10.1 kB | 3.1 kB | Provider request mappers and tool serializers; no React/UI/Markdown runtime. |
 | `react-chorus/server` | 0.7 kB | 0.4 kB | SSE framing helpers for proxy routes (headers, encode/format, [DONE], error envelope); no React/UI runtime. |
 | Lazy `highlight.js` runtime | 891.4 kB | 295.9 kB | Async code-fence chunk, never part of initial JS. |
 
 `highlight.js` is only fetched the first time a fenced code block (` ``` ` or `~~~`) appears in rendered text. The matching GitHub dark/light token-color stylesheet is also injected on demand based on `codeBlockTheme`; code renders immediately as plain text and is re-rendered with syntax highlighting once the chunk arrives. While an assistant message is actively streaming, Chorus renders that growing message as React-escaped plain text and switches to full Markdown parsing/sanitization when the stream finalizes.
 
-The playground has a separate budget because it intentionally bundles a complete demo app. `npm run build:playground` also runs `npm run verify:playground-size`, writes `.cache/react-chorus/playground-bundle-size-report.json`, and checks this paragraph. The current playground initial JS graph is 409.2 kB / 128.8 kB gzip and its largest lazy chunk (highlight.js) is 890.9 kB / 295.7 kB gzip. Vite's chunk warning limit is raised to that documented lazy budget so the playground build stays free of Vite chunk warnings while the budget script tracks regressions.
+The playground has a separate budget because it intentionally bundles a complete demo app. `npm run build:playground` also runs `npm run verify:playground-size`, writes `.cache/react-chorus/playground-bundle-size-report.json`, and checks this paragraph. The current playground initial JS graph is 418.2 kB / 131.6 kB gzip and its largest lazy chunk (highlight.js) is 890.9 kB / 295.7 kB gzip. Vite's chunk warning limit is raised to that documented lazy budget so the playground build stays free of Vite chunk warnings while the budget script tracks regressions.
 
 To refresh the published size claims after dependency or feature changes, run `npm run build`, `npm run verify:bundle-size`, and `npm run build:playground`, then copy the updated values from stdout or the `.cache/react-chorus/*-bundle-size-report.json` files into this section. The verification commands may fail until the README values are updated to match their reports.
 
@@ -892,6 +894,25 @@ To refresh the published size claims after dependency or feature changes, run `n
 If your SSR app wants to allow sanitized raw HTML, create an isomorphic DOMPurify instance (for example with your framework's DOM/window or jsdom on the server) and pass it to the standalone renderer: `<Markdown sanitizer={purify} />` or `<Markdown sanitizer={(html) => purify.sanitize(html)} />`. The built-in chat renderer accepts the same customization via `<Chorus markdownSanitizer={purify} />` / `<ChatWindow markdownSanitizer={purify} />`, or through `markdownProps={{ sanitizer: purify }}`. You can also pass `markedOptions` and `markedExtensions` directly to `<Markdown>` or via `markdownProps` to adjust parsing and register marked extensions without mutating marked's global singleton.
 
 Code-block copy buttons flash `Copied!` on success and `Copy failed` when the Clipboard API rejects. Pass `<Markdown onCopyError={(error) => ...} />` — or `markdownProps={{ onCopyError }}` on `<Chorus>` / `<ChatWindow>` — to show your own toast or fallback alert.
+
+The copy chrome is a real, keyboard-focusable `<button>`: it activates with Enter/Space, keeps its accessible name (`aria-label`) in sync with the Copy / Copied / Failed state, and announces each transition through a polite `aria-live` status region next to it.
+
+Use `codeBlockCopy` on `<Markdown>` (or `markdownProps={{ codeBlockCopy }}` on `<Chorus>` / `<ChatWindow>`) to control that chrome:
+
+- `'default'` (or `true`, or omitted) keeps the built-in copy button.
+- `false` opts out entirely — no copy button is rendered, while the styled `.chorus-codeblock` wrapper stays.
+- a function `(ctx) => htmlString` renders your own chrome. `ctx` is `{ theme, labels }`; the returned HTML is inserted ahead of the `<pre>`. Include a `chorus-copy-btn` element to reuse the built-in clipboard wiring, and a `chorus-copy-status` element (ideally `aria-live="polite"`) to receive screen-reader status updates. The returned markup is trusted and inserted without sanitization, so pass a stable function reference.
+
+```tsx
+// Opt out of the copy button entirely
+<Markdown text={md} codeBlockCopy={false} />
+
+// Render your own chrome (defined once, outside render)
+const renderCopy = ({ labels }) =>
+  `<button type="button" class="chorus-copy-btn" aria-label="${labels.ariaLabel}">⧉</button>` +
+  `<span class="chorus-copy-status" role="status" aria-live="polite"></span>`;
+<Markdown text={md} codeBlockCopy={renderCopy} />
+```
 
 ## Security and CSP
 
@@ -961,6 +982,8 @@ Message source modes are mutually exclusive:
 - Uncontrolled with a seed: pass `initialMessages` (or legacy `messages`) and let Chorus manage subsequent updates internally.
 - Uncontrolled with persistence: pass `persistenceKey` without `value`; passing both makes `value` win, so built-in persistence is bypassed without reading the ignored key.
 
+`initialMessages` (and legacy `messages`) follow a **frozen-seed contract**: the seed is captured once at mount and never re-derived. If a parent rebuilds the seed array after mount — for example regenerating welcome messages on a locale, theme, or persona change — the new array is silently ignored: the transcript does not re-seed, and `resetToInitialMessages` still restores the mount-time value. In development Chorus logs a one-time warning when the reference changes. To swap the transcript at runtime, use controlled mode (`value` + `onChange`), call `ChorusRef.clear()`, or force a fresh mount with `key={...}`.
+
 When `persistenceKey` is combined with `initialMessages` (or legacy `messages`), stored history is checked first. If the key has no stored value, Chorus renders and saves the seed so welcome messages still appear with persistence enabled. If the key already exists, the stored value wins. Promise-based storage adapters keep the built-in composer and write actions disabled while the initial read is pending; the seed/empty-state prompts stay hidden until the read resolves so a pre-load Send cannot overwrite an existing transcript.
 
 Persistence writes are debounced while assistant tokens stream, flushed when a message finalizes and on explicit edits/deletes/clears, and serialized for async adapters so older saves cannot overwrite newer transcripts. Pending debounced writes are also flushed on `pagehide` and `visibilitychange` → `hidden`; synchronous adapters such as `localStorage` can complete that final write during tab close, while Promise-based adapters cannot block navigation. If you wire `useChorusPersistence()` into your own controlled state, gate your custom composer on `persist.loaded` (or intentionally queue your own edits) before calling `persist.onChange`. For remote/IndexedDB persistence, prefer a synchronous localStorage fallback plus an async backup when data loss on close is unacceptable.
@@ -976,8 +999,8 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `value` | `Message<TMeta>[]` | — | Controlled message list. Pair with `onChange`; Chorus renders this array as the source of truth. |
 | `onChange` | `(messages: Message<TMeta>[]) => void` | — | Called whenever Chorus wants to change the message list in controlled mode (`value` is provided). Not called for legacy `messages`-only uncontrolled state. |
 | `onMessagesChange` | `(messages, context) => void` | — | Read-only transcript observer for controlled, uncontrolled, and persistence-backed modes. Fires for initial/loaded messages, sends, stream chunks, returned messages, edits, deletes, retry/regenerate truncation, and clear without making Chorus controlled. `context.source` is `'controlled'`, `'uncontrolled'`, or `'persistence'`. |
-| `messages` | `Message<TMeta>[]` | — | Legacy initial-only seed for uncontrolled mode. Read once on mount; later prop changes are ignored. Prefer `initialMessages` for seeding or `value` + `onChange` for controlled mode. |
-| `initialMessages` | `Message<TMeta>[]` | — | Initial-only seed for uncontrolled mode. Useful for welcome messages; `system` messages are hidden by default via `hiddenRoles`. Tool calls remain visible by default. |
+| `messages` | `Message<TMeta>[]` | — | Legacy initial-only seed for uncontrolled mode. Read once on mount; later prop changes are ignored (dev warns once on a reference change). Prefer `initialMessages` for seeding or `value` + `onChange` for controlled mode. |
+| `initialMessages` | `Message<TMeta>[]` | — | Initial-only seed for uncontrolled mode, captured once at mount (frozen-seed contract — later reference changes are ignored and dev-warned once). Useful for welcome messages; `system` messages are hidden by default via `hiddenRoles`. Tool calls remain visible by default. |
 | `emptyState` | `ReactNode` | — | Custom content shown in the transcript when the visible message list is empty and the assistant is not typing. |
 | `suggestedPrompts` | `string[]` | — | Default empty-state prompt buttons. Clicking one fills and focuses the composer without sending. Ignored when `emptyState` is provided. |
 | `placeholder` | `string` | `"Send a message"` | Input placeholder text. |
@@ -1005,6 +1028,7 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `tools` | `Record<string, (input, context) => unknown \| Promise<unknown>>` | — | Executable tool registry keyed by tool name. Matching handlers run after the stream completes; their return value is appended to the tool message as output. |
 | `autoContinueTools` | `boolean` | `false` | Opt in to an automatic tool-execution → model-continuation loop on the `transport` path after all completed tool calls have outputs. |
 | `maxToolIterations` | `number` | `4` | Maximum automatic tool iterations when `autoContinueTools` is enabled. Prevents infinite loops. |
+| `continueOnToolError` | `boolean` | `false` | Treat a thrown tool handler (or `onToolCall`) error as a normal tool result instead of a terminal turn failure. The error is recorded on the tool row (`{ error: message }` output plus `metadata.isError`); with `autoContinueTools` enabled the loop continues, feeding the error tool result back to the model so it can self-recover. Abort errors (Stop) always end the turn. |
 | `shouldContinueToolLoop` | `(context) => boolean \| Promise<boolean>` | — | Optional gate before each automatic continuation. Return `false` to stop after rendering/executing the current tool batch. |
 | `onStreamDone` | `({ assistantMessage, toolMessages, messages, response, reason, willContinue, iteration, maxToolIterations }) => void` | — | Called after each `transport` stream completes normally and tool handlers (if any) finish. Fires for tool-only turns where `onFinish` has no assistant message. `reason` is `'completed'`, `'tool-loop-continue'`, `'tool-loop-veto'`, or `'max-tool-iterations'` — use it to detect when `autoContinueTools` stops because the safety cap was reached. |
 | `onCopy` | `(message: Message<TMeta>) => void` | Clipboard copy when available | Overrides the built-in per-message Copy action. If omitted, Chorus copies `message.text` with `navigator.clipboard.writeText` when the Clipboard API is available. |
@@ -1021,14 +1045,14 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `clearLabel` | `string` | `'Clear conversation'` | Label for the built-in clear/reset button. |
 | `confirmClearConversation` | `({ messages, resetToInitialMessages, source, persistenceKey? }) => boolean \| void \| Promise<boolean \| void>` | — | Optional gate for the built-in clear/reset action. Return or resolve `false` to cancel before persistence is flushed. While an async confirmation is pending the clear button is disabled and duplicate clears (button or `ref.clear()`) are ignored. |
 | `onClear` | `(messages: Message<TMeta>[]) => void` | — | Called with the reset message list after the built-in clear action runs. |
-| `resetToInitialMessages` | `boolean` | `false` | When clearing, restore the initial `messages`/`initialMessages` seed instead of saving an empty transcript. |
+| `resetToInitialMessages` | `boolean` | `false` | When clearing, restore the initial `messages`/`initialMessages` seed instead of saving an empty transcript. Restores the mount-time seed (frozen-seed contract) even if the seed prop was swapped after mount. |
 | `showJumpToBottomButton` | `boolean` | `!headless` | Shows the floating “Jump to latest” button when the user scrolls away from the bottom and new activity arrives. Pass `false` to disable it (for example when you own the scroll affordance); the headless exports default `headless={true}` so the button is off by default there. |
 | `headless` | `boolean` | `false` | Strip all default styles and inline style injection. |
 | `renderMessage` | `(message: Message<TMeta>, ctx: RenderMessageContext<TMeta>) => ReactNode` | — | Custom per-message renderer. Return `null` to fall back to default rendering. `ctx` includes `isStreaming`, `isEditing` (true while the built-in inline editor is active — gate your own content on it so the editor replaces the row), `messageProps` for scroll targets, `defaultRender(slots?)`, and action callbacks/default action controls. Existing one-argument renderers continue to work. |
-| `markdownProps` | `Omit<MarkdownProps, 'text' \| 'codeTheme' \| 'headless' \| 'streaming'>` | — | Props forwarded to the built-in Markdown renderer for every message, including `sanitizer`, `markedOptions`, `markedExtensions`, and `onCopyError`. |
+| `markdownProps` | `Omit<MarkdownProps, 'text' \| 'codeTheme' \| 'headless' \| 'streaming'>` | — | Props forwarded to the built-in Markdown renderer for every message, including `sanitizer`, `markedOptions`, `markedExtensions`, `onCopyError`, and `codeBlockCopy`. |
 | `markdownSanitizer` | `MarkdownSanitizer` | — | Convenience alias for `markdownProps.sanitizer`; takes precedence when both are provided. |
 | `hiddenRoles` | `Role[]` | `['system']` | Message roles hidden from the transcript. Tool calls are visible by default in `<Chorus>`; pass `['system', 'tool']` to hide them, or `[]` to show all roles. `<Chorus>` accepts `hiddenRoles` only — `showSystemMessages` exists on `<ChatWindow>` for backwards compatibility. |
-| `labels` | `ChorusLabels` | English defaults | Localized strings for every built-in UI surface: composer placeholder/aria-labels/attach/send/stop, transcript aria-label/typing/retry/jump-to-latest/empty-state title, message actions (edit/regenerate/copy/copy-failed/thumbs up/down/delete/save/cancel), per-role speaker SR labels, tool-call section headers, reasoning summary, code-fence copy chrome, conversation-list affordances, and the clear button. See [Localizing built-in strings](#localizing-built-in-strings). |
+| `labels` | `ChorusLabels` | English defaults | Localized strings for every built-in UI surface: composer placeholder/aria-labels/attach/drop-to-attach/send/stop, transcript aria-label/typing/retry/jump-to-latest/empty-state title, message actions (edit/regenerate/copy/copy-failed/thumbs up/down/delete/save/cancel), per-role speaker SR labels, tool-call section headers, reasoning summary, code-fence copy chrome, conversation-list affordances, and the clear button. See [Localizing built-in strings](#localizing-built-in-strings). |
 
 ### Localizing built-in strings
 
@@ -1042,6 +1066,7 @@ const fr: ChorusLabels = {
     placeholder: 'Écrivez un message',
     ariaLabel: 'Champ de message',
     attachFile: 'Joindre un fichier',
+    dropToAttach: 'Déposer pour joindre',
     send: 'Envoyer',
     stop: 'Arrêter',
     disabledReason: 'Composer désactivé.',
@@ -1073,7 +1098,7 @@ const fr: ChorusLabels = {
     system: 'Message système',
     tool: 'Message outil',
   },
-  toolCall: { input: 'Entrée', output: 'Sortie' },
+  toolCall: { input: 'Entrée', output: 'Sortie', running: 'En cours…', empty: 'Aucune sortie' },
   reasoning: 'Raisonnement',
   codeCopy: { copy: 'Copier', copied: 'Copié !', failed: 'Échec', ariaLabel: 'Copier le code' },
   conversationList: {
@@ -1416,9 +1441,49 @@ const latestMessages = React.useRef<Message[]>([]);
 
 For one-off reads from outside React state, call `chorusRef.current?.getMessages()`.
 
+### Transcript search, copy, and export
+
+`useChorusTranscriptActions` is a headless utility hook for building a search box, a "copy conversation" button, or a "download transcript" affordance around `<Chorus>` or a custom headless shell — without writing the indexing, clipboard, and serialization layers yourself. Pass it the same `messages` array you render (from `chorusRef.getMessages()`, `onMessagesChange`, or your own state) and it returns three callbacks with stable identities:
+
+- `searchMessages(query)` — case-insensitive substring search across each message's `text`, `reasoning`, and (for tool messages) `toolCall.name`. Returns the matching `Message[]`; a blank/whitespace-only query returns `[]`. Pair it with `chorusRef.scrollToMessage(id)` to jump to a hit.
+- `copyAll(format?)` — copies the whole transcript to the clipboard. Defaults to `'markdown'`; pass `'json'` for the raw structure. Resolves `false` (and calls the optional `onCopyError`) when the Clipboard API is unavailable or the write rejects.
+- `exportAs(format)` — serializes the transcript to a string. `'markdown'` renders a readable transcript with one heading per message (tool calls include their input/output); `'json'` returns `JSON.stringify(messages, null, 2)`, which round-trips through `JSON.parse`.
+
+```tsx
+import React from 'react';
+import { Chorus, useChorusTranscriptActions, type ChorusRef, type Message } from 'react-chorus';
+
+export function SearchableChat() {
+  const chorusRef = React.useRef<ChorusRef>(null);
+  const [messages, setMessages] = React.useState<Message[]>([]);
+  const { searchMessages, copyAll, exportAs } = useChorusTranscriptActions(messages);
+
+  const jumpToFirstHit = (query: string) => {
+    const [hit] = searchMessages(query);
+    if (hit) chorusRef.current?.scrollToMessage(hit.id);
+  };
+
+  const downloadTranscript = () => {
+    const blob = new Blob([exportAs('markdown')], { type: 'text/markdown' });
+    window.open(URL.createObjectURL(blob), '_blank');
+  };
+
+  return (
+    <>
+      <input type="search" placeholder="Search transcript…" onChange={(e) => jumpToFirstHit(e.target.value)} />
+      <button type="button" onClick={() => copyAll()}>Copy conversation</button>
+      <button type="button" onClick={downloadTranscript}>Download .md</button>
+      <Chorus ref={chorusRef} transport="/api/chat" onMessagesChange={setMessages} />
+    </>
+  );
+}
+```
+
+`useChorusTranscriptActions` is also re-exported from `react-chorus/headless`. Pass `{ roleLabels }` to relabel the Markdown headings (for example `{ user: 'Customer', assistant: 'Agent' }`) and `{ onCopyError }` to observe clipboard failures from `copyAll()`.
+
 ### Attachment composer UX
 
-Passing `accept` enables the built-in attachment composer. Users can pick files, paste files from the clipboard, or drag/drop files onto the composer; all three paths use the same `accept` matching (`image/*`, exact MIME types, and extensions such as `.pdf`).
+Passing `accept` enables the built-in attachment composer. Users can pick files, paste files from the clipboard, or drag/drop files anywhere over the chat surface — the transcript as well as the composer — and a "Drop to attach" overlay confirms the drop target while a file is dragged over it. All paths use the same `accept` matching (`image/*`, exact MIME types, and extensions such as `.pdf`). An empty or whitespace-only `accept` (and `maxAttachmentBytes={0}`) means "no attachments allowed": the attach button is hidden and stray drops are still neutralized so the browser never navigates away to a dropped file's URL.
 
 By default, react-chorus reads accepted files into base64 **data URLs** and stores them in `Message.attachments`. That makes local demos and simple persistence easy, but data URLs can inflate request bodies and persisted history. For production, set size/count limits and consider `uploadAttachment` so large files are uploaded to your storage/provider before the message is sent.
 
@@ -1781,6 +1846,8 @@ For agentic UIs, react-chorus provides first-class support for tool call renderi
 
 On the built-in `transport` path, connector `toolDelta` events are display-only by default: Chorus creates or updates a visible `role: 'tool'` message and leaves execution to your app. A streamed tool call is considered complete when the provider stream ends (`[DONE]`, `message_stop`, a normal Gemini finish reason, or the response body closing). Tool-only turns end the sending state cleanly; because there is no assistant message, `onFinish` does not fire, but `onStreamDone` and/or `onToolCall` can observe the completed tool context.
 
+The default `<ToolCallBlock>` renders an expandable input/output panel once a call has either. Before its arguments arrive — or for a call that legitimately produces no input and no output — it shows an explicit status row instead of an empty control: `Running…` while the turn is still streaming, `No output` once it has settled. Both strings are localizable via `labels.toolCall.running` / `labels.toolCall.empty`.
+
 To observe deltas without executing tools:
 
 ```tsx
@@ -1796,7 +1863,9 @@ To observe deltas without executing tools:
 />
 ```
 
-To execute tools in the simple path, pass a `tools` registry. Handlers run after streaming input completes, receive the final parsed `input` plus an abortable context, and their return value is appended as `toolCall.output`. If the user clicks Stop while a handler is running, `context.signal` is aborted and late outputs are ignored. If a handler throws a non-abort error, Chorus keeps the tool row inspectable, writes `{ error: message }` to its output, calls `onError`, and shows the friendly error banner; clicking Retry removes the failed assistant/tool attempt before rendering the fresh response.
+To execute tools in the simple path, pass a `tools` registry. Handlers run after streaming input completes, receive the final parsed `input` plus an abortable context, and their return value is appended as `toolCall.output`. If the user clicks Stop while a handler is running, `context.signal` is aborted and late outputs are ignored. If a handler throws a non-abort error, Chorus keeps the tool row inspectable and writes `{ error: message }` to its output (and flags `metadata.isError`). By default it then ends the turn — calling `onError` and showing the friendly error banner; clicking Retry removes the failed assistant/tool attempt before rendering the fresh response.
+
+To make a thrown tool error recoverable instead of terminal, set `continueOnToolError`. The error output is then treated as a normal tool result: the already-streamed assistant text from that iteration is kept, no error banner is shown, and — with `autoContinueTools` enabled — the loop continues and feeds the error tool result back to the model (as `is_error: true` for Anthropic) so it can apologize or try a different approach. Abort errors from Stop always end the turn regardless of this flag.
 
 By default this remains display/manual mode: Chorus does not make a second model request after tool execution, so use `onToolCall`/`onStreamDone` or your backend to continue the agent loop when needed. To opt in to a built-in loop, set `autoContinueTools`. Chorus will run the handlers, append outputs, then send a continuation request with the updated history. `maxToolIterations` (default `4`) prevents runaway loops, `shouldContinueToolLoop(context)` can stop a specific continuation, and Stop aborts both tool execution and continuation streams. When the cap fires (or any other terminal condition), `onStreamDone` receives a `reason` (`'max-tool-iterations' | 'tool-loop-veto' | 'tool-loop-continue' | 'completed'`) plus `willContinue`, `iteration`, and `maxToolIterations` — hosts decide how to surface the cap in their UI (Chorus deliberately does not render a default banner).
 
@@ -2100,9 +2169,10 @@ Built-in tool call blocks can be themed through palette keys (`toolBorder`, `too
 
 ## Theming
 
-Pass a `palette` prop to `<Chorus>` (or wrap components in `<ChorusTheme palette={…}>`):
+Theming is a single mechanism: a **`palette`** object that maps to `--chorus-*` CSS custom properties. Every exported root component — `Chorus`, `ChatWindow`, `ChatInput`, and `ConversationList` — accepts a `palette` prop and writes those variables onto its own root element. `<ChorusTheme>` is the same mechanism without a component: a bare `<div>` that carries the variables for any subtree, handy when you compose the pieces yourself.
 
 ```tsx
+// Full widget — theme it directly.
 <Chorus
   palette={{
     chatBg: '#0f0f0f',
@@ -2114,7 +2184,29 @@ Pass a `palette` prop to `<Chorus>` (or wrap components in `<ChorusTheme palette
   }}
   onSend={…}
 />
+
+// Composed shell — theme each piece via its own `palette` prop…
+<ChatWindow messages={messages} palette={{ chatBg: '#0f0f0f' }} />
+<ChatInput value={value} onChange={setValue} onSend={onSend} palette={{ inputBg: '#1a1a1a' }} />
+
+// …or wrap the whole subtree once with <ChorusTheme>.
+<ChorusTheme palette={{ chatBg: '#0f0f0f', inputBg: '#1a1a1a' }}>
+  <ChatWindow messages={messages} />
+  <ChatInput value={value} onChange={setValue} onSend={onSend} />
+</ChorusTheme>
 ```
+
+A per-component `palette` prop and a `<ChorusTheme palette={…}>` wrapper are interchangeable: both emit the same `--chorus-*` variables, only the DOM element they land on differs. The `palette` is applied the same way on the default and `react-chorus/headless` exports — `headless` controls injected `<style>` tags and code-block chrome, not the host-supplied theme.
+
+### Theming precedence
+
+Theming resolves through the **standard CSS custom-property cascade** — there is no JavaScript-level merge between layers. `styleVarsFromPalette` only emits a variable for a palette key you actually set, so resolution is *per variable*:
+
+1. The **nearest ancestor — or the element itself — that sets a given `--chorus-*` variable wins.** A component's own `palette` prop sits closest to its own DOM, so it overrides an ancestor `<ChorusTheme>` or `<Chorus palette>` for the keys it defines — but only those keys; keys it omits keep inheriting from the ancestor.
+2. **Host CSS variables** (e.g. `--chorus-chat-bg` declared on `:root` or any ancestor in your own stylesheet) join the same cascade. A closer `palette`/`ChorusTheme` overrides them; they in turn override the bundled defaults.
+3. The **bundled stylesheet defaults** (the `var(--chorus-chat-bg, #161616)` fallbacks in `Chorus.css`) apply when nothing else sets the variable.
+
+So `<ChorusTheme palette={A}><Chorus palette={B} /></ChorusTheme>` renders `<Chorus>` with `B` winning, falling back to `A` for any key `B` omits, then to host CSS variables, then to the built-in defaults.
 
 Available palette keys: `chatBg`, `chatText`, `border`, `assistantBubbleBg`, `assistantText`, `assistantBorder`, `userBubbleBg`, `userText`, `userBorder`, `inputAreaBg`, `inputBg`, `inputText`, `inputBorder`, `sendButtonBg`, `sendButtonText`, `focusRing`, `actionText`, `actionHoverBg`, `actionHoverText`, `errorBg`, `errorBorder`, `errorText`, `toolBorder`, `toolHeaderBg`, `toolHeaderText`, `toolHeaderHover`, `toolNameText`, `toolBodyBg`, `toolLabelText`, `toolCodeText`.
 
@@ -2134,10 +2226,10 @@ You can compose the UI from smaller pieces:
 import { ChatWindow, ChatInput, ChorusTheme, Markdown } from 'react-chorus';
 ```
 
-- **`<ChatWindow messages={…} typing={…} />`** — renders the scrollable message list with empty-state prompts, a typing indicator, errors, the optional floating jump-to-latest button, and optional `maxRenderedMessages` windowing. It accepts `hiddenRoles?: Role[]` (default `['system', 'tool']`); `showSystemMessages` is deprecated but remains supported as an alias for showing all roles. `showJumpToBottomButton?: boolean` defaults to `!headless` and toggles the floating “Jump to latest” button that surfaces when the user scrolls away from the bottom and new activity arrives — pass `false` to disable it and render your own affordance. Pass `markdownSanitizer`, `markdownProps`, `renderError`, or `renderMessage` to customize built-in rendering.
-- **`<ChatInput value onSend onStop placeholder sending />`** — the text input, send/stop button, disabled/read-only states, and optional attachment composer (`accept`, paste/drop, limits, cancellable `uploadAttachment`).
-- **`<ChorusTheme palette={…}>`** — applies theme CSS variables to any subtree.
-- **`<Markdown text={…} codeTheme="dark" />`** — standalone markdown renderer with syntax highlighting and copy buttons. It supports `streaming` to render escaped plain text until finalization, `sanitizer` to provide a custom DOMPurify-compatible sanitizer when SSR needs sanitized raw HTML instead of the built-in no-raw-HTML safe mode, `markedOptions`/`markedExtensions` for per-instance parser customization, and `onCopyError` for clipboard-copy failures.
+- **`<ChatWindow messages={…} typing={…} />`** — renders the scrollable message list with empty-state prompts, a typing indicator, errors, the optional floating jump-to-latest button, and optional `maxRenderedMessages` windowing. It accepts `hiddenRoles?: Role[]` (default `['system', 'tool']`); `showSystemMessages` is deprecated but remains supported as an alias for showing all roles. `showJumpToBottomButton?: boolean` defaults to `!headless` and toggles the floating “Jump to latest” button that surfaces when the user scrolls away from the bottom and new activity arrives — pass `false` to disable it and render your own affordance. Pass `markdownSanitizer`, `markdownProps`, `renderError`, or `renderMessage` to customize built-in rendering. Accepts a `palette` prop (see [Theming](#theming)).
+- **`<ChatInput value onSend onStop placeholder sending />`** — the text input, send/stop button, disabled/read-only states, and optional attachment composer (`accept`, paste/drop, limits, cancellable `uploadAttachment`). Accepts a `palette` prop (see [Theming](#theming)).
+- **`<ChorusTheme palette={…}>`** — applies the `--chorus-*` theme variables to any subtree; the standalone form of the `palette` prop carried by `Chorus`, `ChatWindow`, `ChatInput`, and `ConversationList`. See [Theming](#theming) for the precedence rules.
+- **`<Markdown text={…} codeTheme="dark" />`** — standalone markdown renderer with syntax highlighting and copy buttons. It supports `streaming` to render escaped plain text until finalization, `sanitizer` to provide a custom DOMPurify-compatible sanitizer when SSR needs sanitized raw HTML instead of the built-in no-raw-HTML safe mode, `markedOptions`/`markedExtensions` for per-instance parser customization, `onCopyError` for clipboard-copy failures, and `codeBlockCopy` to disable or fully customize the per-code-block copy chrome.
 - **`<MessageBubble message={…} />`** — renders the default bubble for one message, including attachments and screen-reader speaker labels. Accepts `className`, `style`, `codeTheme`, `headless`, `streaming`, `markdownProps`, `markdownSanitizer`, and decoration slots (`before`, `headerSlot`, `footerSlot`, `after`) without replacing the full renderer.
 
 ### Headless subpath

@@ -1,6 +1,7 @@
 import type React from 'react';
 import type { ChorusLabels } from '../../labels/types';
 import type { Message, Role } from '../../types';
+import type { Palette } from '../ChorusTheme';
 import type { MarkdownSanitizer } from '../Markdown';
 import type { GetMessageFeedback, MessageBubbleSlots, MessageCopyResult, MessageFeedback, MessageMarkdownProps, MessageRenderActions } from '../MessageRow';
 
@@ -73,4 +74,11 @@ export interface ChatWindowProps<TMeta = Record<string, unknown>> extends Omit<R
   typing?: boolean;
   /** Localized labels for the transcript, message actions, speakers, tool calls, reasoning, and code copy. Defaults to English. */
   labels?: ChorusLabels;
+  /**
+   * Theme palette applied as `--chorus-*` CSS variables on the component root.
+   * Equivalent to wrapping this component in `<ChorusTheme palette={…}>`. When
+   * it is nested inside another `<Chorus palette>` or `<ChorusTheme>`, the
+   * nearest ancestor that sets a given variable wins per the normal CSS cascade.
+   */
+  palette?: Palette;
 }
