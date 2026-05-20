@@ -191,6 +191,48 @@ describe('useChorusPersistence', () => {
     }
   });
 
+  it('flushes a debounced write through the immediate path on pagehide for async storage', () => {
+    vi.useFakeTimers();
+    try {
+      const setItem = vi.fn().mockResolvedValue(undefined);
+      const asyncStorage: StorageAdapter = {
+        getItem: vi.fn().mockReturnValue(null),
+        setItem,
+      };
+      const { result } = renderHook(() => useChorusPersistence('key', { storage: asyncStorage, writeDebounceMs: 1000 }));
+
+      act(() => result.current.onChange(MSGS));
+      expect(setItem).not.toHaveBeenCalled();
+
+      act(() => { window.dispatchEvent(new Event('pagehide')); });
+
+      expect(setItem).toHaveBeenCalledWith('key', JSON.stringify(MSGS));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('routes a page-lifecycle flush through the write chain when a prior write is still settling', async () => {
+    const storage = makeSyncStorage();
+    const setItemArgs: string[] = [];
+    storage.setItem = (k, v) => { storage.store[k] = v; setItemArgs.push(v); };
+    const { result } = renderHook(() => useChorusPersistence('key', { storage, writeDebounceMs: 1000 }));
+
+    await act(async () => {
+      // Write A starts and stays in flight (its runQueuedWrite microtask is pending).
+      result.current.onChange([MSG], { flush: true });
+      // Write B is debounced, then a pagehide flush takes it while A is still settling.
+      result.current.onChange(MSGS);
+      window.dispatchEvent(new Event('pagehide'));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // B is chained after A rather than orphaning it — both land, in order.
+    expect(setItemArgs).toEqual([JSON.stringify([MSG]), JSON.stringify(MSGS)]);
+    expect(storage.store['key']).toBe(JSON.stringify(MSGS));
+  });
+
   it('onChange is stable across re-renders', () => {
     const storage = makeSyncStorage();
     const { result, rerender } = renderHook(() => useChorusPersistence('key', { storage }));
@@ -518,6 +560,52 @@ describe('useChorusPersistence', () => {
         expect(result.current.value).toBe(previousValue);
       } finally {
         window.localStorage.removeItem(key);
+      }
+    });
+
+    it('queues a cross-tab storage event behind an in-flight local write (no lost update)', async () => {
+      const key = 'chorus-cross-tab-inflight';
+      const setItemGate = deferred<void>();
+      let setItemCalls = 0;
+      const asyncLocalStorage: StorageAdapter = {
+        getItem: () => Promise.resolve(null),
+        setItem: () => { setItemCalls += 1; return setItemGate.promise; },
+      };
+      const descriptor = Object.getOwnPropertyDescriptor(window, 'localStorage');
+      const originalLocalStorage = window.localStorage;
+      Object.defineProperty(window, 'localStorage', { configurable: true, value: asyncLocalStorage });
+
+      try {
+        const { result } = renderHook(() => useChorusPersistence(key));
+        await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+        // A local write starts and stays in flight (its setItem promise is gated).
+        const localMsgs: Message[] = [{ id: 'local', role: 'user', text: 'local edit' }];
+        act(() => result.current.onChange(localMsgs, { flush: true }));
+        expect(result.current.value).toEqual(localMsgs);
+        expect(setItemCalls).toBe(1);
+
+        // An external tab event arrives mid-write — it must not clobber the
+        // pending local write's value.
+        const externalMsgs: Message[] = [{ id: 'ext', role: 'user', text: 'other tab' }];
+        act(() => {
+          window.dispatchEvent(new StorageEvent('storage', {
+            key,
+            newValue: JSON.stringify(externalMsgs),
+            oldValue: null,
+          }));
+        });
+        expect(result.current.value).toEqual(localMsgs);
+
+        // Once the local write settles, the queued external event is applied.
+        await act(async () => {
+          setItemGate.resolve();
+          for (let i = 0; i < 6; i += 1) await Promise.resolve();
+        });
+        expect(result.current.value).toEqual(externalMsgs);
+      } finally {
+        if (descriptor) Object.defineProperty(window, 'localStorage', descriptor);
+        else Object.defineProperty(window, 'localStorage', { configurable: true, value: originalLocalStorage });
       }
     });
 
