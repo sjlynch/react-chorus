@@ -510,10 +510,13 @@ describe('ChatInput', () => {
 
       await pasteFiles(local.getByRole('textbox'), file);
 
-      const alert = await local.findByRole('alert');
-      expect(alert).toHaveAttribute('aria-live', 'polite');
-      expect(alert).toHaveTextContent(/notes\.txt/);
-      expect(alert).toHaveTextContent(/not an accepted attachment type/);
+      const status = await local.findByRole('status');
+      // One consistent pairing: role="status" with an explicit polite atomic live
+      // region (no role="alert" + aria-live="polite" conflict).
+      expect(status).toHaveAttribute('aria-live', 'polite');
+      expect(status).toHaveAttribute('aria-atomic', 'true');
+      expect(status).toHaveTextContent(/notes\.txt/);
+      expect(status).toHaveTextContent(/not an accepted attachment type/);
       // Surface is non-modal — it does not steal focus from the composer.
       expect(local.getByRole('textbox')).not.toHaveFocus();
     });
@@ -525,9 +528,9 @@ describe('ChatInput', () => {
 
       await dropFiles(local.getByRole('textbox'), file);
 
-      const alert = await local.findByRole('alert');
-      expect(alert).toHaveTextContent(/large\.txt/);
-      expect(alert).toHaveTextContent(/limit is/);
+      const status = await local.findByRole('status');
+      expect(status).toHaveTextContent(/large\.txt/);
+      expect(status).toHaveTextContent(/limit is/);
     });
 
     it('renders a too-many error region without onAttachmentError wired', async () => {
@@ -544,9 +547,9 @@ describe('ChatInput', () => {
 
       await dropFiles(local.getByRole('textbox'), first, second);
 
-      const alert = await local.findByRole('alert');
-      expect(alert).toHaveTextContent(/Only 1 attachment allowed/);
-      expect(alert).toHaveTextContent(/two\.png/);
+      const status = await local.findByRole('status');
+      expect(status).toHaveTextContent(/Only 1 attachment allowed/);
+      expect(status).toHaveTextContent(/two\.png/);
     });
 
     it('renders an upload-failed error region without onAttachmentError wired', async () => {
@@ -561,9 +564,9 @@ describe('ChatInput', () => {
 
       upload.reject(new Error('network down'));
 
-      const alert = await local.findByRole('alert');
-      expect(alert).toHaveTextContent(/broken\.png/);
-      expect(alert).toHaveTextContent(/network down/);
+      const status = await local.findByRole('status');
+      expect(status).toHaveTextContent(/broken\.png/);
+      expect(status).toHaveTextContent(/network down/);
     });
 
     it('renders a read-failed error region without onAttachmentError wired', async () => {
@@ -578,9 +581,9 @@ describe('ChatInput', () => {
 
         mockReader.readers[0].reject(new DOMException('disk unavailable', 'NotReadableError'));
 
-        const alert = await local.findByRole('alert');
-        expect(alert).toHaveTextContent(/broken-read\.png/);
-        expect(alert).toHaveTextContent(/disk unavailable/);
+        const status = await local.findByRole('status');
+        expect(status).toHaveTextContent(/broken-read\.png/);
+        expect(status).toHaveTextContent(/disk unavailable/);
       } finally {
         mockReader.restore();
       }
@@ -595,7 +598,7 @@ describe('ChatInput', () => {
       await pasteFiles(local.getByRole('textbox'), file);
 
       await waitFor(() => expect(onAttachmentError).toHaveBeenCalledWith(expect.objectContaining({ reason: 'unsupported-type' })));
-      expect(await local.findByRole('alert')).toHaveTextContent(/not an accepted attachment type/);
+      expect(await local.findByRole('status')).toHaveTextContent(/not an accepted attachment type/);
     });
 
     it('dismisses the error region when the user clicks the dismiss button', async () => {
@@ -605,11 +608,11 @@ describe('ChatInput', () => {
       const local = within(container);
 
       await pasteFiles(local.getByRole('textbox'), file);
-      expect(await local.findByRole('alert')).toBeInTheDocument();
+      expect(await local.findByRole('status')).toBeInTheDocument();
 
       await user.click(local.getByRole('button', { name: /dismiss attachment error/i }));
 
-      expect(local.queryByRole('alert')).not.toBeInTheDocument();
+      expect(local.queryByRole('status')).not.toBeInTheDocument();
     });
 
     it('clears the error region when a new clean file batch is added', async () => {
@@ -625,12 +628,12 @@ describe('ChatInput', () => {
       const local = within(container);
 
       await pasteFiles(local.getByRole('textbox'), bad);
-      expect(await local.findByRole('alert')).toBeInTheDocument();
+      expect(await local.findByRole('status')).toBeInTheDocument();
 
       await dropFiles(local.getByRole('textbox'), good);
 
       expect(await local.findByText('good.png')).toBeInTheDocument();
-      await waitFor(() => expect(local.queryByRole('alert')).not.toBeInTheDocument());
+      await waitFor(() => expect(local.queryByRole('status')).not.toBeInTheDocument());
     });
 
     it('clears the error region after an accepted send', async () => {
@@ -641,12 +644,12 @@ describe('ChatInput', () => {
       const local = within(container);
 
       await pasteFiles(local.getByRole('textbox'), file);
-      expect(await local.findByRole('alert')).toBeInTheDocument();
+      expect(await local.findByRole('status')).toBeInTheDocument();
 
       await user.click(local.getByRole('button', { name: /send/i }));
 
       expect(onSend).toHaveBeenCalledOnce();
-      await waitFor(() => expect(local.queryByRole('alert')).not.toBeInTheDocument());
+      await waitFor(() => expect(local.queryByRole('status')).not.toBeInTheDocument());
     });
 
     it('uses renderAttachmentError when provided to override the default region', async () => {
@@ -663,7 +666,7 @@ describe('ChatInput', () => {
       await pasteFiles(local.getByRole('textbox'), file);
 
       expect(await local.findByTestId('custom-attachment-error')).toHaveTextContent(/Custom: notes\.txt/);
-      expect(local.queryByRole('alert')).not.toBeInTheDocument();
+      expect(local.queryByRole('status')).not.toBeInTheDocument();
     });
 
     it('suppresses the default region when renderAttachmentError={null}', async () => {
@@ -675,7 +678,7 @@ describe('ChatInput', () => {
       await pasteFiles(local.getByRole('textbox'), file);
 
       await waitFor(() => expect(onAttachmentError).toHaveBeenCalledWith(expect.objectContaining({ reason: 'unsupported-type' })));
-      expect(local.queryByRole('alert')).not.toBeInTheDocument();
+      expect(local.queryByRole('status')).not.toBeInTheDocument();
     });
   });
 
@@ -941,7 +944,7 @@ describe('ChatInput', () => {
       }
     });
 
-    it('emits a polite localized failure announcement when a pending upload rejects', async () => {
+    it('announces a pending upload failure once via the error region, leaving the announcer span empty', async () => {
       const upload = deferred<AttachmentUploadResult>();
       const uploadAttachment = vi.fn(() => upload.promise);
       const file = new File(['image'], 'broken.png', { type: 'image/png' });
@@ -959,10 +962,40 @@ describe('ChatInput', () => {
 
       upload.reject(new Error('réseau coupé'));
 
+      // The default error region is itself a polite live region and carries the
+      // failure announcement.
+      const status = await local.findByRole('status');
+      expect(status).toHaveTextContent('Envoi impossible de broken.png : réseau coupé');
+      // The separate announcer span stays empty, so a single failure is announced
+      // exactly once instead of twice.
+      expect(local.getByTestId('chorus-attachment-announcer')).toHaveTextContent('');
+    });
+
+    it('announces a pending upload failure via the announcer span when renderAttachmentError={null}', async () => {
+      const upload = deferred<AttachmentUploadResult>();
+      const uploadAttachment = vi.fn(() => upload.promise);
+      const file = new File(['image'], 'broken.png', { type: 'image/png' });
+      const { container } = render(
+        <ControlledChatInput
+          accept="image/*"
+          uploadAttachment={uploadAttachment}
+          attachmentLabels={FR_ATTACHMENT_LABELS}
+          renderAttachmentError={null}
+        />,
+      );
+      const local = within(container);
+
+      await dropFiles(local.getByRole('textbox'), file);
+      expect(await local.findByText('broken.png')).toBeInTheDocument();
+
+      upload.reject(new Error('réseau coupé'));
+
+      // With the default error region suppressed there is no error live region,
+      // so the polite announcer span is the only screen-reader path and the
+      // failure announcement is emitted there instead.
       const announcer = local.getByTestId('chorus-attachment-announcer');
       await waitFor(() => expect(announcer).toHaveTextContent('Échec : broken.png'));
-      const alert = await local.findByRole('alert');
-      expect(alert).toHaveTextContent('Envoi impossible de broken.png : réseau coupé');
+      expect(local.queryByRole('status')).not.toBeInTheDocument();
     });
 
     it('uses localized labels for chip remove buttons, error region, and error messages', async () => {
@@ -975,12 +1008,12 @@ describe('ChatInput', () => {
 
       await pasteFiles(local.getByRole('textbox'), file);
 
-      const alert = await local.findByRole('alert');
-      expect(alert).toHaveTextContent("notes.txt n'est pas accepté (image/*).");
+      const status = await local.findByRole('status');
+      expect(status).toHaveTextContent("notes.txt n'est pas accepté (image/*).");
       const dismiss = local.getByRole('button', { name: "Fermer l'erreur" });
       expect(dismiss).toHaveAttribute('title', "Fermer l'erreur");
       await user.click(dismiss);
-      expect(local.queryByRole('alert')).not.toBeInTheDocument();
+      expect(local.queryByRole('status')).not.toBeInTheDocument();
     });
 
     it('uses localized too-large/too-many messages', async () => {
@@ -992,8 +1025,8 @@ describe('ChatInput', () => {
 
       await dropFiles(local.getByRole('textbox'), file);
 
-      const alert = await local.findByRole('alert');
-      expect(alert).toHaveTextContent(/large\.txt.*dépasse la limite/);
+      const status = await local.findByRole('status');
+      expect(status).toHaveTextContent(/large\.txt.*dépasse la limite/);
 
       const first = new File(['one'], 'one.png', { type: 'image/png' });
       const second = new File(['two'], 'two.png', { type: 'image/png' });
@@ -1013,8 +1046,8 @@ describe('ChatInput', () => {
       );
       const local2 = within(container2);
       await dropFiles(local2.getByRole('textbox'), first, second);
-      const alert2 = await local2.findByRole('alert');
-      expect(alert2).toHaveTextContent('Limite 1 pour two.png.');
+      const status2 = await local2.findByRole('status');
+      expect(status2).toHaveTextContent('Limite 1 pour two.png.');
     });
 
     it('uses localized aria-label for the chip remove button', async () => {

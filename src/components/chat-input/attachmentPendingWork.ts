@@ -42,6 +42,16 @@ interface UsePendingAttachmentWorkOptions {
   setAttachments: React.Dispatch<React.SetStateAction<Attachment[]>>;
   setAnnouncement: React.Dispatch<React.SetStateAction<AttachmentAnnouncement | null>>;
   reportAttachmentError: (error: AttachmentError) => void;
+  /**
+   * Whether an attachment error region (the default `AttachmentErrorRegion` or a
+   * host `renderAttachmentError` node) is rendered for failures. That region is a
+   * live region that announces the failure itself, so when it is present the
+   * separate `kind: 'failed'` polite announcement is skipped — otherwise a single
+   * failure would be announced twice. When false (`renderAttachmentError={null}`,
+   * i.e. no error surface), the `failed` announcement is the only screen-reader
+   * notification of the failure and is emitted.
+   */
+  errorRegionRendered: boolean;
 }
 
 export function usePendingAttachmentWork({
@@ -53,6 +63,7 @@ export function usePendingAttachmentWork({
   setAttachments,
   setAnnouncement,
   reportAttachmentError,
+  errorRegionRendered,
 }: UsePendingAttachmentWorkOptions) {
   const pendingControllersRef = React.useRef<Map<string, AbortController>>(new Map());
   // Latest labels are tracked via a ref so async completion handlers always use the freshest
@@ -136,18 +147,23 @@ export function usePendingAttachmentWork({
             maxAttachmentBytes,
             maxAttachments,
           }));
-          setAnnouncement({
-            id: pendingId,
-            kind: 'failed',
-            message: errorLabels.failedAnnouncement(file.name),
-          });
+          // The error region rendered by `reportAttachmentError` is itself a polite
+          // live region that announces this failure. Only emit the separate `failed`
+          // announcement when no error region exists, so one failure is announced once.
+          if (!errorRegionRendered) {
+            setAnnouncement({
+              id: pendingId,
+              kind: 'failed',
+              message: errorLabels.failedAnnouncement(file.name),
+            });
+          }
         }
         setAttachments(prev => prev.filter(att => getPendingAttachmentId(att) !== pendingId));
       } finally {
         pendingControllersRef.current.delete(pendingId);
       }
     }));
-  }, [accept, convertFile, maxAttachmentBytes, maxAttachments, reportAttachmentError, setAnnouncement, setAttachments, uploadAttachment]);
+  }, [accept, convertFile, errorRegionRendered, maxAttachmentBytes, maxAttachments, reportAttachmentError, setAnnouncement, setAttachments, uploadAttachment]);
 
   return {
     startPendingAttachmentWork,

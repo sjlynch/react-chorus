@@ -6,6 +6,7 @@ import { getPendingAttachmentId, isPendingAttachment, listFiles } from './attach
 import { useAttachmentDragState } from './useAttachmentDragState';
 import { usePendingAttachmentWork, type AttachmentAnnouncement } from './attachmentPendingWork';
 import { validateAttachmentBatch } from './attachmentValidation';
+import type { RenderAttachmentErrorContext } from './types';
 
 export type { AttachmentAnnouncement } from './attachmentPendingWork';
 
@@ -15,6 +16,15 @@ export interface UseAttachmentQueueOptions {
   maxAttachmentBytes?: number;
   maxAttachments?: number;
   onAttachmentError?: (error: AttachmentError) => void;
+  /**
+   * The host's attachment-error render override, used only to decide whether an
+   * error region is rendered for failures: `null` opts out of any error surface,
+   * `undefined` keeps the default `AttachmentErrorRegion`, and a function renders
+   * a custom node. When a region is rendered it announces failures itself, so the
+   * pending-work hook skips the separate `failed` announcement to avoid a double
+   * screen-reader announcement.
+   */
+  renderAttachmentError?: ((context: RenderAttachmentErrorContext) => React.ReactNode) | null;
   uploadAttachment?: UploadAttachment;
   canIngestFiles: boolean;
   composerInactive: boolean;
@@ -27,6 +37,7 @@ export function useAttachmentQueue({
   maxAttachmentBytes,
   maxAttachments,
   onAttachmentError,
+  renderAttachmentError,
   uploadAttachment,
   canIngestFiles,
   composerInactive,
@@ -71,6 +82,10 @@ export function useAttachmentQueue({
     setAttachments,
     setAnnouncement,
     reportAttachmentError,
+    // A `null` override means the host opted out of any error surface; anything
+    // else (default region or a custom node) renders a region that announces
+    // failures itself.
+    errorRegionRendered: renderAttachmentError !== null,
   });
 
   const clearAttachmentsAndPendingWork = React.useCallback(() => {

@@ -52,9 +52,11 @@ export interface ChatInputProps extends Omit<React.HTMLAttributes<HTMLDivElement
   onAttachmentError?: (error: AttachmentError) => void;
   /**
    * Replaces the built-in attachment error region. When omitted, the composer
-   * renders a default polite-live alert below the chips with a dismiss button.
-   * Pass `null` to suppress the default UI entirely (e.g. when the host has
-   * already wired its own surface via `onAttachmentError`).
+   * renders a default polite live region (`role="status"`) below the chips with
+   * a dismiss button, which also serves as the screen-reader announcement for
+   * read/upload failures. Pass `null` to suppress the default UI entirely (e.g.
+   * when the host has already wired its own surface via `onAttachmentError`); the
+   * composer then announces failures through its separate polite announcer span.
    */
   renderAttachmentError?: ((context: RenderAttachmentErrorContext) => React.ReactNode) | null;
   uploadAttachment?: UploadAttachment;

@@ -78,6 +78,7 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(funct
     maxAttachmentBytes,
     maxAttachments,
     onAttachmentError,
+    renderAttachmentError,
     uploadAttachment,
     canIngestFiles,
     composerInactive,
