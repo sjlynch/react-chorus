@@ -538,6 +538,26 @@ const { send } = useChorusStream(transport, { connector: 'ai-sdk' });
 const { send } = useChorusStream(transport);
 ```
 
+## Named SSE events
+
+The SSE spec lets a stream pair a named `event:` line with its `data:` payload. Chorus captures the event name while parsing and routes on it before the connector runs:
+
+```
+event: error
+data: rate limited
+
+event: heartbeat
+data: {}
+
+data: {"choices":[{"index":0,"delta":{"content":"Hello"}}]}
+```
+
+- `event: error` — the frame is surfaced as a `ChorusStreamError` (rejecting `send()` and calling `onError`) **even when the `data:` payload is a bare string**, instead of the connector typing `rate limited` into the assistant message. If the payload is JSON, the error message is taken from `{ error }` / `{ error: { message } }` / `{ message }`; otherwise the raw payload text is used.
+- `event: heartbeat` and `event: ping` — treated as keepalives and skipped, so a `{}` or empty payload is never rendered as text and no connector dispatch is wasted.
+- No `event:` line, or `event: message` (the SSE default) — routed to the connector exactly as before. Provider streams such as Anthropic that name their events (`event: content_block_delta`) are unaffected: those connectors key off the JSON `type` field, not the SSE event name.
+
+A spec-valid `text/event-stream` may also consist entirely of `:` keepalive comments or named `event:` lines with no `data:` field (for example heartbeats before a turn that produced no streamed output). Such a response now resolves cleanly; the "no Server-Sent Events" guard still fires for non-SSE bodies (a JSON or plain-text error body served with the wrong `Content-Type`).
+
 ## OpenAI SSE format
 
 The `openaiConnector` reads the selected Chat Completions alternative (`choices[index === 0]`, or the first array entry when indexes are omitted). It maps:
@@ -868,9 +888,9 @@ react-chorus keeps React/ReactDOM as peer dependencies and externalizes runtime 
 
 | Entry | Initial JS | gzip | Notes |
 |-------|------------|------|-------|
-| `react-chorus` (`<Chorus>`) | 187.1 kB | 61.3 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
-| `react-chorus/headless` | 187.4 kB | 61.5 kB | Headless defaults, same behavior surface. |
-| `react-chorus` (`useChorusStream`) | 52.7 kB | 16.1 kB | Root hook import; CI fails if it pulls UI, Markdown, or icon dependencies. |
+| `react-chorus` (`<Chorus>`) | 187.5 kB | 61.4 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
+| `react-chorus/headless` | 187.8 kB | 61.6 kB | Headless defaults, same behavior surface. |
+| `react-chorus` (`useChorusStream`) | 53.1 kB | 16.3 kB | Root hook import; CI fails if it pulls UI, Markdown, or icon dependencies. |
 | `react-chorus` (`Markdown`) | 75.2 kB | 25.4 kB | Standalone Markdown renderer; includes Markdown parsing/sanitization, not chat icons. |
 | `react-chorus` (`ChatWindow`) | 119.0 kB | 39.7 kB | Transcript renderer with Markdown and message action icons, without the composer/widget shell. |
 | `react-chorus` (`ConversationList`) | 7.2 kB | 2.4 kB | Conversation sidebar component only; no Markdown/icon graph. |
@@ -1556,7 +1576,7 @@ const { send, abort, sending } = useChorusStream<MyMeta>(transport, { connector:
 - Non-abort transport, HTTP, connector, and in-band provider errors call `onError` when supplied and reject the returned `send()` promise. This lets README-style `await send(...)` bridges surface the friendly Chorus error banner through the surrounding `onSend` catch path.
 - If `onError` itself throws while handling a stream error, Chorus warns in development and still rejects `send()` with the original stream error. If `onDone` throws after a successful stream, `send()` rejects with that completion callback error and does not call `onError`.
 - `onError` receives raw transport details (including bounded HTTP response body snippets); the built-in UI continues to show only `errorMessage`.
-- A 200 response that contains no SSE `data:` lines (for example a JSON `{"error":"missing key"}` or plain-text body served instead of `text/event-stream`) rejects `send()` with a `ChorusStreamError` whose message names Server-Sent Events, includes the response `Content-Type`, and previews the body — instead of completing silently with no chunks and no error. Truly empty/no-content bodies still resolve.
+- A 200 response that contains no SSE-shaped lines at all (for example a JSON `{"error":"missing key"}` or plain-text body served instead of `text/event-stream`) rejects `send()` with a `ChorusStreamError` whose message names Server-Sent Events, includes the response `Content-Type`, and previews the body — instead of completing silently with no chunks and no error. Truly empty/no-content bodies still resolve, and so does a valid `text/event-stream` that carried only `:` keepalive comments or named `event:` lines with no `data:` field (see [Named SSE events](#named-sse-events)).
 - Calling `send()` while a previous `send()` is still in flight rejects the new call with a `ChorusStreamError` whose `code === 'concurrent-send'` (the previous send keeps running, the transport is not invoked a second time, and a dev-mode warning is logged). Custom shells that `await send(...)` can branch on `err instanceof ChorusStreamError && err.code === 'concurrent-send'` to keep their input/UI state intact, instead of mistaking the silent no-op for a successful empty stream. To start a fresh send, await the active promise or call `abort()` first.
 - `opts.connector` — `'openai'` | `'anthropic'` | `'gemini'` | `'ai-sdk'` | `'auto'` | custom `Connector`. Defaults to `'auto'` which handles OpenAI, Gemini, Anthropic, and Vercel AI SDK JSON / data-stream frames, plain-text SSE, reasoning/tool deltas, and in-band `{ error }` payloads.
 - If a connector exposes `createState()`, the hook creates one state object per `send()` and passes it to every `extract(data, state)` call for that stream. Do not store per-stream parser buffers in module globals; use connector state instead.

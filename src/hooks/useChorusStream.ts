@@ -1,6 +1,7 @@
 import React from 'react';
 import type { ConnectorName, Message } from '../types';
 import { getConnector, type Connector, type ConnectorResult, type ConnectorToolDelta } from '../connectors/connectors';
+import { extractErrorMessage } from '../connectors/error';
 import { useLatestRef } from './useLatestRef';
 import { readSSEStream } from '../streaming/readSSEStream';
 import { createDelayedChunkEmitter } from '../streaming/delayedStreamEvents';
@@ -47,6 +48,20 @@ export interface StreamOptions {
 
 function safeOnObserverError(callbackName: string, error: unknown) {
   warnInDev(`[Chorus] \`${callbackName}\` callback threw and was ignored so the original stream error could be re-thrown.`, error);
+}
+
+/**
+ * Build a ChorusStreamError from the `data` payload of a named `event: error`
+ * SSE frame. The payload may be JSON (`{ "error": ... }`, `{ "message": ... }`,
+ * a bare JSON string) or non-JSON text; either way the frame is surfaced as an
+ * error instead of being rendered as assistant text.
+ */
+function errorFromEventErrorFrame(payload: string): ChorusStreamError {
+  let parsed: unknown = payload;
+  try { parsed = JSON.parse(payload); } catch { /* non-JSON payload: keep the raw text */ }
+  const message = (typeof parsed === 'string' ? parsed : extractErrorMessage(parsed))
+    || payload || 'SSE `event: error` frame';
+  return createConnectorStreamError(message, parsed);
 }
 
 function connectorErrorFromResult(out: ConnectorResult) {
@@ -164,7 +179,15 @@ async function runSendStream<TMeta>(args: {
   if (!res.ok) throw await createHttpResponseError(res);
   if (!res.body) throw new ChorusStreamError(`Response body was missing for HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''}`);
 
-  const streamPromise = readSSEStream(res, (payload) => {
+  const streamPromise = readSSEStream(res, (payload, eventName) => {
+    // Route named SSE `event:` frames before the connector runs. `event: error`
+    // is surfaced as a ChorusStreamError regardless of its data shape (instead of
+    // letting the connector type a bare error string into the assistant message);
+    // `event: heartbeat`/`ping` keepalives are dropped so a `{}`/empty payload is
+    // never rendered. Unnamed frames and the SSE-default `event: message` dispatch
+    // to the connector unchanged.
+    if (eventName === 'error') throw errorFromEventErrorFrame(payload);
+    if (eventName === 'heartbeat' || eventName === 'ping') return;
     const done = deliverConnectorResult(connector.extract(payload, connectorState));
     if (done) return false;
   }, session.readerController.signal);
