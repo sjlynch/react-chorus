@@ -1,4 +1,5 @@
 import { toToolDefinitionList } from '../tools';
+import { warnOnceInDev } from './devWarn';
 import type { ProviderToolsOption } from './types/common';
 import type { AnthropicMessagesBodyOptions } from './types/anthropic';
 import type { GeminiGenerateContentBodyOptions } from './types/gemini';
@@ -62,17 +63,50 @@ export function stripOpenAIResponsesOptions<TMeta>(options: OpenAIResponsesBodyO
 }
 
 export function stripAnthropicOptions<TMeta>(options: AnthropicMessagesBodyOptions<TMeta>) {
-  const { unsupportedAttachmentText: _unsupportedAttachmentText, stream = true, tools, ...rest } = options;
+  // `system` is pulled out of `rest` so the caller-provided value is resolved
+  // explicitly against history system text instead of silently leaking into
+  // `bodyOptions` and being overwritten — see `resolveProviderSystem`.
+  const { unsupportedAttachmentText: _unsupportedAttachmentText, stream = true, tools, system, ...rest } = options;
   void _unsupportedAttachmentText;
   const bodyOptions: Record<string, unknown> = { ...rest };
   injectTools(bodyOptions, tools, toAnthropicTools);
-  return { bodyOptions, stream };
+  return { bodyOptions, stream, system };
 }
 
 export function stripGeminiOptions<TMeta>(options: GeminiGenerateContentBodyOptions<TMeta>) {
-  const { unsupportedAttachmentText: _unsupportedAttachmentText, tools, ...rest } = options;
+  // `systemInstruction` is pulled out of `rest` for the same reason as
+  // Anthropic's `system` above — see `resolveProviderSystem`.
+  const { unsupportedAttachmentText: _unsupportedAttachmentText, tools, systemInstruction, ...rest } = options;
   void _unsupportedAttachmentText;
   const bodyOptions: Record<string, unknown> = { ...rest };
   injectTools(bodyOptions, tools, toGeminiTools);
-  return bodyOptions;
+  return { bodyOptions, systemInstruction };
+}
+
+/**
+ * Resolve "system" precedence between a caller-supplied option (`system` for
+ * Anthropic, `systemInstruction` for Gemini) and system text derived from
+ * `role: 'system'` messages in the history.
+ *
+ * Documented precedence: when the caller passes the option explicitly, the
+ * caller's value wins and history-derived system text is dropped. When both
+ * sources are present a dev-mode warn-once fires so the dropped history text
+ * is observable. With only one source present, that source is used.
+ */
+export function resolveProviderSystem(
+  provider: 'Anthropic' | 'Gemini',
+  field: 'system' | 'systemInstruction',
+  callerSystem: unknown,
+  historySystem: unknown,
+): unknown {
+  if (callerSystem === undefined) return historySystem;
+  if (historySystem !== undefined) {
+    warnOnceInDev(
+      `react-chorus:${provider.toLowerCase()}-system-precedence`,
+      `[react-chorus] ${provider} request received both a caller-provided \`${field}\` option and ` +
+        `system message(s) in the conversation history. The caller-provided \`${field}\` takes ` +
+        'precedence; the history system text is ignored.',
+    );
+  }
+  return callerSystem;
 }

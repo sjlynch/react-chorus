@@ -21,14 +21,20 @@ function createMalformedSseError(res: Response, bodyPreview: string, truncated: 
   );
 }
 
+function isEventStreamResponse(res: Response): boolean {
+  return (res.headers.get('content-type') || '').toLowerCase().includes('text/event-stream');
+}
+
 /**
  * Robust SSE reader:
  * - Parses the stream line-by-line (handles CR, LF, and chunk boundaries)
  * - Collects data field lines for an event; dispatches on a blank line
+ * - Captures the most recent `event:` name and passes it to `onEvent`
+ *   (`undefined` when the frame had no `event:` field, per the SSE spec)
  * - Strips one leading UTF-8 BOM and supports colonless fields per the SSE algorithm
  * - Preserves empty data lines (blank lines inside payloads)
  */
-export function readSSEStream(res: Response, onEvent: (payload: string) => unknown, signal?: AbortSignal): Promise<void> {
+export function readSSEStream(res: Response, onEvent: (payload: string, eventName?: string) => unknown, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) return Promise.reject(createAbortError());
   if (!res.body) return Promise.resolve();
   const reader = res.body.getReader();
@@ -37,17 +43,23 @@ export function readSSEStream(res: Response, onEvent: (payload: string) => unkno
   let currentLine = '';
   let skipNextLF = false;
   let dataLines: string[] = [];
+  let eventName = '';
   let stopped = false;
   let sawStreamStart = false;
   let sawDataField = false;
+  let sawSseFrame = false;
   let bodyTotalLength = 0;
   let bodyPreview = '';
 
   const flushEvent = () => {
+    // Per the SSE spec the event-type buffer resets on every blank line,
+    // whether or not a data payload is dispatched.
+    const name = eventName;
+    eventName = '';
     if (!dataLines.length || stopped) return;
     const payload = dataLines.join('\n');
     dataLines = [];
-    if (onEvent(payload) === false) stopped = true;
+    if (onEvent(payload, name || undefined) === false) stopped = true;
   };
 
   const processLine = (line: string) => {
@@ -55,13 +67,21 @@ export function readSSEStream(res: Response, onEvent: (payload: string) => unkno
     if (line === '') { flushEvent(); return; }
 
     const colon = line.indexOf(':');
+    // A line starting with a colon is an SSE comment (`: keepalive`). Ignore its
+    // content, but record that the stream was SSE-shaped.
+    if (colon === 0) { sawSseFrame = true; return; }
+
     const field = colon === -1 ? line : line.slice(0, colon);
     let value = colon === -1 ? '' : line.slice(colon + 1);
     if (value.startsWith(' ')) value = value.slice(1);
 
     if (field === 'data') {
       sawDataField = true;
+      sawSseFrame = true;
       dataLines.push(value);
+    } else if (field === 'event') {
+      sawSseFrame = true;
+      eventName = value;
     }
   };
 
@@ -151,7 +171,18 @@ export function readSSEStream(res: Response, onEvent: (payload: string) => unkno
           // almost certainly a backend mistake (200 JSON `{ "error": ... }` or plain text
           // instead of `text/event-stream`). Without this guard the stream closes silently
           // and the UI looks broken — no chunks, no error banner, no onError callback.
-          if (!sawDataField && bodyTotalLength > 0 && bodyPreview.trim().length > 0) {
+          //
+          // But a spec-valid `text/event-stream` may legitimately carry only `:` keepalive
+          // comments or named `event:` lines with no `data:` field — e.g. heartbeats before
+          // a turn that produced no streamed output. Skip the guard when the response is a
+          // `text/event-stream` AND at least one SSE-shaped line (`data:` / `event:` / `:`
+          // comment) was observed; otherwise the body is not SSE and the guard still fires.
+          if (
+            !sawDataField &&
+            bodyTotalLength > 0 &&
+            bodyPreview.trim().length > 0 &&
+            (!isEventStreamResponse(res) || !sawSseFrame)
+          ) {
             throw createMalformedSseError(res, bodyPreview, bodyTotalLength > bodyPreview.length);
           }
         }

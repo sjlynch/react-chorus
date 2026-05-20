@@ -74,13 +74,16 @@ export function normalizeReturnedMessage<TMeta>(message: Partial<Message<TMeta>>
   const text = message.text ?? '';
 
   if (message.role === 'tool') {
+    const toolCall = message.toolCall ?? { name: 'tool' };
     return {
       id,
       role: 'tool',
       text,
       metadata: message.metadata,
       reasoning: message.reasoning,
-      toolCall: message.toolCall ?? { name: 'tool' },
+      // Guarantee a stable tool-call id so downstream identity (createToolCallContext,
+      // provider-id metadata, delta mapping) can address each tool message uniquely.
+      toolCall: toolCall.id ? toolCall : { ...toolCall, id: createMessageId() },
     };
   }
 
