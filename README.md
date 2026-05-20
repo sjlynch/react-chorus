@@ -868,11 +868,11 @@ react-chorus keeps React/ReactDOM as peer dependencies and externalizes runtime 
 
 | Entry | Initial JS | gzip | Notes |
 |-------|------------|------|-------|
-| `react-chorus` (`<Chorus>`) | 187.1 kB | 61.3 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
-| `react-chorus/headless` | 187.4 kB | 61.5 kB | Headless defaults, same behavior surface. |
+| `react-chorus` (`<Chorus>`) | 187.5 kB | 61.4 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
+| `react-chorus/headless` | 187.9 kB | 61.6 kB | Headless defaults, same behavior surface. |
 | `react-chorus` (`useChorusStream`) | 52.7 kB | 16.1 kB | Root hook import; CI fails if it pulls UI, Markdown, or icon dependencies. |
-| `react-chorus` (`Markdown`) | 75.2 kB | 25.4 kB | Standalone Markdown renderer; includes Markdown parsing/sanitization, not chat icons. |
-| `react-chorus` (`ChatWindow`) | 119.0 kB | 39.7 kB | Transcript renderer with Markdown and message action icons, without the composer/widget shell. |
+| `react-chorus` (`Markdown`) | 75.6 kB | 25.6 kB | Standalone Markdown renderer; includes Markdown parsing/sanitization, not chat icons. |
+| `react-chorus` (`ChatWindow`) | 119.4 kB | 39.8 kB | Transcript renderer with Markdown and message action icons, without the composer/widget shell. |
 | `react-chorus` (`ConversationList`) | 7.2 kB | 2.4 kB | Conversation sidebar component only; no Markdown/icon graph. |
 | `react-chorus/transport` | 5.6 kB | 2.4 kB | Transport factories only; no React/UI/Markdown runtime. |
 | `react-chorus/provider-requests` | 10.1 kB | 3.1 kB | Provider request mappers and tool serializers; no React/UI/Markdown runtime. |
@@ -881,7 +881,7 @@ react-chorus keeps React/ReactDOM as peer dependencies and externalizes runtime 
 
 `highlight.js` is only fetched the first time a fenced code block (` ``` ` or `~~~`) appears in rendered text. The matching GitHub dark/light token-color stylesheet is also injected on demand based on `codeBlockTheme`; code renders immediately as plain text and is re-rendered with syntax highlighting once the chunk arrives. While an assistant message is actively streaming, Chorus renders that growing message as React-escaped plain text and switches to full Markdown parsing/sanitization when the stream finalizes.
 
-The playground has a separate budget because it intentionally bundles a complete demo app. `npm run build:playground` also runs `npm run verify:playground-size`, writes `.cache/react-chorus/playground-bundle-size-report.json`, and checks this paragraph. The current playground initial JS graph is 408.4 kB / 128.6 kB gzip and its largest lazy chunk (highlight.js) is 890.9 kB / 295.7 kB gzip. Vite's chunk warning limit is raised to that documented lazy budget so the playground build stays free of Vite chunk warnings while the budget script tracks regressions.
+The playground has a separate budget because it intentionally bundles a complete demo app. `npm run build:playground` also runs `npm run verify:playground-size`, writes `.cache/react-chorus/playground-bundle-size-report.json`, and checks this paragraph. The current playground initial JS graph is 408.8 kB / 128.7 kB gzip and its largest lazy chunk (highlight.js) is 890.9 kB / 295.7 kB gzip. Vite's chunk warning limit is raised to that documented lazy budget so the playground build stays free of Vite chunk warnings while the budget script tracks regressions.
 
 To refresh the published size claims after dependency or feature changes, run `npm run build`, `npm run verify:bundle-size`, and `npm run build:playground`, then copy the updated values from stdout or the `.cache/react-chorus/*-bundle-size-report.json` files into this section. The verification commands may fail until the README values are updated to match their reports.
 
@@ -892,6 +892,25 @@ To refresh the published size claims after dependency or feature changes, run `n
 If your SSR app wants to allow sanitized raw HTML, create an isomorphic DOMPurify instance (for example with your framework's DOM/window or jsdom on the server) and pass it to the standalone renderer: `<Markdown sanitizer={purify} />` or `<Markdown sanitizer={(html) => purify.sanitize(html)} />`. The built-in chat renderer accepts the same customization via `<Chorus markdownSanitizer={purify} />` / `<ChatWindow markdownSanitizer={purify} />`, or through `markdownProps={{ sanitizer: purify }}`. You can also pass `markedOptions` and `markedExtensions` directly to `<Markdown>` or via `markdownProps` to adjust parsing and register marked extensions without mutating marked's global singleton.
 
 Code-block copy buttons flash `Copied!` on success and `Copy failed` when the Clipboard API rejects. Pass `<Markdown onCopyError={(error) => ...} />` — or `markdownProps={{ onCopyError }}` on `<Chorus>` / `<ChatWindow>` — to show your own toast or fallback alert.
+
+The copy chrome is a real, keyboard-focusable `<button>`: it activates with Enter/Space, keeps its accessible name (`aria-label`) in sync with the Copy / Copied / Failed state, and announces each transition through a polite `aria-live` status region next to it.
+
+Use `codeBlockCopy` on `<Markdown>` (or `markdownProps={{ codeBlockCopy }}` on `<Chorus>` / `<ChatWindow>`) to control that chrome:
+
+- `'default'` (or `true`, or omitted) keeps the built-in copy button.
+- `false` opts out entirely — no copy button is rendered, while the styled `.chorus-codeblock` wrapper stays.
+- a function `(ctx) => htmlString` renders your own chrome. `ctx` is `{ theme, labels }`; the returned HTML is inserted ahead of the `<pre>`. Include a `chorus-copy-btn` element to reuse the built-in clipboard wiring, and a `chorus-copy-status` element (ideally `aria-live="polite"`) to receive screen-reader status updates. The returned markup is trusted and inserted without sanitization, so pass a stable function reference.
+
+```tsx
+// Opt out of the copy button entirely
+<Markdown text={md} codeBlockCopy={false} />
+
+// Render your own chrome (defined once, outside render)
+const renderCopy = ({ labels }) =>
+  `<button type="button" class="chorus-copy-btn" aria-label="${labels.ariaLabel}">⧉</button>` +
+  `<span class="chorus-copy-status" role="status" aria-live="polite"></span>`;
+<Markdown text={md} codeBlockCopy={renderCopy} />
+```
 
 ## Security and CSP
 
@@ -1025,7 +1044,7 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `showJumpToBottomButton` | `boolean` | `!headless` | Shows the floating “Jump to latest” button when the user scrolls away from the bottom and new activity arrives. Pass `false` to disable it (for example when you own the scroll affordance); the headless exports default `headless={true}` so the button is off by default there. |
 | `headless` | `boolean` | `false` | Strip all default styles and inline style injection. |
 | `renderMessage` | `(message: Message<TMeta>, ctx: RenderMessageContext<TMeta>) => ReactNode` | — | Custom per-message renderer. Return `null` to fall back to default rendering. `ctx` includes `isStreaming`, `isEditing` (true while the built-in inline editor is active — gate your own content on it so the editor replaces the row), `messageProps` for scroll targets, `defaultRender(slots?)`, and action callbacks/default action controls. Existing one-argument renderers continue to work. |
-| `markdownProps` | `Omit<MarkdownProps, 'text' \| 'codeTheme' \| 'headless' \| 'streaming'>` | — | Props forwarded to the built-in Markdown renderer for every message, including `sanitizer`, `markedOptions`, `markedExtensions`, and `onCopyError`. |
+| `markdownProps` | `Omit<MarkdownProps, 'text' \| 'codeTheme' \| 'headless' \| 'streaming'>` | — | Props forwarded to the built-in Markdown renderer for every message, including `sanitizer`, `markedOptions`, `markedExtensions`, `onCopyError`, and `codeBlockCopy`. |
 | `markdownSanitizer` | `MarkdownSanitizer` | — | Convenience alias for `markdownProps.sanitizer`; takes precedence when both are provided. |
 | `hiddenRoles` | `Role[]` | `['system']` | Message roles hidden from the transcript. Tool calls are visible by default in `<Chorus>`; pass `['system', 'tool']` to hide them, or `[]` to show all roles. `<Chorus>` accepts `hiddenRoles` only — `showSystemMessages` exists on `<ChatWindow>` for backwards compatibility. |
 | `labels` | `ChorusLabels` | English defaults | Localized strings for every built-in UI surface: composer placeholder/aria-labels/attach/send/stop, transcript aria-label/typing/retry/jump-to-latest/empty-state title, message actions (edit/regenerate/copy/copy-failed/thumbs up/down/delete/save/cancel), per-role speaker SR labels, tool-call section headers, reasoning summary, code-fence copy chrome, conversation-list affordances, and the clear button. See [Localizing built-in strings](#localizing-built-in-strings). |
@@ -2137,7 +2156,7 @@ import { ChatWindow, ChatInput, ChorusTheme, Markdown } from 'react-chorus';
 - **`<ChatWindow messages={…} typing={…} />`** — renders the scrollable message list with empty-state prompts, a typing indicator, errors, the optional floating jump-to-latest button, and optional `maxRenderedMessages` windowing. It accepts `hiddenRoles?: Role[]` (default `['system', 'tool']`); `showSystemMessages` is deprecated but remains supported as an alias for showing all roles. `showJumpToBottomButton?: boolean` defaults to `!headless` and toggles the floating “Jump to latest” button that surfaces when the user scrolls away from the bottom and new activity arrives — pass `false` to disable it and render your own affordance. Pass `markdownSanitizer`, `markdownProps`, `renderError`, or `renderMessage` to customize built-in rendering.
 - **`<ChatInput value onSend onStop placeholder sending />`** — the text input, send/stop button, disabled/read-only states, and optional attachment composer (`accept`, paste/drop, limits, cancellable `uploadAttachment`).
 - **`<ChorusTheme palette={…}>`** — applies theme CSS variables to any subtree.
-- **`<Markdown text={…} codeTheme="dark" />`** — standalone markdown renderer with syntax highlighting and copy buttons. It supports `streaming` to render escaped plain text until finalization, `sanitizer` to provide a custom DOMPurify-compatible sanitizer when SSR needs sanitized raw HTML instead of the built-in no-raw-HTML safe mode, `markedOptions`/`markedExtensions` for per-instance parser customization, and `onCopyError` for clipboard-copy failures.
+- **`<Markdown text={…} codeTheme="dark" />`** — standalone markdown renderer with syntax highlighting and copy buttons. It supports `streaming` to render escaped plain text until finalization, `sanitizer` to provide a custom DOMPurify-compatible sanitizer when SSR needs sanitized raw HTML instead of the built-in no-raw-HTML safe mode, `markedOptions`/`markedExtensions` for per-instance parser customization, `onCopyError` for clipboard-copy failures, and `codeBlockCopy` to disable or fully customize the per-code-block copy chrome.
 - **`<MessageBubble message={…} />`** — renders the default bubble for one message, including attachments and screen-reader speaker labels. Accepts `className`, `style`, `codeTheme`, `headless`, `streaming`, `markdownProps`, `markdownSanitizer`, and decoration slots (`before`, `headerSlot`, `footerSlot`, `after`) without replacing the full renderer.
 
 ### Headless subpath
