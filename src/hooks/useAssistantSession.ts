@@ -1,6 +1,7 @@
 import React from 'react';
 import type { Attachment, Message } from '../types';
 import type { Connector } from '../connectors/connectors';
+import type { OpenAIConnectorOptions } from '../connectors/openai';
 import type { ConnectorName } from '../types';
 import { useChorusStream, type Transport } from './useChorusStream';
 import { useLatestRef } from './useLatestRef';
@@ -8,6 +9,7 @@ import { useMirroredState } from './useMirroredState';
 import { useAssistantSessionRefs } from './assistant-session/useAssistantSessionRefs';
 import { createDefaultFetchSSETransport, type FetchTransportInit } from './assistant-session/transport';
 import { DEFAULT_MAX_TOOL_ITERATIONS } from './assistant-session/toolLoop';
+import { warnInDev } from '../utils/warnings';
 import { createObserverCallbacks } from './assistant-session/observerCallbacks';
 import { useAssistantBuffer } from './assistant-session/assistantBuffer';
 import { useToolExecution } from './assistant-session/toolExecution';
@@ -64,6 +66,7 @@ export interface UseAssistantSessionOptions<TMeta = Record<string, unknown>> {
   transport?: string | FetchTransportInit<TMeta> | Transport<TMeta>;
   systemPrompt?: string;
   connector?: Connector | ConnectorName;
+  connectorOptions?: OpenAIConnectorOptions;
   onSend?: ChorusOnSend<TMeta>;
   minAssistantDelayMs: number;
   fallbackErrorMessage: string;
@@ -77,6 +80,7 @@ export interface UseAssistantSessionOptions<TMeta = Record<string, unknown>> {
   tools?: ChorusToolRegistry<TMeta>;
   autoContinueTools?: boolean;
   maxToolIterations?: number;
+  continueOnToolError?: boolean;
   shouldContinueToolLoop?: ChorusShouldContinueToolLoop<TMeta>;
   confirmDeleteMessage?: ChorusConfirmDeleteMessage<TMeta>;
   confirmClearConversation?: ChorusConfirmClearConversation<TMeta>;
@@ -110,6 +114,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
   transport,
   systemPrompt,
   connector,
+  connectorOptions,
   onSend,
   minAssistantDelayMs,
   fallbackErrorMessage,
@@ -123,6 +128,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
   tools,
   autoContinueTools = false,
   maxToolIterations = DEFAULT_MAX_TOOL_ITERATIONS,
+  continueOnToolError = false,
   shouldContinueToolLoop,
   confirmDeleteMessage,
   confirmClearConversation,
@@ -144,6 +150,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     tools: toolsRef,
     autoContinueTools: autoContinueToolsRef,
     maxToolIterations: maxToolIterationsRef,
+    continueOnToolError: continueOnToolErrorRef,
     shouldContinueToolLoop: shouldContinueToolLoopRef,
     confirmDeleteMessage: confirmDeleteMessageRef,
     confirmClearConversation: confirmClearConversationRef,
@@ -167,6 +174,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     tools,
     autoContinueTools,
     maxToolIterations,
+    continueOnToolError,
     shouldContinueToolLoop,
     confirmDeleteMessage,
     confirmClearConversation,
@@ -262,6 +270,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     finalizeAssistantNow,
     resetPendingAssistantState,
     resetStreamState,
+    persistenceKey,
     observers,
   });
   const {
@@ -281,6 +290,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     hasStartedAssistantRef,
     toolsRef,
     onToolCallRef,
+    continueOnToolErrorRef,
     safeOnToolDelta: observers.safeOnToolDelta,
     safeNotifyToolCall: observers.safeNotifyToolCall,
     isAssistantSessionActive,
@@ -289,15 +299,43 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
   const { appendToolDeltaNow, getToolMessagesByIds, runCompletedToolCalls } = toolExec;
 
   const resolvedTransport = React.useMemo((): Transport<TMeta> => {
-    if (typeof transport === 'string') return createDefaultFetchSSETransport<TMeta>(transport);
+    // Case 1: transport genuinely absent — keep the silent empty-200 fallback.
+    // This is the ONLY case for which that stub should remain reachable; an
+    // absent transport means the caller is driving output some other way
+    // (`onSend`, or not expecting assistant turns at all).
+    if (transport == null) {
+      return () => Promise.resolve(new Response(null, { status: 200 }));
+    }
+
+    // A custom Transport function is opaque to us; resolve it as-is.
     if (typeof transport === 'function') return transport;
-    if (transport && typeof transport === 'object' && typeof transport.url === 'string') {
+
+    // String shorthand or `{ url }` object: require a usable, non-whitespace
+    // URL before resolving. `transport.url` is typed `string`, but a JS caller
+    // (unset env var, typo'd key, build-time placeholder) can still land here
+    // with `undefined`/`''`, so the runtime checks below are load-bearing.
+    const url = typeof transport === 'string' ? transport : transport.url;
+    if (typeof url === 'string' && url.trim() !== '') {
+      // Case 2: valid config — resolve normally.
       return createDefaultFetchSSETransport<TMeta>(transport);
     }
-    return () => Promise.resolve(new Response(null, { status: 200 }));
+
+    // Case 3: transport is present but misconfigured — a bare empty/whitespace
+    // string, or a non-null object lacking a usable string `url`. Do NOT fall
+    // through to the empty-200 stub: that ends the turn with a blank assistant
+    // message and no error. Warn in dev, and resolve to a transport that
+    // rejects so the existing stream-error UI surfaces the misconfiguration.
+    warnInDev(
+      '[Chorus] transport URL is empty/missing; assistant responses are disabled. '
+        + 'Did you forget to set an env var or substitute a build-time placeholder?',
+    );
+    return () => Promise.reject(new Error(
+      '[Chorus] transport is misconfigured: no usable URL was provided. Pass a '
+        + 'non-empty URL string, or a transport object with a non-empty string `url`.',
+    ));
   }, [transport]);
 
-  const { send: doStream, abort: streamAbort, sending: streamSending } = useChorusStream<TMeta>(resolvedTransport, { connector });
+  const { send: doStream, sending: streamSending } = useChorusStream<TMeta>(resolvedTransport, { connector, connectorOptions });
   const streamSendingRef = useLatestRef(streamSending);
   const sending = transport ? (streamSending || transportBusy) : internalSending;
 
@@ -334,10 +372,10 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
   });
   const { startTransportStream } = transportLifecycle;
 
-  // The orchestrator captures three hook-supplied callbacks at call time via
-  // a ref so it can be created before useToolExecution / useChorusStream /
-  // useTransportLifecycle (which themselves consume orchestrator outputs).
-  orchestrator.bindLateDeps({ appendToolDeltaNow, streamAbort, startTransportStream });
+  // The orchestrator captures two hook-supplied callbacks at call time via
+  // a ref so it can be created before useToolExecution / useTransportLifecycle
+  // (which themselves consume orchestrator outputs).
+  orchestrator.bindLateDeps({ appendToolDeltaNow, startTransportStream });
 
   const { send, retry, stop, clear, handleEdit, handleRegenerate, handleDelete } = useSessionCommands<TMeta>({
     messagesRef,
