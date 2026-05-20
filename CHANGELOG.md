@@ -8,6 +8,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Added
 
+#### Connectors / streaming
+- Added the `'ai-sdk'` connector for the [Vercel AI SDK](./README.md#vercel-ai-sdk-stream-format). It parses both stream shapes the SDK can emit: the SSE-formatted **UI message stream** (`toUIMessageStreamResponse()`, AI SDK v5+) with `text-delta`, `reasoning-delta`, and `tool-input-*` / `tool-output-*` JSON events, and the prefix-coded **data-stream protocol** (`toDataStreamResponse()`, AI SDK v4) with `0:` / `g:` / `9:` / `c:` / `a:` text, reasoning, and tool frames plus `d:`/`e:` finish frames. `error` / `3:` frames surface through the in-band error path, and protocol/lifecycle frames are silently ignored.
+- Extended `autoConnector` frame detection to recognize Vercel AI SDK UI-message-stream JSON and data-stream prefix lines, so AI SDK routes work under the default `connector="auto"`.
+- Exported `createOpenAIConnector`, a factory for OpenAI connectors with a configurable, case-insensitive `<think>` reasoning splitter (`thinkTag` option), along with the `OpenAIConnectorOptions` and `ThinkTagSplitterOptions` types.
+- Exported `aiSdkConnector` and `createOpenAIConnector`, bringing the built-in connector exports to `getConnector`, `autoConnector`, `openaiConnector`, `createOpenAIConnector`, `anthropicConnector`, `geminiConnector`, and `aiSdkConnector`.
+
+### Deprecation candidates (future major)
+- The default transport body `{ prompt, history }` duplicates the latest user turn — `prompt` equals `history[history.length - 1].text`. Backends already consume `history` only (see all `examples/` proxies). A future major release should drop `prompt` from `createFetchSSETransport`, `createWebSocketTransport`, and `createDefaultFetchSSETransport` defaults and send `{ history }` exclusively. Until then, README and JSDoc warn against re-appending `prompt` server-side. See [README → Migration and Upgrading → Default transport body will drop the `prompt` field](./README.md#default-transport-body-will-drop-the-prompt-field) for the concrete migration path.
+
+## [0.2.0] - 2026-05-15
+
+### Added
+
 #### Tool agent loop
 - Added a `tools` registry prop and `ChorusToolRegistry` type for declaring client-side tool implementations.
 - Added `autoContinueTools`, `maxToolIterations`, and `shouldContinueToolLoop` props for controlling automatic tool-call → result → resume cycles.
@@ -65,5 +78,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ### Fixed
 - Fixed stream cleanup on unmount/pre-aborted signals, richer HTTP error details, WebSocket close-before-open hangs, safe dev-mode checks without `process`, observer callback isolation, and transport concurrency guards.
 
-### Deprecation candidates (future major)
-- The default transport body `{ prompt, history }` duplicates the latest user turn — `prompt` equals `history[history.length - 1].text`. Backends already consume `history` only (see all `examples/` proxies). A future major release should drop `prompt` from `createFetchSSETransport`, `createWebSocketTransport`, and `createDefaultFetchSSETransport` defaults and send `{ history }` exclusively. Until then, README and JSDoc warn against re-appending `prompt` server-side. See [README → Migration and Upgrading → Default transport body will drop the `prompt` field](./README.md#default-transport-body-will-drop-the-prompt-field) for the concrete migration path.
+## [0.1.0] - 2026-05-11
+
+### Added
+- Initial public release: the batteries-included `<Chorus>` chat component coordinating message rendering, the composer, streaming, persistence, and theming, with a stable `ChorusProps` contract.
+- `react-chorus/headless` entry and the `headless` prop for unstyled, bring-your-own-CSS usage.
+- Component pieces for custom shells: `ChatWindow`, `MessageBubble`, `ChatInput`, `ToolCallBlock`, `ChorusTheme`, and `Markdown`.
+- The `Message` type with `Role`, `Attachment`, `ToolCall`, and `StorageAdapter`, including an optional generic `metadata` field and `system` / `tool` message roles.
+- SSE streaming via the `transport` prop, with the `createFetchSSETransport` and `createWebSocketTransport` factories and the standalone `useChorusStream` hook.
+- Provider connectors with auto-detection: `getConnector`, `autoConnector`, `openaiConnector`, and `anthropicConnector` for parsing OpenAI and Anthropic (Claude) SSE streams.
+- Markdown rendering with fenced code blocks, lazy-loaded `highlight.js` syntax highlighting, and copy-to-clipboard buttons.
+- Conversation persistence through the `useChorusPersistence` hook and `persistenceKey` prop, backed by `localStorage` or a pluggable `StorageAdapter`.
+- Error-state UI with retry support.
+- Message actions: edit a sent message, regenerate a response, and delete messages.
+- File and image attachment support in `ChatInput`.
+- Tool call / agent step rendering via `ToolCallBlock`, plus the `renderMessage` render prop and `MessageBubble` for custom message rendering.
+- Theming through `ChorusTheme` and the `Palette` type.
