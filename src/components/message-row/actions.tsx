@@ -4,13 +4,14 @@ import type { Message, MessageFeedback } from '../../types';
 import { DEFAULT_MESSAGE_ACTION_LABELS } from '../../labels/messageActions';
 import type { ChorusMessageActionLabels, ChorusSpeakerLabels } from '../../labels/types';
 import { COPY_FEEDBACK_DURATION_MS, canWriteTextToClipboard, writeTextToClipboard } from '../../utils/messageCopy';
+import { joinClasses } from '../../utils/className';
 import { InlineMessageEditor } from './InlineMessageEditor';
 import { useActionEditing, useReturnFocusAfterEditing } from './renderState';
 import { MessageSpeakerLabel } from './speaker';
 import type { MessageCopyResult, MessageRenderActions } from './types';
 
 export function actionButtonClass(active?: boolean, extraClass?: string) {
-  return ['chorus-action-btn', active && 'chorus-action-btn--active', extraClass].filter(Boolean).join(' ');
+  return joinClasses('chorus-action-btn', active && 'chorus-action-btn--active', extraClass);
 }
 
 function hasRenderableActions(actions: MessageRenderActions) {

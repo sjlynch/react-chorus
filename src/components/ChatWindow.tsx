@@ -10,6 +10,7 @@ import { ErrorRow, JumpToBottomButton, TranscriptEmptyState, TypingRow } from '.
 import type { ChatWindowProps } from './chat-window/types';
 import { useAutoScroll } from './chat-window/useAutoScroll';
 import { styleVarsFromPalette } from '../utils/paletteVars';
+import { joinClasses } from '../utils/className';
 import type { MessageCopyResult } from './MessageRow';
 
 export { stringActivityKey } from './chat-window/activityKey';
@@ -101,7 +102,7 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
   return (
     <div
       {...rest}
-      className={["chorus-window", headless ? "chorus-window--headless" : undefined, className].filter(Boolean).join(" ")}
+      className={joinClasses("chorus-window", headless ? "chorus-window--headless" : undefined, className)}
       style={{ ...paletteVars, ...style }}
       ref={windowRef}
       role="log"

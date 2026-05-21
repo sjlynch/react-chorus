@@ -6,6 +6,7 @@ import type { Message } from '../types';
 import type { ChorusProps } from '../Chorus.types';
 import type { ChorusShellDerivedState } from './derivedState';
 import type { ChorusComposerActions, ChorusComposerState } from './useComposerActions';
+import { joinClasses } from '../utils/className';
 
 export type ChorusRootProps = React.HTMLAttributes<HTMLDivElement>;
 
@@ -50,13 +51,13 @@ export function buildRootProps({
 }: BuildRootPropsArgs): ChorusRootProps {
   return {
     ...rest,
-    className: [
+    className: joinClasses(
       'chorus',
       disabled && 'chorus--disabled',
       readOnly && 'chorus--readonly',
       alwaysShowMessageActions && 'chorus--always-show-actions',
       className,
-    ].filter(Boolean).join(' '),
+    ),
     style: { ...paletteVars, ...style },
     'aria-disabled': writesDisabled ? true : rest['aria-disabled'],
   };

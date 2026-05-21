@@ -8,6 +8,7 @@ import type { ConversationListProps } from './conversation-list/types';
 import { useConversationRename } from './conversation-list/useConversationRename';
 import { useDeleteConversationConfirmation } from './conversation-list/useDeleteConversationConfirmation';
 import type { ConversationSummary } from '../hooks/useConversations';
+import { joinClasses } from '../utils/className';
 
 export type { ConfirmDeleteConversation, ConfirmDeleteConversationContext, ConversationListProps } from './conversation-list/types';
 
@@ -117,12 +118,12 @@ export function ConversationList({
     setPendingDeleteFocus(null);
   }, [pendingDeleteFocus]);
 
-  const rootClassName = [
+  const rootClassName = joinClasses(
     'chorus-conversation-list',
     headless ? 'chorus-conversation-list--headless' : undefined,
     interactionsDisabled ? 'chorus-conversation-list--loading' : undefined,
     className,
-  ].filter(Boolean).join(' ');
+  );
 
   return (
     <nav className={rootClassName} style={{ ...paletteVars, ...style }} aria-label={labels.navAriaLabel}>

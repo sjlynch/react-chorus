@@ -1,15 +1,15 @@
 import React from 'react';
-import { createPortal } from 'react-dom';
-import { ArrowUp, Paperclip } from 'lucide-react';
 import { DEFAULT_COMPOSER_LABELS } from '../labels/composer';
 import { DEFAULT_ATTACHMENT_LABELS } from '../labels/attachments';
-import { AttachmentChips } from './chat-input/AttachmentChips';
-import { AttachmentErrorRegion } from './chat-input/AttachmentErrorRegion';
+import { AttachmentSection } from './chat-input/AttachmentSection';
+import { ComposerInputRow } from './chat-input/ComposerInputRow';
+import { DropOverlayPortal } from './chat-input/DropOverlayPortal';
 import { useAttachmentQueue } from './chat-input/useAttachmentQueue';
 import { useChatInputSend } from './chat-input/useChatInputSend';
 import { useComposerTextarea } from './chat-input/useComposerTextarea';
 import { useFileIngestionHandlers } from './chat-input/useFileIngestionHandlers';
 import type { ChatInputHandle, ChatInputProps } from './chat-input/types';
+import { joinClasses } from '../utils/className';
 import { styleVarsFromPalette } from '../utils/paletteVars';
 
 export type { ChatInputFocusOptions, ChatInputHandle, ChatInputProps, RenderAttachmentErrorContext } from './chat-input/types';
@@ -164,45 +164,17 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(funct
     }
   };
 
-  const rootClassName = [
-    `chorus-input${draggingFiles ? ' chorus-input--dragging' : ''}`,
+  const rootClassName = joinClasses(
+    'chorus-input',
+    draggingFiles && 'chorus-input--dragging',
     disabled && 'chorus-input--disabled',
     readOnly && 'chorus-input--readonly',
     className,
-  ].filter(Boolean).join(' ');
+  );
 
   const paletteVars = React.useMemo(() => styleVarsFromPalette(palette), [palette]);
 
-  // The "Drop to attach" overlay must blanket the whole widget so it always
-  // renders under the cursor — `useChatSurfaceFileDrop` also accepts file drops
-  // over the transcript, far above the composer. Portal it onto the surrounding
-  // `.chorus` surface when one exists; a standalone ChatInput (no surface) keeps
-  // the overlay inside its own composer-sized root. Resolved once on mount: the
-  // `.chorus` ancestor of a mounted ChatInput does not change.
-  const [dropOverlayHost, setDropOverlayHost] = React.useState<HTMLElement | null>(null);
-  React.useEffect(() => {
-    setDropOverlayHost(rootRef.current?.closest<HTMLElement>('.chorus') ?? null);
-  }, [rootRef]);
-
-  const attachmentErrorNode = attachmentError && renderAttachmentError !== null
-    ? (renderAttachmentError
-      ? renderAttachmentError({ error: attachmentError, dismiss: dismissAttachmentError })
-      : (
-        <AttachmentErrorRegion
-          error={attachmentError}
-          labels={attachmentLabels}
-          onDismiss={dismissAttachmentError}
-        />
-      ))
-    : null;
-
-  const dropOverlay = draggingFiles && canIngestFiles ? (
-    <div className="chorus-drop-overlay" aria-hidden="true">
-      <span className="chorus-drop-overlay-label">{labels.dropToAttach}</span>
-    </div>
-  ) : null;
-
-  const root = (
+  return (
     <div
       // Any unrecognised props (`...rest`) — including event handlers such as
       // `onKeyDown` — attach to this root container, NOT the inner textarea.
@@ -222,58 +194,49 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(funct
       title={inactiveReason ?? titleProp}
     >
       {inactiveReason && <span id={reasonId} className="chorus-sr-only">{inactiveReason}</span>}
-      <AttachmentChips
+      <AttachmentSection
         attachments={queuedAttachments}
-        disabled={composerInactive}
+        composerInactive={composerInactive}
+        canIngestFiles={canIngestFiles}
+        labels={attachmentLabels}
         onRemove={removeAttachment}
         onRetry={retryAttachment}
-        labels={attachmentLabels}
-        onAltChange={canIngestFiles ? updateAttachmentAlt : undefined}
+        onAltChange={updateAttachmentAlt}
+        announcement={announcement}
+        attachmentError={attachmentError}
+        renderAttachmentError={renderAttachmentError}
+        dismissAttachmentError={dismissAttachmentError}
       />
-      <span
-        className="chorus-sr-only"
-        aria-live="polite"
-        aria-atomic="true"
-        data-testid="chorus-attachment-announcer"
-      >
-        {announcement?.message ?? ''}
-      </span>
-      {attachmentErrorNode}
-      <div className={`chorus-input-row${showAttachBtn ? ' chorus-input-row--has-attach' : ''}`}>
-        {showAttachBtn && (
-          <input ref={fileInputRef} type="file" accept={accept} multiple style={{ display: 'none' }} onChange={onFileInputChange} disabled={!canIngestFiles} />
-        )}
-        {showAttachBtn && (
-          <button type="button" className="chorus-attach" onClick={() => { if (canIngestFiles) fileInputRef.current?.click(); }} aria-label={labels.attachFile} title={labels.attachFile} disabled={!canIngestFiles} aria-disabled={!canIngestFiles}>
-            <Paperclip size={18} strokeWidth={2} />
-          </button>
-        )}
-        <textarea
-          ref={textareaRef}
-          value={value}
-          onChange={handleTextareaChange}
-          onKeyDown={onKeyDown}
-          onCompositionStart={handleCompositionStart}
-          onCompositionEnd={handleCompositionEnd}
-          placeholder={placeholderText}
-          aria-label={textareaAriaLabel}
-          aria-describedby={inactiveReason ? reasonId : undefined}
-          disabled={disabled}
-          readOnly={readOnly || disabled}
-          // A natively disabled control must not also advertise aria-readonly:
-          // the two ARIA states are mutually exclusive, so only expose it for
-          // a purely read-only (not disabled) textarea.
-          aria-readonly={readOnly && !disabled ? true : undefined}
-        />
-        <button type="button" className="chorus-send" onClick={handleClick} aria-label={sendActionLabel} title={sendActionLabel} disabled={sending ? !stopAvailable : !canSend}>
-          {sending ? <span className="chorus-stop-fill" /> : <ArrowUp size={18} strokeWidth={2} />}
-        </button>
-      </div>
-      {dropOverlay && !dropOverlayHost && dropOverlay}
+      <ComposerInputRow
+        showAttachBtn={showAttachBtn}
+        canIngestFiles={canIngestFiles}
+        accept={accept}
+        attachFileLabel={labels.attachFile}
+        fileInputRef={fileInputRef}
+        onFileInputChange={onFileInputChange}
+        textareaRef={textareaRef}
+        value={value}
+        onTextareaChange={handleTextareaChange}
+        onKeyDown={onKeyDown}
+        onCompositionStart={handleCompositionStart}
+        onCompositionEnd={handleCompositionEnd}
+        placeholder={placeholderText}
+        textareaAriaLabel={textareaAriaLabel}
+        reasonId={reasonId}
+        hasInactiveReason={Boolean(inactiveReason)}
+        disabled={disabled}
+        readOnly={readOnly}
+        onSendClick={handleClick}
+        sendActionLabel={sendActionLabel}
+        sending={sending}
+        stopAvailable={stopAvailable}
+        canSend={canSend}
+      />
+      <DropOverlayPortal
+        active={draggingFiles && canIngestFiles}
+        label={labels.dropToAttach}
+        rootRef={rootRef}
+      />
     </div>
   );
-
-  return dropOverlay && dropOverlayHost
-    ? <>{root}{createPortal(dropOverlay, dropOverlayHost)}</>
-    : root;
 });

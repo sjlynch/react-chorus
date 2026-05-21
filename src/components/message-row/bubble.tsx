@@ -4,6 +4,7 @@ import { DEFAULT_ATTACHMENT_LABELS } from '../../labels/attachments';
 import { DEFAULT_REASONING_LABEL } from '../../labels/reasoning';
 import type { ChorusAttachmentLabels, ChorusCodeCopyLabels, ChorusSpeakerLabels } from '../../labels/types';
 import { getAttachmentPreviewSource } from '../../utils/attachmentPreview';
+import { joinClasses } from '../../utils/className';
 import { Markdown, type MarkdownSanitizer } from '../Markdown';
 import { defaultFormatMessageTimestamp } from './formatTimestamp';
 import { MessageRenderStateContext } from './renderState';
@@ -164,7 +165,7 @@ export function MessageBubble<TMeta = Record<string, unknown>>({ message, classN
   const renderState = React.useContext(MessageRenderStateContext);
   if (renderState?.messageId === message.id && renderState.isEditing) return null;
 
-  const cls = ['chorus-msg', `chorus-${message.role}`, className].filter(Boolean).join(' ');
+  const cls = joinClasses('chorus-msg', `chorus-${message.role}`, className);
   return (
     <div className={cls} style={style} data-chorus-message-id={message.id}>
       <MessageSpeakerLabel role={message.role} speakers={speakerLabels} />
