@@ -77,6 +77,19 @@ export async function readErrorBodySnippet(
   return { text, truncated, timedOut };
 }
 
+/**
+ * True for a {@link ChorusStreamError} that rejected a send before it ever
+ * started — a `concurrent-send` overlap (a previous send still in flight) or an
+ * `already-aborted` externalSignal. These reject `send()` without invoking the
+ * transport or firing `cb.onError`, so any caller that attaches a bare `.catch`
+ * to the send promise must detect them here and surface the error itself rather
+ * than swallow the turn.
+ */
+export function isUnstartedSendError(error: unknown): error is ChorusStreamError {
+  return error instanceof ChorusStreamError
+    && (error.code === 'concurrent-send' || error.code === 'already-aborted');
+}
+
 export async function createHttpResponseError(res: Response) {
   const statusText = res.statusText ? ` ${res.statusText}` : '';
   const { text, truncated, timedOut } = await readErrorBodySnippet(res);
