@@ -14,6 +14,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Exported `createOpenAIConnector`, a factory for OpenAI connectors with a configurable, case-insensitive `<think>` reasoning splitter (`thinkTag` option), along with the `OpenAIConnectorOptions` and `ThinkTagSplitterOptions` types.
 - Exported `aiSdkConnector` and `createOpenAIConnector`, bringing the built-in connector exports to `getConnector`, `autoConnector`, `openaiConnector`, `createOpenAIConnector`, `anthropicConnector`, `geminiConnector`, and `aiSdkConnector`.
 
+### Changed
+
+#### Markdown
+- The bundled `chorus-md` stylesheet now styles GFM tables. `marked`'s `gfm: true` already emitted real `<table>` markup, but the injected sheet only styled code blocks, so tables rendered as borderless rows of text; they now use collapsed borders, 1px cell borders, cell padding, and an emphasized header row. The new `--chorus-md-table-border` and `--chorus-md-table-header-bg` CSS variables theme the cell borders and header background. This is a visible rendering change for every `<Markdown>`/`<Chorus>` consumer that renders tables.
+
+### Fixed
+- The built-in transcript error banner now renders a dismiss (X) button when `onDismissError` is wired (it always is under `<Chorus>`), so consumers using the default error UI — not just a custom `renderError` — can clear the banner. Added a localizable `labels.transcript.dismissError` string for its accessible label.
+
 ### Deprecation candidates (future major)
 - The default transport body `{ prompt, history }` duplicates the latest user turn — `prompt` equals `history[history.length - 1].text`. Backends already consume `history` only (see all `examples/` proxies). A future major release should drop `prompt` from `createFetchSSETransport`, `createWebSocketTransport`, and `createDefaultFetchSSETransport` defaults and send `{ history }` exclusively. Until then, README and JSDoc warn against re-appending `prompt` server-side. See [README → Migration and Upgrading → Default transport body will drop the `prompt` field](./README.md#default-transport-body-will-drop-the-prompt-field) for the concrete migration path.
 

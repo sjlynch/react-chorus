@@ -1,5 +1,5 @@
 import type { Message } from '../../types';
-import { openAIImageUrlFromAttachment, unsupportedAttachmentText } from '../attachments';
+import { isOpenAIImageAttachment, openAIImageUrlFromAttachment, unsupportedAttachmentText } from '../attachments';
 import { stripOpenAIResponsesOptions } from '../options';
 import { messageText, toolContextText, toolOutputText } from '../toolOutput';
 import { mapHistoryWithToolRuns } from '../toolRunMapper';
@@ -52,7 +52,7 @@ function openAIResponsesInputContent<TMeta>(
 
   if (message.role === 'user') {
     for (const attachment of message.attachments ?? []) {
-      if (attachment.type.startsWith('image/')) {
+      if (isOpenAIImageAttachment(attachment)) {
         const imageUrl = openAIImageUrlFromAttachment(attachment);
         if (imageUrl) {
           parts.push({ type: 'input_image', image_url: imageUrl });

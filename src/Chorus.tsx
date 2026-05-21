@@ -12,7 +12,7 @@ import { useChorusComposerActions, useChorusComposerState } from './chorus-shell
 import { resolveBuiltInPersistenceKey, useChorusShellDerivedState } from './chorus-shell/derivedState';
 import { DEFAULT_CHORUS_HIDDEN_ROLES, DEFAULT_MIN_ASSISTANT_DELAY_MS, DEFAULT_PERSISTENCE_WRITE_DEBOUNCE_MS, type ChorusProps, type ChorusRef } from './Chorus.types';
 
-export type { Transport, FetchTransportInit, Connector, RenderAttachmentErrorContext, ChorusAbortContext, ChorusAbortReason, ChorusAbortSource, ChorusClearConversationContext, ChorusConfirmClearConversation, ChorusConfirmDeleteMessage, ChorusDeleteMessageContext, ChorusFinishContext, ChorusMessagesChangeContext, ChorusOnAbort, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusProps, ChorusRef, ChorusSendHelpers, ChorusSendPath, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusStreamDoneReason, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolLoopContext, ChorusToolRegistry } from './Chorus.types';
+export type { Transport, FetchTransportInit, Connector, RenderAttachmentErrorContext, ChorusAbortContext, ChorusAbortReason, ChorusAbortSource, ChorusClearConversationContext, ChorusConfirmClearConversation, ChorusConfirmDeleteMessage, ChorusDeleteMessageContext, ChorusFinishContext, ChorusMessagesChangeContext, ChorusMessagesChangeReason, ChorusMessagesChangeSource, ChorusOnAbort, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusProps, ChorusRef, ChorusSendHelpers, ChorusSendPath, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusStreamDoneReason, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolHandler, ChorusToolLoopContext, ChorusToolRegistry } from './Chorus.types';
 
 function ChorusInner<TMeta = Record<string, unknown>>({
   accept,
@@ -57,6 +57,7 @@ function ChorusInner<TMeta = Record<string, unknown>>({
   onMessagesChange,
   onStreamDone,
   onStreamWarning,
+  onStreamMetadata,
   onToolCall,
   onToolDelta,
   onPersistenceError,
@@ -130,6 +131,10 @@ function ChorusInner<TMeta = Record<string, unknown>>({
     autoContinueTools,
     maxToolIterations,
     shouldContinueToolLoop,
+    tools,
+    onToolCall,
+    onToolDelta,
+    continueOnToolError,
   });
 
   const session = useAssistantSession<TMeta>({
@@ -149,6 +154,7 @@ function ChorusInner<TMeta = Record<string, unknown>>({
     onAbort,
     onStreamDone,
     onStreamWarning,
+    onStreamMetadata,
     onToolCall,
     onToolDelta,
     tools,

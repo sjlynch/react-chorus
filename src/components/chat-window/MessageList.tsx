@@ -74,16 +74,25 @@ export function MessageList<TMeta = Record<string, unknown>>({
   onEdit,
   onRegenerate,
 }: MessageListProps<TMeta>) {
-  // A tool call belongs to a turn that is still streaming whenever any
-  // assistant turn is in flight — its arguments/result may not have arrived
-  // yet. Tool messages never carry the `streamingMessageId` themselves (that
-  // tracks the pending assistant message), so derive it from session activity.
+  // Tool messages never carry the `streamingMessageId` themselves (that tracks
+  // the pending assistant message), so derive turn membership from position.
+  // An assistant turn is in flight whenever `sessionStreaming` is true, and the
+  // streaming turn is every message after the last user message. A tool call
+  // only counts as streaming when it sits inside that trailing turn — flagging
+  // *every* tool row instead would flip an older, already-finished empty-bodied
+  // tool call to "Running…" the moment an unrelated later turn streams.
   const sessionStreaming = streamingMessageId != null;
+  const lastUserIndex = sessionStreaming
+    ? messages.reduce((last, m, i) => (m.role === 'user' ? i : last), -1)
+    : -1;
 
   return (
     <>
-      {messages.map(message => {
+      {messages.map((message, index) => {
         const isStreaming = message.id === streamingMessageId;
+        // A tool row may show "Running…" only while it belongs to the in-flight
+        // turn — i.e. it trails the last user message during a streaming turn.
+        const toolStreaming = sessionStreaming && index > lastUserIndex;
         const initialFeedback = getSelectedFeedback(message);
         const feedback = feedbackEnabled ? (variant: MessageFeedback | null) => onMessageFeedback(message, variant) : undefined;
         const defaultRender = (slots?: MessageBubbleSlots) => {
@@ -93,7 +102,7 @@ export function MessageList<TMeta = Record<string, unknown>>({
                 <MessageSpeakerLabel role={message.role} speakers={resolvedLabels.speakers} />
                 {slots?.before}
                 {slots?.headerSlot}
-                <ToolCallBlock toolCall={message.toolCall} labels={resolvedLabels.toolCall} streaming={sessionStreaming} />
+                <ToolCallBlock toolCall={message.toolCall} labels={resolvedLabels.toolCall} streaming={toolStreaming} />
                 {slots?.footerSlot}
                 {slots?.after}
               </div>

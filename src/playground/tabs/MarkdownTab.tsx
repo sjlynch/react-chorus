@@ -1,5 +1,5 @@
 import React from 'react';
-import { Chorus, type ChorusRef } from '../../Chorus';
+import { Chorus, type ChorusMessagesChangeContext, type ChorusRef } from '../../Chorus';
 import type { Message } from '../../types';
 import { DEMO_PALETTE } from './palettes';
 import { markdownTransport } from './markdownTransport';
@@ -36,8 +36,41 @@ export function MarkdownTab() {
   const [codeTheme, setCodeTheme] = React.useState<'dark' | 'light'>('dark');
   const chorusRef = React.useRef<ChorusRef>(null);
 
+  // The quick-prompt buttons drive `ChorusRef.send()`, which is a no-op
+  // (returns `false`) while a turn streams or before the async persistence
+  // load resolves. Track both windows so the buttons can disable themselves
+  // the way the built-in `suggestedPrompts` chips do via `suggestedPromptsDisabled`.
+  const [sending, setSending] = React.useState(false);
+  const [persistenceLoaded, setPersistenceLoaded] = React.useState(false);
+
+  const handleMessagesChange = React.useCallback(
+    (_messages: Message[], context: ChorusMessagesChangeContext) => {
+      if (context.reason === 'persistence-load' || context.reason === 'persistence-seed') {
+        setPersistenceLoaded(true);
+      }
+      if (context.reason === 'send' || context.reason === 'retry' || context.reason === 'regenerate') {
+        setSending(true);
+      }
+    },
+    [],
+  );
+
+  const endTurn = React.useCallback(() => setSending(false), []);
+
+  const promptsDisabled = sending || !persistenceLoaded;
+  const disabledReason = !persistenceLoaded
+    ? 'Loading saved conversation…'
+    : sending
+      ? 'Wait for the current response to finish…'
+      : undefined;
+
   const sendQuickPrompt = (prompt: string) => {
-    chorusRef.current?.send(prompt);
+    // send() returns false (a no-op) mid-stream or before persistence loads;
+    // the buttons are disabled in those windows, but honor the result instead
+    // of discarding it so a rejected send never silently looks accepted.
+    if (chorusRef.current?.send(prompt)) {
+      setSending(true);
+    }
   };
 
   return (
@@ -51,6 +84,9 @@ export function MarkdownTab() {
               type="button"
               className="pg-quick-prompt"
               onClick={() => sendQuickPrompt(q.prompt)}
+              disabled={promptsDisabled}
+              aria-disabled={promptsDisabled || undefined}
+              title={promptsDisabled ? disabledReason : undefined}
             >
               {q.label}
             </button>
@@ -82,6 +118,10 @@ export function MarkdownTab() {
         showClearButton
         palette={DEMO_PALETTE}
         codeBlockTheme={codeTheme}
+        onMessagesChange={handleMessagesChange}
+        onFinish={endTurn}
+        onAbort={endTurn}
+        onError={endTurn}
       />
     </div>
   );

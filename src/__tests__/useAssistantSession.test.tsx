@@ -179,5 +179,25 @@ describe('useAssistantSession', () => {
       expect(result.current.streamRawError).toBeInstanceOf(Error);
       expect(result.current.streamRawError?.message).toContain('transport is misconfigured');
     });
+
+    it('routes a bare empty-string transport to the rejecting transport, not the missing-handler warning', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      // `transport=""` is the most common real misconfiguration (an unset env
+      // var resolving to an empty string). It is falsy but still a transport
+      // prop, so the `send` command must accept it and reach the rejecting
+      // transport rather than warn that no response handler was provided.
+      const { result } = renderHook(() => useTransportHarness(''));
+
+      act(() => {
+        expect(result.current.send('hello')).toBe(true);
+      });
+
+      await waitFor(() => expect(result.current.streamError).toBe('failed'));
+      expect(result.current.streamRawError).toBeInstanceOf(Error);
+      expect(result.current.streamRawError?.message).toContain('transport is misconfigured');
+      expect(warn).not.toHaveBeenCalledWith(
+        expect.stringContaining('neither `transport` nor `onSend`'),
+      );
+    });
   });
 });

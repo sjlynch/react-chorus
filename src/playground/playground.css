@@ -433,7 +433,7 @@ body {
   cursor: pointer;
   transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
 }
-.pg-quick-prompt:hover {
+.pg-quick-prompt:hover:not(:disabled) {
   background: rgba(99,102,241,0.22);
   border-color: rgba(99,102,241,0.6);
   color: #e0e7ff;
@@ -442,6 +442,7 @@ body {
   outline: 2px solid rgba(99,102,241,0.5);
   outline-offset: 1px;
 }
+.pg-quick-prompt:disabled { opacity: .5; cursor: default; }
 
 /* Theming-tab avatar slots (rendered via MessageBubbleSlots.before / .after) */
 .pg-avatar {

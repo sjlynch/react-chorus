@@ -6,7 +6,7 @@ This example exercises the [Built-in connectors](../../README.md#built-in-connec
 
 ## Prerequisites
 
-- Node.js 20+
+- Node.js 20.19+ or 22.12+ (required by the example's `vite: ^8` toolchain)
 - An `OPENAI_API_KEY`. Without it the backend's first call to OpenAI fails and the frontend renders a connection-style error.
 
 ## Run from a fresh clone
