@@ -12,7 +12,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Added the `'ai-sdk'` connector for the [Vercel AI SDK](./README.md#vercel-ai-sdk-stream-format). It parses both stream shapes the SDK can emit: the SSE-formatted **UI message stream** (`toUIMessageStreamResponse()`, AI SDK v5+) with `text-delta`, `reasoning-delta`, and `tool-input-*` / `tool-output-*` JSON events, and the prefix-coded **data-stream protocol** (`toDataStreamResponse()`, AI SDK v4) with `0:` / `g:` / `9:` / `c:` / `a:` text, reasoning, and tool frames plus `d:`/`e:` finish frames. `error` / `3:` frames surface through the in-band error path, and protocol/lifecycle frames are silently ignored.
 - Extended `autoConnector` frame detection to recognize Vercel AI SDK UI-message-stream JSON and data-stream prefix lines, so AI SDK routes work under the default `connector="auto"`.
 - Exported `createOpenAIConnector`, a factory for OpenAI connectors with a configurable, case-insensitive `<think>` reasoning splitter (`thinkTag` option), along with the `OpenAIConnectorOptions` and `ThinkTagSplitterOptions` types.
-- Exported `aiSdkConnector` and `createOpenAIConnector`, bringing the built-in connector exports to `getConnector`, `autoConnector`, `openaiConnector`, `createOpenAIConnector`, `anthropicConnector`, `geminiConnector`, and `aiSdkConnector`.
+- The new `'ai-sdk'` connector is reachable by name only — `getConnector('ai-sdk')` or `connector="ai-sdk"`. The public connector accessors remain `getConnector` and `createOpenAIConnector`; the provider singletons (`openaiConnector`/`anthropicConnector`/`geminiConnector`/`aiSdkConnector`) and `autoConnector` stay `@internal` and are not exported from `react-chorus` / `react-chorus/headless`.
 
 ### Changed
 

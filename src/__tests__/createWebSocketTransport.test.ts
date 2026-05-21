@@ -300,6 +300,34 @@ describe('createWebSocketTransport', () => {
     await expect(reader.read()).rejects.toThrow(/code 4000: unmounting/);
   });
 
+  it('delivers onMessage only for live frames in transient mode', async () => {
+    const seen: string[] = [];
+    const transport = createWebSocketTransport('wss://api.example.com/chat', {
+      onMessage: (data) => seen.push(data),
+    });
+
+    const promise = transport('hello', [], new AbortController().signal);
+    const ws = MockWebSocket.instances[0];
+    ws.emitOpen();
+    const response = await promise;
+
+    // A live in-flight frame reaches both the response stream and onMessage.
+    ws.onmessage?.({ data: '{"chunk":"live"}' } as MessageEvent);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(seen).toEqual(['{"chunk":"live"}']);
+
+    // Consumer cancels the reader — this closes the response stream and socket.
+    await response.body!.cancel();
+
+    // A late in-flight frame must reach neither: transient onMessage mirrors
+    // what the response stream receives, so post-cancel frames are not observed.
+    ws.onmessage?.({ data: '{"chunk":"late"}' } as MessageEvent);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(seen).toEqual(['{"chunk":"live"}']);
+  });
+
   it('errors active streams on abnormal 1006 close in persistent mode', async () => {
     const transport = createWebSocketTransport('wss://api.example.com/chat', { persistent: true });
     const promise = transport('hello', [], new AbortController().signal);
@@ -634,5 +662,187 @@ describe('createWebSocketTransport', () => {
     const decoder = new TextDecoder();
     expect(decoder.decode((await firstReader.read()).value)).toBe('data: shared\n\n');
     expect(decoder.decode((await secondReader.read()).value)).toBe('data: shared\n\n');
+  });
+
+  it('fires onClose once on a server-initiated persistent close', async () => {
+    const events: string[] = [];
+    const transport = createWebSocketTransport('wss://api.example.com/chat', {
+      persistent: true,
+      onClose: (code, reason) => events.push(`close:${code}:${reason}`),
+    });
+
+    const promise = transport('hello', [], new AbortController().signal);
+    const ws = MockWebSocket.instances[0];
+    ws.emitOpen();
+    await promise;
+
+    ws.emitClose(1000, 'done');
+
+    expect(events).toEqual(['close:1000:done']);
+  });
+
+  it('does not fire onClose again after onError tore down a failed persistent socket', async () => {
+    const events: string[] = [];
+    const transport = createWebSocketTransport('wss://api.example.com/chat', {
+      persistent: true,
+      onError: () => events.push('error'),
+      onClose: (code) => events.push(`close:${code}`),
+    });
+
+    const promise = transport('hello', [], new AbortController().signal);
+    const ws = MockWebSocket.instances[0];
+    ws.emitOpen();
+    const response = await promise;
+    const reader = response.body!.getReader();
+
+    // A real WebSocket fires onerror then onclose for a failed connection.
+    ws.emitError();
+    ws.emitClose(1006, 'abnormal');
+
+    await expect(reader.read()).rejects.toThrow('WebSocket connection error');
+    // onError reported the failure once; the trailing onclose must not also
+    // fire onClose — the socket's lifecycle is reported at most once.
+    expect(events).toEqual(['error']);
+  });
+
+  it('does not close a stream registered by a new send after a persistent socket failed', async () => {
+    const transport = createWebSocketTransport('wss://api.example.com/chat', { persistent: true });
+
+    const firstPromise = transport('one', [], new AbortController().signal);
+    const firstWs = MockWebSocket.instances[0];
+    firstWs.emitOpen();
+    const firstReader = (await firstPromise).body!.getReader();
+
+    // The first socket fails via onerror.
+    firstWs.emitError();
+    await expect(firstReader.read()).rejects.toThrow('WebSocket connection error');
+
+    // A new send opens a fresh socket and registers a new stream...
+    const secondPromise = transport('two', [], new AbortController().signal);
+    const secondWs = MockWebSocket.instances[1];
+    secondWs.emitOpen();
+    const secondReader = (await secondPromise).body!.getReader();
+
+    // ...before the failed socket's trailing onclose runs.
+    firstWs.emitClose(1006, 'abnormal');
+
+    // The new stream must be unaffected — no spurious close/error.
+    secondWs.onmessage?.({ data: '{"chunk":"live"}' } as MessageEvent);
+    const chunk = await secondReader.read();
+    expect(new TextDecoder().decode(chunk.value)).toBe('data: {"chunk":"live"}\n\n');
+    expect(MockWebSocket.instances).toHaveLength(2);
+  });
+
+  it('drops an undecodable push frame without failing the persistent socket or concurrent streams', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const transport = createWebSocketTransport('wss://api.example.com/chat', {
+        persistent: true,
+        formatMessage: (text) => ({ payload: text, correlationId: text }),
+        correlate: (frame) => {
+          try { return (JSON.parse(frame) as { id?: string }).id ?? null; } catch { return null; }
+        },
+      });
+
+      const firstPromise = transport('one', [], new AbortController().signal);
+      const ws = MockWebSocket.instances[0];
+      ws.emitOpen();
+      const firstReader = (await firstPromise).body!.getReader();
+      const secondReader = (await transport('two', [], new AbortController().signal)).body!.getReader();
+
+      // A stray frame the decoder rejects (a bare number is neither string,
+      // Blob, ArrayBuffer, nor typed array) must not be treated as a socket
+      // failure that nulls the shared socket and errors every active stream.
+      ws.onmessage?.({ data: 999 } as unknown as MessageEvent);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(ws.closedWith).toEqual([]);
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('could not be decoded'),
+        expect.any(Error),
+      );
+
+      // Both concurrent streams stay alive and keep receiving their frames.
+      ws.onmessage?.({ data: JSON.stringify({ id: 'one', token: 'A' }) } as MessageEvent);
+      ws.onmessage?.({ data: JSON.stringify({ id: 'two', token: 'B' }) } as MessageEvent);
+      const decoder = new TextDecoder();
+      expect(decoder.decode((await firstReader.read()).value)).toBe(`data: ${JSON.stringify({ id: 'one', token: 'A' })}\n\n`);
+      expect(decoder.decode((await secondReader.read()).value)).toBe(`data: ${JSON.stringify({ id: 'two', token: 'B' })}\n\n`);
+
+      await firstReader.cancel();
+      await secondReader.cancel();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
+
+describe('createWebSocketTransport correlate-without-persistent dev warning', () => {
+  const ORIGINAL_NODE_ENV = process.env.NODE_ENV;
+
+  beforeEach(() => {
+    MockWebSocket.instances = [];
+    vi.stubGlobal('WebSocket', MockWebSocket);
+  });
+
+  afterEach(() => {
+    process.env.NODE_ENV = ORIGINAL_NODE_ENV;
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    vi.resetModules();
+  });
+
+  // The transient transport warns at most once per process, so each case
+  // re-imports the module to get a fresh warn-once flag.
+  async function freshCreateWebSocketTransport() {
+    vi.resetModules();
+    return (await import('../streaming/createWebSocketTransport')).createWebSocketTransport;
+  }
+
+  it('warns once in dev when correlate is provided without persistent: true', async () => {
+    process.env.NODE_ENV = 'development';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const create = await freshCreateWebSocketTransport();
+
+    create('wss://api.example.com/chat', { correlate: () => null });
+    create('wss://api.example.com/chat', {
+      correlate: () => null,
+      formatMessage: (text) => ({ payload: text, correlationId: text }),
+    });
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('`correlate`'));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('persistent'));
+  });
+
+  it('does not warn when correlate is provided with persistent: true', async () => {
+    process.env.NODE_ENV = 'development';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const create = await freshCreateWebSocketTransport();
+
+    create('wss://api.example.com/chat', { persistent: true, correlate: () => null });
+
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('does not warn for a transient transport without a correlate callback', async () => {
+    process.env.NODE_ENV = 'development';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const create = await freshCreateWebSocketTransport();
+
+    create('wss://api.example.com/chat');
+
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('does not warn in production', async () => {
+    process.env.NODE_ENV = 'production';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const create = await freshCreateWebSocketTransport();
+
+    create('wss://api.example.com/chat', { correlate: () => null });
+
+    expect(warn).not.toHaveBeenCalled();
   });
 });

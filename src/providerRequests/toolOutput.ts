@@ -38,8 +38,7 @@ export function compactJSONString(value: unknown) {
 }
 
 export function toolContextText<TMeta>(message: Message<TMeta>) {
-  const rawText = messageText(message);
-  const text = rawText.trim();
+  const text = messageText(message).trim();
 
   if (!message.toolCall) {
     return text ? `Tool result:\n${text}` : null;
@@ -47,16 +46,27 @@ export function toolContextText<TMeta>(message: Message<TMeta>) {
 
   const name = message.toolCall.name || 'tool';
   const input = safeStringify(message.toolCall.input ?? null);
-  const output = safeStringify(message.toolCall.output ?? (text ? rawText : null));
+  // Resolve output via toolOutputValue so an explicit `output: null` is honored
+  // (rendered as an empty Output) consistently with the structured provider
+  // paths, instead of `??` silently falling through to the streamed text.
+  const output = safeStringify(toolOutputValue(message));
   return `Tool call ${name}\nInput:\n${input}\nOutput:\n${output}`;
 }
 
+// Normalize a tool-call `input` into the object shape required by
+// `tool_use.input` (Anthropic) and `functionCall.args` (Gemini), both typed
+// `Record<string, unknown>`. A record (or a string encoding one) is used
+// directly; any non-object value — including an array, which is never a valid
+// argument object — is wrapped as `{ input: <value> }`. A JSON-array string is
+// parsed first so it is treated the same as a bare array. `openAIToolCallArguments`
+// mirrors this policy for OpenAI tool-call `arguments`.
 export function objectToolInput(value: unknown) {
   if (isRecord(value)) return value;
   if (typeof value === 'string') {
     try {
       const parsed = JSON.parse(value);
       if (isRecord(parsed)) return parsed;
+      if (Array.isArray(parsed)) return { input: parsed };
     } catch {}
     return { input: value };
   }

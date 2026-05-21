@@ -396,6 +396,30 @@ describe('openaiConnector (Responses API)', () => {
     expect(result?.metadata?.usage).toEqual({ promptTokens: 12, completionTokens: 7, totalTokens: 19 });
   });
 
+  it('treats the terminal response.incomplete event like response.completed', () => {
+    const result = openaiConnector.extract(JSON.stringify({
+      type: 'response.incomplete',
+      response: {
+        status: 'incomplete',
+        incomplete_details: { reason: 'max_output_tokens' },
+        usage: { input_tokens: 5, output_tokens: 9, total_tokens: 14 },
+      },
+    }));
+    expect(result?.done).toBe(true);
+    expect(result?.warning?.code).toBe('truncated');
+    expect(result?.metadata?.finishReason).toBe('max_output_tokens');
+    expect(result?.metadata?.usage).toEqual({ promptTokens: 5, completionTokens: 9, totalTokens: 14 });
+  });
+
+  it('drains buffered tool deltas on response.incomplete when output_item.added never arrives', () => {
+    const state = openaiConnector.createState?.();
+    openaiConnector.extract(JSON.stringify({ type: 'response.function_call_arguments.delta', item_id: 'fc_3', delta: '{"x":1}' }), state);
+    const incomplete = openaiConnector.extract(JSON.stringify({ type: 'response.incomplete', response: {} }), state);
+    expect(incomplete?.done).toBe(true);
+    expect(incomplete?.toolDelta?.id).toBe('fc_3');
+    expect(incomplete?.toolDelta?.input).toBe('{"x":1}');
+  });
+
   it('treats response.completed without incomplete_details as a clean done with usage', () => {
     const result = openaiConnector.extract(JSON.stringify({
       type: 'response.completed',

@@ -66,6 +66,27 @@ export function dataUrlFromAttachment(attachment: Attachment) {
   return data ? parseDataUrl(data) : null;
 }
 
+export type OpenAIImageDetail = 'auto' | 'low' | 'high';
+const OPENAI_IMAGE_DETAIL_VALUES: ReadonlySet<string> = new Set<OpenAIImageDetail>(['auto', 'low', 'high']);
+
+/**
+ * Read an optional OpenAI image `detail` hint from `attachment.metadata.openai.imageDetail`.
+ *
+ * Lets callers send low-detail (cheaper) or high-detail images per attachment.
+ * Returns `undefined` unless the metadata carries one of the three documented
+ * values, so the mapper omits `detail` entirely and OpenAI applies its default.
+ */
+export function openAIImageDetail(attachment: Attachment): OpenAIImageDetail | undefined {
+  const metadata = attachment.metadata;
+  const openai = metadata && typeof metadata.openai === 'object' && metadata.openai
+    ? (metadata.openai as Record<string, unknown>)
+    : undefined;
+  const detail = openai?.imageDetail;
+  return typeof detail === 'string' && OPENAI_IMAGE_DETAIL_VALUES.has(detail)
+    ? (detail as OpenAIImageDetail)
+    : undefined;
+}
+
 export type ProviderAttachmentSource =
   | { kind: 'data-url'; mimeType: string; base64: string }
   | { kind: 'file-uri'; mimeType: string; fileUri: string }

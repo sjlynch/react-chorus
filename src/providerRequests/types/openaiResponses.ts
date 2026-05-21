@@ -21,6 +21,8 @@ export interface OpenAIResponsesOutputTextPart {
 export interface OpenAIResponsesInputImagePart {
   type: 'input_image';
   image_url: string;
+  /** Optional fidelity hint sourced from `attachment.metadata.openai.imageDetail`. */
+  detail?: 'auto' | 'low' | 'high';
 }
 
 export interface OpenAIResponsesInputFilePart {

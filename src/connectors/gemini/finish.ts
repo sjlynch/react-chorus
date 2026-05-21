@@ -5,6 +5,7 @@ import {
   isUnspecifiedFinishReason,
 } from '../geminiSemantics';
 import type { ConnectorResult } from '../types';
+import { addWarning } from './result';
 
 export function applyFinishReason(
   result: ConnectorResult,
@@ -30,17 +31,15 @@ export function applyFinishReason(
     result.done = true;
     if (finishReason === 'MAX_TOKENS') {
       result.metadata = { ...(result.metadata ?? {}), finishReason };
-      // Only set the truncation warning when none is present yet, so a chunk
-      // that carries both an unsupported part and `finishReason: MAX_TOKENS`
-      // keeps the earlier `unsupported-part` warning instead of clobbering it
-      // — consistent with the defensive guard in candidates.ts.
-      if (!result.warning) {
-        result.warning = {
-          code: 'truncated',
-          message: 'Gemini response truncated by maxOutputTokens',
-          payload: obj,
-        };
-      }
+      // Append the truncation warning rather than overwrite: a chunk that
+      // carries both an unsupported part and `finishReason: MAX_TOKENS` must
+      // surface *both* diagnostics. Truncation is the more actionable signal,
+      // so it must never be dropped just because an earlier warning exists.
+      addWarning(result, {
+        code: 'truncated',
+        message: 'Gemini response truncated by maxOutputTokens',
+        payload: obj,
+      });
     }
   }
   return result;

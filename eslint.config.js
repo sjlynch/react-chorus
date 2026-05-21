@@ -6,9 +6,16 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['coverage', 'dist', 'dist-playground', 'examples/*/dist', 'examples/*/.next', 'examples/*/next-env.d.ts']),
+  // `examples/**` is ignored wholesale: each example ships its own toolchain
+  // (Vite or Next) and per-example tsconfig, none of which is wired into this
+  // config's typescript-eslint project. Linting example source here would
+  // resolve `react-chorus` imports against the wrong project context. Examples
+  // are instead gated by `npm run verify:examples`, which installs and
+  // build-smokes every example (see scripts/check-example-metadata.mjs).
+  globalIgnores(['coverage', 'dist', 'dist-playground', 'examples/**']),
   {
-    files: ['**/*.{ts,tsx}'],
+    // `scripts/**/*.mjs` are real, tested build/verify scripts — lint them too.
+    files: ['**/*.{ts,tsx}', 'scripts/**/*.mjs'],
     extends: [
       js.configs.recommended,
       tseslint.configs.recommended,
@@ -16,7 +23,8 @@ export default defineConfig([
       reactRefresh.configs.vite,
     ],
     languageOptions: {
-      ecmaVersion: 2020,
+      // ecmaVersion 2022 covers top-level `await`, used by the scripts/*.mjs files.
+      ecmaVersion: 2022,
       globals: {
         ...globals.browser,
         ...globals.node,

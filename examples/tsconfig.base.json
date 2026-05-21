@@ -1,6 +1,7 @@
-// Shared TypeScript base for the Vite examples. Each Vite example extends this
-// with its own tsconfig.json so `tsc --noEmit` and IDE typechecking work. Vite
-// still performs the actual transpile/build; this config is type-only (noEmit).
+// Shared TypeScript base for the examples. Each example extends this with its
+// own tsconfig.json so `tsc --noEmit` and IDE typechecking work. The bundler
+// (Vite, or Next for the with-next App Router example) still performs the
+// actual transpile/build; this config is type-only (noEmit).
 {
   "compilerOptions": {
     "target": "ES2022",

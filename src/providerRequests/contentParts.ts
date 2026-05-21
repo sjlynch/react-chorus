@@ -4,6 +4,7 @@ import {
   unsupportedAttachmentPart,
   type ProviderAttachmentSource,
 } from './attachments';
+import { warnOnceInDev } from './devWarn';
 import { messageText } from './toolOutput';
 import type { ProviderMappingOptions } from './types/common';
 
@@ -33,6 +34,8 @@ export function attachmentPartFromSource<TPart>(
 }
 
 export interface MessageContentPartsSpec<TMeta, TPart> {
+  /** Provider label used in the dev warn-once key emitted when an attachment degrades to text. */
+  provider: string;
   createTextPart: (text: string) => TPart;
   mapAttachment?: (attachment: Attachment, message: Message<TMeta>) => TPart | null;
   includeAttachments?: (message: Message<TMeta>) => boolean;
@@ -54,12 +57,29 @@ export function messageContentParts<TMeta, TPart>(
   spec: MessageContentPartsSpec<TMeta, TPart>,
 ): TPart[] {
   const parts = messageTextParts(message, spec.createTextPart);
-  const includeAttachments = spec.includeAttachments?.(message) ?? (message.role === 'user');
+  // Attachments are surfaced for every role that carries them, not just `user`.
+  // `AssistantMessage` explicitly allows `attachments`, and a dropped attachment
+  // on any role must be observable (as the unsupported-attachment text block,
+  // with a dev warning) rather than silently discarded.
+  const includeAttachments = spec.includeAttachments?.(message) ?? Boolean(message.attachments?.length);
   if (!includeAttachments) return parts;
 
   for (const attachment of message.attachments ?? []) {
-    const part = spec.mapAttachment?.(attachment, message) ?? null;
-    parts.push(part ?? unsupportedAttachmentPart(attachment, message, options, spec.createTextPart));
+    // Only `user`-turn attachments are mapped to provider media parts: no
+    // provider accepts an image/file block in an assistant (or system) turn, so
+    // non-user attachments always degrade to the unsupported-attachment block.
+    const part = message.role === 'user' ? spec.mapAttachment?.(attachment, message) ?? null : null;
+    if (part) {
+      parts.push(part);
+      continue;
+    }
+    const name = attachment.name || 'attachment';
+    warnOnceInDev(
+      `react-chorus:unsupported-attachment:${spec.provider}:${name}`,
+      `[react-chorus] ${spec.provider} request: attachment "${name}" could not be represented in the ` +
+        'provider schema and was replaced with an unsupported-attachment text block.',
+    );
+    parts.push(unsupportedAttachmentPart(attachment, message, options, spec.createTextPart));
   }
 
   return parts;
