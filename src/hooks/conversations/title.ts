@@ -3,6 +3,9 @@ import type { RenameFromFirstMessageOptions } from './types';
 
 export const DEFAULT_FIRST_MESSAGE_TITLE_MAX_LENGTH = 48;
 
+/** Roles `titleFromFirstMessage` scans when `includeRoles` is not supplied. */
+export const DEFAULT_TITLE_SOURCE_ROLES: Message['role'][] = ['user'];
+
 export function normalizeTitle(title: string | undefined, fallback: string) {
   const trimmed = title?.trim();
   return trimmed || fallback;
@@ -10,10 +13,14 @@ export function normalizeTitle(title: string | undefined, fallback: string) {
 
 export function titleFromFirstMessage(
   messages: Pick<Message, 'role' | 'text'>[],
-  { fallbackTitle, maxLength = DEFAULT_FIRST_MESSAGE_TITLE_MAX_LENGTH }: Pick<RenameFromFirstMessageOptions, 'fallbackTitle' | 'maxLength'> = {},
+  { fallbackTitle, maxLength = DEFAULT_FIRST_MESSAGE_TITLE_MAX_LENGTH, includeRoles }: Pick<RenameFromFirstMessageOptions, 'fallbackTitle' | 'maxLength' | 'includeRoles'> = {},
 ) {
-  const firstUserText = messages.find(message => message.role === 'user' && (message.text ?? '').trim().length > 0)?.text;
-  const normalized = (firstUserText ?? fallbackTitle ?? '').replace(/\s+/g, ' ').trim();
+  // Default to user messages: a conversation seeded with a system prompt + an
+  // assistant greeting has no user text until the user replies. Callers wanting
+  // to title such an assistant-first conversation pass `includeRoles`.
+  const roles = includeRoles && includeRoles.length > 0 ? includeRoles : DEFAULT_TITLE_SOURCE_ROLES;
+  const firstText = messages.find(message => roles.includes(message.role) && (message.text ?? '').trim().length > 0)?.text;
+  const normalized = (firstText ?? fallbackTitle ?? '').replace(/\s+/g, ' ').trim();
   if (!normalized) return '';
 
   const limit = Math.max(1, maxLength);
