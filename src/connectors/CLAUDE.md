@@ -41,7 +41,7 @@ Known string names use the centralized `ConnectorName` alias in `src/types.ts`.
 
 - `connectors.ts` — stable public barrel for connector types, exposed connector singletons (`anthropicConnector`, `geminiConnector`, `aiSdkConnector`, `autoConnector`), `getConnector`, and OpenAI connector options/factory.
 - `registry.ts` — `getConnector()` string/custom-object registry plus dev-only warning-once logic for unknown names and ignored connector options.
-- `auto.ts` — `autoConnector`, provider shape detection, AI SDK UI-message-stream guards, conservative AI SDK data-stream detection, and flush routing to the first consumer.
+- `auto.ts` — `autoConnector` facade. Internals are split under `connectors/auto/`: `detection.ts` for provider shape detection, AI SDK UI-message-stream guards, conservative AI SDK data-stream detection, and generic JSON text fallback; `state.ts` for auto state creation, consumer tracking, and flush routing to the first consumer; `dispatch.ts` for the documented auto dispatch order.
 - `openai.ts` — public OpenAI facade and state factory. Internals are split under `connectors/openai/`: `thinkTagSplitter.ts` for `<think>` parsing + EOF flush, `chatCompletions.ts` for `choices[].delta`, `responses.ts` for `response.*` events, and `shared.ts` for small result helpers.
 - `anthropic.ts` — reads `content_block_delta` text/thinking events and `tool_use` / `input_json_delta`; treats `message_stop` as done.
 - `gemini.ts` — public Gemini facade preserving the `src/connectors/gemini` import path. Internals are split under `connectors/gemini/`: `connector.ts` orchestrates parse flow, `state.ts` keeps first-seen-wins function-call ids, `candidates.ts` selects candidate index 0 and extracts parts, `toolDeltas.ts` maps `functionCall` parts, `unsupportedParts.ts` warns on `inlineData`/`fileData`, `promptFeedback.ts` handles prompt blocking, `finish.ts` handles STOP/MAX_TOKENS/blocked/unspecified finish reasons, and `result.ts` holds result append helpers.
@@ -72,5 +72,5 @@ Do not loosen the AI SDK data-stream guard: `connector="auto"` must render prose
 1. Implement `Connector` in a new file. If it needs parser memory, expose `createState()` and thread the state through helper functions.
 2. Export it from `connectors.ts` and register its string name in `registry.ts` / `getConnector()`.
 3. If exposing a string option, add the name once to centralized `ConnectorName` in `src/types.ts`; `ChorusProps` and `useChorusStream` import that alias.
-4. Add shape detection to `auto.ts` when safe and unambiguous, including `errorPayload` handling and a `flush()` hook if the parser buffers partial output.
+4. Add shape detection to `connectors/auto/detection.ts` and dispatch in `connectors/auto/dispatch.ts` when safe and unambiguous, including `errorPayload` handling and a `flush()` hook if the parser buffers partial output.
 5. Add connector tests for text, reasoning/tool deltas, done, warnings/metadata, in-band errors, EOF flushes, empty/invalid payloads, and auto-detection.
