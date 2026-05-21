@@ -69,10 +69,35 @@ describe('useChorusTranscriptActions', () => {
       expect(result.current.searchMessages('loop').map((m) => m.id)).toEqual(['t']);
     });
 
-    it('matches message reasoning text', () => {
+    it('matches an assistant message by its reasoning text', () => {
       const { result } = renderHook(() => useChorusTranscriptActions(MESSAGES));
       const hits = result.current.searchMessages('ci pipeline');
       expect(hits.map((m) => m.id)).toEqual(['a1']);
+    });
+
+    it('matches a message by an attachment file name', () => {
+      const { result } = renderHook(() => useChorusTranscriptActions(MESSAGES));
+      expect(result.current.searchMessages('shot.png').map((m) => m.id)).toEqual(['u2']);
+      expect(result.current.searchMessages('SHOT.PNG').map((m) => m.id)).toEqual(['u2']);
+    });
+
+    it('does not match reasoning carried on a non-assistant message', () => {
+      // exportMarkdown only renders reasoning for assistant messages, so search
+      // ignores it elsewhere to keep the search/export contract symmetric.
+      const messages: Message[] = [{ id: 's', role: 'system', text: 'visible', reasoning: 'hidden thought' }];
+      const { result } = renderHook(() => useChorusTranscriptActions(messages));
+      expect(result.current.searchMessages('hidden thought')).toEqual([]);
+    });
+
+    it('matches every string exportAs("markdown") renders, and vice versa', () => {
+      const { result } = renderHook(() => useChorusTranscriptActions(MESSAGES));
+      const md = result.current.exportAs('markdown');
+      // Assistant reasoning: rendered in the export AND findable via search.
+      expect(md).toContain('Consider the CI pipeline first.');
+      expect(result.current.searchMessages('Consider the CI pipeline first.').map((m) => m.id)).toEqual(['a1']);
+      // Attachment file name: rendered in the export AND findable via search.
+      expect(md).toContain('shot.png');
+      expect(result.current.searchMessages('shot.png').map((m) => m.id)).toEqual(['u2']);
     });
 
     it('returns the original message references', () => {
@@ -133,6 +158,22 @@ describe('useChorusTranscriptActions', () => {
       expect(md).toContain('**Output:**');
     });
 
+    it('renders an assistant message\'s reasoning under a **Reasoning:** block', () => {
+      const { result } = renderHook(() => useChorusTranscriptActions(MESSAGES));
+      const md = result.current.exportAs('markdown');
+      expect(md).toContain('**Reasoning:**');
+      expect(md).toContain('Consider the CI pipeline first.');
+    });
+
+    it('does not render reasoning carried on a non-assistant message', () => {
+      const messages: Message[] = [{ id: 's', role: 'system', text: 'visible', reasoning: 'hidden thought' }];
+      const { result } = renderHook(() => useChorusTranscriptActions(messages));
+      const md = result.current.exportAs('markdown');
+      expect(md).toContain('visible');
+      expect(md).not.toContain('**Reasoning:**');
+      expect(md).not.toContain('hidden thought');
+    });
+
     it('honors custom role labels for Markdown headings', () => {
       const { result } = renderHook(() =>
         useChorusTranscriptActions(MESSAGES, { roleLabels: { user: 'Customer', assistant: 'Agent' } }),
@@ -182,6 +223,106 @@ describe('useChorusTranscriptActions', () => {
         expect(onCopyError).toHaveBeenCalledTimes(1);
       } finally {
         if (original) Object.defineProperty(navigator, 'clipboard', original);
+      }
+    });
+  });
+
+  describe('downloadAs', () => {
+    type ObjectUrlKey = 'createObjectURL' | 'revokeObjectURL';
+
+    /** Temporarily swap a `URL` object-URL method, restoring it afterwards. */
+    function patchUrl(key: ObjectUrlKey, value: unknown): () => void {
+      const original = Object.getOwnPropertyDescriptor(URL, key);
+      Object.defineProperty(URL, key, { configurable: true, writable: true, value });
+      return () => {
+        if (original) Object.defineProperty(URL, key, original);
+        else Reflect.deleteProperty(URL as unknown as Record<string, unknown>, key);
+      };
+    }
+
+    async function withDownloadEnv<T>(
+      run: (env: {
+        createObjectURL: ReturnType<typeof vi.fn>;
+        revokeObjectURL: ReturnType<typeof vi.fn>;
+        anchors: HTMLAnchorElement[];
+      }) => T | Promise<T>,
+    ): Promise<T> {
+      const createObjectURL = vi.fn(() => 'blob:transcript');
+      const revokeObjectURL = vi.fn();
+      const restore = [patchUrl('createObjectURL', createObjectURL), patchUrl('revokeObjectURL', revokeObjectURL)];
+      const anchors: HTMLAnchorElement[] = [];
+      const clickSpy = vi
+        .spyOn(HTMLAnchorElement.prototype, 'click')
+        .mockImplementation(function (this: HTMLAnchorElement) {
+          anchors.push(this);
+        });
+      try {
+        return await run({ createObjectURL, revokeObjectURL, anchors });
+      } finally {
+        clickSpy.mockRestore();
+        restore.forEach((fn) => fn());
+      }
+    }
+
+    it('downloads Markdown with a default filename and a text/markdown blob', async () => {
+      await withDownloadEnv(async ({ createObjectURL, revokeObjectURL, anchors }) => {
+        const { result } = renderHook(() => useChorusTranscriptActions(MESSAGES));
+        const ok = result.current.downloadAs('markdown');
+        expect(ok).toBe(true);
+        expect(anchors).toHaveLength(1);
+        expect(anchors[0].download).toBe('transcript.md');
+        expect(createObjectURL).toHaveBeenCalledTimes(1);
+        const blob = createObjectURL.mock.calls[0][0] as Blob;
+        expect(blob.type).toBe('text/markdown');
+        expect(await blob.text()).toContain('## User');
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(revokeObjectURL).toHaveBeenCalledWith('blob:transcript');
+      });
+    });
+
+    it('downloads JSON with the json extension and an application/json blob', async () => {
+      await withDownloadEnv(async ({ createObjectURL, anchors }) => {
+        const { result } = renderHook(() => useChorusTranscriptActions(MESSAGES));
+        expect(result.current.downloadAs('json')).toBe(true);
+        expect(anchors[0].download).toBe('transcript.json');
+        const blob = createObjectURL.mock.calls[0][0] as Blob;
+        expect(blob.type).toBe('application/json');
+        expect(JSON.parse(await blob.text())).toEqual(JSON.parse(JSON.stringify(MESSAGES)));
+      });
+    });
+
+    it('appends the format extension to a caller filename that lacks one', async () => {
+      await withDownloadEnv(({ anchors }) => {
+        const { result } = renderHook(() => useChorusTranscriptActions(MESSAGES));
+        result.current.downloadAs('markdown', 'my-chat');
+        expect(anchors[0].download).toBe('my-chat.md');
+      });
+    });
+
+    it('honors a caller filename that already has an extension', async () => {
+      await withDownloadEnv(({ anchors }) => {
+        const { result } = renderHook(() => useChorusTranscriptActions(MESSAGES));
+        result.current.downloadAs('json', 'export.txt');
+        expect(anchors[0].download).toBe('export.txt');
+      });
+    });
+
+    it('returns false without downloading an empty transcript', async () => {
+      await withDownloadEnv(({ createObjectURL, anchors }) => {
+        const { result } = renderHook(() => useChorusTranscriptActions([]));
+        expect(result.current.downloadAs('markdown')).toBe(false);
+        expect(createObjectURL).not.toHaveBeenCalled();
+        expect(anchors).toHaveLength(0);
+      });
+    });
+
+    it('returns false when object URLs are unavailable (e.g. SSR)', () => {
+      const restore = patchUrl('createObjectURL', undefined);
+      try {
+        const { result } = renderHook(() => useChorusTranscriptActions(MESSAGES));
+        expect(result.current.downloadAs('markdown')).toBe(false);
+      } finally {
+        restore();
       }
     });
   });

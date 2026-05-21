@@ -14,5 +14,12 @@ export function handlePromptFeedback(obj: Record<string, unknown>): ConnectorRes
   const message = worstCategory
     ? `Gemini blocked the prompt (blockReason: ${blockReason}, worst category: ${worstCategory})`
     : `Gemini blocked the prompt (blockReason: ${blockReason})`;
-  return { error: message, errorPayload: obj };
+  // Attach the structured safety data as metadata, mirroring the candidate-level SAFETY path.
+  // Without this a telemetry consumer would get safety ratings for response blocks but not
+  // prompt blocks.
+  const metadata: Record<string, unknown> = { blockReason };
+  if (Array.isArray(feedback.safetyRatings) && feedback.safetyRatings.length > 0) {
+    metadata.safetyRatings = feedback.safetyRatings;
+  }
+  return { error: message, errorPayload: obj, metadata };
 }

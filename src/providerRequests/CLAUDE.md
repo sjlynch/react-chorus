@@ -15,4 +15,16 @@ Provider-specific request-body mapping lives in this folder:
 - `types/common.ts` — shared mapping/tool option types and body utility helpers.
 - `types/openaiChat.ts`, `types/openaiResponses.ts`, `types/anthropic.ts`, and `types/gemini.ts` — provider-specific body options and wire-shape interfaces.
 
+## Attachment mapping rules
+
+- **User-turn attachments** are mapped to provider media parts (`image`/`document`/`input_image`/`input_file`/`inlineData`/`fileData`) by each mapper's `mapAttachment`. An attachment that cannot be represented in the provider schema (unsupported MIME, missing/invalid source URL) degrades to an unsupported-attachment text block.
+- **Assistant-turn attachments** are *never* mapped to provider media parts: no provider accepts an image/file block in an assistant turn. `AssistantMessage` allows `attachments`, so a carried attachment is surfaced as the unsupported-attachment text block (an `output_text`/`text` part for OpenAI, joined into the assistant `content` string for Chat Completions) rather than being silently dropped.
+- Every unsupported-attachment substitution emits a `warnOnceInDev` keyed by provider + attachment name, so the data loss is observable in development.
+- `messageContentParts` (in `contentParts.ts`) centralizes this: it surfaces attachments for any role that carries them and only invokes `mapAttachment` for `role === 'user'`.
+- OpenAI image attachments may carry a per-attachment fidelity hint at `attachment.metadata.openai.imageDetail` (`'auto' | 'low' | 'high'`), emitted as `image_url.detail` (Chat Completions) / `input_image.detail` (Responses).
+
+## Tool source detection
+
+`options.ts` decides whether a `tools` value is a Chorus definition array/registry (serialized via `to*Tools`) or a raw provider tool array (forwarded verbatim as the escape hatch). A Chorus array item is recognized by a `handler` function *or* a non-empty string `name` with none of the raw provider marker keys (`type`, `function`, `input_schema`, `functionDeclarations`) — so handler-less definition arrays are still serialized. Raw Gemini tool arrays are forwarded unchanged but checked for empty `functionDeclarations` groups (an opaque-400 trap) with a dev warn.
+
 Keep `src/providerRequests.ts` as the public compatibility facade. When adding a provider, put provider-only rules in a new module here, reuse the shared helpers where possible, and export public names through the facade without changing existing request helper names, body shapes, or type names.

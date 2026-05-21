@@ -100,6 +100,24 @@ describe('development warnings', () => {
     await waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining('`value` makes Chorus controlled')));
   });
 
+  it('warns when value is provided alongside the messages seed', async () => {
+    process.env.NODE_ENV = 'development';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    render(<Chorus value={[]} onChange={vi.fn()} messages={[USER_MSG]} />);
+
+    await waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining('Both `value` and `messages` were provided')));
+  });
+
+  it('warns when value is provided alongside the initialMessages seed', async () => {
+    process.env.NODE_ENV = 'development';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    render(<Chorus value={[]} onChange={vi.fn()} initialMessages={[USER_MSG]} />);
+
+    await waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining('Both `value` and `initialMessages` were provided')));
+  });
+
   it('warns when shouldContinueToolLoop is provided without autoContinueTools', async () => {
     process.env.NODE_ENV = 'development';
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);

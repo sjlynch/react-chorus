@@ -56,7 +56,34 @@ function useTransportHarness(transport: HarnessTransport) {
   });
 }
 
+function useNoHandlerHarness(initial: Message[]) {
+  const [messages, setMessages] = React.useState<Message[]>(initial);
+  const messagesRef = React.useRef<Message[]>(initial);
+  const onChunkRef = React.useRef<((chunk: string, id: string) => void) | undefined>(undefined);
+
+  const updateMessages = React.useCallback((updater: (prev: Message[]) => Message[]) => {
+    const next = updater(messagesRef.current);
+    messagesRef.current = next;
+    setMessages(next);
+    return next;
+  }, []);
+
+  // Neither `onSend` nor `transport` is supplied: there is no response handler.
+  const session = useAssistantSession({
+    messages,
+    updateMessages,
+    seedMessages: initial,
+    minAssistantDelayMs: 0,
+    fallbackErrorMessage: 'failed',
+    onChunkRef,
+    flushPersistence: vi.fn(),
+  });
+
+  return { messages, session };
+}
+
 const TRANSPORT_WARNING = 'transport URL is empty/missing';
+const MISSING_HANDLER_WARNING = 'neither `transport` nor `onSend`';
 
 afterEach(() => {
   cleanup();
@@ -103,6 +130,45 @@ describe('useAssistantSession', () => {
     expect(onSend).not.toHaveBeenCalled();
     expect(result.current.messages).toBe(messagesBeforeEdit);
     expect(result.current.messages[0]).toEqual(expect.objectContaining({ text: 'hello' }));
+  });
+
+  describe('missing response handler guard', () => {
+    it('handleEdit warns and leaves the transcript untouched when no transport or onSend is configured', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const initial: Message[] = [
+        { id: 'u1', role: 'user', text: 'original' },
+        { id: 'a1', role: 'assistant', text: 'answer' },
+      ];
+      const { result } = renderHook(() => useNoHandlerHarness(initial));
+      const before = result.current.messages;
+
+      act(() => {
+        result.current.session.handleEdit('u1', 'edited text');
+      });
+
+      // The edit is rejected before mutating: no commit, just the warning.
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(MISSING_HANDLER_WARNING));
+      expect(result.current.messages).toBe(before);
+      expect(result.current.messages[0]).toEqual(expect.objectContaining({ text: 'original' }));
+    });
+
+    it('handleRegenerate warns and leaves the transcript untouched when no transport or onSend is configured', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const initial: Message[] = [
+        { id: 'u1', role: 'user', text: 'question' },
+        { id: 'a1', role: 'assistant', text: 'answer' },
+      ];
+      const { result } = renderHook(() => useNoHandlerHarness(initial));
+      const before = result.current.messages;
+
+      act(() => {
+        result.current.session.handleRegenerate('a1');
+      });
+
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(MISSING_HANDLER_WARNING));
+      expect(result.current.messages).toBe(before);
+      expect(result.current.messages[1]).toEqual(expect.objectContaining({ text: 'answer' }));
+    });
   });
 
   describe('misconfigured transport resolver', () => {

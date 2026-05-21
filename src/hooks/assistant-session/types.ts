@@ -5,6 +5,18 @@ import type { SendCallbacks } from '../useChorusStream';
 export interface ChorusSendHelpers {
   appendAssistant: (chunk: string) => void;
   appendReasoning?: (chunk: string) => void;
+  /**
+   * Render a `role: 'tool'` row in the transcript from an accumulated connector
+   * tool delta. This helper is **presentation only**: unlike the `transport`
+   * send path, it does NOT execute registered `tools` handlers, fire
+   * `onToolCall` / `onToolDelta`, or drive the `autoContinueTools` loop, so the
+   * row's `toolCall.output` stays unset unless you fill it in.
+   *
+   * On the `onSend` path you own tool execution. After running the tool
+   * yourself, populate the row by calling `appendToolDelta` again with the same
+   * `delta.id` and an `output` (deltas merge by id), and stream the model's
+   * follow-up turn with `appendAssistant`.
+   */
   appendToolDelta?: (delta: ConnectorToolDelta) => void;
   finalizeAssistant: () => void;
   /** Complete callback set for bridging `useChorusStream(...).send()` through `onSend`. */
@@ -22,6 +34,16 @@ export interface ChorusSendHelpers {
  * a `Message`. An `onSend` that resolves without appending or returning a
  * message closes the turn silently — `sending` flips back off but no
  * `onFinish`/`onAbort`/`onError` observer fires (Chorus warns once in dev).
+ *
+ * The `messages` argument is a snapshot of the transcript captured when the
+ * turn started. A `Message` returned from `onSend` is appended to the *live*
+ * transcript when the promise resolves — not to that snapshot — so the
+ * transcript must not be mutated while an `onSend` is in flight (resolving a
+ * delete confirmation, a controlled host re-deriving the array in `onChange`,
+ * or a persistence load). Mutating it mid-flight lands the returned assistant
+ * message on a transcript that no longer matches what `onSend` reasoned about.
+ * Stream via `helpers.appendAssistant()` instead of returning a `Message` if
+ * the transcript can change during the turn.
  */
 export type ChorusOnSend<TMeta = Record<string, unknown>> = (
   text: string,
@@ -139,7 +161,15 @@ export type ChorusShouldContinueToolLoop<TMeta = Record<string, unknown>> = (con
 export interface UpdateMessagesOptions {
   flushPersistence?: boolean;
   removePersistenceIfEmpty?: boolean;
-  reason?: 'send' | 'assistant' | 'retry' | 'edit' | 'regenerate' | 'delete' | 'clear' | 'update';
+  /**
+   * Route this update straight to the persistence write queue, bypassing the
+   * controlled-host `onChange`, the uncontrolled `setInternalMsgs`, and the
+   * `onMessagesChange` observer. Used by the `useRAFQueue` unmount flush so a
+   * final buffered token is persisted without a host callback firing after the
+   * component has torn down.
+   */
+  persistOnly?: boolean;
+  reason?: 'send' | 'assistant' | 'retry' | 'edit' | 'regenerate' | 'delete' | 'clear' | 'error-cleanup' | 'update';
 }
 
 export type UpdateSessionMessages<TMeta> = (

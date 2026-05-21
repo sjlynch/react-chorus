@@ -371,4 +371,42 @@ describe('Chorus imperative ref', () => {
 
     await waitFor(() => expect(screen.queryByText('staged.txt')).not.toBeInTheDocument());
   });
+
+  it('warns once per method when an imperative call is rejected because writes are gated', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const ref = React.createRef<ChorusRef>();
+      // Controlled without `onChange`: imperative writes cannot be reflected.
+      render(
+        <Chorus
+          ref={ref}
+          value={[
+            { id: 'u1', role: 'user', text: 'Hello' },
+            { id: 'a1', role: 'assistant', text: 'Hi' },
+          ]}
+          onSend={vi.fn<OnSend>(async () => undefined)}
+          minAssistantDelayMs={0}
+        />,
+      );
+
+      const rejectionWarnings = () =>
+        warn.mock.calls.filter(call => String(call[0]).includes('distinct from an invalid-argument/no-op'));
+
+      act(() => { ref.current?.send('hello'); });
+      act(() => { ref.current?.send('hello again'); });
+
+      // The misconfiguration is reported, and explains it is distinct from an
+      // ordinary no-op `false` — but only once for the repeated `send` call.
+      expect(rejectionWarnings()).toHaveLength(1);
+      expect(rejectionWarnings()[0][0]).toContain('`ChorusRef.send()`');
+      expect(rejectionWarnings()[0][0]).toContain('controlled');
+
+      // A different imperative method warns on its own.
+      act(() => { ref.current?.regenerate('a1'); });
+      expect(rejectionWarnings()).toHaveLength(2);
+      expect(rejectionWarnings()[1][0]).toContain('`ChorusRef.regenerate()`');
+    } finally {
+      warn.mockRestore();
+    }
+  });
 });

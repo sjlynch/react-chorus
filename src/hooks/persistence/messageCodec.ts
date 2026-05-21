@@ -94,8 +94,25 @@ function validateStoredMessage<TMeta>(value: unknown): { ok: true; message: Mess
   return { ok: true, message: value as unknown as Message<TMeta> };
 }
 
+/**
+ * Warns (in dev) when a stored payload deserialized to something other than an
+ * array — e.g. a `{"messages":[...]}` object written by a different tool or an
+ * older format the host migrated. `null`/`undefined` means "nothing stored" and
+ * stays silent; any other non-array value loudly signals the transcript was
+ * dropped, matching the dev-warning discipline for invalid message entries.
+ */
+function warnNonArrayPayload(parsed: unknown): void {
+  if (parsed === null || parsed === undefined) return;
+  warnInDev(
+    `[Chorus] Expected an array of persisted messages, got ${typeof parsed}; treating as empty.`,
+  );
+}
+
 function validateStoredMessages<TMeta>(parsed: unknown): Message<TMeta>[] {
-  if (!Array.isArray(parsed)) return [];
+  if (!Array.isArray(parsed)) {
+    warnNonArrayPayload(parsed);
+    return [];
+  }
 
   const valid: Message<TMeta>[] = [];
   const dropped: Array<{ index: number; id?: string; reason: string }> = [];
@@ -130,8 +147,11 @@ function validateStoredMessages<TMeta>(parsed: unknown): Message<TMeta>[] {
  * Invalid entries dropped here include: non-object entries, missing or empty `id`,
  * unknown `role`, non-string `text` on non-tool messages, tool messages without a
  * valid `toolCall` (object with non-blank `name`), and attachments on roles that do
- * not support them. Pass a custom `deserializeMessages` to take over validation; the
- * persistence hook still applies an array guard to whatever the custom hook returns.
+ * not support them. A non-array payload (e.g. a `{"messages":[...]}` object) loads as
+ * empty with a dev warning, so a silently unreadable transcript is not mistaken for an
+ * empty one. Pass a custom `deserializeMessages` to take over validation; the
+ * persistence hook still applies an array guard (with the same dev warning) to whatever
+ * the custom hook returns.
  */
 export function defaultDeserializeMessages<TMeta>(raw: string): Message<TMeta>[] {
   const parsed = JSON.parse(raw) as unknown;
@@ -146,7 +166,11 @@ export function parseStoredMessages<TMeta = Record<string, unknown>>(
   if (!raw) return { messages: [], error: null };
   try {
     const parsed = deserializeMessages(raw);
-    return { messages: Array.isArray(parsed) ? parsed : [], error: null };
+    if (!Array.isArray(parsed)) {
+      warnNonArrayPayload(parsed);
+      return { messages: [], error: null };
+    }
+    return { messages: parsed, error: null };
   } catch (error) {
     return { messages: [], error: createPersistenceError(key, 'deserialize', error) };
   }

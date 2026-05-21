@@ -24,8 +24,16 @@ export interface RenameFromFirstMessageOptions {
   overwrite?: boolean;
   /** Maximum generated title length before adding an ellipsis. Defaults to 48. */
   maxLength?: number;
-  /** Used when no non-empty user message text exists. */
+  /** Used when no eligible non-empty message text exists. */
   fallbackTitle?: string;
+  /**
+   * Message roles eligible to source the generated title, scanned in `messages`
+   * order. Defaults to `['user']`. Pass `['assistant']` to title an
+   * assistant-first conversation (system prompt + assistant greeting, no user
+   * reply yet), or `['user', 'assistant']` to title from whichever non-empty
+   * message of those roles appears first.
+   */
+  includeRoles?: Message['role'][];
 }
 
 export interface UseConversationsOptions {
