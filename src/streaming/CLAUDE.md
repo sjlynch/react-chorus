@@ -12,8 +12,8 @@ The type is exported from `src/hooks/useChorusStream.ts` and re-exported from `C
 
 ## Streaming pipeline modules
 
-- `readSSEStream.ts` parses SSE data fields, including one leading BOM, colonless `data` fields, multiline payloads, and CR/LF variants. It also captures the named `event:` field and passes it to `onEvent(payload, eventName?)`. Its end-of-stream "no Server-Sent Events" guard treats a `text/event-stream` that contained any SSE-shaped line (`data:` / `event:` / `:` comment) as valid, so keepalive/event-only streams resolve cleanly.
-- `delayedStreamEvents.ts` buffers first text/reasoning/tool events for `minDelayMs` and preserves callback-error semantics.
+- `readSSEStream.ts` exposes the stream-independent `createSSEParser` state machine for line splitting, one-leading-BOM handling, `data:`/`event:` fields, comments/keepalives, EOF flush, and named-event dispatch. `readSSEStream` is the `Response`/`ReadableStream` adapter plus abort handling and the end-of-stream "no Server-Sent Events" guard; `text/event-stream` bodies with any SSE-shaped line (`data:` / `event:` / `:` comment) remain valid, so keepalive/event-only streams resolve cleanly.
+- `delayedStreamEvents.ts` buffers first text/reasoning/tool events for `minDelayMs`; internals are split into release scheduling, delayed event queue, abort cancellation, and callback delivery/error propagation helpers while preserving callback-error semantics.
 - `errors.ts` defines `ChorusStreamError`, HTTP error-body snippet/timeout handling, and connector `errorPayload` preservation.
 - `toolDeltaAccumulator.ts` merges streamed tool-call deltas before callbacks see them.
 ## Fetch SSE transport

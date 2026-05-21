@@ -1,8 +1,8 @@
 import type { Attachment, Message } from '../types';
-import { resolveProviderAttachmentSource, unsupportedAttachmentPart } from './attachments';
+import { attachmentPartFromSource, messageContentParts } from './contentParts';
 import { metadataBoolean, metadataString } from './metadata';
 import { resolveProviderSystem, stripAnthropicOptions, systemTextFromHistory } from './options';
-import { messageText, objectToolInput, toolContextText, toolOutputText } from './toolOutput';
+import { objectToolInput, toolContextText, toolOutputText } from './toolOutput';
 import { mapHistoryWithToolRuns } from './toolRunMapper';
 import type { ProviderMappingOptions } from './types/common';
 import type {
@@ -77,44 +77,34 @@ const ANTHROPIC_DATA_URL_MIME_TYPES = new Set([
 ]);
 
 function anthropicAttachmentBlock(attachment: Attachment): AnthropicImageBlock | AnthropicDocumentBlock | null {
-  const source = resolveProviderAttachmentSource(attachment, ANTHROPIC_DATA_URL_MIME_TYPES);
-  if (source.kind !== 'data-url') return null;
-
-  if (ANTHROPIC_IMAGE_MIME_TYPES.has(source.mimeType)) {
-    return {
-      type: 'image',
-      source: { type: 'base64', media_type: source.mimeType, data: source.base64 },
-    };
-  }
-  if (ANTHROPIC_DOCUMENT_MIME_TYPES.has(source.mimeType)) {
-    return {
-      type: 'document',
-      source: { type: 'base64', media_type: source.mimeType, data: source.base64 },
-    };
-  }
-  return null;
+  return attachmentPartFromSource<AnthropicImageBlock | AnthropicDocumentBlock>(attachment, {
+    dataUrlMimeTypes: ANTHROPIC_DATA_URL_MIME_TYPES,
+    dataUrl: source => {
+      if (ANTHROPIC_IMAGE_MIME_TYPES.has(source.mimeType)) {
+        return {
+          type: 'image',
+          source: { type: 'base64', media_type: source.mimeType, data: source.base64 },
+        };
+      }
+      if (ANTHROPIC_DOCUMENT_MIME_TYPES.has(source.mimeType)) {
+        return {
+          type: 'document',
+          source: { type: 'base64', media_type: source.mimeType, data: source.base64 },
+        };
+      }
+      return null;
+    },
+  });
 }
 
 function anthropicContentBlocks<TMeta>(
   message: Message<TMeta>,
   options: ProviderMappingOptions<TMeta>,
 ): AnthropicContentBlock[] {
-  const blocks: AnthropicContentBlock[] = [];
-  const text = messageText(message);
-  if (text.trim()) blocks.push({ type: 'text', text });
-
-  if (message.role === 'user') {
-    for (const attachment of message.attachments ?? []) {
-      const block = anthropicAttachmentBlock(attachment);
-      if (block) {
-        blocks.push(block);
-      } else {
-        blocks.push(unsupportedAttachmentPart(attachment, message, options, text => ({ type: 'text', text })));
-      }
-    }
-  }
-
-  return blocks;
+  return messageContentParts<TMeta, AnthropicContentBlock>(message, options, {
+    createTextPart: text => ({ type: 'text', text }),
+    mapAttachment: anthropicAttachmentBlock,
+  });
 }
 
 function toAnthropicMessage<TMeta>(message: Message<TMeta>, options: ProviderMappingOptions<TMeta>): AnthropicMessage | null {

@@ -3,7 +3,8 @@ import { Chorus } from '../../Chorus';
 import type { ChorusToolRegistry } from '../../Chorus';
 import type { Message, Role } from '../../types';
 import { DEMO_PALETTE } from './palettes';
-import { lookupWeather, toolAgentTransport, type WeatherFixture } from './toolAgentTransport';
+import { toolAgentTransport } from './toolAgentTransport';
+import { lookupWeather, type WeatherFixture } from './weatherFixtures';
 
 const WELCOME_MESSAGE: Message = {
   id: 'welcome-tool-agent',

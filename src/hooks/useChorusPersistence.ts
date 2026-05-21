@@ -157,7 +157,7 @@ export function useChorusPersistence<TMeta = Record<string, unknown>>(
     writeCoordination,
   );
 
-  usePersistenceReadLifecycle(
+  usePersistenceReadLifecycle({
     key,
     storage,
     writeVersionRef,
@@ -170,7 +170,7 @@ export function useChorusPersistence<TMeta = Record<string, unknown>>(
     deserializeMessagesRef,
     queueWrite,
     reportPersistenceError,
-  );
+  });
 
   const onChange = React.useCallback((messages: Message<TMeta>[], writeOptions?: PersistenceWriteOptions) => {
     const k = keyRef.current;
