@@ -1,5 +1,6 @@
 import React from 'react';
 import { useLatestRef } from '../useLatestRef';
+import { isTransportPresent } from './transportResolver';
 
 export interface SessionBusyDeps {
   transport: unknown;
@@ -27,10 +28,13 @@ export function useSessionBusy({
   internalSendingRef,
 }: SessionBusyDeps): SessionBusyState {
   const streamSendingRef = useLatestRef(streamSending);
-  const sending = transport ? (streamSending || transportBusy) : internalSending;
+  // Gate on transport *presence*, not bare truthiness, so a misconfigured
+  // `transport=""` reports transport busy state (matching the transport send
+  // path) instead of falling back to the `onSend`-only `internalSending`.
+  const sending = isTransportPresent(transport) ? (streamSending || transportBusy) : internalSending;
 
   const isBusy = React.useCallback(() => (
-    transportRef.current
+    isTransportPresent(transportRef.current)
       ? streamSendingRef.current || transportBusyRef.current
       : internalSendingRef.current
   ), [internalSendingRef, streamSendingRef, transportBusyRef, transportRef]);

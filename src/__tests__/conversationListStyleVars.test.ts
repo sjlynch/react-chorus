@@ -18,6 +18,7 @@ const FULL_PALETTE: Required<Palette> = {
   errorBg: '#101029', errorBorder: '#101030', errorText: '#101031',
   toolBorder: '#101032', toolHeaderBg: '#101033', toolHeaderText: '#101034', toolHeaderHover: '#101035',
   toolNameText: '#101036', toolBodyBg: '#101037', toolLabelText: '#101038', toolCodeText: '#101039',
+  toolRunningText: '#101040',
 };
 
 describe('conversation-list styleVarsFromPalette parity', () => {
