@@ -14,7 +14,7 @@ root README.
 
 ## Prerequisites
 
-- Node.js 20+
+- Node.js 20.19+ or 22.12+ (required by the example's `vite: ^8` toolchain)
 - No API keys — the bundled `ws` server generates the reply locally.
 
 ## Run from a fresh clone
@@ -39,7 +39,7 @@ npm start
 
 The server logs `Mock Anthropic WebSocket backend listening on ws://localhost:8787`.
 Override the port with `PORT=9000 npm start`; if you do, update `WS_URL` in
-[`../src/App.tsx`](./src/App.tsx) to match.
+[`src/App.tsx`](./src/App.tsx) to match.
 
 ### 3. Terminal 2 — Vite frontend
 

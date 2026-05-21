@@ -22,14 +22,19 @@ export interface ChorusTranscriptActionsOptions {
 
 export interface ChorusTranscriptActions<TMeta = Record<string, unknown>> {
   /**
-   * Case-insensitive substring search across each message's `text`, `reasoning`,
-   * and (for tool messages) `toolCall.name`. Returns `[]` for a blank query.
+   * Case-insensitive substring search across each message's `text`,
+   * `reasoning`, and — for tool messages — `toolCall.name` plus its serialized
+   * `input` and `output` (the same values `exportAs` renders, so a query that
+   * matches the export also matches here). Returns `[]` for a blank query.
    */
   searchMessages(query: string): Message<TMeta>[];
   /**
    * Copy the whole transcript to the clipboard. Defaults to Markdown; pass
-   * `'json'` for the raw structure. Resolves `false` when the Clipboard API is
-   * unavailable or the write rejects (and calls `onCopyError`).
+   * `'json'` for the raw structure. Resolves `false` without touching the
+   * clipboard when the transcript is empty (a non-error signal a host can use
+   * to disable a "copy conversation" button — `onCopyError` is not called).
+   * Also resolves `false`, and calls `onCopyError`, when the Clipboard API is
+   * unavailable or the write rejects.
    */
   copyAll(format?: TranscriptExportFormat): Promise<boolean>;
   /**
@@ -40,13 +45,6 @@ export interface ChorusTranscriptActions<TMeta = Record<string, unknown>> {
   exportAs(format: TranscriptExportFormat): string;
 }
 
-function messageMatchesQuery<TMeta>(message: Message<TMeta>, needle: string): boolean {
-  if (message.text && message.text.toLowerCase().includes(needle)) return true;
-  if (message.reasoning && message.reasoning.toLowerCase().includes(needle)) return true;
-  if (message.role === 'tool' && message.toolCall.name.toLowerCase().includes(needle)) return true;
-  return false;
-}
-
 function stringifyToolValue(value: unknown): string {
   if (typeof value === 'string') return value;
   try {
@@ -54,6 +52,20 @@ function stringifyToolValue(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+function messageMatchesQuery<TMeta>(message: Message<TMeta>, needle: string): boolean {
+  if (message.text && message.text.toLowerCase().includes(needle)) return true;
+  if (message.reasoning && message.reasoning.toLowerCase().includes(needle)) return true;
+  if (message.role === 'tool') {
+    const { name, input, output } = message.toolCall;
+    if (name.toLowerCase().includes(needle)) return true;
+    // Tool I/O is often the substantive content in an agentic transcript and
+    // exportAs renders it, so search the same serialized input/output here.
+    if (input !== undefined && stringifyToolValue(input).toLowerCase().includes(needle)) return true;
+    if (output !== undefined && stringifyToolValue(output).toLowerCase().includes(needle)) return true;
+  }
+  return false;
 }
 
 function exportMarkdown<TMeta>(messages: Message<TMeta>[], roleLabels?: Partial<Record<Role, string>>): string {
@@ -121,7 +133,13 @@ export function useChorusTranscriptActions<TMeta = Record<string, unknown>>(
 
   const copyAll = React.useCallback(
     (format: TranscriptExportFormat = 'markdown') => {
-      const text = exportTranscript(messagesRef.current, format, optionsRef.current?.roleLabels);
+      const currentMessages = messagesRef.current;
+      // An empty transcript exports to '' (markdown) or '[]' (json); writing
+      // either would silently report success on a "copy conversation" button.
+      // Resolve false without touching the clipboard so the host can disable
+      // it — this is not an error, so onCopyError is intentionally not called.
+      if (currentMessages.length === 0) return Promise.resolve(false);
+      const text = exportTranscript(currentMessages, format, optionsRef.current?.roleLabels);
       return writeTextToClipboard(text, optionsRef.current?.onCopyError);
     },
     [messagesRef, optionsRef],

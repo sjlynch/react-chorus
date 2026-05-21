@@ -81,8 +81,11 @@ describe('autoConnector', () => {
 
   it('delegates to aiSdkConnector for Vercel AI SDK data-stream protocol lines', () => {
     expect(autoConnector.extract('0:"hello"')).toEqual({ text: 'hello' });
-    expect(autoConnector.extract('e:{"finishReason":"stop","usage":{}}')).toEqual({ done: true });
-    expect(autoConnector.extract('3:"upstream failed"')).toEqual({ error: 'upstream failed', errorPayload: 'upstream failed' });
+    expect(autoConnector.extract('d:{"finishReason":"stop","usage":{}}')).toEqual({ done: true });
+    // `e:` (finish-step) is still detected and delegated, but keeps the stream open.
+    expect(autoConnector.extract('e:{"finishReason":"tool-calls","usage":{}}')).toBeNull();
+    expect(autoConnector.extract('3:"upstream failed"'))
+      .toEqual({ error: 'upstream failed', errorPayload: '3:"upstream failed"' });
   });
 
   it('delegates to geminiConnector for Gemini-shaped JSON', () => {
@@ -146,7 +149,7 @@ describe('autoConnector', () => {
 
   it('still routes genuine data-stream frames after tightening the auto dispatch', () => {
     expect(autoConnector.extract('0:"hello"')).toEqual({ text: 'hello' });
-    expect(autoConnector.extract('e:{"finishReason":"stop","usage":{}}')).toEqual({ done: true });
+    expect(autoConnector.extract('d:{"finishReason":"stop","usage":{}}')).toEqual({ done: true });
   });
 
   it('parses an AI SDK frame carrying a stray top-level error key as its frame type, matching aiSdkConnector', () => {

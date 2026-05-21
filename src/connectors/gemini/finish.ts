@@ -30,11 +30,17 @@ export function applyFinishReason(
     result.done = true;
     if (finishReason === 'MAX_TOKENS') {
       result.metadata = { ...(result.metadata ?? {}), finishReason };
-      result.warning = {
-        code: 'truncated',
-        message: 'Gemini response truncated by maxOutputTokens',
-        payload: obj,
-      };
+      // Only set the truncation warning when none is present yet, so a chunk
+      // that carries both an unsupported part and `finishReason: MAX_TOKENS`
+      // keeps the earlier `unsupported-part` warning instead of clobbering it
+      // — consistent with the defensive guard in candidates.ts.
+      if (!result.warning) {
+        result.warning = {
+          code: 'truncated',
+          message: 'Gemini response truncated by maxOutputTokens',
+          payload: obj,
+        };
+      }
     }
   }
   return result;

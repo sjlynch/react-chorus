@@ -41,7 +41,7 @@ react-chorus is for React developers who want a drop-in AI chat UI that stays co
 
 ## Install
 
-react-chorus requires Node.js 20 or newer for package installation and server-side usage. Contributors running the Vite-powered dev/build tooling should use Node 20.19+ or Node 22.12+.
+react-chorus requires Node.js 20.19+ or 22.12+ for package installation, server-side usage, and the Vite-powered dev/build tooling. Installing on an older Node 20 release (20.0–20.18) emits an `npm WARN EBADENGINE` warning.
 
 ```bash
 npm install react-chorus
@@ -702,7 +702,7 @@ Gemini `functionCall.name` maps to `toolCall.name`, `functionCall.args` maps to 
 
 > **Runnable example:** [`examples/with-gemini`](./examples/with-gemini) drives the `gemini` connector from a built-in mock that streams the `candidates` chunks above, so it runs with no API key; its README documents the matching Express + `@google/generative-ai` proxy.
 
-Gemini blocked finish reasons such as `SAFETY`, `RECITATION`, `BLOCKLIST`, or `PROHIBITED_CONTENT` are treated as stream errors instead of silent completion. The `Error` passed to `onError` includes the raw `finishReason` (for example `finishReason: SAFETY`); the default UI still shows the generic `errorMessage`. `MAX_TOKENS` is treated as a completed response and additionally produces a non-fatal connector `warning` (a `ConnectorWarning` with `code: 'truncated'`) and sets `metadata.finishReason: 'MAX_TOKENS'` on the finalized assistant message. There is no `onWarning` host callback today: connector warnings are not routed to a typed prop or `useChorusStream` callback — they surface only as a one-line dev-mode `console.warn`. To react to truncation in app code, read `metadata.finishReason` from the finalized message (see [Message Shape](#message-shape)).
+Gemini blocked finish reasons such as `SAFETY`, `RECITATION`, `BLOCKLIST`, or `PROHIBITED_CONTENT` are treated as stream errors instead of silent completion. The `Error` passed to `onError` includes the raw `finishReason` (for example `finishReason: SAFETY`); the default UI still shows the generic `errorMessage`. `MAX_TOKENS` is treated as a completed response and additionally produces a non-fatal connector `warning` (a `ConnectorWarning` with `code: 'truncated'`) plus connector `metadata` carrying `finishReason: 'MAX_TOKENS'`. To react to truncation in app code, observe the warning via the `onStreamWarning` prop and the metadata via the `onStreamMetadata` prop (or `send(..., { onWarning, onMetadata })` when driving `useChorusStream` directly). When you drive the hook directly and omit `onWarning`, the warning is logged once in development so the signal stays discoverable.
 
 Example backend proxy (Express + `@google/generative-ai`):
 
@@ -841,7 +841,7 @@ With either route the client just needs `<Chorus transport="/api/chat" connector
 
 ## Examples
 
-Runnable examples live in the [`/examples`](./examples) directory. They declare the same Node.js 20+ floor as the root package and consume the local build after `npm run build`. `npm run verify:examples` recursively checks example `package.json` metadata (including nested packages such as `examples/with-openai/server`), build-smokes every example with a `build` script (including the Next.js App Router example), and, for start-only example packages (such as the Express proxy server), syntax-checks the entry file and import-resolves any `react-chorus` subpath exports it uses so a breaking change to `react-chorus/server` or `react-chorus/provider-requests` fails CI. Each example that ships a committed `package-lock.json` is installed with `npm ci`, so a registry-side dependency release cannot silently change what CI builds.
+Runnable examples live in the [`/examples`](./examples) directory. They declare a Node.js 20.19+ or 22.12+ floor — matching what their `vite: ^8` toolchain requires — and consume the local build after `npm run build`. `npm run verify:examples` recursively checks example `package.json` metadata (including nested packages such as `examples/with-openai/server`), build-smokes every example with a `build` script (including the Next.js App Router example), and, for start-only example packages (such as the Express proxy server), syntax-checks the entry file and import-resolves any `react-chorus` subpath exports it uses so a breaking change to `react-chorus/server` or `react-chorus/provider-requests` fails CI. Each example that ships a committed `package-lock.json` is installed with `npm ci`, so a registry-side dependency release cannot silently change what CI builds.
 
 | Example | Description |
 |---------|-------------|
@@ -975,7 +975,7 @@ react-chorus keeps React/ReactDOM as peer dependencies and externalizes runtime 
 | `react-chorus` (`Markdown`) | 76.0 kB | 25.7 kB | Standalone Markdown renderer; includes Markdown parsing/sanitization, not chat icons. |
 | `react-chorus` (`ChatWindow`) | 127.5 kB | 42.4 kB | Transcript renderer with Markdown and message action icons, without the composer/widget shell. |
 | `react-chorus` (`ConversationList`) | 8.7 kB | 3.0 kB | Conversation sidebar component only; no Markdown/icon graph. |
-| `react-chorus/transport` | 6.3 kB | 2.6 kB | Transport factories only; no React/UI/Markdown runtime. |
+| `react-chorus/transport` | 6.8 kB | 2.8 kB | Transport factories only; no React/UI/Markdown runtime. |
 | `react-chorus/provider-requests` | 11.2 kB | 3.5 kB | Provider request mappers and tool serializers; no React/UI/Markdown runtime. |
 | `react-chorus/server` | 0.7 kB | 0.4 kB | SSE framing helpers for proxy routes (headers, encode/format, [DONE], error envelope); no React/UI runtime. |
 | Lazy `highlight.js` runtime | 891.4 kB | 295.9 kB | Async code-fence chunk, never part of initial JS. |
@@ -996,11 +996,11 @@ Code-block copy buttons flash `Copied!` on success and `Copy failed` when the Cl
 
 The copy chrome is a real, keyboard-focusable `<button>`: it activates with Enter/Space, keeps its accessible name (`aria-label`) in sync with the Copy / Copied / Failed state, and announces each transition through a polite `aria-live` status region next to it.
 
-Use `codeBlockCopy` on `<Markdown>` (or `markdownProps={{ codeBlockCopy }}` on `<Chorus>` / `<ChatWindow>`) to control that chrome:
+Use `codeBlockCopy` on `<Markdown>` (or `markdownProps={{ codeBlockCopy }}` on `<Chorus>` / `<ChatWindow>`) to control that chrome — its prop type is the exported `CodeBlockCopy` union:
 
 - `'default'` (or `true`, or omitted) keeps the built-in copy button.
 - `false` opts out entirely — no copy button is rendered, while the styled `.chorus-codeblock` wrapper stays.
-- a function `(ctx) => htmlString` renders your own chrome. `ctx` is `{ theme, labels }`; the returned HTML is inserted ahead of the `<pre>`. Include a `chorus-copy-btn` element to reuse the built-in clipboard wiring, and a `chorus-copy-status` element (ideally `aria-live="polite"`) to receive screen-reader status updates. The returned markup is trusted and inserted without sanitization, so pass a stable function reference.
+- a function `(ctx) => htmlString` — the exported `CodeBlockCopyRenderer` type — renders your own chrome. `ctx` is a `CodeBlockCopyContext` (`{ theme, labels }`); the returned HTML is inserted ahead of the `<pre>`. Include a `chorus-copy-btn` element to reuse the built-in clipboard wiring, and a `chorus-copy-status` element (ideally `aria-live="polite"`) to receive screen-reader status updates. The returned markup is trusted and inserted without sanitization, so pass a stable function reference.
 
 ```tsx
 // Opt out of the copy button entirely
@@ -1123,15 +1123,16 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `onAbort` | `({ message, messages, reason, source, path }) => void` | — | Called when an active assistant generation is cancelled by Stop, `ref.stop()`, clear-while-sending, or a superseding session. `message` is the finalized partial assistant message or `null` before the first token; `path` is `'transport'` or `'onSend'`; `reason` is `'stop'`, `'clear'`, or `'superseded'`; `source` is `'user'` for built-in UI actions and `'programmatic'` for imperative/internal cancellation. |
 | `renderError` | `({ error, rawError, retry, dismiss }) => ReactNode` | — | Replace the built-in error banner. `error` is the friendly UI string, `rawError` is the last raw `Error` when available, `retry()` resubmits the last turn, and `dismiss()` clears the banner. |
 | `onChunk` | `(chunk: string, messageId: string) => void` | — | Observation hook called for each streamed token. Receives the assistant `messageId` so callers can correlate chunks with a specific message. Does **not** affect streaming behaviour. |
-| `onToolDelta` | `({ delta, message, messages }) => void` | — | Observation hook called for every accumulated streamed tool-call delta on the `transport` path. Does **not** affect execution. |
-| `onToolCall` | `({ id, name, input, output, message, messages, signal }) => unknown \| Promise<unknown>` | — | Called after stream input completes for each streamed tool call. If no matching `tools[name]` handler exists, a non-`undefined` return value is appended as `toolCall.output`. |
-| `tools` | `Record<string, (input, context) => unknown \| Promise<unknown>>` | — | Executable tool registry keyed by tool name. Matching handlers run after the stream completes; their return value is appended to the tool message as output. |
+| `onToolDelta` | `({ delta, message, messages }) => void` | — | Observation hook called for every accumulated streamed tool-call delta on the `transport` path. Does **not** affect execution. Transport-path only — never fires on the `onSend` path (a dev warning flags this). |
+| `onToolCall` | `({ id, name, input, output, message, messages, signal }) => unknown \| Promise<unknown>` | — | Called after stream input completes for each streamed tool call. If no matching `tools[name]` handler exists, a non-`undefined` return value is appended as `toolCall.output`. Transport-path only — never fires on the `onSend` path, where you execute tools yourself (a dev warning flags this). |
+| `tools` | `Record<string, (input, context) => unknown \| Promise<unknown>>` | — | Executable tool registry keyed by tool name. Matching handlers run after the stream completes; their return value is appended to the tool message as output. Transport-path only — registered handlers never run on the `onSend` path, where you execute tools yourself (a dev warning flags this). |
 | `autoContinueTools` | `boolean` | `false` | Opt in to an automatic tool-execution → model-continuation loop on the `transport` path after all completed tool calls have outputs. |
 | `maxToolIterations` | `number` | `4` | Maximum automatic tool iterations when `autoContinueTools` is enabled. Prevents infinite loops. |
-| `continueOnToolError` | `boolean` | `false` | Treat a thrown tool handler (or `onToolCall`) error as a normal tool result instead of a terminal turn failure. The error is recorded on the tool row (`{ error: message }` output plus `metadata.isError`); with `autoContinueTools` enabled the loop continues, feeding the error tool result back to the model so it can self-recover. Abort errors (Stop) always end the turn. |
+| `continueOnToolError` | `boolean` | `false` | Treat a thrown tool handler (or `onToolCall`) error as a normal tool result instead of a terminal turn failure. The error is recorded on the tool row (`{ error: message }` output plus `metadata.isError`); with `autoContinueTools` enabled the loop continues, feeding the error tool result back to the model so it can self-recover. Abort errors (Stop) always end the turn. Transport-path only — has no effect on the `onSend` path, where you execute tools yourself (a dev warning flags this). |
 | `shouldContinueToolLoop` | `(context) => boolean \| Promise<boolean>` | — | Optional gate before each automatic continuation. Return `false` to stop after rendering/executing the current tool batch. |
 | `onStreamDone` | `({ assistantMessage, toolMessages, messages, response, reason, willContinue, iteration, maxToolIterations }) => void` | — | Called after each `transport` stream completes normally and tool handlers (if any) finish. Fires for tool-only turns where `onFinish` has no assistant message. `reason` is `'completed'`, `'tool-loop-continue'`, `'tool-loop-veto'`, or `'max-tool-iterations'` — use it to detect when `autoContinueTools` stops because the safety cap was reached. |
 | `onStreamWarning` | `(warning: ConnectorWarning) => void` | — | Observation hook for non-fatal connector warnings on the `transport` path (`{ code, message, payload? }`) — e.g. a `truncated` warning when the model hit its max-token limit, or safety-rating notices. The stream still completes normally (`onFinish`/`onStreamDone` fire as usual); use it to tell the user the response may be cut off or partially blocked. A throwing handler is warned in development and otherwise ignored. |
+| `onStreamMetadata` | `(metadata: Record<string, unknown>) => void` | — | Observation hook for free-form provider metadata on the `transport` path as connectors emit it — OpenAI Responses token `usage`, Anthropic `stopReason`/`stopSequence`, Gemini `safetyRatings`/`finishReason`, OpenAI Chat `finishReason`. Fires once per connector result that carries metadata, so it may be called several times per turn; the stream still completes normally. Wire it for usage/cost telemetry (e.g. a live budget meter) or to persist safety ratings. A throwing handler is warned in development and otherwise ignored. |
 | `onCopy` | `(message: Message<TMeta>) => void` | Clipboard copy when available | Overrides the built-in per-message Copy action. If omitted, Chorus copies `message.text` with `navigator.clipboard.writeText` when the Clipboard API is available. |
 | `getMessageFeedback` | `(message: Message<TMeta>) => 'up' \| 'down' \| null \| undefined` | `message.metadata.feedback` | Seeds the pressed thumb state from persisted feedback. Return `null` for no selection; return `undefined` to fall back to `message.metadata.feedback` when it is `'up'` or `'down'`. |
 | `onFeedback` | `(message: Message<TMeta>, feedback: 'up' \| 'down' \| null) => void` | — | Enables built-in thumbs-up / thumbs-down per-message feedback actions and reports changes. Clicking the already-selected thumb toggles the rating off and reports `null` so a mis-click can be undone. |
@@ -1155,7 +1156,7 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `markdownProps` | `Omit<MarkdownProps, 'text' \| 'codeTheme' \| 'headless' \| 'streaming'>` | — | Props forwarded to the built-in Markdown renderer for every message, including `sanitizer`, `markedOptions`, `markedExtensions`, `onCopyError`, and `codeBlockCopy`. |
 | `markdownSanitizer` | `MarkdownSanitizer` | — | Convenience alias for `markdownProps.sanitizer`; takes precedence when both are provided. |
 | `hiddenRoles` | `Role[]` | `['system']` | Message roles hidden from the transcript. Tool calls are visible by default in `<Chorus>`; pass `['system', 'tool']` to hide them, or `[]` to show all roles. `<Chorus>` accepts `hiddenRoles` only — `showSystemMessages` exists on `<ChatWindow>` for backwards compatibility. |
-| `labels` | `ChorusLabels` | English defaults | Localized strings for every built-in UI surface: composer placeholder/aria-labels/attach/drop-to-attach/send/stop, transcript aria-label/typing/retry/jump-to-latest/empty-state title, message actions (edit/regenerate/copy/copy-failed/thumbs up/down/delete/save/cancel), per-role speaker SR labels, tool-call section headers, reasoning summary, code-fence copy chrome, conversation-list affordances, and the clear button. See [Localizing built-in strings](#localizing-built-in-strings). |
+| `labels` | `ChorusLabels` | English defaults | Localized strings for every built-in UI surface: composer placeholder/aria-labels/attach/drop-to-attach/send/stop, transcript aria-label/typing/retry/dismiss-error/jump-to-latest/empty-state title, message actions (edit/regenerate/copy/copy-failed/thumbs up/down/delete/save/cancel), per-role speaker SR labels, tool-call section headers, reasoning summary, code-fence copy chrome, conversation-list affordances, and the clear button. See [Localizing built-in strings](#localizing-built-in-strings). |
 
 ### Localizing built-in strings
 
@@ -1179,6 +1180,7 @@ const fr: ChorusLabels = {
     ariaLabel: 'Historique de chat',
     typing: "L'assistant écrit",
     retry: 'Réessayer',
+    dismissError: "Masquer l'erreur",
     jumpToLatest: '↓ Aller au plus récent',
     suggestedPromptsAriaLabel: 'Suggestions',
     emptyStateTitle: 'Comment puis-je aider ?',
@@ -1244,7 +1246,7 @@ const fr: ChorusLabels = {
 
 Labels are deep-merged with the defaults, so you only need to override the strings you actually want to change. **Partial overrides only:** `undefined`, `null`, and empty-string values fall back to the English default so a loose i18n catalog cannot accidentally erase a UI label. Pass a non-empty whitespace string (e.g. `' '`) when you genuinely want a visually empty value. `resolveChorusLabels(partial)` is exported when you want to compute the resolved set yourself (for storybook fixtures, `<ChatWindow>` outside of `<Chorus>`, or fully custom shells).
 
-The `attachments` slice localizes the attachment composer end-to-end: chip remove-button labels, the pending read/upload polite-live status text and `aria-busy` chips, the polite-live completion announcements that confirm "attached" / "failed" after a pending chip resolves, the dismiss-error button, the "describe this image" affordance (visible next to image chips so users can supply alt text before sending), validation/read/upload error messages with `{name, accept, size, limit, max, detail}` interpolation, and the role-hinted image fallback alt rendered in the transcript when `Attachment.alt` is absent.
+The `attachments` slice localizes the attachment composer end-to-end: chip remove-button labels, the pending read/upload polite-live status text and `aria-busy` chips, the polite-live completion announcements that confirm "attached" / "failed" after a pending chip resolves, the dismiss-error button, the "describe this image" affordance (visible next to image chips so users can supply alt text before sending), validation/read/upload error messages with `{name, accept, size, limit, max, detail}` interpolation, and the role-hinted image fallback alt rendered in the transcript when `Attachment.alt` is absent. The English defaults for just this slice are exported as `DEFAULT_ATTACHMENT_LABELS` (a `ChorusAttachmentLabels`), handy when you want to extend the attachment strings rather than replace them.
 
 ### `helpers` (passed to `onSend`)
 
@@ -1253,7 +1255,7 @@ The `attachments` slice localizes the attachment composer end-to-end: chip remov
 | `appendAssistant(chunk)` | Append a text chunk to the current assistant message. Chunks are buffered until `minAssistantDelayMs` has elapsed before the first token is shown. |
 | `appendReasoning(chunk)` | Append a reasoning/thinking chunk to the current assistant message. |
 | `appendToolDelta(delta)` | Create/update a `role: 'tool'` message from an accumulated connector tool delta. |
-| `streamCallbacks()` | Convenience helper returning `{ onChunk, onReasoning, onToolDelta, onWarning, onDone }` for `useChorusStream(...).send()`. `onWarning` forwards non-fatal connector warnings to the `<Chorus onStreamWarning>` prop. It is present at runtime; optional chaining keeps older hand-written helper mocks type-compatible. |
+| `streamCallbacks()` | Convenience helper returning `{ onChunk, onReasoning, onToolDelta, onWarning, onMetadata, onDone }` for `useChorusStream(...).send()`. `onWarning` forwards non-fatal connector warnings to the `<Chorus onStreamWarning>` prop and `onMetadata` forwards free-form provider metadata to the `<Chorus onStreamMetadata>` prop. It is present at runtime; optional chaining keeps older hand-written helper mocks type-compatible. |
 | `finalizeAssistant()` | Mark the assistant message complete. If first-token chunks are still buffered, completion waits until they flush. |
 | `signal` | `AbortSignal` — aborted when Stop, clear-while-sending, or a superseding session cancels the active send. |
 | `systemPrompt` | The optional `systemPrompt` prop. Use it when serializing custom `onSend` requests; Chorus does not insert it into the `messages` argument on this path. |
@@ -1493,6 +1495,8 @@ When you drive `useChorusStream` directly, callbacks fire in this order for a si
 
 `onWarning` fires for non-fatal connector warnings (`{ code, message, payload? }`) as the connector emits them — e.g. a `truncated` warning when the model stopped at its max-token limit, or safety-rating notices. Unlike `onError`, a warning does not abort the stream: `onDone` still fires afterwards. A throwing `onWarning` is warned in development and otherwise ignored, so a misbehaving warning observer cannot fail an otherwise-successful send. When you drive `useChorusStream` directly and omit `onWarning`, warnings are logged once in development so the signal stays discoverable; `<Chorus>` surfaces them through the `onStreamWarning` prop.
 
+`onMetadata` fires for free-form provider metadata (`Record<string, unknown>`) as connectors emit it — OpenAI Responses token `usage`, Anthropic `stopReason`/`stopSequence`, Gemini `safetyRatings`/`finishReason`, OpenAI Chat `finishReason`. Like `onWarning` it never aborts the stream and a throwing handler is warned in development and otherwise ignored. Unlike `onWarning`, omitting it drops metadata silently — it is opt-in diagnostics, not a signal a developer needs surfaced — so directly-driven hooks see no dev log. `<Chorus>` surfaces it through the `onStreamMetadata` prop; wire it for usage/cost telemetry such as a live budget meter.
+
 ### Completion telemetry with `onFinish`
 
 Use `onFinish` when you need the final assistant message rather than token-by-token observations:
@@ -1563,8 +1567,8 @@ For one-off reads from outside React state, call `chorusRef.current?.getMessages
 
 `useChorusTranscriptActions` is a headless utility hook for building a search box, a "copy conversation" button, or a "download transcript" affordance around `<Chorus>` or a custom headless shell — without writing the indexing, clipboard, and serialization layers yourself. Pass it the same `messages` array you render (from `chorusRef.getMessages()`, `onMessagesChange`, or your own state) and it returns three callbacks with stable identities:
 
-- `searchMessages(query)` — case-insensitive substring search across each message's `text`, `reasoning`, and (for tool messages) `toolCall.name`. Returns the matching `Message[]`; a blank/whitespace-only query returns `[]`. Pair it with `chorusRef.scrollToMessage(id)` to jump to a hit.
-- `copyAll(format?)` — copies the whole transcript to the clipboard. Defaults to `'markdown'`; pass `'json'` for the raw structure. Resolves `false` (and calls the optional `onCopyError`) when the Clipboard API is unavailable or the write rejects.
+- `searchMessages(query)` — case-insensitive substring search across each message's `text`, `reasoning`, and — for tool messages — `toolCall.name` plus its serialized `input` and `output` (the same I/O `exportAs` renders, so a value visible in the export is also findable here). Returns the matching `Message[]`; a blank/whitespace-only query returns `[]`. Pair it with `chorusRef.scrollToMessage(id)` to jump to a hit.
+- `copyAll(format?)` — copies the whole transcript to the clipboard. Defaults to `'markdown'`; pass `'json'` for the raw structure. Resolves `false` without touching the clipboard when the transcript is empty (a non-error signal — `onCopyError` is not called — so you can disable the button). Also resolves `false`, and calls the optional `onCopyError`, when the Clipboard API is unavailable or the write rejects.
 - `exportAs(format)` — serializes the transcript to a string. `'markdown'` renders a readable transcript with one heading per message (tool calls include their input/output); `'json'` returns `JSON.stringify(messages, null, 2)`, which round-trips through `JSON.parse`.
 
 ```tsx
@@ -1689,7 +1693,7 @@ Every `Message` accepts an optional `createdAt` ISO-8601 string (for example `ne
 />
 ```
 
-With `showTimestamps`, the default renderer adds a locale-aware `<time>` element below each bubble; messages without a `createdAt` render no time. The default formatter shows a short time of day (`Intl.DateTimeFormat`, with a `toLocaleTimeString` fallback). Pass `formatTimestamp` for a different format — for example a relative time or a date + time — and it also receives the message so you can vary by role:
+With `showTimestamps`, the default renderer adds a locale-aware `<time>` element below each bubble; messages without a `createdAt` render no time. The default formatter shows a short time of day (`Intl.DateTimeFormat`, with a `toLocaleTimeString` fallback). Pass `formatTimestamp` for a different format — for example a relative time or a date + time — and it also receives the message so you can vary by role. The prop's type is exported as `MessageTimestampFormatter<TMeta>` for typing a reusable formatter:
 
 ```tsx
 <Chorus
@@ -1763,6 +1767,7 @@ const { send, abort, sending } = useChorusStream<MyMeta>(transport, { connector:
 - `send(..., { minDelayMs })` buffers the first streamed chunks until that many milliseconds have elapsed from send start, then flushes them before continuing normally.
 - `send(..., { onReasoning, onToolDelta })` receives connector-emitted reasoning chunks and accumulated tool deltas when you use the hook directly. `<Chorus>` wires these into `Message.reasoning` and `role: 'tool'` messages automatically; advanced `onSend` bridges can pass `helpers.streamCallbacks?.()` to preserve the same behavior.
 - `send(..., { onWarning })` receives non-fatal connector warnings (`ConnectorWarning` — `{ code, message, payload? }`) such as `truncated` (max-token stop) or safety notices. The stream is not aborted; `onDone` still fires. `<Chorus>` surfaces these through the `onStreamWarning` prop, and `helpers.streamCallbacks?.()` forwards them on the `onSend` bridge. When you drive the hook directly and omit `onWarning`, warnings are logged once in development instead.
+- `send(..., { onMetadata })` receives free-form provider metadata (`Record<string, unknown>`) such as token `usage`, `finishReason`, `stopReason`, or `safetyRatings`. The stream is not aborted; `onDone` still fires. `<Chorus>` surfaces these through the `onStreamMetadata` prop, and `helpers.streamCallbacks?.()` forwards them on the `onSend` bridge. Omitting `onMetadata` drops the metadata silently.
 - Non-abort transport, HTTP, connector, and in-band provider errors call `onError` when supplied and reject the returned `send()` promise. This lets README-style `await send(...)` bridges surface the friendly Chorus error banner through the surrounding `onSend` catch path.
 - If `onError` itself throws while handling a stream error, Chorus warns in development and still rejects `send()` with the original stream error. If `onDone` throws after a successful stream, `send()` rejects with that completion callback error and does not call `onError`.
 - `onError` receives raw transport details (including bounded HTTP response body snippets); the built-in UI continues to show only `errorMessage`.
@@ -2302,7 +2307,7 @@ Reasoning blocks reuse existing palette variables (`--chorus-chat-bg`, `--chorus
 
 ### CSS custom properties for tool blocks
 
-Built-in tool call blocks can be themed through palette keys (`toolBorder`, `toolHeaderBg`, `toolHeaderText`, `toolHeaderHover`, `toolNameText`, `toolBodyBg`, `toolLabelText`, and `toolCodeText`). For advanced CSS-only overrides, use the underlying CSS variables directly:
+Built-in tool call blocks can be themed through palette keys (`toolBorder`, `toolHeaderBg`, `toolHeaderText`, `toolHeaderHover`, `toolNameText`, `toolBodyBg`, `toolLabelText`, `toolCodeText`, and `toolRunningText`). For advanced CSS-only overrides, use the underlying CSS variables directly:
 
 ```css
 :root {
@@ -2314,6 +2319,7 @@ Built-in tool call blocks can be themed through palette keys (`toolBorder`, `too
   --chorus-tool-body-bg: #111;
   --chorus-tool-label-text: #666;
   --chorus-tool-code-text: #e6edf3;
+  --chorus-tool-running-text: #a3a3a3; /* "Running…" status while a call is in flight */
 }
 ```
 
@@ -2358,7 +2364,7 @@ Theming resolves through the **standard CSS custom-property cascade** — there 
 
 So `<ChorusTheme palette={A}><Chorus palette={B} /></ChorusTheme>` renders `<Chorus>` with `B` winning, falling back to `A` for any key `B` omits, then to host CSS variables, then to the built-in defaults.
 
-Available palette keys: `chatBg`, `chatText`, `border`, `assistantBubbleBg`, `assistantText`, `assistantBorder`, `userBubbleBg`, `userText`, `userBorder`, `inputAreaBg`, `inputBg`, `inputText`, `inputBorder`, `sendButtonBg`, `sendButtonText`, `focusRing`, `actionText`, `actionHoverBg`, `actionHoverText`, `errorBg`, `errorBorder`, `errorText`, `toolBorder`, `toolHeaderBg`, `toolHeaderText`, `toolHeaderHover`, `toolNameText`, `toolBodyBg`, `toolLabelText`, `toolCodeText`.
+Available palette keys: `chatBg`, `chatText`, `border`, `assistantBubbleBg`, `assistantText`, `assistantBorder`, `userBubbleBg`, `userText`, `userBorder`, `inputAreaBg`, `inputBg`, `inputText`, `inputBorder`, `sendButtonBg`, `sendButtonText`, `focusRing`, `actionText`, `actionHoverBg`, `actionHoverText`, `errorBg`, `errorBorder`, `errorText`, `toolBorder`, `toolHeaderBg`, `toolHeaderText`, `toolHeaderHover`, `toolNameText`, `toolBodyBg`, `toolLabelText`, `toolCodeText`, `toolRunningText`.
 
 ### Reduced motion
 
@@ -2377,7 +2383,7 @@ import { ChatWindow, ChatInput, ChorusTheme, Markdown } from 'react-chorus';
 ```
 
 - **`<ChatWindow messages={…} typing={…} />`** — renders the scrollable message list with empty-state prompts, a typing indicator, errors, the optional floating jump-to-latest button, and optional `maxRenderedMessages` windowing. It accepts `hiddenRoles?: Role[]` (default `['system', 'tool']`); `showSystemMessages` is deprecated but remains supported as an alias for showing all roles. `showJumpToBottomButton?: boolean` defaults to `!headless` and toggles the floating “Jump to latest” button that surfaces when the user scrolls away from the bottom and new activity arrives — pass `false` to disable it and render your own affordance. Pass `markdownSanitizer`, `markdownProps`, `renderError`, or `renderMessage` to customize built-in rendering. Accepts a `palette` prop (see [Theming](#theming)).
-- **`<ChatInput value onSend onStop placeholder sending />`** — the text input, send/stop button, disabled/read-only states, and optional attachment composer (`accept`, paste/drop, limits, cancellable `uploadAttachment`). Accepts a `palette` prop (see [Theming](#theming)).
+- **`<ChatInput value onSend onStop placeholder sending />`** — the text input, send/stop button, disabled/read-only states, and optional attachment composer (`accept`, paste/drop, limits, cancellable `uploadAttachment`). Accepts a `palette` prop (see [Theming](#theming)). It is `forwardRef`-enabled: pass a `ChatInputHandle` ref to imperatively `focus()` the composer (with optional `ChatInputFocusOptions` caret placement) from a custom shell.
 - **`<ChorusTheme palette={…}>`** — applies the `--chorus-*` theme variables to any subtree; the standalone form of the `palette` prop carried by `Chorus`, `ChatWindow`, `ChatInput`, and `ConversationList`. See [Theming](#theming) for the precedence rules.
 - **`<Markdown text={…} codeTheme="dark" />`** — standalone markdown renderer with syntax highlighting and copy buttons. It supports `streaming` to render escaped plain text until finalization, `sanitizer` to provide a custom DOMPurify-compatible sanitizer when SSR needs sanitized raw HTML instead of the built-in no-raw-HTML safe mode, `markedOptions`/`markedExtensions` for per-instance parser customization, `onCopyError` for clipboard-copy failures, and `codeBlockCopy` to disable or fully customize the per-code-block copy chrome.
 - **`<MessageBubble message={…} />`** — renders the default bubble for one message, including attachments and screen-reader speaker labels. Accepts `className`, `style`, `codeTheme`, `headless`, `streaming`, `markdownProps`, `markdownSanitizer`, and decoration slots (`before`, `headerSlot`, `footerSlot`, `after`) without replacing the full renderer.
@@ -2385,6 +2391,8 @@ import { ChatWindow, ChatInput, ChorusTheme, Markdown } from 'react-chorus';
 ### Headless subpath
 
 Import from `react-chorus/headless` when you want semantic markup and behavior without default styling. The headless subpath preserves class names as styling hooks, and its `Chorus`, `ChatWindow`, `MessageBubble`, `ConversationList`, and `Markdown` exports default `headless={true}` so Markdown styles and syntax-highlight theme CSS are not injected unless you explicitly pass `headless={false}`. It re-exports the same public message, attachment, upload, streaming, and persistence types as the root entry point so `ChatInput` handlers can be typed from the subpath alone.
+
+When `headless` is in effect, the `ChatWindow` and `ConversationList` roots also carry a `--headless` modifier class (`chorus-window--headless` and `chorus-conversation-list--headless`) alongside their base class, so a stylesheet can target the headless build specifically (for example, to opt those roots into a custom layout).
 
 Because `showJumpToBottomButton` defaults to `!headless`, the floating jump button is off on the headless exports. Pass `showJumpToBottomButton={true}` to opt the built-in button back in, or leave it off and render your own jump-to-latest UI from the same "auto-scroll paused" + "has unread activity" signals the built-in button reacts to — track them with a scroll listener on the `ChatWindow` ref (the built-in `useAutoScroll` helper compares `scrollHeight - scrollTop - clientHeight` against a 48 px near-bottom threshold and flags unread activity when a new message arrives while paused).
 
@@ -2424,9 +2432,9 @@ Helpers and constants:
 - `getConnector`, `createOpenAIConnector` — connector accessors. `getConnector(name, options?)` resolves a built-in connector by name (`'openai'` / `'anthropic'` / `'gemini'` / `'ai-sdk'` / `'auto'`); `createOpenAIConnector(options?)` builds a customized OpenAI connector object.
 - `formatAnthropicMessagesBody`, `formatGeminiGenerateContentBody`, `formatOpenAIChatCompletionsBody`, `formatOpenAIResponsesBody`, `toAnthropicMessages`, `toAnthropicMessagesBody`, `toAnthropicTools`, `toGeminiContents`, `toGeminiGenerateContentBody`, `toGeminiTools`, `toOpenAIChatCompletionsBody`, `toOpenAIChatCompletionsMessages`, `toOpenAIChatCompletionsTools`, `toOpenAIResponsesBody`, `toOpenAIResponsesInput`, `toOpenAIResponsesTools` — provider request mappers.
 - `ChorusStreamError` — error class thrown by `useChorusStream` and the transport path.
-- `DEFAULT_CHORUS_LABELS`, `resolveChorusLabels` — built-in localization helpers.
+- `DEFAULT_CHORUS_LABELS`, `DEFAULT_ATTACHMENT_LABELS`, `resolveChorusLabels` — built-in localization helpers and label defaults (`DEFAULT_ATTACHMENT_LABELS` is the English `attachments` slice).
 
-Types: every public type re-exported from the root barrel is also importable from `react-chorus/headless` — including `Message`, `AnyChorusMessage`, `UserMessage`, `AssistantMessage`, `SystemMessage`, `ToolMessage`, `Role`, `ToolCall`, `Attachment`, `AttachmentError`, `AttachmentErrorReason`, `AttachmentSource`, `AttachmentUploadResult`, `UploadAttachment`, `UploadAttachmentOptions`, `StorageAdapter`, `ConnectorName`, `Connector`, `ConnectorResult`, `ConnectorToolDelta`, `Transport`, `FetchSSETransportOptions`, `FetchTransportInit`, `WebSocketTransport`, `WebSocketTransportOptions`, `SendCallbacks`, `StreamOptions`, `ChorusProps` (aliased to `ChorusHeadlessProps`), `ChorusRef`, `ChorusSendHelpers`, `ChorusSendPath`, `ChorusOnSend`, `ChorusOnFinish`, `ChorusOnAbort`, `ChorusOnStreamDone`, `ChorusOnToolCall`, `ChorusOnToolDelta`, `ChorusAbortContext`, `ChorusAbortReason`, `ChorusAbortSource`, `ChorusFinishContext`, `ChorusStreamDoneContext`, `ChorusStreamDoneReason`, `ChorusToolCallContext`, `ChorusToolDeltaContext`, `ChorusToolLoopContext`, `ChorusToolRegistry`, `ChorusConfirmClearConversation`, `ChorusClearConversationContext`, `ChorusConfirmDeleteMessage`, `ChorusDeleteMessageContext`, `ChorusShouldContinueToolLoop`, `ChorusMessagesChangeContext`, `ChorusToolDefinition`, `RenderErrorContext`, `RenderMessageContext`, `RenderMessageRootProps`, `MessageBubbleProps`, `MessageBubbleSlots`, `MessageMarkdownProps`, `MessageRenderActions`, `MessageCopyResult`, `MessageFeedback`, `GetMessageFeedback`, `ChatInputProps`, `ChatWindowProps`, `ConversationListProps`, `ConfirmDeleteConversation`, `ConfirmDeleteConversationContext`, `ConversationStorageError`, `ConversationStorageOperation`, `ConversationSummary`, `RenameFromFirstMessageOptions`, `UseConversationsOptions`, `UseConversationsResult`, `ChorusPersistenceError`, `PersistenceOperation`, `PersistenceWriteOptions`, `SerializeMessages`, `DeserializeMessages`, `UseChorusPersistenceOptions`, `UseChorusPersistenceResult`, `RenderAttachmentErrorContext`, `Palette`, `MarkdownProps`, `MarkdownSanitizer`, all `ChorusLabels` sub-shapes, and every provider request type (`AnthropicMessagesBody`, `AnthropicTool`, `OpenAIChatCompletionsBody`, `GeminiGenerateContentBody`, etc.).
+Types: every public type re-exported from the root barrel is also importable from `react-chorus/headless` — including `Message`, `AnyChorusMessage`, `UserMessage`, `AssistantMessage`, `SystemMessage`, `ToolMessage`, `Role`, `ToolCall`, `Attachment`, `AttachmentError`, `AttachmentErrorReason`, `AttachmentSource`, `AttachmentUploadResult`, `UploadAttachment`, `UploadAttachmentOptions`, `StorageAdapter`, `ConnectorName`, `Connector`, `ConnectorResult`, `ConnectorToolDelta`, `Transport`, `FetchSSETransportOptions`, `FetchTransportInit`, `WebSocketTransport`, `WebSocketTransportOptions`, `SendCallbacks`, `StreamOptions`, `ChorusProps` (aliased to `ChorusHeadlessProps`), `ChorusRef`, `ChorusSendHelpers`, `ChorusSendPath`, `ChorusOnSend`, `ChorusOnFinish`, `ChorusOnAbort`, `ChorusOnStreamDone`, `ChorusOnToolCall`, `ChorusOnToolDelta`, `ChorusAbortContext`, `ChorusAbortReason`, `ChorusAbortSource`, `ChorusFinishContext`, `ChorusStreamDoneContext`, `ChorusStreamDoneReason`, `ChorusToolCallContext`, `ChorusToolDeltaContext`, `ChorusToolLoopContext`, `ChorusToolRegistry`, `ChorusToolHandler`, `ChorusConfirmClearConversation`, `ChorusClearConversationContext`, `ChorusConfirmDeleteMessage`, `ChorusDeleteMessageContext`, `ChorusShouldContinueToolLoop`, `ChorusMessagesChangeContext`, `ChorusMessagesChangeReason`, `ChorusMessagesChangeSource`, `ChorusToolDefinition`, `RenderErrorContext`, `RenderMessageContext`, `RenderMessageRootProps`, `MessageBubbleProps`, `MessageBubbleSlots`, `MessageMarkdownProps`, `MessageRenderActions`, `MessageTimestampFormatter`, `MessageCopyResult`, `MessageFeedback`, `GetMessageFeedback`, `ChatInputProps`, `ChatInputHandle`, `ChatInputFocusOptions`, `ChatWindowProps`, `ConversationListProps`, `ConfirmDeleteConversation`, `ConfirmDeleteConversationContext`, `ConversationStorageError`, `ConversationStorageOperation`, `ConversationSummary`, `RenameFromFirstMessageOptions`, `UseConversationsOptions`, `UseConversationsResult`, `ChorusPersistenceError`, `PersistenceOperation`, `PersistenceWriteOptions`, `SerializeMessages`, `DeserializeMessages`, `UseChorusPersistenceOptions`, `UseChorusPersistenceResult`, `RenderAttachmentErrorContext`, `Palette`, `MarkdownProps`, `MarkdownSanitizer`, `CodeBlockCopy`, `CodeBlockCopyContext`, `CodeBlockCopyRenderer`, all `ChorusLabels` sub-shapes, and every provider request type (`AnthropicMessagesBody`, `AnthropicTool`, `OpenAIChatCompletionsBody`, `GeminiGenerateContentBody`, etc.).
 
 ## Message Shape
 
@@ -2573,7 +2581,7 @@ The provider connector singletons (`openaiConnector`, `anthropicConnector`, `gem
 
 ## Development and release
 
-Use Node.js 20 or newer (Node 20.19+ or 22.12+ recommended for the Vite toolchain), then install dependencies with `npm ci`.
+Use Node.js 20.19+ or 22.12+ (the floor the root `package.json` `engines.node` and the Vite toolchain both require), then install dependencies with `npm ci`.
 
 Release/CI quality gates:
 

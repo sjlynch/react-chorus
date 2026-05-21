@@ -1,5 +1,5 @@
 import type { Message } from '../../types';
-import { openAIImageUrlFromAttachment, unsupportedAttachmentText } from '../attachments';
+import { isOpenAIImageAttachment, openAIImageUrlFromAttachment, unsupportedAttachmentText } from '../attachments';
 import { hasOwn, isRecord, metadataArray, nonEmptyString } from '../metadata';
 import { stripOpenAIChatOptions } from '../options';
 import { messageText, toolContextText, toolOutputText } from '../toolOutput';
@@ -83,7 +83,7 @@ function openAIChatUserContent<TMeta>(
   if (text.trim()) parts.push({ type: 'text', text });
 
   for (const attachment of message.attachments ?? []) {
-    const imageUrl = attachment.type.startsWith('image/') ? openAIImageUrlFromAttachment(attachment) : null;
+    const imageUrl = isOpenAIImageAttachment(attachment) ? openAIImageUrlFromAttachment(attachment) : null;
     if (imageUrl) {
       parts.push({ type: 'image_url', image_url: { url: imageUrl } });
     } else {

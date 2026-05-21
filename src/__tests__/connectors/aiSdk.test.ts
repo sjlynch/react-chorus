@@ -120,13 +120,22 @@ describe('aiSdkConnector', () => {
       });
     });
 
-    it('returns done on finish-step (d:) and finish-message (e:) frames', () => {
+    it('returns done on the finish-message (d:) frame', () => {
       expect(aiSdkConnector.extract('d:{"finishReason":"stop","usage":{}}')).toEqual({ done: true });
-      expect(aiSdkConnector.extract('e:{"finishReason":"stop","usage":{}}')).toEqual({ done: true });
     });
 
-    it('surfaces 3: error frames with the original payload', () => {
-      expect(aiSdkConnector.extract('3:"upstream failed"')).toEqual({ error: 'upstream failed', errorPayload: 'upstream failed' });
+    it('does not terminate the stream on a finish-step (e:) frame mid multi-step run', () => {
+      const state = aiSdkConnector.createState?.();
+      // `e:` ends one step (e.g. between a tool call and the model's follow-up
+      // turn); a `streamText` agent with `maxSteps > 1` must keep streaming.
+      expect(aiSdkConnector.extract('e:{"finishReason":"tool-calls","usage":{}}', state)).toBeNull();
+      // Text from the model's follow-up step still streams after the e: frame.
+      expect(aiSdkConnector.extract('0:"follow-up"', state)).toEqual({ text: 'follow-up' });
+    });
+
+    it('surfaces 3: error frames with the original frame line as errorPayload', () => {
+      expect(aiSdkConnector.extract('3:"upstream failed"'))
+        .toEqual({ error: 'upstream failed', errorPayload: '3:"upstream failed"' });
     });
 
     it('ignores unknown / annotation-only frames so protocol text never leaks', () => {

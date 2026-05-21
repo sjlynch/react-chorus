@@ -6,7 +6,7 @@ This example exercises the [`ConversationList`](../../README.md#individual-compo
 
 ## Prerequisites
 
-- Node.js 20+
+- Node.js 20.19+ or 22.12+ (required by the example's `vite: ^8` toolchain)
 - No API keys — replies are generated locally in `src/App.tsx`.
 
 ## Run from a fresh clone

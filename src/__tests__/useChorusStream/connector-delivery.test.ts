@@ -88,6 +88,63 @@ describe('useChorusStream connector delivery', () => {
     expect(onError).not.toHaveBeenCalled();
   });
 
+  it('routes connector metadata to onMetadata', async () => {
+    const transport = vi.fn<Transport>(() => Promise.resolve(makeSseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { content: 'done' }, finish_reason: 'stop' }] }),
+    ])));
+    const onChunk = vi.fn();
+    const onMetadata = vi.fn();
+    const onDone = vi.fn();
+    const { result } = renderHook(() => useChorusStream(transport, { connector: 'openai' }));
+
+    await act(async () => {
+      await result.current.send('hello', [], { onChunk, onMetadata, onDone });
+    });
+
+    expect(onChunk).toHaveBeenCalledWith('done');
+    expect(onMetadata).toHaveBeenCalledTimes(1);
+    expect(onMetadata).toHaveBeenCalledWith({ finishReason: 'stop' });
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops connector metadata silently when onMetadata is omitted', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const transport = vi.fn<Transport>(() => Promise.resolve(makeSseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { content: 'done' }, finish_reason: 'stop' }] }),
+    ])));
+    const onDone = vi.fn();
+    const { result } = renderHook(() => useChorusStream(transport, { connector: 'openai' }));
+
+    await act(async () => {
+      await result.current.send('hello', [], { onChunk: vi.fn(), onDone });
+    });
+
+    expect(onDone).toHaveBeenCalledTimes(1);
+    // Unlike a warning, metadata without an observer is not dev-logged — it is opt-in
+    // diagnostics, so dropping it leaves no console noise.
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('keeps the send successful when onMetadata throws', async () => {
+    const transport = vi.fn<Transport>(() => Promise.resolve(makeSseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { content: 'done' }, finish_reason: 'stop' }] }),
+    ])));
+    const onMetadata = vi.fn(() => { throw new Error('metadata observer boom'); });
+    const onDone = vi.fn();
+    const onError = vi.fn();
+    const { result } = renderHook(() => useChorusStream(transport, { connector: 'openai' }));
+
+    await act(async () => {
+      await expect(
+        result.current.send('hello', [], { onChunk: vi.fn(), onMetadata, onDone, onError }),
+      ).resolves.toBeUndefined();
+    });
+
+    expect(onMetadata).toHaveBeenCalledTimes(1);
+    expect(onDone).toHaveBeenCalledTimes(1);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
   it('forwards connectorOptions to the resolved built-in connector', async () => {
     const transport = vi.fn<Transport>(() => Promise.resolve(makeSseResponse([
       JSON.stringify({ choices: [{ index: 0, delta: { content: '<reasoning>plan</reasoning>answer' } }] }),
