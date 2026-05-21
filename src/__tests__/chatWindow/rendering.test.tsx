@@ -391,4 +391,36 @@ describe('ChatWindow rendering behavior', () => {
     render(<ChatWindow messages={[TOOL_MSG]} showSystemMessages />);
     expect(screen.getByText('search')).toBeInTheDocument();
   });
+  it('shows a running status for an empty-bodied tool row inside the streaming turn', () => {
+    const emptyTool: Message = { id: 't-empty', role: 'tool', text: '', toolCall: { name: 'lookup' } };
+    render(
+      <ChatWindow
+        messages={[USER_MSG, emptyTool, { id: 'a2', role: 'assistant', text: '' }]}
+        streamingMessageId="a2"
+        hiddenRoles={[]}
+      />,
+    );
+    expect(screen.getByText('Running…')).toBeInTheDocument();
+    expect(screen.queryByText('No output')).not.toBeInTheDocument();
+  });
+  it('keeps a finished empty-bodied tool row settled when a separate later turn streams', () => {
+    // The empty-bodied tool call precedes a finalized assistant message; an
+    // unrelated streaming turn afterwards must not flip it back to "Running…".
+    const emptyTool: Message = { id: 't-empty', role: 'tool', text: '', toolCall: { name: 'lookup' } };
+    render(
+      <ChatWindow
+        messages={[
+          USER_MSG,
+          emptyTool,
+          ASST_MSG,
+          { id: 'u2', role: 'user', text: 'Again' },
+          { id: 'a2', role: 'assistant', text: '' },
+        ]}
+        streamingMessageId="a2"
+        hiddenRoles={[]}
+      />,
+    );
+    expect(screen.getByText('No output')).toBeInTheDocument();
+    expect(screen.queryByText('Running…')).not.toBeInTheDocument();
+  });
 });
