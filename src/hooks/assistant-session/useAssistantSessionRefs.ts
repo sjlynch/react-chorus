@@ -11,6 +11,7 @@ type RefValues<TMeta> = {
   onAbort: UseAssistantSessionOptions<TMeta>['onAbort'];
   onStreamDone: UseAssistantSessionOptions<TMeta>['onStreamDone'];
   onStreamWarning: UseAssistantSessionOptions<TMeta>['onStreamWarning'];
+  onStreamMetadata: UseAssistantSessionOptions<TMeta>['onStreamMetadata'];
   onToolCall: UseAssistantSessionOptions<TMeta>['onToolCall'];
   onToolDelta: UseAssistantSessionOptions<TMeta>['onToolDelta'];
   tools: UseAssistantSessionOptions<TMeta>['tools'];
@@ -39,6 +40,7 @@ export function useAssistantSessionRefs<TMeta>(v: RefValues<TMeta>) {
     onAbort: useLatestRef(v.onAbort),
     onStreamDone: useLatestRef(v.onStreamDone),
     onStreamWarning: useLatestRef(v.onStreamWarning),
+    onStreamMetadata: useLatestRef(v.onStreamMetadata),
     onToolCall: useLatestRef(v.onToolCall),
     onToolDelta: useLatestRef(v.onToolDelta),
     tools: useLatestRef(v.tools),
