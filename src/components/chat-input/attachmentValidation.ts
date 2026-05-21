@@ -2,17 +2,20 @@ import type { AttachmentError, AttachmentErrorReason, AttachmentSource } from '.
 import type { ChorusAttachmentLabels } from '../../labels/types';
 import type { PendingAttachmentOperation } from './attachmentUtils';
 
+const BYTES_PER_UNIT = 1024;
+const FIXED_DECIMAL_THRESHOLD = 10;
+
 export function formatBytes(bytes: number) {
   if (!Number.isFinite(bytes)) return String(bytes);
-  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < BYTES_PER_UNIT) return `${bytes} B`;
   const units = ['KB', 'MB', 'GB'];
-  let size = bytes / 1024;
+  let size = bytes / BYTES_PER_UNIT;
   let unit = units[0];
-  for (let i = 1; i < units.length && size >= 1024; i += 1) {
-    size /= 1024;
+  for (let i = 1; i < units.length && size >= BYTES_PER_UNIT; i += 1) {
+    size /= BYTES_PER_UNIT;
     unit = units[i];
   }
-  return `${size.toFixed(size >= 10 ? 0 : 1)} ${unit}`;
+  return `${size.toFixed(size >= FIXED_DECIMAL_THRESHOLD ? 0 : 1)} ${unit}`;
 }
 
 export function matchesAccept(file: File, accept: string) {

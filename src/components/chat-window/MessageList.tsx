@@ -1,10 +1,10 @@
 import React from 'react';
 import type { ResolvedChorusLabels } from '../../labels/types';
 import type { Message } from '../../types';
-import { Markdown, type MarkdownSanitizer } from '../Markdown';
-import { MessageActionControls, MessageRenderStateContext, MessageRenderStateProvider, MessageRow, MessageSpeakerLabel } from '../MessageRow';
+import type { MarkdownSanitizer } from '../Markdown';
+import { MessageRenderStateContext, MessageRenderStateProvider } from '../MessageRow';
 import type { MessageBubbleSlots, MessageCopyResult, MessageFeedback, MessageMarkdownProps, MessageRenderActions, MessageTimestampFormatter } from '../MessageRow';
-import { ToolCallBlock } from '../ToolCallBlock';
+import { buildMessageDefaultRender, buildMessageRenderActions } from './messageRenderBuilders';
 import { attachMessageRootProps } from './rendering';
 import type { RenderMessageContext, RenderMessageRootProps } from './types';
 
@@ -95,81 +95,38 @@ export function MessageList<TMeta = Record<string, unknown>>({
         const toolStreaming = sessionStreaming && index > lastUserIndex;
         const initialFeedback = getSelectedFeedback(message);
         const feedback = feedbackEnabled ? (variant: MessageFeedback | null) => onMessageFeedback(message, variant) : undefined;
-        const defaultRender = (slots?: MessageBubbleSlots) => {
-          if (message.role === 'tool') {
-            // `ToolMessage.text` is an optional host-authored summary of the tool
-            // result (see types.ts). Render it above the call block as finalized
-            // Markdown so a populated `text` is visible instead of silently
-            // dropped. It is not incrementally streamed by Chorus, so it is
-            // always parsed (streaming=false) regardless of the turn state.
-            const toolText = message.text ?? '';
-            const hasToolText = toolText.trim().length > 0;
-            return (
-              <div className="chorus-msg chorus-tool" data-chorus-message-id={message.id}>
-                <MessageSpeakerLabel role={message.role} speakers={resolvedLabels.speakers} />
-                {slots?.before}
-                {slots?.headerSlot}
-                {hasToolText && (
-                  <div className="chorus-bubble">
-                    <Markdown
-                      {...markdownProps}
-                      text={toolText}
-                      codeTheme={codeTheme}
-                      headless={headless}
-                      streaming={false}
-                      sanitizer={markdownSanitizer ?? markdownProps?.sanitizer}
-                      codeCopyLabels={resolvedLabels.codeCopy ?? markdownProps?.codeCopyLabels}
-                    />
-                  </div>
-                )}
-                <ToolCallBlock toolCall={message.toolCall} labels={resolvedLabels.toolCall} streaming={toolStreaming} />
-                {slots?.footerSlot}
-                {slots?.after}
-              </div>
-            );
-          }
-
-          return (
-            <MessageRow
-              m={message}
-              codeTheme={codeTheme}
-              headless={headless}
-              streaming={isStreaming}
-              markdownProps={markdownProps}
-              markdownSanitizer={markdownSanitizer}
-              messageActionLabels={resolvedLabels.messageActions}
-              speakerLabels={resolvedLabels.speakers}
-              reasoningLabel={resolvedLabels.reasoning}
-              codeCopyLabels={resolvedLabels.codeCopy}
-              attachmentLabels={resolvedLabels.attachments}
-              showTimestamp={showTimestamps}
-              formatTimestamp={formatTimestamp}
-              onEdit={onEdit}
-              onRegenerate={onRegenerate}
-              onDelete={onDelete}
-              onCopy={copyAvailable ? copyMessage : undefined}
-              onFeedback={feedback ? (_message, variant) => feedback(variant) : undefined}
-              initialFeedback={initialFeedback}
-              feedbackReadOnly={feedbackReadOnly}
-              {...slots}
-            />
-          );
-        };
-        const actions: MessageRenderActions = {
-          canEdit: Boolean(message.role === 'user' && onEdit),
-          canRegenerate: Boolean(message.role === 'assistant' && onRegenerate),
-          canDelete: Boolean(onDelete),
-          // Pass through unchanged: trimming/empty-drop is owned solely by
-          // InlineMessageEditor.submitEdit so onEdit's contract is consistent.
-          edit: message.role === 'user' && onEdit ? (newText) => onEdit(message.id, newText) : undefined,
-          regenerate: message.role === 'assistant' && onRegenerate ? () => onRegenerate(message.id) : undefined,
-          delete: onDelete ? () => onDelete(message.id) : undefined,
-          copy: copyAvailable ? () => copyMessage(message) : undefined,
+        const defaultRender = buildMessageDefaultRender<TMeta>({
+          message,
+          codeTheme,
+          headless,
+          markdownProps,
+          markdownSanitizer,
+          resolvedLabels,
+          isStreaming,
+          toolStreaming,
+          showTimestamps,
+          formatTimestamp,
+          onEdit,
+          onRegenerate,
+          onDelete,
+          copyAvailable,
+          copyMessage,
           feedback,
           initialFeedback,
           feedbackReadOnly,
-          defaultRender: () => <MessageActionControls message={message} actions={actions} labels={resolvedLabels.messageActions} speakerLabels={resolvedLabels.speakers} />,
-        };
+        });
+        const actions = buildMessageRenderActions<TMeta>({
+          message,
+          resolvedLabels,
+          onEdit,
+          onRegenerate,
+          onDelete,
+          copyAvailable,
+          copyMessage,
+          feedback,
+          initialFeedback,
+          feedbackReadOnly,
+        });
         const messageProps: RenderMessageRootProps = { 'data-chorus-message-id': message.id };
 
         return (

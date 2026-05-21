@@ -10,6 +10,7 @@ Helper map:
 - `chat-window/activityKey.ts` — `stringActivityKey` plus attachment/message/visible activity fingerprints for auto-scroll and unread detection.
 - `chat-window/messageWindowing.ts` — deprecated `showSystemMessages`/`hiddenRoles` resolution, visible-message filtering, and `maxRenderedMessages` normalization/windowing.
 - `chat-window/MessageList.tsx` — visible message mapping, `renderMessage` context/slot handling, default tool/message rows, and action/copy/feedback wiring.
+- `chat-window/messageRenderBuilders.tsx` — `buildMessageDefaultRender` (tool vs `MessageRow` default slot) and `buildMessageRenderActions` (the `MessageRenderActions` object) for one message.
 - `chat-window/TranscriptStatusRows.tsx` — custom/default empty state, typing indicator, error row, and jump-to-bottom button.
 - `chat-window/useAutoScroll.ts` — scroll container ref, near-bottom tracking, unread/jump-to-bottom state, and imperative scroll-to-bottom behavior.
 - `chat-window/feedback.ts` — per-message feedback override state and cleanup as messages leave the transcript.

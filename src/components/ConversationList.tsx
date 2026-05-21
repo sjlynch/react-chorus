@@ -4,6 +4,7 @@ import { styleVarsFromPalette } from './conversation-list/styleVars';
 import { ConversationListItem } from './conversation-list/ConversationListItem';
 import { defaultFormatTimestamp } from './conversation-list/formatTimestamp';
 import { sortedConversations } from './conversation-list/sorting';
+import { ConversationRenameProvider, type ConversationRenameContextValue } from './conversation-list/renameContext';
 import type { ConversationListProps } from './conversation-list/types';
 import { useConversationRename } from './conversation-list/useConversationRename';
 import { useDeleteConversationConfirmation } from './conversation-list/useDeleteConversationConfirmation';
@@ -73,6 +74,20 @@ export function ConversationList({
     submitRename,
   } = useConversationRename(conversations, renameConversation);
 
+  // Rename-form state for the single editing row, provided once around the
+  // list so each row consumes it via context instead of prop-drilling.
+  const renameContextValue = React.useMemo<ConversationRenameContextValue>(() => ({
+    editingId,
+    draftTitle,
+    setDraftTitle,
+    renameInputRef,
+    isDraftEmpty,
+    isDraftTooLong,
+    startRename,
+    cancelRename,
+    submitRename,
+  }), [editingId, draftTitle, setDraftTitle, renameInputRef, isDraftEmpty, isDraftTooLong, startRename, cancelRename, submitRename]);
+
   const handleConversationDeleted = React.useCallback((conversation: ConversationSummary) => {
     const order = orderedConversationsRef.current;
     const index = order.findIndex(c => c.id === conversation.id);
@@ -139,37 +154,29 @@ export function ConversationList({
           reader would announce a bare, role-less <div>. */}
       <div className="chorus-conversation-items" role={conversations.length === 0 ? undefined : 'list'} aria-label={labels.navAriaLabel} ref={itemsRef} tabIndex={-1}>
         {conversations.length === 0 && <div className="chorus-conversation-empty">{resolvedEmpty}</div>}
-        {orderedConversations.map(conversation => {
-          const active = conversation.id === activeId;
-          const editing = conversation.id === editingId;
-          const pinned = Boolean(conversation.pinned);
-          return (
-            <ConversationListItem
-              key={conversation.id}
-              conversation={conversation}
-              active={active}
-              editing={editing}
-              pinned={pinned}
-              pending={pendingDeleteIds.has(conversation.id)}
-              disabled={interactionsDisabled}
-              labels={labels}
-              formatTime={formatTimestamp}
-              selectConversation={selectConversation}
-              renameConversation={renameConversation}
-              deleteConversation={deleteConversation}
-              pinConversation={pinConversation}
-              draftTitle={draftTitle}
-              setDraftTitle={setDraftTitle}
-              renameInputRef={renameInputRef}
-              isDraftEmpty={isDraftEmpty}
-              isDraftTooLong={isDraftTooLong}
-              startRename={startRename}
-              cancelRename={cancelRename}
-              submitRename={submitRename}
-              onDelete={handleDeleteConversation}
-            />
-          );
-        })}
+        <ConversationRenameProvider value={renameContextValue}>
+          {orderedConversations.map(conversation => {
+            const active = conversation.id === activeId;
+            const pinned = Boolean(conversation.pinned);
+            return (
+              <ConversationListItem
+                key={conversation.id}
+                conversation={conversation}
+                active={active}
+                pinned={pinned}
+                pending={pendingDeleteIds.has(conversation.id)}
+                disabled={interactionsDisabled}
+                labels={labels}
+                formatTime={formatTimestamp}
+                selectConversation={selectConversation}
+                renameConversation={renameConversation}
+                deleteConversation={deleteConversation}
+                pinConversation={pinConversation}
+                onDelete={handleDeleteConversation}
+              />
+            );
+          })}
+        </ConversationRenameProvider>
       </div>
 
       <div className="chorus-sr-only" role="status" aria-live="polite">{announcement}</div>
