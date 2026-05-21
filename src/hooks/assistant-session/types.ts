@@ -139,7 +139,7 @@ export type ChorusShouldContinueToolLoop<TMeta = Record<string, unknown>> = (con
 export interface UpdateMessagesOptions {
   flushPersistence?: boolean;
   removePersistenceIfEmpty?: boolean;
-  reason?: 'send' | 'assistant' | 'retry' | 'edit' | 'regenerate' | 'delete' | 'clear' | 'update';
+  reason?: 'send' | 'assistant' | 'retry' | 'edit' | 'regenerate' | 'delete' | 'clear' | 'error-cleanup' | 'update';
 }
 
 export type UpdateSessionMessages<TMeta> = (

@@ -65,6 +65,7 @@ describe('useChorusStream error handling', () => {
   it('surfaces a connector error even when the error string is empty', async () => {
     // A provider that emits `error: ''` is still reporting a failure; the empty
     // string must not be treated as 'no error' or the stream completes silently.
+    // A non-empty message is synthesized so `error.message` is never blank.
     const emptyErrorConnector = {
       name: 'empty-error-test',
       extract: () => ({ error: '' }),
@@ -84,10 +85,35 @@ describe('useChorusStream error handling', () => {
     });
 
     expect(rejection).toBeInstanceOf(ChorusStreamError);
+    expect((rejection as ChorusStreamError).message).toBe('Connector reported an error with no message');
     expect(onError).toHaveBeenCalledTimes(1);
     expect(onError.mock.calls[0][0]).toBeInstanceOf(ChorusStreamError);
+    expect(onError.mock.calls[0][0].message).toBe('Connector reported an error with no message');
     expect(onDone).not.toHaveBeenCalled();
     expect(result.current.sending).toBe(false);
+  });
+
+  it('synthesizes a connector error message when the error string is whitespace-only', async () => {
+    // Whitespace-only is as useless as empty for `error.message`; treat it the
+    // same and synthesize a readable message.
+    const whitespaceErrorConnector = {
+      name: 'whitespace-error-test',
+      extract: () => ({ error: '   \n  ' }),
+    };
+    const transport = vi.fn<Transport>(() => Promise.resolve(makeSseResponse(['anything'])));
+    const onError = vi.fn();
+    const { result } = renderHook(() => useChorusStream(transport, { connector: whitespaceErrorConnector }));
+
+    let rejection: unknown;
+    await act(async () => {
+      rejection = await result.current.send('hello', [], { onChunk: vi.fn(), onError }).then(
+        () => undefined,
+        (err) => err,
+      );
+    });
+
+    expect((rejection as ChorusStreamError).message).toBe('Connector reported an error with no message');
+    expect(onError.mock.calls[0][0].message).toBe('Connector reported an error with no message');
   });
 
   it('calls onError instead of onDone when transport throws a non-abort error', async () => {

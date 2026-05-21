@@ -2,7 +2,15 @@ import React from 'react';
 import type { ChatInputHandle } from '../components/ChatInput';
 import type { ChorusRef } from '../Chorus.types';
 import type { Attachment, Message } from '../types';
+import { isChorusDevMode } from '../utils/devMode';
 import type { UseAssistantSessionResult } from './useAssistantSession';
+
+type ImperativeRejectionCause = 'writesDisabled' | 'controlledWithoutOnChange';
+
+const REJECTION_EXPLANATIONS: Record<ImperativeRejectionCause, string> = {
+  writesDisabled: '`disabled`/`readOnly` is set, or a built-in persistence load is still pending, so write actions are gated',
+  controlledWithoutOnChange: '`value` is provided without `onChange`, so Chorus is controlled and cannot reflect the change itself',
+};
 
 interface UseChorusRefArgs<TMeta> {
   session: UseAssistantSessionResult;
@@ -41,10 +49,29 @@ export function useChorusRef<TMeta>(
     controlledWithoutOnChange,
   }: UseChorusRefArgs<TMeta>,
 ): void {
-  React.useImperativeHandle(ref, () => ({
+  // A `false` return from an imperative method is ambiguous: it can mean an
+  // invalid argument / no-op (e.g. unknown id, no error to retry) OR that
+  // writes are gated (`disabled`/`readOnly`/load pending, or controlled without
+  // `onChange`). The latter is a host misconfiguration the caller usually wants
+  // to know about, so emit a one-time-per-(method, cause) dev warning for it.
+  const warnedRejectionsRef = React.useRef<Set<string>>(new Set());
+
+  React.useImperativeHandle(ref, () => {
+    const warnRejected = (method: string, cause: ImperativeRejectionCause): false => {
+      if (isChorusDevMode()) {
+        const key = `${method}:${cause}`;
+        if (!warnedRejectionsRef.current.has(key)) {
+          warnedRejectionsRef.current.add(key);
+          console.warn(`[Chorus] \`ChorusRef.${method}()\` returned \`false\` because ${REJECTION_EXPLANATIONS[cause]}. This rejection is distinct from an invalid-argument/no-op \`false\` (e.g. unknown id or nothing to act on).`);
+        }
+      }
+      return false;
+    };
+
+    return {
     send(text: string, attachments: Attachment[] = []) {
-      if (writesDisabled) return false;
-      if (controlledWithoutOnChange) return false;
+      if (writesDisabled) return warnRejected('send', 'writesDisabled');
+      if (controlledWithoutOnChange) return warnRejected('send', 'controlledWithoutOnChange');
       const accepted = session.send(text, attachments);
       // Mirror a UI-driven send: clear the draft, collapse the textarea, and
       // drop any attachment chips the user had staged in the composer.
@@ -55,8 +82,9 @@ export function useChorusRef<TMeta>(
       session.stop('programmatic');
     },
     clear() {
-      if (writesDisabled || session.clearConfirmationPending) return false;
-      if (controlledWithoutOnChange) return false;
+      if (writesDisabled) return warnRejected('clear', 'writesDisabled');
+      if (session.clearConfirmationPending) return false;
+      if (controlledWithoutOnChange) return warnRejected('clear', 'controlledWithoutOnChange');
       // On commit the clear path invokes onClear, which resets the composer the
       // same way a UI-driven clear does — no extra reset is needed here (and
       // resetting unconditionally would wrongly clear it before an async
@@ -65,22 +93,22 @@ export function useChorusRef<TMeta>(
       return true;
     },
     retry() {
-      if (writesDisabled) return false;
-      if (controlledWithoutOnChange) return false;
+      if (writesDisabled) return warnRejected('retry', 'writesDisabled');
+      if (controlledWithoutOnChange) return warnRejected('retry', 'controlledWithoutOnChange');
       if (!session.streamError) return false;
       session.retry();
       return true;
     },
     regenerate(messageId: string) {
-      if (writesDisabled) return false;
-      if (controlledWithoutOnChange) return false;
+      if (writesDisabled) return warnRejected('regenerate', 'writesDisabled');
+      if (controlledWithoutOnChange) return warnRejected('regenerate', 'controlledWithoutOnChange');
       if (!canRegenerateMessage(messagesRef.current, messageId)) return false;
       session.handleRegenerate(messageId);
       return true;
     },
     dismissError() {
-      if (writesDisabled) return false;
-      if (controlledWithoutOnChange) return false;
+      if (writesDisabled) return warnRejected('dismissError', 'writesDisabled');
+      if (controlledWithoutOnChange) return warnRejected('dismissError', 'controlledWithoutOnChange');
       if (!session.streamError) return false;
       session.dismissError();
       return true;
@@ -100,5 +128,6 @@ export function useChorusRef<TMeta>(
       target.scrollIntoView({ block: 'nearest' });
       return true;
     },
-  }), [controlledWithoutOnChange, inputRef, messagesRef, resetComposer, rootRef, session, writesDisabled]);
+    };
+  }, [controlledWithoutOnChange, inputRef, messagesRef, resetComposer, rootRef, session, writesDisabled]);
 }

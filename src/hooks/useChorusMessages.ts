@@ -16,6 +16,9 @@ export type ChorusMessagesChangeReason =
   | 'regenerate'
   | 'delete'
   | 'clear'
+  // Internal removal of a half-streamed assistant partial after a stream
+  // failure or supersession — distinct from a host-initiated `'delete'`.
+  | 'error-cleanup'
   | 'update';
 
 export interface ChorusMessagesChangeContext {

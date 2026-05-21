@@ -3,8 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Chorus } from '../../Chorus';
-import { sendMessage } from './testUtils';
-import type { Message, OnSend } from './testUtils';
+import { sendMessage, erroringSSEResponse } from './testUtils';
+import type { Message, OnSend, Transport } from './testUtils';
 
 vi.mock('../../components/Markdown', () => ({
   Markdown: ({ text }: { text: string }) => <span data-testid="markdown">{text}</span>,
@@ -142,5 +142,30 @@ describe('Chorus message change observations', () => {
       .map(([, context]) => context.reason)
       .filter((reason) => reason === 'external');
     expect(externalReasons).toHaveLength(2);
+  });
+
+  it('reports a transport-error partial removal with the error-cleanup reason, not delete', async () => {
+    const user = userEvent.setup();
+    const onMessagesChange = vi.fn();
+    // The stream emits a partial token, then errors before completing.
+    const transport = vi.fn<Transport>(async () => erroringSSEResponse(['partial answer']));
+
+    render(
+      <Chorus
+        transport={transport}
+        connector="openai"
+        minAssistantDelayMs={0}
+        onMessagesChange={onMessagesChange}
+      />,
+    );
+
+    await sendMessage(user, 'trigger failure');
+    await waitFor(() => expect(screen.queryByText('partial answer')).not.toBeInTheDocument());
+
+    // Discarding the half-streamed partial is internal stream-failure cleanup,
+    // distinguishable from a host-initiated `'delete'`.
+    const reasons = onMessagesChange.mock.calls.map(([, context]) => context.reason);
+    expect(reasons).toContain('error-cleanup');
+    expect(reasons).not.toContain('delete');
   });
 });

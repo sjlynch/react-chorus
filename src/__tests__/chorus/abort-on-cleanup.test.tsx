@@ -83,10 +83,13 @@ describe('Chorus abort-on-cleanup', () => {
     // The stale stream is aborted and the abort is reported to the host.
     expect(helpers.signal.aborted).toBe(true);
     await waitFor(() => expect(onAbort).toHaveBeenCalledOnce());
+    // A `'superseded'` abort discards the half-streamed partial instead of
+    // finalizing it, so `message` is null rather than the truncated turn.
     expect(onAbort.mock.calls[0][0]).toEqual(expect.objectContaining({
       reason: 'superseded',
       source: 'programmatic',
       path: 'onSend',
+      message: null,
     }));
 
     // Conversation B never shows conversation A's streamed token...

@@ -188,7 +188,11 @@ export function useSessionOrchestrator<TMeta>(deps: SessionOrchestratorDeps<TMet
     if (partialId || toolMessageIds.size > 0) {
       updateSessionMessages(
         prev => prev.filter(m => m.id !== partialId && !toolMessageIds.has(m.id)),
-        { flushPersistence: true, reason: 'delete' },
+        // `'error-cleanup'`, not `'delete'`: dropping a half-streamed partial
+        // after a stream failure or supersession is internal cleanup, not a
+        // host-initiated message delete. A host observing `onMessagesChange`
+        // should be able to tell the two apart.
+        { flushPersistence: true, reason: 'error-cleanup' },
       );
     }
   }, [pendingAssistantIdRef, pendingToolMessageIdsRef, resetStreamState, updateSessionMessages]);
@@ -208,7 +212,18 @@ export function useSessionOrchestrator<TMeta>(deps: SessionOrchestratorDeps<TMet
     }
     controllerRef.current = null;
 
-    const message = finalizeAssistantNow();
+    // `'stop'` intentionally keeps whatever streamed — finalizeAssistantNow()
+    // commits the partial assistant message into the transcript. `'superseded'`
+    // is a brand-new turn replacing this one, so the half-streamed partial must
+    // be discarded instead: leaving it committed wedges a stale truncated turn
+    // between the two user messages (and re-sends it as history). Mirror the
+    // transport error path (finalizeErroredTransportStream) and drop it.
+    let message: Message<TMeta> | null = null;
+    if (reason === 'superseded') {
+      removePendingAssistant();
+    } else {
+      message = finalizeAssistantNow();
+    }
     observers.safeOnAbort({
       message,
       messages: messagesRef.current,
@@ -216,15 +231,26 @@ export function useSessionOrchestrator<TMeta>(deps: SessionOrchestratorDeps<TMet
       source,
       path,
     });
-  }, [finalizeAssistantNow, invalidateAssistantSession, messagesRef, observers, setTransportBusy, transportRef]);
+  }, [finalizeAssistantNow, invalidateAssistantSession, messagesRef, observers, removePendingAssistant, setTransportBusy, transportRef]);
 
   const triggerAssistant = React.useCallback((text: string, history: Message<TMeta>[] = messagesRef.current) => {
     if (activeSendPathRef.current) abortActiveAssistant('superseded', 'programmatic');
 
     const sessionId = beginAssistantSession();
-    rememberSubmittedTurn(text, history);
     const currentTransport = transportRef.current;
     const sendPath = selectAssistantSendPath<TMeta>(currentTransport, onSendRef.current);
+
+    if (sendPath.path === 'missing') {
+      invalidateAssistantSession(sessionId);
+      warnMissingResponseHandler();
+      return;
+    }
+
+    // Record the submitted turn only after a real send path is committed.
+    // Recording it before path selection logs a phantom turn for the
+    // `'missing'` case — a turn that was never dispatched would then be
+    // replayable by `retry()`.
+    rememberSubmittedTurn(text, history);
 
     if (sendPath.path === 'transport') {
       if (sendPath.onSend) warnTransportOnSend();
@@ -236,12 +262,6 @@ export function useSessionOrchestrator<TMeta>(deps: SessionOrchestratorDeps<TMet
       clearStreamError();
       setTransportBusy(true);
       lateDepsRef.current?.startTransportStream(sessionId, text, history, controller, 0);
-      return;
-    }
-
-    if (sendPath.path === 'missing') {
-      invalidateAssistantSession(sessionId);
-      warnMissingResponseHandler();
       return;
     }
 

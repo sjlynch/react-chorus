@@ -50,7 +50,12 @@ function connectorErrorFromResult(out: ConnectorResult) {
   // a truthiness check would silently complete the stream with no error
   // surfaced. Use `'error' in out` as the sentinel so a missing key (no error)
   // stays distinct from a present-but-empty value.
-  return 'error' in out ? createConnectorStreamError(out.error ?? '', out.errorPayload) : null;
+  if (!('error' in out)) return null;
+  // The error key is present but the message is empty/whitespace. Synthesize a
+  // non-empty message so `streamRawError.message` and any `onError` handler
+  // logging `error.message` never receive a blank string.
+  const message = out.error?.trim() ? out.error : 'Connector reported an error with no message';
+  return createConnectorStreamError(message, out.errorPayload);
 }
 
 export function createConnectorResultDeliverer(

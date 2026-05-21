@@ -67,6 +67,11 @@ export function useChorusPropWarnings<TMeta>({
       console.warn(`[Chorus] \`${changedProp}\` array reference changed after mount; the new value is ignored because the seed is captured at mount. To replace the transcript, use \`value\`+\`onChange\`, call ChorusRef.clear(), or remount via \`key={...}\`.`);
     }
 
+    if (value !== undefined && (messages !== undefined || initialMessages !== undefined)) {
+      const seedProp = messages !== undefined ? 'messages' : 'initialMessages';
+      console.warn(`[Chorus] Both \`value\` and \`${seedProp}\` were provided. \`value\` makes the message list controlled, so \`${seedProp}\` does not seed what is displayed — it only backs the uncontrolled state restored by \`resetToInitialMessages\` on clear(). Remove \`${seedProp}\`, or drop \`value\` for uncontrolled mode.`);
+    }
+
     if (value !== undefined && persistenceKey) {
       console.warn('[Chorus] Both `value` and `persistenceKey` were provided. `value` makes the message list controlled, so built-in persistence is ignored and message changes are not saved automatically. Remove `persistenceKey` or manage persistence in your controlled state.');
     }
