@@ -2,12 +2,12 @@ import React from 'react';
 import type { ConversationSummary } from '../../hooks/useConversations';
 import type { ChorusConversationListLabels } from '../../labels/types';
 import { conversationClasses } from './classes';
+import { useConversationRenameContext } from './renameContext';
 import { CONVERSATION_RENAME_MAX_LENGTH } from './useConversationRename';
 
 interface ConversationListItemProps {
   conversation: ConversationSummary;
   active: boolean;
-  editing: boolean;
   pinned: boolean;
   pending: boolean;
   disabled: boolean;
@@ -17,21 +17,12 @@ interface ConversationListItemProps {
   renameConversation?: (id: string, title: string) => void;
   deleteConversation?: (id: string) => void;
   pinConversation?: (id: string, pinned?: boolean) => void;
-  draftTitle: string;
-  setDraftTitle: React.Dispatch<React.SetStateAction<string>>;
-  renameInputRef: React.RefObject<HTMLInputElement | null>;
-  isDraftEmpty: boolean;
-  isDraftTooLong: boolean;
-  startRename: (conversation: ConversationSummary) => void;
-  cancelRename: () => void;
-  submitRename: (id: string) => void;
   onDelete: (conversation: ConversationSummary) => void;
 }
 
 export function ConversationListItem({
   conversation,
   active,
-  editing,
   pinned,
   pending,
   disabled,
@@ -41,16 +32,22 @@ export function ConversationListItem({
   renameConversation,
   deleteConversation,
   pinConversation,
-  draftTitle,
-  setDraftTitle,
-  renameInputRef,
-  isDraftEmpty,
-  isDraftTooLong,
-  startRename,
-  cancelRename,
-  submitRename,
   onDelete,
 }: ConversationListItemProps) {
+  // Rename-form state is owned by ConversationList and shared via context; the
+  // single editing row derives `editing` from `editingId`.
+  const {
+    editingId,
+    draftTitle,
+    setDraftTitle,
+    renameInputRef,
+    isDraftEmpty,
+    isDraftTooLong,
+    startRename,
+    cancelRename,
+    submitRename,
+  } = useConversationRenameContext();
+  const editing = conversation.id === editingId;
   const errorId = React.useId();
   const isDraftInvalid = isDraftEmpty || isDraftTooLong;
   const renameError = isDraftEmpty

@@ -4,7 +4,8 @@
 
 Module map:
 
-- `ConversationListItem.tsx` — per-row DOM, ARIA, action buttons, rename form (inline validation message + `maxLength`), and timestamp rendering. The row root carries `data-conversation-id` so the facade can locate it for focus restoration.
+- `ConversationListItem.tsx` — per-row DOM, ARIA, action buttons, rename form (inline validation message + `maxLength`), and timestamp rendering. The row root carries `data-conversation-id` so the facade can locate it for focus restoration. Rename-form state comes from `renameContext.ts` via `useConversationRenameContext`, not props; the row derives its own `editing` flag from `conversation.id === editingId`.
+- `renameContext.ts` — `ConversationRenameContext` (provider + `useConversationRenameContext` hook) carrying the `useConversationRename` state for the single editing row. `ConversationList` provides it once around the list so the per-row props stay limited to conversation data, selection, and delete handling. `restoreFocusId`/`clearRestoreFocus` deliberately stay off the context — they drive the facade's focus effects and no row reads them.
 - `types.ts` — public `ConversationListProps`, `ConfirmDeleteConversation`, and delete-confirmation context types.
 - `sorting.ts` — pinned/recency/stable-input-order sorting.
 - `classes.ts` — conversation row class-name composition.
