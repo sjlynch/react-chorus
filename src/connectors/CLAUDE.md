@@ -16,11 +16,12 @@ The parsing contract is:
   error?: string;
   errorPayload?: unknown;
   warning?: { code: string; message: string; payload?: unknown };
+  warnings?: Array<{ code: string; message: string; payload?: unknown }>;
   metadata?: Record<string, unknown>;
 } | null
 ```
 
-`text` appends output, `reasoning` appends the assistant thinking trace, `toolDelta`/`toolDeltas` update one or more streamed tool-call messages, `done` stops the SSE reader, `error` carries an in-band provider error, `warning` carries non-fatal diagnostics (for example truncation or unsupported Gemini parts), and `metadata` carries provider diagnostics such as safety ratings or response ids. When present, `errorPayload` is attached to the thrown `ChorusStreamError` so `onError`/`streamRawError` can inspect the provider JSON.
+`text` appends output, `reasoning` appends the assistant thinking trace, `toolDelta`/`toolDeltas` update one or more streamed tool-call messages, `done` stops the SSE reader, `error` carries an in-band provider error, `warning`/`warnings` carry non-fatal diagnostics (for example truncation or unsupported Gemini parts — use `warnings` when one chunk produces more than one, `warning` mirrors the first for back-compat), and `metadata` carries provider diagnostics such as safety ratings or response ids. When present, `errorPayload` is attached to the thrown `ChorusStreamError` so `onError`/`streamRawError` can inspect the provider JSON.
 
 The `Connector` type is exported from `types.ts`, `openai.ts`, and `connectors.ts`:
 
