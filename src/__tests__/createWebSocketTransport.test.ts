@@ -373,6 +373,31 @@ describe('createWebSocketTransport', () => {
     await expect(reader.read()).rejects.toThrow(/transport closed by client/);
   });
 
+  it('removes aborted open waiters without closing a connecting persistent socket', async () => {
+    const firstController = new AbortController();
+    const secondController = new AbortController();
+    const transport = createWebSocketTransport('wss://api.example.com/chat', {
+      persistent: true,
+      correlate: () => null,
+    });
+
+    const firstPromise = transport('one', [], firstController.signal);
+    const ws = MockWebSocket.instances[0];
+    const secondPromise = transport('two', [], secondController.signal);
+
+    firstController.abort();
+
+    await expect(firstPromise).rejects.toThrow('Aborted');
+
+    ws.emitOpen();
+    const secondResponse = await secondPromise;
+
+    expect(secondResponse.ok).toBe(true);
+    expect(MockWebSocket.instances).toHaveLength(1);
+    expect(ws.closedWith).toEqual([]);
+    expect(ws.sent).toEqual(['{"prompt":"two","history":[]}']);
+  });
+
   it('closes the WS and errors the stream when the AbortSignal fires after open', async () => {
     const controller = new AbortController();
     const transport = createWebSocketTransport('wss://api.example.com/chat');
