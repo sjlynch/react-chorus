@@ -67,6 +67,12 @@ describe('react-chorus/headless defaults', () => {
     expect(container.querySelector('.chorus-conversation-list')).toHaveClass('chorus-conversation-list--headless');
   });
 
+  it('ChatWindow defaults to headless mode', () => {
+    const { container } = render(<ChatWindow messages={[USER_MSG]} />);
+
+    expect(container.querySelector('.chorus-window')).toHaveClass('chorus-window--headless');
+  });
+
   it('Chorus does not inject Markdown styles by default', () => {
     render(<Chorus initialMessages={[USER_MSG]} />);
 

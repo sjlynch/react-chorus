@@ -265,6 +265,46 @@ describe('OpenAI provider request mapping', () => {
       },
     ]);
   });
+
+  it('routes OpenAI image attachments by the data-URL header MIME, not a mismatched attachment.type', () => {
+    // A generic upload pipeline often relabels an image as
+    // `application/octet-stream` (or leaves `type` empty). The base64 `data:`
+    // header is authoritative — the same routing Anthropic and Gemini use — so
+    // OpenAI Chat and Responses must still deliver these as images.
+    const relabeledImageHistory = (): Message[] => [
+      {
+        id: 'relabel-user',
+        role: 'user',
+        text: 'Describe these',
+        attachments: [
+          { name: 'octet', type: 'application/octet-stream', data: 'data:image/png;base64,aGVsbG8=', size: 5 },
+          { name: 'blank', type: '', data: 'data:image/jpeg;base64,d29ybGQ=', size: 5 },
+        ],
+      },
+    ];
+
+    expect(toOpenAIChatCompletionsBody(relabeledImageHistory()).messages).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Describe these' },
+          { type: 'image_url', image_url: { url: 'data:image/png;base64,aGVsbG8=' } },
+          { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,d29ybGQ=' } },
+        ],
+      },
+    ]);
+
+    expect(toOpenAIResponsesBody(relabeledImageHistory()).input).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'input_text', text: 'Describe these' },
+          { type: 'input_image', image_url: 'data:image/png;base64,aGVsbG8=' },
+          { type: 'input_image', image_url: 'data:image/jpeg;base64,d29ybGQ=' },
+        ],
+      },
+    ]);
+  });
 });
 
 describe('OpenAI tool-call arguments are always valid JSON', () => {

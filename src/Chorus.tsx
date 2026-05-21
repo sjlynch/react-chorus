@@ -57,6 +57,7 @@ function ChorusInner<TMeta = Record<string, unknown>>({
   onMessagesChange,
   onStreamDone,
   onStreamWarning,
+  onStreamMetadata,
   onToolCall,
   onToolDelta,
   onPersistenceError,
@@ -130,6 +131,10 @@ function ChorusInner<TMeta = Record<string, unknown>>({
     autoContinueTools,
     maxToolIterations,
     shouldContinueToolLoop,
+    tools,
+    onToolCall,
+    onToolDelta,
+    continueOnToolError,
   });
 
   const session = useAssistantSession<TMeta>({
@@ -149,6 +154,7 @@ function ChorusInner<TMeta = Record<string, unknown>>({
     onAbort,
     onStreamDone,
     onStreamWarning,
+    onStreamMetadata,
     onToolCall,
     onToolDelta,
     tools,
