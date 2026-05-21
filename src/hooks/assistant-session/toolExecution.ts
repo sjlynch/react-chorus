@@ -24,6 +24,71 @@ export function resolveToolHandlerLocal<TMeta>(
   return typeof entry.handler === 'function' ? (entry.handler as ChorusToolHandler<TMeta>) : undefined;
 }
 
+function hasOwn(value: object, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+export function buildToolMessageFromDelta<TMeta>(
+  messageId: string,
+  delta: ConnectorToolDelta,
+  existing?: ToolMessage<TMeta>,
+): ToolMessage<TMeta> {
+  const toolCall: ToolMessage<TMeta>['toolCall'] = {
+    ...(existing?.toolCall ?? {}),
+    id: delta.id,
+    name: delta.name ?? existing?.toolCall?.name ?? delta.id,
+  };
+  if (hasOwn(delta, 'input')) toolCall.input = delta.input;
+  if (hasOwn(delta, 'output')) toolCall.output = delta.output;
+
+  return {
+    id: messageId,
+    role: 'tool',
+    text: existing?.text ?? '',
+    reasoning: existing?.reasoning,
+    metadata: metadataWithToolProvider(existing?.metadata, delta),
+    toolCall,
+  };
+}
+
+interface ApplyToolOutputOptions {
+  isError?: boolean;
+}
+
+export function applyToolOutput<TMeta>(
+  message: Message<TMeta>,
+  output: unknown,
+  options: ApplyToolOutputOptions = {},
+): Message<TMeta> {
+  if (message.role !== 'tool') return message;
+  const next: ToolMessage<TMeta> = {
+    ...message,
+    toolCall: { ...message.toolCall, output },
+  };
+  if (options.isError) next.metadata = metadataWithToolError(message.metadata);
+  return next;
+}
+
+export function createToolCallContextFromMessage<TMeta>(
+  message: Message<TMeta>,
+  messages: Message<TMeta>[],
+  signal: AbortSignal,
+): ChorusToolCallContext<TMeta> | null {
+  if (message.role !== 'tool') return null;
+  const id = message.toolCall.id ?? message.id;
+  const name = message.toolCall.name || id;
+  const context: ChorusToolCallContext<TMeta> = {
+    id,
+    name,
+    input: message.toolCall.input,
+    message,
+    messages,
+    signal,
+  };
+  if (hasOwn(message.toolCall, 'output')) context.output = message.toolCall.output;
+  return context;
+}
+
 export interface ToolExecutionDeps<TMeta> {
   updateSessionMessages: UpdateSessionMessages<TMeta>;
   messagesRef: React.MutableRefObject<Message<TMeta>[]>;
@@ -80,24 +145,9 @@ export function useToolExecution<TMeta>(deps: ToolExecutionDeps<TMeta>): ToolExe
     let updatedMessage: ToolMessage<TMeta> | null = null;
     const nextMessages = updateSessionMessages(prev => {
       const idx = prev.findIndex(m => m.id === messageId);
-      const existing = idx >= 0 ? prev[idx] : undefined;
-      const toolCall = {
-        ...(existing?.toolCall ?? {}),
-        id: delta.id,
-        name: delta.name ?? existing?.toolCall?.name ?? delta.id,
-      };
-      if (Object.prototype.hasOwnProperty.call(delta, 'input')) toolCall.input = delta.input;
-      if (Object.prototype.hasOwnProperty.call(delta, 'output')) toolCall.output = delta.output;
-
-      const metadata = metadataWithToolProvider(existing?.metadata, delta);
-      const nextMessage: ToolMessage<TMeta> = {
-        id: messageId,
-        role: 'tool',
-        text: existing?.text ?? '',
-        reasoning: existing?.reasoning,
-        metadata,
-        toolCall,
-      };
+      const found = idx >= 0 ? prev[idx] : undefined;
+      const existing = found?.role === 'tool' ? found : undefined;
+      const nextMessage = buildToolMessageFromDelta<TMeta>(messageId, delta, existing);
       updatedMessage = nextMessage;
 
       if (idx >= 0) return prev.map(m => m.id === messageId ? nextMessage : m);
@@ -113,35 +163,19 @@ export function useToolExecution<TMeta>(deps: ToolExecutionDeps<TMeta>): ToolExe
 
   const setToolOutput = React.useCallback((messageId: string, output: unknown) => {
     updateSessionMessages(prev => prev.map(message => (
-      message.id === messageId && message.role === 'tool'
-        ? { ...message, toolCall: { ...message.toolCall, output } }
-        : message
+      message.id === messageId ? applyToolOutput(message, output) : message
     )), { reason: 'assistant' });
   }, [updateSessionMessages]);
 
   const setToolErrorOutput = React.useCallback((messageId: string, output: unknown) => {
     updateSessionMessages(prev => prev.map(message => (
-      message.id === messageId && message.role === 'tool'
-        ? { ...message, metadata: metadataWithToolError(message.metadata), toolCall: { ...message.toolCall, output } }
-        : message
+      message.id === messageId ? applyToolOutput(message, output, { isError: true }) : message
     )), { reason: 'assistant' });
   }, [updateSessionMessages]);
 
-  const createToolCallContext = React.useCallback((message: Message<TMeta>, signal: AbortSignal): ChorusToolCallContext<TMeta> | null => {
-    if (message.role !== 'tool') return null;
-    const id = message.toolCall.id ?? message.id;
-    const name = message.toolCall.name || id;
-    const context: ChorusToolCallContext<TMeta> = {
-      id,
-      name,
-      input: message.toolCall.input,
-      message,
-      messages: messagesRef.current,
-      signal,
-    };
-    if (Object.prototype.hasOwnProperty.call(message.toolCall, 'output')) context.output = message.toolCall.output;
-    return context;
-  }, [messagesRef]);
+  const createToolCallContext = React.useCallback((message: Message<TMeta>, signal: AbortSignal): ChorusToolCallContext<TMeta> | null => (
+    createToolCallContextFromMessage(message, messagesRef.current, signal)
+  ), [messagesRef]);
 
   const runCompletedToolCalls = React.useCallback(async (sessionId: number, toolMessages: ToolMessage<TMeta>[], signal: AbortSignal) => {
     if (!toolMessages.length) return;

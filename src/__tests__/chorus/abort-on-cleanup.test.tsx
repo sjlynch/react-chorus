@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Chorus } from '../../Chorus';
-import { deferred, makeSyncStorage } from './testUtils';
+import { sendMessage, deferred, makeSyncStorage } from './testUtils';
 import type { OnSend, OnSendHelpers, Transport } from './testUtils';
 
 vi.mock('../../components/Markdown', () => ({
@@ -21,8 +21,7 @@ describe('Chorus abort-on-cleanup', () => {
 
     const { unmount } = render(<Chorus onSend={onSend} minAssistantDelayMs={0} />);
 
-    await user.type(screen.getByPlaceholderText('Send a message'), 'hi');
-    await user.click(screen.getByRole('button', { name: /send/i }));
+    await sendMessage(user, 'hi');
     await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
     expect(capturedSignal?.aborted).toBe(false);
 
@@ -45,8 +44,7 @@ describe('Chorus abort-on-cleanup', () => {
 
     const { unmount } = render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} />);
 
-    await user.type(screen.getByPlaceholderText('Send a message'), 'hi');
-    await user.click(screen.getByRole('button', { name: /send/i }));
+    await sendMessage(user, 'hi');
     await waitFor(() => expect(transport).toHaveBeenCalledOnce());
     expect(capturedSignal?.aborted).toBe(false);
 
@@ -71,8 +69,7 @@ describe('Chorus abort-on-cleanup', () => {
       <Chorus persistenceKey="conv-a" persistenceStorage={storage} onSend={onSend} minAssistantDelayMs={0} onAbort={onAbort} />,
     );
 
-    await user.type(screen.getByPlaceholderText('Send a message'), 'hello A');
-    await user.click(screen.getByRole('button', { name: /send/i }));
+    await sendMessage(user, 'hello A');
     await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
 
     act(() => helpers.appendAssistant('A-only assistant token'));

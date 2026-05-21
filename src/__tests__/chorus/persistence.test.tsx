@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Chorus } from '../../Chorus';
-import { sseResponse, deferred, makeSyncStorage } from './testUtils';
+import { sendMessage, sseResponse, deferred, makeSyncStorage } from './testUtils';
 import type { ChorusRef, Message, OnSend, StorageAdapter, Transport } from './testUtils';
 
 vi.mock('../../components/Markdown', () => ({
@@ -188,8 +188,7 @@ describe('Chorus', () => {
 
     render(<Chorus persistenceKey="chat" persistenceStorage={storage} transport={transport} connector="openai" minAssistantDelayMs={0} />);
 
-    await user.type(screen.getByPlaceholderText('Send a message'), 'persist stream');
-    await user.click(screen.getByRole('button', { name: /send/i }));
+    await sendMessage(user, 'persist stream');
 
     expect(await screen.findByText(finalText)).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument());
@@ -286,8 +285,7 @@ describe('Chorus', () => {
 
     render(<Chorus persistenceKey="chat" persistenceStorage={storage} onPersistenceError={onPersistenceError} onSend={() => undefined} />);
 
-    await user.type(screen.getByPlaceholderText('Send a message'), 'will persist');
-    await user.click(screen.getByRole('button', { name: /send/i }));
+    await sendMessage(user, 'will persist');
 
     expect(screen.getByText('will persist')).toBeInTheDocument();
     await waitFor(() => expect(onPersistenceError).toHaveBeenCalledWith(quotaError));
@@ -373,8 +371,7 @@ describe('Chorus', () => {
     expect(screen.getByText('Stored custom')).toBeInTheDocument();
     expect(deserializeMessages).toHaveBeenCalledWith('custom:read');
 
-    await user.type(screen.getByPlaceholderText('Send a message'), 'new message');
-    await user.click(screen.getByRole('button', { name: /send/i }));
+    await sendMessage(user, 'new message');
 
     await waitFor(() => expect(serializeMessages).toHaveBeenCalled());
     await waitFor(() => expect(storage.store.chat).toBe('custom:write'));

@@ -2,14 +2,14 @@ import { describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Chorus } from '../../Chorus';
-import { sseResponse, deferred } from './testUtils';
+import { sendMessage, sseResponse, deferred } from './testUtils';
 import type { Message, OnSend, OnSendHelpers, Transport } from './testUtils';
 
 vi.mock('../../components/Markdown', () => ({
   Markdown: ({ text }: { text: string }) => <span data-testid="markdown">{text}</span>,
 }));
 
-describe('Chorus', () => {
+describe('Chorus onSend lifecycle', () => {
   it('delays custom onSend helper chunks until minAssistantDelayMs elapses', async () => {
     vi.useFakeTimers();
     try {
@@ -51,8 +51,7 @@ describe('Chorus', () => {
 
     render(<Chorus onSend={onSend} systemPrompt="Stay concise." minAssistantDelayMs={0} />);
 
-    await user.type(screen.getByPlaceholderText('Send a message'), 'hi');
-    await user.click(screen.getByRole('button', { name: /send/i }));
+    await sendMessage(user, 'hi');
 
     await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
     const [, messages, helpers] = onSend.mock.calls[0];
@@ -73,8 +72,7 @@ describe('Chorus', () => {
 
     render(<Chorus onSend={onSend} minAssistantDelayMs={0} />);
 
-    await user.type(screen.getByPlaceholderText('Send a message'), 'hello');
-    await user.click(screen.getByRole('button', { name: /send/i }));
+    await sendMessage(user, 'hello');
 
     await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
     expect(await screen.findByText('non-streamed reply')).toBeInTheDocument();
@@ -87,8 +85,7 @@ describe('Chorus', () => {
 
     render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} onFinish={onFinish} />);
 
-    await user.type(screen.getByPlaceholderText('Send a message'), 'finish transport');
-    await user.click(screen.getByRole('button', { name: /send/i }));
+    await sendMessage(user, 'finish transport');
 
     await waitFor(() => expect(onFinish).toHaveBeenCalledOnce());
     expect(onFinish.mock.calls[0][0]).toEqual(expect.objectContaining({
@@ -118,18 +115,15 @@ describe('Chorus', () => {
 
     render(<Chorus onSend={onSend} minAssistantDelayMs={0} onFinish={onFinish} />);
 
-    await user.type(screen.getByPlaceholderText('Send a message'), 'stream');
-    await user.click(screen.getByRole('button', { name: /send/i }));
+    await sendMessage(user, 'stream');
     await waitFor(() => expect(onFinish).toHaveBeenCalledTimes(1));
     expect(onFinish.mock.calls[0][0]).toEqual(expect.objectContaining({ reason: 'done', message: expect.objectContaining({ text: 'helper done' }) }));
 
-    await user.type(screen.getByPlaceholderText('Send a message'), 'auto');
-    await user.click(screen.getByRole('button', { name: /send/i }));
+    await sendMessage(user, 'auto');
     await waitFor(() => expect(onFinish).toHaveBeenCalledTimes(2));
     expect(onFinish.mock.calls[1][0]).toEqual(expect.objectContaining({ reason: 'done', message: expect.objectContaining({ text: 'auto done' }) }));
 
-    await user.type(screen.getByPlaceholderText('Send a message'), 'return');
-    await user.click(screen.getByRole('button', { name: /send/i }));
+    await sendMessage(user, 'return');
     await waitFor(() => expect(onFinish).toHaveBeenCalledTimes(3));
     expect(onFinish.mock.calls[2][0]).toEqual(expect.objectContaining({ reason: 'returned-message', message: expect.objectContaining({ text: 'returned done' }) }));
     warn.mockRestore();
@@ -152,92 +146,19 @@ describe('Chorus', () => {
 
     render(<Chorus onSend={onSend} minAssistantDelayMs={0} onFinish={onFinish} />);
 
-    await user.type(screen.getByPlaceholderText('Send a message'), 'stop');
-    await user.click(screen.getByRole('button', { name: /send/i }));
+    await sendMessage(user, 'stop');
     await waitFor(() => expect(screen.getByRole('button', { name: /stop/i })).toBeInTheDocument());
     await user.click(screen.getByRole('button', { name: /stop/i }));
     await waitFor(() => expect(helpers.signal.aborted).toBe(true));
 
-    await user.type(screen.getByPlaceholderText('Send a message'), 'error');
-    await user.click(screen.getByRole('button', { name: /send/i }));
+    await sendMessage(user, 'error');
     await screen.findByText('Something went wrong. Please try again.');
 
-    await user.type(screen.getByPlaceholderText('Send a message'), 'empty');
-    await user.click(screen.getByRole('button', { name: /send/i }));
+    await sendMessage(user, 'empty');
     await waitFor(() => expect(onSend).toHaveBeenCalledWith('empty', expect.any(Array), expect.any(Object)));
 
     expect(onFinish).not.toHaveBeenCalled();
     warn.mockRestore();
-  });
-
-  it('calls onAbort with the partial assistant when Stop cancels streamed onSend output', async () => {
-    const user = userEvent.setup();
-    const onAbort = vi.fn();
-    let capturedSignal: AbortSignal | undefined;
-    const onSend = vi.fn<OnSend>((_text, _messages, helpers) => {
-      capturedSignal = helpers.signal;
-      helpers.appendAssistant('partial abort');
-      return new Promise<void>((_resolve, reject) => {
-        helpers.signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
-      });
-    });
-
-    render(<Chorus onSend={onSend} minAssistantDelayMs={0} onAbort={onAbort} />);
-
-    await user.type(screen.getByPlaceholderText('Send a message'), 'stop after token');
-    await user.click(screen.getByRole('button', { name: /send/i }));
-    expect(await screen.findByText('partial abort')).toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: /stop/i }));
-
-    await waitFor(() => expect(onAbort).toHaveBeenCalledOnce());
-    expect(capturedSignal?.aborted).toBe(true);
-    expect(onAbort.mock.calls[0][0]).toEqual(expect.objectContaining({
-      reason: 'stop',
-      source: 'user',
-      path: 'onSend',
-      message: expect.objectContaining({ role: 'assistant', text: 'partial abort' }),
-    }));
-    expect(onAbort.mock.calls[0][0].messages).toEqual([
-      expect.objectContaining({ role: 'user', text: 'stop after token' }),
-      expect.objectContaining({ role: 'assistant', text: 'partial abort' }),
-    ]);
-  });
-
-  it('calls onAbort with a null assistant when Stop happens before the first transport token', async () => {
-    const user = userEvent.setup();
-    const onAbort = vi.fn();
-    let capturedSignal: AbortSignal | undefined;
-    const transport = vi.fn<Transport>((_text, _history, signal) => {
-      capturedSignal = signal;
-      return new Promise<Response>((_resolve, reject) => {
-        signal.addEventListener('abort', () => {
-          const err = new Error('Aborted');
-          err.name = 'AbortError';
-          reject(err);
-        }, { once: true });
-      });
-    });
-
-    render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} onAbort={onAbort} />);
-
-    await user.type(screen.getByPlaceholderText('Send a message'), 'stop before token');
-    await user.click(screen.getByRole('button', { name: /send/i }));
-    await waitFor(() => expect(screen.getByRole('button', { name: /stop/i })).toBeInTheDocument());
-
-    await user.click(screen.getByRole('button', { name: /stop/i }));
-
-    await waitFor(() => expect(onAbort).toHaveBeenCalledOnce());
-    expect(capturedSignal?.aborted).toBe(true);
-    expect(onAbort.mock.calls[0][0]).toEqual(expect.objectContaining({
-      reason: 'stop',
-      source: 'user',
-      path: 'transport',
-      message: null,
-    }));
-    expect(onAbort.mock.calls[0][0].messages).toEqual([
-      expect.objectContaining({ role: 'user', text: 'stop before token' }),
-    ]);
   });
 
   it('onSend path calls onSend with text, messages, and helpers', async () => {
@@ -247,8 +168,7 @@ describe('Chorus', () => {
 
     render(<Chorus messages={initial} onSend={onSend} minAssistantDelayMs={0} />);
 
-    await user.type(screen.getByPlaceholderText('Send a message'), 'hello');
-    await user.click(screen.getByRole('button', { name: /send/i }));
+    await sendMessage(user, 'hello');
 
     await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
     const [text, messages, helpers] = onSend.mock.calls[0];
@@ -271,8 +191,7 @@ describe('Chorus', () => {
 
     render(<Chorus onSend={onSend} />);
 
-    await user.type(screen.getByPlaceholderText('Send a message'), 'waiting prompt');
-    await user.click(screen.getByRole('button', { name: /send/i }));
+    await sendMessage(user, 'waiting prompt');
 
     await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
     expect(screen.getByText('waiting prompt')).toBeInTheDocument();
@@ -291,8 +210,7 @@ describe('Chorus', () => {
 
     render(<Chorus onSend={onSend} minAssistantDelayMs={0} />);
 
-    await user.type(screen.getByPlaceholderText('Send a message'), 'stream');
-    await user.click(screen.getByRole('button', { name: /send/i }));
+    await sendMessage(user, 'stream');
 
     await waitFor(() => expect(screen.getByRole('button', { name: /stop/i })).toBeInTheDocument());
 
@@ -312,8 +230,7 @@ describe('Chorus', () => {
 
     render(<Chorus onSend={onSend} minAssistantDelayMs={0} />);
 
-    await user.type(screen.getByPlaceholderText('Send a message'), 'stream');
-    await user.click(screen.getByRole('button', { name: /send/i }));
+    await sendMessage(user, 'stream');
 
     expect(await screen.findByText('forgotten finalize')).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument());
@@ -334,8 +251,7 @@ describe('Chorus', () => {
     try {
       render(<Chorus onSend={onSend} minAssistantDelayMs={0} />);
 
-      await user.type(screen.getByPlaceholderText('Send a message'), 'stream');
-      await user.click(screen.getByRole('button', { name: /send/i }));
+      await sendMessage(user, 'stream');
 
       expect(await screen.findByText('browser finalize')).toBeInTheDocument();
       await waitFor(() => expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument());

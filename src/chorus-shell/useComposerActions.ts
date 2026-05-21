@@ -9,7 +9,7 @@ interface UseChorusComposerStateArgs<TMeta> {
   onClear?: (messages: Message<TMeta>[]) => void;
 }
 
-interface ChorusComposerState<TMeta> {
+export interface ChorusComposerState<TMeta> {
   inputRef: React.RefObject<ChatInputHandle | null>;
   draft: string;
   setDraft: React.Dispatch<React.SetStateAction<string>>;
@@ -26,7 +26,7 @@ interface UseChorusComposerActionsArgs {
   writesDisabled: boolean;
 }
 
-interface ChorusComposerActions {
+export interface ChorusComposerActions {
   handleInputSend: (attachments?: Attachment[]) => boolean;
   handleStop: () => void;
   handleClear: () => void;

@@ -1,9 +1,27 @@
+import React from 'react';
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { Chorus } from '../../Chorus';
 import type { ChorusOnSend, ChorusProps, ChorusRef, ChorusSendHelpers, Transport } from '../../Chorus';
 import type { Message, StorageAdapter as StorageAdapterType } from '../../types';
 
 export type { ChorusProps, ChorusRef, Message, StorageAdapterType as StorageAdapter, Transport };
 export type OnSend = ChorusOnSend;
 export type OnSendHelpers = ChorusSendHelpers;
+export type ChorusUser = ReturnType<typeof userEvent.setup>;
+
+export function renderChorus<TMeta = Record<string, unknown>>(props: ChorusProps<TMeta> = {}) {
+  const user = userEvent.setup();
+  return {
+    user,
+    ...render(<Chorus<TMeta> {...props} />),
+  };
+}
+
+export async function sendMessage(user: ChorusUser, text: string) {
+  await user.type(screen.getByPlaceholderText('Send a message'), text);
+  await user.click(screen.getByRole('button', { name: /send/i }));
+}
 
 export function sseResponse(chunks: string[], status = 200) {
   const encoder = new TextEncoder();

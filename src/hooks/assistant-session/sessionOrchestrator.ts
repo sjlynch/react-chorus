@@ -1,12 +1,12 @@
 import React from 'react';
 import type { Message } from '../../types';
 import type { ConnectorToolDelta } from '../../connectors/connectors';
-import { isChorusDevMode } from '../../utils/devMode';
 import { cloneHistoryForRetry, findLastUserMessage } from './messageUtils';
 import type { ObserverCallbacks } from './observerCallbacks';
 import { startOnSendLifecycle } from './onSendLifecycle';
+import { resolveAbortSendPath, selectAssistantSendPath } from './sessionPath';
+import { useSessionWarnings } from './sessionWarnings';
 import type { StartTransportStream } from './transportLifecycle';
-import { isTransportPresent } from './transportResolver';
 import type {
   ChorusAbortReason,
   ChorusAbortSource,
@@ -95,8 +95,8 @@ export interface SessionOrchestrator<TMeta> {
  * wires them in via `bindLateDeps` once those hooks exist; the orchestrator's
  * trigger/abort callbacks read them through a ref at call time.
  *
- * Dev-mode warnings (missing-response-handler, transport+onSend) are owned
- * here so they fire at most once per hook instance.
+ * Dev-mode warnings (missing-response-handler, transport+onSend, empty-onSend)
+ * are wired through `useSessionWarnings` so they fire at most once per hook instance.
  */
 export function useSessionOrchestrator<TMeta>(deps: SessionOrchestratorDeps<TMeta>): SessionOrchestrator<TMeta> {
   const {
@@ -127,27 +127,11 @@ export function useSessionOrchestrator<TMeta>(deps: SessionOrchestratorDeps<TMet
   const controllerRef = React.useRef<AbortController | null>(null);
   const activeSessionIdRef = React.useRef(0);
   const activeSendPathRef = React.useRef<ChorusSendPath | null>(null);
-  const warnedMissingHandlerRef = React.useRef(false);
-  const warnedTransportOnSendRef = React.useRef(false);
-  const warnedEmptyOnSendRef = React.useRef(false);
   const lateDepsRef = React.useRef<SessionOrchestratorLateDeps<TMeta> | null>(null);
+  const { warnMissingResponseHandler, warnEmptyOnSend, warnTransportOnSend } = useSessionWarnings();
 
   const bindLateDeps = React.useCallback((next: SessionOrchestratorLateDeps<TMeta>) => {
     lateDepsRef.current = next;
-  }, []);
-
-  const warnMissingResponseHandler = React.useCallback(() => {
-    if (isChorusDevMode() && !warnedMissingHandlerRef.current) {
-      warnedMissingHandlerRef.current = true;
-      console.warn('[Chorus] `send` was called but neither `transport` nor `onSend` was provided. Pass one of these props to produce an assistant response.');
-    }
-  }, []);
-
-  const warnEmptyOnSend = React.useCallback(() => {
-    if (isChorusDevMode() && !warnedEmptyOnSendRef.current) {
-      warnedEmptyOnSendRef.current = true;
-      console.warn('[Chorus] `onSend` resolved without appending assistant chunks or returning a message; no `onFinish`/`onAbort` observer fires for this turn. Call `helpers.finalizeAssistant()` or return a `Message` from `onSend`.');
-    }
   }, []);
 
   const beginAssistantSession = React.useCallback(() => {
@@ -210,7 +194,7 @@ export function useSessionOrchestrator<TMeta>(deps: SessionOrchestratorDeps<TMet
   }, [pendingAssistantIdRef, pendingToolMessageIdsRef, resetStreamState, updateSessionMessages]);
 
   const abortActiveAssistant = React.useCallback((reason: ChorusAbortReason, source: ChorusAbortSource) => {
-    const path = activeSendPathRef.current ?? (isTransportPresent(transportRef.current) ? 'transport' : 'onSend');
+    const path = resolveAbortSendPath(activeSendPathRef.current, transportRef.current);
 
     invalidateAssistantSession();
     // On the transport path `controllerRef.current` IS the external signal
@@ -240,13 +224,10 @@ export function useSessionOrchestrator<TMeta>(deps: SessionOrchestratorDeps<TMet
     const sessionId = beginAssistantSession();
     rememberSubmittedTurn(text, history);
     const currentTransport = transportRef.current;
-    const currentOnSend = onSendRef.current;
+    const sendPath = selectAssistantSendPath<TMeta>(currentTransport, onSendRef.current);
 
-    if (isTransportPresent(currentTransport)) {
-      if (isChorusDevMode() && currentOnSend && !warnedTransportOnSendRef.current) {
-        warnedTransportOnSendRef.current = true;
-        console.warn('[Chorus] Both `transport` and `onSend` props were provided. `transport` takes precedence and `onSend` will be ignored. Remove one of the two props to silence this warning.');
-      }
+    if (sendPath.path === 'transport') {
+      if (sendPath.onSend) warnTransportOnSend();
       controllerRef.current?.abort();
       const controller = new AbortController();
       controllerRef.current = controller;
@@ -258,7 +239,7 @@ export function useSessionOrchestrator<TMeta>(deps: SessionOrchestratorDeps<TMet
       return;
     }
 
-    if (!currentOnSend) {
+    if (sendPath.path === 'missing') {
       invalidateAssistantSession(sessionId);
       warnMissingResponseHandler();
       return;
@@ -288,9 +269,9 @@ export function useSessionOrchestrator<TMeta>(deps: SessionOrchestratorDeps<TMet
       sessionId,
       text,
       history,
-      onSend: currentOnSend,
+      onSend: sendPath.onSend,
     });
-  }, [abortActiveAssistant, appendAssistantNow, appendAssistantReasoningNow, beginAssistantSession, clearStreamError, completeActiveSession, hasStartedAssistantRef, invalidateAssistantSession, isAssistantSessionActive, messagesRef, minAssistantDelayMsRef, observers, onSendRef, rememberSubmittedTurn, removePendingAssistant, resetStreamState, setInternalSending, setTransportBusy, showStreamError, systemPromptRef, transportRef, updateSessionMessages, warnEmptyOnSend, warnMissingResponseHandler]);
+  }, [abortActiveAssistant, appendAssistantNow, appendAssistantReasoningNow, beginAssistantSession, clearStreamError, completeActiveSession, hasStartedAssistantRef, invalidateAssistantSession, isAssistantSessionActive, messagesRef, minAssistantDelayMsRef, observers, onSendRef, rememberSubmittedTurn, removePendingAssistant, resetStreamState, setInternalSending, setTransportBusy, showStreamError, systemPromptRef, transportRef, updateSessionMessages, warnEmptyOnSend, warnMissingResponseHandler, warnTransportOnSend]);
 
   // `abortActiveAssistant` is stable in real <Chorus> usage, but a hook-level
   // consumer can pass an unstable `flushPersistence` whose identity ripples

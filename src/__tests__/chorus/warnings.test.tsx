@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Chorus } from '../../Chorus';
-import { sseResponse } from './testUtils';
+import { sendMessage, sseResponse } from './testUtils';
 import type { ChorusProps, Message } from './testUtils';
 
 vi.mock('../../components/Markdown', () => ({
@@ -21,8 +21,7 @@ describe('Chorus', () => {
       { id: 'dup', role: 'assistant', text: 'two' },
     ]} onSend={onSend} minAssistantDelayMs={0} />);
 
-    await user.type(screen.getByPlaceholderText('Send a message'), 'hello');
-    await user.click(screen.getByRole('button', { name: /send/i }));
+    await sendMessage(user, 'hello');
 
     await waitFor(() => expect(warn).toHaveBeenCalledWith('[Chorus] Duplicate message IDs detected:', ['dup']));
     warn.mockRestore();
@@ -174,8 +173,7 @@ describe('Chorus', () => {
     const { rerender } = render(<Harness seed={mountSeed} />);
 
     // Diverge the transcript from the seed.
-    await user.type(screen.getByPlaceholderText('Send a message'), 'question');
-    await user.click(screen.getByRole('button', { name: /send/i }));
+    await sendMessage(user, 'question');
     expect(await screen.findByText('reply')).toBeInTheDocument();
 
     // Parent rebuilds initialMessages after mount (e.g. a locale switch).
