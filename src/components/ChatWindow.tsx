@@ -145,6 +145,7 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
         error={error}
         rawError={rawError}
         retryLabel={resolvedLabels.transcript.retry}
+        dismissLabel={resolvedLabels.transcript.dismissError}
         onRetry={onRetry}
         onDismissError={onDismissError}
         renderError={renderError}

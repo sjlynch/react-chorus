@@ -1,6 +1,23 @@
 import type { Message } from '../types';
 import type { Transport } from '../hooks/useChorusStream';
 
+// Local duplicate of `isChorusDevMode` from `src/utils/devMode.ts`. Importing the
+// shared helper (or `streaming/internal/devMode.ts`) would add a cross-chunk
+// dependency to the transport-only subpath and risk its tight size budget — the
+// same trade-off `websocket/persistent.ts` documents for this chunk.
+function isFetchSSETransportDevMode(): boolean {
+  try {
+    return typeof process !== 'undefined' && typeof process.env !== 'undefined' && process.env.NODE_ENV !== 'production';
+  } catch {
+    return false;
+  }
+}
+
+// Warn at most once per process when a `formatBody` serializer is paired with a
+// body-less method, mirroring `warnIgnoredConnectorOptions` in
+// `src/connectors/registry.ts`: both surface a silently-dropped option in dev.
+let warnedFormatBodyIgnoredForBodylessMethod = false;
+
 export interface FetchSSETransportOptions<TMeta = Record<string, unknown>> extends Omit<RequestInit, 'body' | 'method' | 'signal'> {
   /**
    * HTTP method for the outgoing request. Defaults to `'POST'`.
@@ -27,7 +44,8 @@ export interface FetchSSETransportOptions<TMeta = Record<string, unknown>> exten
    * caller supplied an explicit Content-Type header. When provided, set headers
    * yourself for JSON bodies; FormData/Blob/URLSearchParams are not forced to JSON.
    *
-   * Ignored when `method` is `'GET'` or `'HEAD'`.
+   * Ignored — with a one-time dev-mode warning — when `method` is `'GET'` or
+   * `'HEAD'`.
    *
    * @example OpenAI-compatible backend
    * ```ts
@@ -46,6 +64,23 @@ export function createFetchSSETransport<TMeta = Record<string, unknown>>(
   const method = init?.method ?? 'POST';
   const bodyless = method === 'GET' || method === 'HEAD';
   const hasCustomFormatBody = typeof init?.formatBody === 'function';
+
+  if (
+    bodyless &&
+    hasCustomFormatBody &&
+    !warnedFormatBodyIgnoredForBodylessMethod &&
+    isFetchSSETransportDevMode()
+  ) {
+    warnedFormatBodyIgnoredForBodylessMethod = true;
+    console.warn(
+      `[react-chorus] createFetchSSETransport: \`formatBody\` was provided together with `
+        + `\`method: '${method}'\`, but ${method} requests are body-less — the \`formatBody\` `
+        + `serializer is ignored and the request is sent with no body. Drop \`formatBody\` and `
+        + `carry request state in the URL (typically as query parameters) for GET/HEAD requests, `
+        + `or switch to a body-carrying method such as POST. This warning fires once.`,
+    );
+  }
+
   const formatBody =
     init?.formatBody ??
     ((text: string, history: Message<TMeta>[]) => JSON.stringify({ prompt: text, history }));

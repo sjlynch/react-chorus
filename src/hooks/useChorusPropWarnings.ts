@@ -17,6 +17,10 @@ interface UseChorusPropWarningsArgs<TMeta> {
   autoContinueTools: ChorusProps<TMeta>['autoContinueTools'];
   maxToolIterations: ChorusProps<TMeta>['maxToolIterations'];
   shouldContinueToolLoop: ChorusProps<TMeta>['shouldContinueToolLoop'];
+  tools: ChorusProps<TMeta>['tools'];
+  onToolCall: ChorusProps<TMeta>['onToolCall'];
+  onToolDelta: ChorusProps<TMeta>['onToolDelta'];
+  continueOnToolError: ChorusProps<TMeta>['continueOnToolError'];
 }
 
 export function useChorusPropWarnings<TMeta>({
@@ -33,6 +37,10 @@ export function useChorusPropWarnings<TMeta>({
   autoContinueTools,
   maxToolIterations,
   shouldContinueToolLoop,
+  tools,
+  onToolCall,
+  onToolDelta,
+  continueOnToolError,
 }: UseChorusPropWarningsArgs<TMeta>): void {
   // The message seed (`messages ?? initialMessages`) is captured once at mount
   // by useChorusMessages and never re-derived. Track its mount-time reference so
@@ -75,6 +83,19 @@ export function useChorusPropWarnings<TMeta>({
       console.warn('[Chorus] `connectorOptions` only applies to the `transport` send path. With `onSend` you parse the response yourself — pass `connectorOptions` into the `useChorusStream` call inside your `onSend` if you need it.');
     }
 
+    const toolExecutionProps = [
+      tools !== undefined && 'tools',
+      onToolCall !== undefined && 'onToolCall',
+      onToolDelta !== undefined && 'onToolDelta',
+      continueOnToolError !== undefined && 'continueOnToolError',
+    ].filter((name): name is string => typeof name === 'string');
+
+    if (toolExecutionProps.length > 0 && transport === undefined && onSend) {
+      const propList = toolExecutionProps.map(name => `\`${name}\``).join('/');
+      const verb = toolExecutionProps.length > 1 ? 'only run' : 'only runs';
+      console.warn(`[Chorus] ${propList} ${verb} on the \`transport\` send path. With \`onSend\` you execute tools yourself — registered tool handlers never run and tool callbacks never fire. Run tools inside your \`onSend\` client, or pass \`transport\`.`);
+    }
+
     if (sending !== undefined && transport) {
       console.warn('[Chorus] `sending` was provided alongside `transport`. Chorus owns the transport send state; `sending` is primarily for fully custom `onSend`/`useChorusStream` integrations.');
     }
@@ -96,5 +117,5 @@ export function useChorusPropWarnings<TMeta>({
         console.warn(`[Chorus] ${propList} ${verb} ignored without \`transport\`. The automatic tool loop runs only on the \`transport\` send path; with \`onSend\` you drive tool continuations yourself. Pass \`transport\`, or gate continuations inside your \`onSend\` client.`);
       }
     }
-  }, [messages, initialMessages, onChange, value, persistenceKey, connector, connectorOptions, transport, onSend, sending, autoContinueTools, maxToolIterations, shouldContinueToolLoop]);
+  }, [messages, initialMessages, onChange, value, persistenceKey, connector, connectorOptions, transport, onSend, sending, autoContinueTools, maxToolIterations, shouldContinueToolLoop, tools, onToolCall, onToolDelta, continueOnToolError]);
 }
