@@ -8,144 +8,22 @@ import {
   hasOwn,
   hasToolDelta,
   mergeResult,
-  numberFromUnknown,
   stringFromUnknown,
   type ResponseToolRef,
 } from './shared';
+import {
+  bufferResponseToolArg,
+  drainResponseToolBuffer,
+  extractResponseToolId,
+  outputIndexKey,
+  refusalKey,
+  replayBufferedToolArgs,
+  toolDeltaFromRef,
+} from './responseToolCalls';
+import { applyResponseCompletion, IGNORED_RESPONSE_EVENT_TYPES } from './responseMetadata';
 import { createThinkTagSplitter } from './thinkTagSplitter';
 
-/** Stable fallback key for a function call identified only by its (usually numeric) output_index. */
-function outputIndexKey(obj: Record<string, unknown>): string {
-  const outputIndex = obj.output_index;
-  return typeof outputIndex === 'number' || typeof outputIndex === 'string'
-    ? `openai-response-output-${outputIndex}`
-    : '';
-}
-
-function extractResponseToolId(obj: Record<string, unknown>) {
-  const itemId = stringFromUnknown(obj.item_id);
-  if (itemId) return itemId;
-  return outputIndexKey(obj);
-}
-
-/**
- * Response events we deliberately ignore (lifecycle signals with no useful UI payload).
- * Documented here so future readers don't think they were forgotten:
- *  - `response.created` — start-of-stream telemetry; no text yet.
- *  - `response.output_item.started` — item lifecycle marker preceding `.added`.
- */
-const IGNORED_RESPONSE_EVENT_TYPES = new Set([
-  'response.created',
-  'response.output_item.started',
-]);
-
-function refusalKey(obj: Record<string, unknown>) {
-  const itemId = stringFromUnknown(obj.item_id);
-  if (itemId) return itemId;
-  // output_index is virtually always a number in the Responses API, so stringify
-  // it like extractResponseToolId does — otherwise numeric-only refusals all
-  // collapse onto the '' key and cross-contaminate.
-  const outputIndex = obj.output_index;
-  return typeof outputIndex === 'number' || typeof outputIndex === 'string' ? String(outputIndex) : '';
-}
-
-function bufferResponseToolArg(state: OpenAIConnectorState, key: string, delta: unknown) {
-  const existing = state.responseToolArgBuffer.get(key);
-  if (existing) existing.push(delta);
-  else state.responseToolArgBuffer.set(key, [delta]);
-}
-
-function toolDeltaFromRef(ref: ResponseToolRef, input: unknown): ConnectorToolDelta {
-  return {
-    id: ref.id,
-    input,
-    provider: 'openai',
-    ...(ref.providerId ? { providerId: ref.providerId } : { generated: true }),
-  };
-}
-
-/**
- * Replay any `function_call_arguments.delta` payloads buffered under `key`
- * (an item_id or output-index fallback) now that `ref` resolves the call's
- * canonical id. Cleared from the buffer so they are not replayed again.
- */
-function replayBufferedToolArgs(
-  state: OpenAIConnectorState,
-  key: string,
-  ref: ResponseToolRef,
-  result: ConnectorResult,
-) {
-  if (!key) return;
-  const buffered = state.responseToolArgBuffer.get(key);
-  if (!buffered) return;
-  state.responseToolArgBuffer.delete(key);
-  for (const input of buffered) appendToolDelta(result, toolDeltaFromRef(ref, input));
-}
-
-/**
- * Drain every still-buffered `function_call_arguments.delta` — used when a
- * stream ends without the matching `output_item.added` ever arriving, so the
- * tool call still surfaces (under a generated id) instead of being dropped.
- */
-export function drainResponseToolBuffer(state: OpenAIConnectorState): ConnectorToolDelta[] {
-  const toolDeltas: ConnectorToolDelta[] = [];
-  for (const [key, inputs] of state.responseToolArgBuffer) {
-    for (const input of inputs) toolDeltas.push(toolDeltaFromRef({ id: key }, input));
-  }
-  state.responseToolArgBuffer.clear();
-  return toolDeltas;
-}
-
-function extractResponseUsage(usage: unknown): Record<string, number> | undefined {
-  if (!usage || typeof usage !== 'object') return undefined;
-  const u = usage as Record<string, unknown>;
-  const out: Record<string, number> = {};
-  const promptTokens = numberFromUnknown(u.input_tokens ?? u.prompt_tokens);
-  const completionTokens = numberFromUnknown(u.output_tokens ?? u.completion_tokens);
-  const totalTokens = numberFromUnknown(u.total_tokens);
-  if (promptTokens !== undefined) out.promptTokens = promptTokens;
-  if (completionTokens !== undefined) out.completionTokens = completionTokens;
-  if (totalTokens !== undefined) out.totalTokens = totalTokens;
-  return Object.keys(out).length > 0 ? out : undefined;
-}
-
-// `incomplete_details.reason` values (carried on `response.completed` and the
-// terminal `response.incomplete` event) that mean the response was cut short —
-// surfaced as a non-fatal `warning`, mirroring the Chat Completions / Gemini /
-// Anthropic truncation signals.
-const INCOMPLETE_REASON_WARNINGS: Record<string, { code: string; message: string }> = {
-  max_output_tokens: { code: 'truncated', message: 'OpenAI response truncated by max_output_tokens' },
-  max_tokens: { code: 'truncated', message: 'OpenAI response truncated by max_output_tokens' },
-  content_filter: { code: 'content_filter', message: 'OpenAI response stopped by the content filter' },
-};
-
-/**
- * Surface a terminal response payload (`response.completed` / `response.incomplete`):
- * token usage and, when the response stopped early, its `incomplete_details`
- * reason as a finish reason + non-fatal warning. Without this a truncated
- * completion looks successful.
- */
-function applyResponseCompletion(result: ConnectorResult, obj: Record<string, unknown>) {
-  const response = obj.response && typeof obj.response === 'object'
-    ? obj.response as Record<string, unknown>
-    : undefined;
-  if (!response) return;
-
-  const usage = extractResponseUsage(response.usage);
-  if (usage) result.metadata = { ...(result.metadata ?? {}), usage };
-
-  const incompleteDetails = response.incomplete_details && typeof response.incomplete_details === 'object'
-    ? response.incomplete_details as Record<string, unknown>
-    : undefined;
-  const reason = incompleteDetails ? stringFromUnknown(incompleteDetails.reason) : '';
-  if (!reason) return;
-
-  result.metadata = { ...(result.metadata ?? {}), finishReason: reason };
-  const known = INCOMPLETE_REASON_WARNINGS[reason];
-  result.warning = known
-    ? { code: known.code, message: known.message, payload: obj }
-    : { code: 'incomplete', message: `OpenAI response ended incomplete: ${reason}`, payload: obj };
-}
+export { drainResponseToolBuffer };
 
 export function extractOpenAIResponseEvent(obj: Record<string, unknown>, state: OpenAIConnectorState): ConnectorResult | null {
   const type = typeof obj.type === 'string' ? obj.type : '';
