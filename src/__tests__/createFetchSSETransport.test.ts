@@ -154,18 +154,24 @@ describe('createFetchSSETransport', () => {
     expect(sentHeaders(options).has('content-type')).toBe(false);
   });
 
-  it('skips formatBody when method is GET', async () => {
+  it('skips formatBody and warns in dev when method is GET', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const formatBody = vi.fn(() => 'should-not-be-called');
     const transport = createFetchSSETransport('https://api.example.com/chat', {
       method: 'GET',
       formatBody,
     });
 
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("`formatBody` was provided together with `method: 'GET'`"),
+    );
+
     await transport('hello', [], new AbortController().signal);
 
     expect(formatBody).not.toHaveBeenCalled();
     const [, options] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(options.body).toBeUndefined();
+    warn.mockRestore();
   });
 
   it('forwards custom method like PUT with a body', async () => {
@@ -179,5 +185,67 @@ describe('createFetchSSETransport', () => {
     expect(options.method).toBe('PUT');
     expect(options.body).toBe(JSON.stringify({ prompt: 'hello', history: [] }));
     expect(sentHeaders(options).get('content-type')).toBe('application/json');
+  });
+});
+
+describe('createFetchSSETransport formatBody / body-less method dev warning', () => {
+  const ORIGINAL_NODE_ENV = process.env.NODE_ENV;
+
+  afterEach(() => {
+    process.env.NODE_ENV = ORIGINAL_NODE_ENV;
+    vi.restoreAllMocks();
+    vi.resetModules();
+  });
+
+  // `createFetchSSETransport` warns at most once per process, so each case
+  // re-imports the module to get a fresh warn-once flag.
+  async function freshCreateFetchSSETransport() {
+    vi.resetModules();
+    return (await import('../streaming/createFetchSSETransport')).createFetchSSETransport;
+  }
+
+  it('warns once in dev when formatBody is paired with a body-less method', async () => {
+    process.env.NODE_ENV = 'development';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const create = await freshCreateFetchSSETransport();
+    const formatBody = () => JSON.stringify({});
+
+    create('https://api.example.com/chat?prompt=hi', { method: 'GET', formatBody });
+    create('https://api.example.com/chat?prompt=hi', { method: 'HEAD', formatBody });
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('`formatBody`'));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("method: 'GET'"));
+  });
+
+  it('does not warn when formatBody is paired with a body-carrying method', async () => {
+    process.env.NODE_ENV = 'development';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const create = await freshCreateFetchSSETransport();
+
+    create('https://api.example.com/chat', { method: 'POST', formatBody: () => '{}' });
+    create('https://api.example.com/chat', { formatBody: () => '{}' });
+
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('does not warn for a body-less method without a formatBody serializer', async () => {
+    process.env.NODE_ENV = 'development';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const create = await freshCreateFetchSSETransport();
+
+    create('https://api.example.com/chat?prompt=hi', { method: 'GET' });
+
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('does not warn in production', async () => {
+    process.env.NODE_ENV = 'production';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const create = await freshCreateFetchSSETransport();
+
+    create('https://api.example.com/chat?prompt=hi', { method: 'GET', formatBody: () => '{}' });
+
+    expect(warn).not.toHaveBeenCalled();
   });
 });

@@ -101,7 +101,7 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
   return (
     <div
       {...rest}
-      className={["chorus-window", className].filter(Boolean).join(" ")}
+      className={["chorus-window", headless ? "chorus-window--headless" : undefined, className].filter(Boolean).join(" ")}
       style={{ ...paletteVars, ...style }}
       ref={windowRef}
       role="log"
@@ -145,6 +145,7 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
         error={error}
         rawError={rawError}
         retryLabel={resolvedLabels.transcript.retry}
+        dismissLabel={resolvedLabels.transcript.dismissError}
         onRetry={onRetry}
         onDismissError={onDismissError}
         renderError={renderError}
