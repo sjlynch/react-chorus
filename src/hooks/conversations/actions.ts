@@ -75,6 +75,15 @@ export function useConversationActions({
     if (!targetStorage) return;
 
     const messageKey = `${messageKeyPrefixRef.current}${id}`;
+    // Both the `removeItem` path and the `setItem(key, '[]')` fallback report
+    // failures as `'delete'`, even though the fallback uses the same `setItem`
+    // primitive a transcript `'write'` would. This divergence is deliberate:
+    // `'delete'` describes the host's intent (it called `deleteConversation`),
+    // and — crucially — it keeps the error out of `handleIndexWriteSuccess`'s
+    // `write`-error clearing. `deleteConversation` issues an index write right
+    // after this; if the fallback failure were `'write'`, that index write's
+    // success would immediately and silently dismiss it. See "Transcript
+    // deletion" in conversations/CLAUDE.md.
     try {
       const result = targetStorage.removeItem
         ? targetStorage.removeItem(messageKey)

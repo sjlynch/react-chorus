@@ -1,5 +1,5 @@
 import { extractErrorMessage } from '../error';
-import { findWorstSafetyCategory } from '../geminiSemantics';
+import { findWorstSafetyCategory, hasFinishReason } from '../geminiSemantics';
 import type { Connector, ConnectorResult } from '../types';
 import { extractCandidateContent, getCandidateKey, selectedCandidate } from './candidates';
 import { applyFinishReason } from './finish';
@@ -37,13 +37,19 @@ export const geminiConnector: Connector<GeminiConnectorState> = {
   extract(data: string, state: GeminiConnectorState = createGeminiConnectorState()): ConnectorResult | null {
     try {
       const obj = JSON.parse(data);
-      const error = extractErrorMessage(obj);
-      if (error) return { error, errorPayload: obj };
       if (!obj || typeof obj !== 'object') return null;
 
       const payload = obj as Record<string, unknown>;
+      // Classify prompt-feedback blocking before generic error extraction: a
+      // `{ error: "...", promptFeedback: {...} }` frame has no streaming-event
+      // shape, so extractErrorMessage would treat the bare `error` string as
+      // terminal and the categorized prompt-block message (plus its safety
+      // metadata) would never be produced.
       const promptBlocked = handlePromptFeedback(payload);
       if (promptBlocked) return promptBlocked;
+
+      const error = extractErrorMessage(obj);
+      if (error) return { error, errorPayload: obj };
 
       if (!Array.isArray(payload.candidates) || payload.candidates.length === 0) return null;
 
@@ -58,7 +64,12 @@ export const geminiConnector: Connector<GeminiConnectorState> = {
 
       const safetyRatings = candidateObj.safetyRatings;
       const worstSafetyCategory = findWorstSafetyCategory(safetyRatings);
-      if (Array.isArray(safetyRatings) && safetyRatings.length > 0) {
+      // Gemini repeats `safetyRatings` on *every* candidate frame. Only attach
+      // them as metadata on the terminal frame (a finishReason is present) so
+      // onMetadata/onStreamMetadata fires once per stream — matching the OpenAI
+      // Chat/Responses and Anthropic connectors — instead of up to once per
+      // chunk, which would over-count any non-idempotent metadata consumer.
+      if (hasFinishReason(candidateObj.finishReason) && Array.isArray(safetyRatings) && safetyRatings.length > 0) {
         result.metadata = { ...(result.metadata ?? {}), safetyRatings };
       }
 
@@ -71,7 +82,8 @@ export const geminiConnector: Connector<GeminiConnectorState> = {
         hasToolDelta(finalResult) ||
         finalResult.done ||
         finalResult.metadata ||
-        finalResult.warning
+        finalResult.warning ||
+        finalResult.warnings?.length
       ) {
         return finalResult;
       }

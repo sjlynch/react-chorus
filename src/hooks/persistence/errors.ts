@@ -1,12 +1,14 @@
 import type { ChorusPersistenceError, PersistenceOperation } from './types';
-import { toError } from '../../utils/errors';
+import { wrapError } from '../../utils/errors';
 import { warnInDev } from '../../utils/warnings';
 
 export function createPersistenceError(key: string, operation: PersistenceOperation, error: unknown): ChorusPersistenceError {
-  const nextError = toError(error) as ChorusPersistenceError;
+  // wrapError returns a fresh Error every time (with the original kept as
+  // `cause`), so the metadata assignments below never touch a shared/frozen
+  // source error and never overwrite its `cause` with a self-reference.
+  const nextError = wrapError(error) as ChorusPersistenceError;
   nextError.key = key;
   nextError.operation = operation;
-  nextError.cause = error;
   return nextError;
 }
 

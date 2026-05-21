@@ -49,13 +49,20 @@ export function toolDeltaFromToolResult(
   frameType: string,
   toolCallId: unknown,
   output: unknown,
+  hasOutput: boolean,
 ): ConnectorToolDelta | null {
   const explicitId = typeof toolCallId === 'string' && toolCallId ? toolCallId : undefined;
   if (!explicitId) {
     warnMissingToolCallId(frameType);
     return null;
   }
-  const delta: ConnectorToolDelta = { id: explicitId, providerId: explicitId, output };
+  const delta: ConnectorToolDelta = { id: explicitId, providerId: explicitId };
+  // Only set `output` when the frame actually carried an `output`/`result`
+  // key. A malformed `tool-output-available` / `a:` frame with neither key
+  // would otherwise emit `{ output: undefined }`, which downstream reads as
+  // "tool finished with an undefined result" — prematurely closing a tool row
+  // still mid-execution. Mirrors the `hasArgs` guard in `toolDeltaFromToolCall`.
+  if (hasOutput) delta.output = output;
   const name = state.toolNamesById.get(explicitId);
   if (name) delta.name = name;
   return delta;

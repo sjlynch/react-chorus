@@ -50,7 +50,12 @@ function connectorErrorFromResult(out: ConnectorResult) {
   // a truthiness check would silently complete the stream with no error
   // surfaced. Use `'error' in out` as the sentinel so a missing key (no error)
   // stays distinct from a present-but-empty value.
-  return 'error' in out ? createConnectorStreamError(out.error ?? '', out.errorPayload) : null;
+  if (!('error' in out)) return null;
+  // The error key is present but the message is empty/whitespace. Synthesize a
+  // non-empty message so `streamRawError.message` and any `onError` handler
+  // logging `error.message` never receive a blank string.
+  const message = out.error?.trim() ? out.error : 'Connector reported an error with no message';
+  return createConnectorStreamError(message, out.errorPayload);
 }
 
 export function createConnectorResultDeliverer(
@@ -70,10 +75,12 @@ export function createConnectorResultDeliverer(
     const toolDeltas = out.toolDeltas?.length ? out.toolDeltas : out.toolDelta ? [out.toolDelta] : [];
     for (const toolDelta of toolDeltas) delayedChunks.handleToolDelta(accumulateToolDelta(toolDelta));
 
-    // Non-fatal connector signals (truncation, safety ratings, telemetry events). Routed to
-    // the optional onWarning observer; without one they are logged in dev so they stay
-    // discoverable. Either way the stream keeps flowing.
-    if (out.warning) deliverConnectorWarning(cb, out.warning);
+    // Non-fatal connector signals (truncation, safety ratings, telemetry events). A single
+    // chunk can carry several (`warnings`); the legacy single `warning` slot is the fallback
+    // for connectors that emit only one. Each is routed to the optional onWarning observer;
+    // without one they are logged in dev so they stay discoverable. The stream keeps flowing.
+    const warnings = out.warnings?.length ? out.warnings : out.warning ? [out.warning] : [];
+    for (const warning of warnings) deliverConnectorWarning(cb, warning);
 
     // Free-form provider metadata (usage, finish/stop reason, safety ratings). Routed to the
     // optional onMetadata observer; without one it is dropped silently. The stream continues.

@@ -16,6 +16,9 @@ export type ChorusMessagesChangeReason =
   | 'regenerate'
   | 'delete'
   | 'clear'
+  // Internal removal of a half-streamed assistant partial after a stream
+  // failure or supersession — distinct from a host-initiated `'delete'`.
+  | 'error-cleanup'
   | 'update';
 
 export interface ChorusMessagesChangeContext {
@@ -31,6 +34,13 @@ interface PersistedChangeOptions {
 interface UpdateMessagesOptions {
   flushPersistence?: boolean;
   removePersistenceIfEmpty?: boolean;
+  /**
+   * Persistence-only update: write straight to the persistence store and skip
+   * `onChange`/`setInternalMsgs` plus the `onMessagesChange` observer. The
+   * `useRAFQueue` unmount flush uses this so a final buffered token still lands
+   * in persistence without a host callback firing after teardown.
+   */
+  persistOnly?: boolean;
   reason?: ChorusMessagesChangeReason;
 }
 
@@ -177,6 +187,18 @@ export function useChorusMessages<TMeta = Record<string, unknown>>({
     const next = updater(msgsRef.current);
     warnDuplicateMessageIds(next);
     msgsRef.current = next;
+
+    if (options?.persistOnly) {
+      // Unmount flush: a buffered token was completed as the component tore
+      // down. Persist it (when this conversation is persistence-backed) but
+      // never call the controlled host's `onChange`, the uncontrolled
+      // `setInternalMsgs`, or the `onMessagesChange` observer — the host and
+      // its router are already gone. Controlled/uncontrolled conversations
+      // have nowhere to persist, so they simply drop the trailing token rather
+      // than surface a post-teardown callback.
+      if (value === undefined && persistenceKey) onPersistedChangeRef.current(next, { flush: true });
+      return next;
+    }
 
     if (value !== undefined) onChangeRef.current?.(next);
     else if (persistenceKey) onPersistedChangeRef.current(next, { flush: options?.flushPersistence, removeIfEmpty: options?.removePersistenceIfEmpty });

@@ -94,6 +94,11 @@ export interface SystemMessage<TMeta = Record<string, unknown>> extends ChorusMe
 
 export interface ToolMessage<TMeta = Record<string, unknown>> extends ChorusMessageBase<TMeta> {
   role: 'tool';
+  /**
+   * Optional human-readable summary of the tool result. When non-empty, the default renderer
+   * shows it as Markdown above the tool-call block; the structured call itself stays in
+   * `toolCall`. Additive and safe to omit.
+   */
   text?: string;
   reasoning?: string;
   attachments?: never;

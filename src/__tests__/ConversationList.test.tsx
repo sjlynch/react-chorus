@@ -394,7 +394,7 @@ describe('ConversationList', () => {
     expect(status).toHaveTextContent(/roadmap ideas/i);
   });
 
-  it('moves focus to the list container when the last conversation is deleted', () => {
+  it('moves focus to the labelled list container when the last conversation is deleted', () => {
     function Harness() {
       const [items, setItems] = React.useState<ConversationSummary[]>([CONVERSATIONS[0]]);
       return (
@@ -409,6 +409,12 @@ describe('ConversationList', () => {
     fireEvent.click(screen.getByRole('button', { name: /delete support chat/i }));
 
     expect(screen.queryByText('Support chat')).toBeNull();
-    expect(container.querySelector('.chorus-conversation-items')).toHaveFocus();
+    const items = container.querySelector('.chorus-conversation-items') as HTMLElement;
+    expect(items).toHaveFocus();
+    // Once empty the container's `role` drops to undefined; a stable
+    // aria-label keeps the post-delete focus target announceable instead of
+    // a bare, role-less <div>.
+    expect(items).not.toHaveAttribute('role');
+    expect(items).toHaveAttribute('aria-label', 'Conversations');
   });
 });

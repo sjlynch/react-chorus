@@ -57,6 +57,7 @@ function geminiAttachmentPart(attachment: Attachment): GeminiPart | null {
 
 function geminiParts<TMeta>(message: Message<TMeta>, options: ProviderMappingOptions<TMeta>): GeminiPart[] {
   return messageContentParts<TMeta, GeminiPart>(message, options, {
+    provider: 'Gemini',
     createTextPart: text => ({ text }),
     mapAttachment: geminiAttachmentPart,
   });

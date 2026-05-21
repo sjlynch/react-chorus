@@ -79,6 +79,11 @@ export function useConversations(options: UseConversationsOptions = {}): UseConv
   const [error, setError] = React.useState<ConversationStorageError | null>(() => initialErrorRef.current);
   const stateRef = React.useRef(state);
   stateRef.current = state;
+  // Gates `setError` so an async index read/write that rejects after the
+  // component unmounts (common on route change while an adapter write is in
+  // flight) cannot trigger a state update on an unmounted component. Mirrors
+  // `useChorusPersistence`'s `mountedRef`.
+  const mountedRef = React.useRef(false);
 
   const notifyError = React.useCallback((nextError: ConversationStorageError) => {
     if (isChorusDevMode()) {
@@ -91,14 +96,19 @@ export function useConversations(options: UseConversationsOptions = {}): UseConv
     const nextError = isConversationStorageError(rawError)
       ? rawError
       : createConversationStorageError(key, operation, rawError, conversationId);
-    setError(nextError);
+    if (mountedRef.current) setError(nextError);
     notifyError(nextError);
   }, [notifyError]);
 
   React.useEffect(() => {
-    if (!initialErrorRef.current) return;
-    notifyError(initialErrorRef.current);
-    initialErrorRef.current = null;
+    mountedRef.current = true;
+    if (initialErrorRef.current) {
+      notifyError(initialErrorRef.current);
+      initialErrorRef.current = null;
+    }
+    return () => {
+      mountedRef.current = false;
+    };
   }, [notifyError]);
 
   const getPersistenceKey = React.useCallback((id: string) => `${messageKeyPrefixRef.current}${id}`, []);
@@ -110,7 +120,7 @@ export function useConversations(options: UseConversationsOptions = {}): UseConv
   // index write proves the index-write path recovered, but says nothing about a
   // prior failed transcript `delete` or index `read`.
   const handleIndexWriteSuccess = React.useCallback((writeVersion: number) => {
-    if (writeVersion !== versionRef.current) return;
+    if (writeVersion !== versionRef.current || !mountedRef.current) return;
     setError(prev => (prev?.operation === 'write' ? null : prev));
   }, []);
 

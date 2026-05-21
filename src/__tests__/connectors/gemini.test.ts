@@ -92,15 +92,18 @@ describe('geminiConnector', () => {
     };
     const data = JSON.stringify(payload);
     const result = geminiConnector.extract(data);
+    const truncatedWarning = {
+      code: 'truncated',
+      message: 'Gemini response truncated by maxOutputTokens',
+      payload,
+    };
     expect(result).toEqual({
       text: 'truncated',
       done: true,
       metadata: { finishReason: 'MAX_TOKENS' },
-      warning: {
-        code: 'truncated',
-        message: 'Gemini response truncated by maxOutputTokens',
-        payload,
-      },
+      // `warning` mirrors the first warning for back-compat; `warnings` is the canonical list.
+      warning: truncatedWarning,
+      warnings: [truncatedWarning],
     });
     expect(result?.warning?.code).toBe('truncated');
   });
@@ -159,28 +162,38 @@ describe('geminiConnector', () => {
     });
   });
 
-  it('attaches safetyRatings as metadata on an unblocked candidate so diagnostics survive', () => {
+  it('attaches safetyRatings as metadata only on the terminal frame, not mid-stream', () => {
     const safetyRatings = [{ category: 'HARM_CATEGORY_HATE_SPEECH', probability: 'NEGLIGIBLE' }];
-    const data = JSON.stringify({
+    // Gemini repeats safetyRatings on every candidate frame. A mid-stream frame
+    // (no finishReason) must NOT attach metadata, otherwise onStreamMetadata
+    // would fire once per chunk and over-count non-idempotent consumers.
+    const midStream = JSON.stringify({
       candidates: [{ content: { parts: [{ text: 'hi' }] }, safetyRatings }],
     });
-    expect(geminiConnector.extract(data)).toEqual({
-      text: 'hi',
+    expect(geminiConnector.extract(midStream)).toEqual({ text: 'hi' });
+
+    // The terminal frame (finishReason present) surfaces safetyRatings once.
+    const terminal = JSON.stringify({
+      candidates: [{ finishReason: 'STOP', content: { parts: [{ text: '!' }] }, safetyRatings }],
+    });
+    expect(geminiConnector.extract(terminal)).toEqual({
+      text: '!',
+      done: true,
       metadata: { safetyRatings },
     });
   });
 
   it('surfaces promptFeedback.blockReason as an error even when candidates is empty', () => {
+    const safetyRatings = [{ category: 'HARM_CATEGORY_HATE_SPEECH', probability: 'HIGH' }];
     const payload = {
       candidates: [],
-      promptFeedback: {
-        blockReason: 'SAFETY',
-        safetyRatings: [{ category: 'HARM_CATEGORY_HATE_SPEECH', probability: 'HIGH' }],
-      },
+      promptFeedback: { blockReason: 'SAFETY', safetyRatings },
     };
     expect(geminiConnector.extract(JSON.stringify(payload))).toEqual({
       error: 'Gemini blocked the prompt (blockReason: SAFETY, worst category: HARM_CATEGORY_HATE_SPEECH)',
       errorPayload: payload,
+      // Prompt blocks carry the structured safety data as metadata, just like candidate-level blocks.
+      metadata: { blockReason: 'SAFETY', safetyRatings },
     });
   });
 
@@ -189,6 +202,24 @@ describe('geminiConnector', () => {
     expect(geminiConnector.extract(JSON.stringify(payload))).toEqual({
       error: 'Gemini blocked the prompt (blockReason: OTHER)',
       errorPayload: payload,
+      metadata: { blockReason: 'OTHER' },
+    });
+  });
+
+  it('classifies a prompt block even when the frame also carries a bare error string', () => {
+    // A `{ error: "...", promptFeedback: {...} }` frame has no streaming-event
+    // shape, so error extraction would otherwise treat the bare `error` string
+    // as terminal and the user would see the generic message instead of the
+    // categorized prompt-block message with its safety metadata.
+    const safetyRatings = [{ category: 'HARM_CATEGORY_DANGEROUS_CONTENT', probability: 'HIGH' }];
+    const payload = {
+      error: 'Request blocked',
+      promptFeedback: { blockReason: 'SAFETY', safetyRatings },
+    };
+    expect(geminiConnector.extract(JSON.stringify(payload))).toEqual({
+      error: 'Gemini blocked the prompt (blockReason: SAFETY, worst category: HARM_CATEGORY_DANGEROUS_CONTENT)',
+      errorPayload: payload,
+      metadata: { blockReason: 'SAFETY', safetyRatings },
     });
   });
 
@@ -349,10 +380,12 @@ describe('geminiConnector', () => {
       expect(result?.warning?.message).toContain('inlineData (image/webp)');
     });
 
-    it('keeps the unsupported-part warning when the same chunk also hits MAX_TOKENS', () => {
+    it('surfaces both the unsupported-part and truncated warnings when a chunk also hits MAX_TOKENS', () => {
       // A multimodal model can emit an inlineData part *and* finishReason
-      // MAX_TOKENS in one chunk; the truncation warning must not clobber the
-      // unsupported-part warning, the only signal that content was dropped.
+      // MAX_TOKENS in one chunk. Both diagnostics must reach the consumer via
+      // `warnings`: the single `warning` slot used to drop the more-actionable
+      // truncation signal, leaving a developer debugging a cut-off answer with
+      // only an unrelated image warning.
       const data = JSON.stringify({
         candidates: [{
           finishReason: 'MAX_TOKENS',
@@ -362,6 +395,8 @@ describe('geminiConnector', () => {
       const result = geminiConnector.extract(data);
       expect(result?.done).toBe(true);
       expect(result?.metadata).toEqual({ finishReason: 'MAX_TOKENS' });
+      expect(result?.warnings?.map(w => w.code)).toEqual(['unsupported-part', 'truncated']);
+      // `warning` keeps the first warning for back-compat with the legacy single slot.
       expect(result?.warning?.code).toBe('unsupported-part');
     });
   });

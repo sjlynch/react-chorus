@@ -99,10 +99,13 @@ export function useSessionCommands<TMeta>({
 
   const { handleEdit, handleRegenerate } = useEditRegenerateCommands<TMeta>({
     messagesRef,
+    transportRef,
+    onSendRef,
     streamError,
     isBusy,
     triggerAssistant,
     updateSessionMessages,
+    warnMissingResponseHandler,
   });
 
   const handleDelete = useDeleteCommand<TMeta>({

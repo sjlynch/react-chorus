@@ -8,6 +8,26 @@ import { createAbnormalCloseError, createAbortError, createClosedBeforeOpenError
 // promise. `closeCode`/`closeReason` are forwarded to the socket close frame.
 type TransientFailHandler = (error: unknown, closeCode?: number, closeReason?: string) => void;
 
+// Local duplicate of `isChorusDevMode` from `src/utils/devMode.ts`. Importing
+// the shared helper here would bundle the transport-only subpath with the
+// session/utils chunk and blow its tight size budget — the same trade-off
+// `persistent.ts` and `createFetchSSETransport.ts` document for these chunks.
+function isTransientWebSocketDevMode(): boolean {
+  try {
+    return typeof process !== 'undefined' && typeof process.env !== 'undefined' && process.env.NODE_ENV !== 'production';
+  } catch {
+    return false;
+  }
+}
+
+// Warn at most once per process when `correlate` is supplied without
+// `persistent: true`. Correlation routing only exists in persistent mode; a
+// transient send owns its own socket, so `correlate` is never consulted and the
+// `correlationId` half of a `formatMessage` result is discarded. Mirrors
+// `createFetchSSETransport`'s one-time warning for a `formatBody` dropped on a
+// body-less GET/HEAD request — both surface a silently-inert option in dev.
+let warnedCorrelateIgnoredInTransientMode = false;
+
 export function createTransientWebSocketTransport<TMeta = Record<string, unknown>>(
   url: string,
   opts: WebSocketTransportOptions<TMeta> | undefined,
@@ -18,6 +38,18 @@ export function createTransientWebSocketTransport<TMeta = Record<string, unknown
   // transport-closed error instead of leaving the socket to close as a clean EOF.
   const activeSends = new Map<WebSocket, TransientFailHandler>();
   const encoder = new TextEncoder();
+
+  if (opts?.correlate && !warnedCorrelateIgnoredInTransientMode && isTransientWebSocketDevMode()) {
+    warnedCorrelateIgnoredInTransientMode = true;
+    console.warn(
+      `[react-chorus] createWebSocketTransport: a \`correlate\` callback was provided `
+        + `without \`persistent: true\`. Correlation routing only applies in persistent `
+        + `mode — in transient mode each send opens its own WebSocket, so \`correlate\` is `
+        + `never consulted and any \`correlationId\` returned by \`formatMessage\` is `
+        + `discarded. Pass \`persistent: true\` to use correlation, or drop \`correlate\` `
+        + `for transient sends. This warning fires once.`,
+    );
+  }
 
   const transport = ((text: string, history: Message<TMeta>[], signal: AbortSignal) =>
     new Promise<Response>((resolve, reject) => {
@@ -79,8 +111,15 @@ export function createTransientWebSocketTransport<TMeta = Record<string, unknown
 
       ws.onmessage = (event: MessageEvent) => {
         void webSocketMessageToText(event.data).then(data => {
-          opts?.onMessage?.(data, event);
+          // `onMessage` fires *after* the `closed()` guard so transient mode
+          // mirrors "messages delivered to the stream": once the consumer
+          // cancels the reader (which closes the stream and the socket) a late
+          // in-flight frame is neither enqueued nor observed. This keeps
+          // token-counting/telemetry consumers in sync with what reached the UI.
+          // Persistent mode deliberately differs — see `persistent.ts`, where
+          // `onMessage` observes raw socket frames including server-pushed ones.
           if (responseStream.closed()) return;
+          opts?.onMessage?.(data, event);
           // Wrap as one SSE event so readSSEStream can parse it downstream.
           // Prefix each line to preserve embedded newlines in the WS payload.
           responseStream.enqueue(encoder.encode(encodeSSEDataEvent(data)));
