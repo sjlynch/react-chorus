@@ -18,6 +18,8 @@ export interface ChorusTranscriptLabels {
   ariaLabel: string;
   typing: string;
   retry: string;
+  /** Aria-label and title for the dismiss button on the default error banner. */
+  dismissError: string;
   jumpToLatest: string;
   suggestedPromptsAriaLabel: string;
   emptyStateTitle: string;

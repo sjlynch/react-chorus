@@ -125,7 +125,12 @@ export function toGeminiContents<TMeta = Record<string, unknown>>(
   return mapHistoryWithToolRuns<TMeta, string, GeminiContent>(history, {
     groupMode: 'contiguous',
     mapMessage: message => toGeminiContent(message, options),
-    extractToolBlock: message => message.toolCall.name || null,
+    // `toolCall` is required on `ToolMessage` at the type level, but the
+    // request mappers tolerate loose runtime history (raw JSON, hand-built
+    // entries, connector bugs). Guard it like the other three mappers so a
+    // `{ role: 'tool' }` entry missing `toolCall` delegates to the guarded
+    // text fallback instead of throwing deep inside `toGeminiContents`.
+    extractToolBlock: message => message.toolCall?.name || null,
     emitToolGroup: (target, pairs) => {
       appendGeminiFunctionCalls(target, pairs.map(entry => geminiFunctionCallPart(entry.message, entry.block)));
       target.push({ role: 'user', parts: pairs.map(entry => geminiFunctionResponsePart(entry.message, entry.block)) });

@@ -6,7 +6,11 @@ import type { Message } from '../types';
 const MESSAGES: Message[] = [
   { id: 'u1', role: 'user', text: 'How do I deploy the app?' },
   { id: 'a1', role: 'assistant', text: 'Run the deploy script.', reasoning: 'Consider the CI pipeline first.' },
-  { id: 't1', role: 'tool', toolCall: { name: 'searchDocs', input: { q: 'deploy' }, output: 'found 3 results' } },
+  {
+    id: 't1',
+    role: 'tool',
+    toolCall: { name: 'searchDocs', input: { q: 'release notes' }, output: 'found at https://docs.example.com/setup-guide' },
+  },
   { id: 's1', role: 'system', text: 'You are a helpful assistant.' },
   {
     id: 'u2',
@@ -39,6 +43,30 @@ describe('useChorusTranscriptActions', () => {
       const { result } = renderHook(() => useChorusTranscriptActions(MESSAGES));
       const hits = result.current.searchMessages('searchdocs');
       expect(hits.map((m) => m.id)).toEqual(['t1']);
+    });
+
+    it('matches a tool message by its serialized tool-call input', () => {
+      const { result } = renderHook(() => useChorusTranscriptActions(MESSAGES));
+      expect(result.current.searchMessages('release notes').map((m) => m.id)).toEqual(['t1']);
+    });
+
+    it('matches a tool message by its tool-call output', () => {
+      const { result } = renderHook(() => useChorusTranscriptActions(MESSAGES));
+      expect(result.current.searchMessages('setup-guide').map((m) => m.id)).toEqual(['t1']);
+    });
+
+    it('matches tool-call input and output case-insensitively', () => {
+      const { result } = renderHook(() => useChorusTranscriptActions(MESSAGES));
+      expect(result.current.searchMessages('RELEASE NOTES').map((m) => m.id)).toEqual(['t1']);
+      expect(result.current.searchMessages('DOCS.EXAMPLE.COM').map((m) => m.id)).toEqual(['t1']);
+    });
+
+    it('does not throw searching a circular tool value', () => {
+      const circular: Record<string, unknown> = {};
+      circular.self = circular;
+      const messages: Message[] = [{ id: 't', role: 'tool', toolCall: { name: 'loop', output: circular } }];
+      const { result } = renderHook(() => useChorusTranscriptActions(messages));
+      expect(result.current.searchMessages('loop').map((m) => m.id)).toEqual(['t']);
     });
 
     it('matches message reasoning text', () => {
@@ -131,6 +159,16 @@ describe('useChorusTranscriptActions', () => {
       const { result } = renderHook(() => useChorusTranscriptActions(MESSAGES));
       await withClipboard(writeText, () => result.current.copyAll('json'));
       expect(JSON.parse(writeText.mock.calls[0][0])).toEqual(JSON.parse(JSON.stringify(MESSAGES)));
+    });
+
+    it('resolves false without writing or reporting an error on an empty transcript', async () => {
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      const onCopyError = vi.fn();
+      const { result } = renderHook(() => useChorusTranscriptActions([], { onCopyError }));
+      const ok = await withClipboard(writeText, () => result.current.copyAll());
+      expect(ok).toBe(false);
+      expect(writeText).not.toHaveBeenCalled();
+      expect(onCopyError).not.toHaveBeenCalled();
     });
 
     it('resolves false and reports an error when the Clipboard API is unavailable', async () => {
