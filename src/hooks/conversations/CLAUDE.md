@@ -13,7 +13,7 @@
 - `indexCodec.ts` — compatibility barrel that re-exports the conversation index helper API for existing internal callers.
 - `parse.ts` / `sanitize.ts` — index JSON parse/serialize/state conversion plus summary sanitization, timestamp backfill migration warnings, pinned coercion, and pristine default-title migration.
 - `activeId.ts` / `timestamp.ts` / `pendingCreates.ts` / `title.ts` — focused helpers for active-id selection, timestamp normalization, pre-load create merging, and first-message/default-title derivation.
-- `indexWriteQueue.ts` — debounced/serialized index writes. Exposes a `writeCoordination` (`isWritePending`/`whenWriteSettles`) so `crossTabSync` can defer external events behind in-flight writes, and an `onWriteSuccess(version)` callback so the facade can clear a stale `error` once a later write lands.
+- `indexWriteQueue.ts` — debounced/serialized index writes; a thin wrapper over the shared `persistence/writeQueueCore.ts` (`useWriteQueueCore`) that adds index serialization and the `(storage, indexKey)` source identity. Exposes a `writeCoordination` (`isWritePending`/`whenWriteSettles`) so `crossTabSync` can defer external events behind in-flight writes, and an `onWriteSuccess(version)` callback so the facade can clear a stale `error` once a later write lands. It passes `deferSyncSettle: false` so a synchronous index write settles eagerly — a cross-tab event arriving right after a local write must apply at once, not be deferred a microtask behind a write that already completed.
 - `storageAdapter.ts` — transcript storage wrapper that touches conversation timestamps.
 - `storageErrors.ts` — conversation storage error normalization.
 
