@@ -313,6 +313,33 @@ describe('ChatWindow rendering behavior', () => {
     expect(screen.getByText('assistant plan')).toBeInTheDocument();
     expect(container.querySelector('.chorus-reasoning')).toBeInTheDocument();
   });
+  it('opens the reasoning disclosure for a reasoning-only streaming turn', () => {
+    render(
+      <ChatWindow
+        streamingMessageId="r-stream"
+        messages={[{ id: 'r-stream', role: 'assistant', text: '', reasoning: 'streaming thoughts' }]}
+      />
+    );
+
+    // A reasoning-first model streams chain-of-thought before any answer text;
+    // the disclosure must be open so the trace is visible instead of frozen.
+    expect(screen.getByText('Reasoning').closest('details')).toHaveAttribute('open');
+  });
+  it('leaves the reasoning disclosure collapsed once streamed answer text arrives', () => {
+    render(
+      <ChatWindow
+        streamingMessageId="r-answer"
+        messages={[{ id: 'r-answer', role: 'assistant', text: 'Here is the answer', reasoning: 'streaming thoughts' }]}
+      />
+    );
+
+    expect(screen.getByText('Reasoning').closest('details')).not.toHaveAttribute('open');
+  });
+  it('leaves the reasoning disclosure collapsed on a settled (non-streaming) message', () => {
+    render(<ChatWindow messages={[{ id: 'r-done', role: 'assistant', text: '', reasoning: 'finished thoughts' }]} />);
+
+    expect(screen.getByText('Reasoning').closest('details')).not.toHaveAttribute('open');
+  });
   it('renders a per-message timestamp when showTimestamps is set', () => {
     const { container } = render(<ChatWindow showTimestamps messages={[{ ...USER_MSG, createdAt: '2026-05-20T15:47:06.425Z' }]} />);
 

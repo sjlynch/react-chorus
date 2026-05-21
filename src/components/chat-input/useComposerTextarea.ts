@@ -1,5 +1,6 @@
 import React from 'react';
 import type { ChatInputFocusOptions, ChatInputHandle } from './types';
+import { useTextareaAutosize } from './useTextareaAutosize';
 
 export const MAX_COMPOSER_TEXTAREA_HEIGHT = 160;
 
@@ -25,21 +26,14 @@ export function useComposerTextarea({
   // async `onSend` can detect that the user has typed since it was dispatched.
   const composerGenerationRef = React.useRef(0);
 
-  const resizeTextarea = React.useCallback(() => {
-    const el = textareaRef.current;
-    if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, MAX_COMPOSER_TEXTAREA_HEIGHT)}px`;
-  }, []);
+  // Auto-grow the textarea to fit its content (shared with the inline message
+  // editor); the hook also re-measures on every `value` change.
+  const resizeTextarea = useTextareaAutosize(textareaRef, value, MAX_COMPOSER_TEXTAREA_HEIGHT);
 
   const resetTextareaHeight = React.useCallback(() => {
     const el = textareaRef.current;
     if (el) el.style.height = '';
   }, []);
-
-  React.useEffect(() => {
-    resizeTextarea();
-  }, [resizeTextarea, value]);
 
   React.useImperativeHandle(forwardedRef, () => ({
     focus(options?: ChatInputFocusOptions) {

@@ -132,6 +132,21 @@ describe('ChatInput attachment intake', () => {
 
     expect(root).not.toHaveClass('chorus-input--dragging');
   });
+  it('renders the drop overlay inside the composer root when used without a .chorus surface', async () => {
+    const file = new File(['drop-bytes'], 'dragged.png', { type: 'image/png' });
+    const { container } = render(<ControlledChatInput accept="image/*" />);
+    const root = container.firstElementChild as HTMLElement;
+
+    await act(async () => {
+      fireEvent.dragEnter(root, { dataTransfer: fileTransfer(file) });
+    });
+
+    // No surrounding `.chorus` to portal onto, so the overlay falls back to the
+    // composer root rather than being dropped on document.body.
+    const overlay = container.querySelector('.chorus-drop-overlay');
+    expect(overlay).not.toBeNull();
+    expect(root.contains(overlay)).toBe(true);
+  });
   it('rejects oversized files and calls onAttachmentError with a useful reason', async () => {
     const onAttachmentError = vi.fn();
     const file = new File(['too large'], 'large.txt', { type: 'text/plain' });

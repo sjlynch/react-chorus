@@ -452,7 +452,7 @@ async function verifyConsumerBundleBudgets() {
     { label: 'headless entry initial JS', entry: 'headless', maxSize: 223 * KiB, maxGzip: 72 * KiB },
     { label: 'root useChorusStream import initial JS', entry: 'rootUseChorusStream', maxSize: 68 * KiB, maxGzip: 21 * KiB },
     { label: 'root Markdown import initial JS', entry: 'rootMarkdown', maxSize: 85 * KiB, maxGzip: 30 * KiB },
-    { label: 'root ChatWindow import initial JS', entry: 'rootChatWindow', maxSize: 130 * KiB, maxGzip: 43 * KiB },
+    { label: 'root ChatWindow import initial JS', entry: 'rootChatWindow', maxSize: 131 * KiB, maxGzip: 44 * KiB },
     { label: 'root ConversationList import initial JS', entry: 'rootConversationList', maxSize: 12 * KiB, maxGzip: 5 * KiB },
     { label: 'transport subpath initial JS', entry: 'transport', maxSize: 8 * KiB, maxGzip: 3 * KiB },
     { label: 'provider-requests subpath initial JS', entry: 'providerRequests', maxSize: 16 * KiB, maxGzip: 6 * KiB },

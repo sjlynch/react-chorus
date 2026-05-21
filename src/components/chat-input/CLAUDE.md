@@ -5,7 +5,8 @@
 Submodule map:
 
 - `types.ts` — `ChatInputProps` and `RenderAttachmentErrorContext` public contracts.
-- `useComposerTextarea.ts` — textarea refs, autoresize (`MAX_COMPOSER_TEXTAREA_HEIGHT`), reset height, imperative focus wiring, IME `isComposingRef`, and the `composerGenerationRef` edit counter.
+- `useTextareaAutosize.ts` — shared `<textarea>` auto-grow hook (collapse-to-`auto` then cap at a max height; re-measures on every `value` change). Used by `useComposerTextarea` and by `message-row/InlineMessageEditor.tsx` so the composer and the inline editor resize identically. It lives here (not under `components/`) so it stays inside the `chat-input` bundle chunk; `InlineMessageEditor` reaching across for it does not pull a new chunk because `ChatWindow` already loads `chat-input`.
+- `useComposerTextarea.ts` — textarea refs, autoresize via `useTextareaAutosize` (`MAX_COMPOSER_TEXTAREA_HEIGHT`), reset height, imperative focus wiring, IME `isComposingRef`, and the `composerGenerationRef` edit counter.
 - `useChatInputSend.ts` — send acceptance semantics, including `onSend` returning `false` or resolving `false` to veto clearing; an async `onSend` whose `composerGenerationRef` changed before it resolves no longer clears the (re-typed) composer.
 - `useFileIngestionHandlers.ts` — picker/paste/composer drag/drop dispatch; host handlers run first and built-in ingestion only runs when the event was not default-prevented.
 - `useChatSurfaceFileDrop.ts` — native drag/drop listeners for the surrounding `.chorus` surface plus the DataTransfer-claiming helper; transcript drops are ingested when allowed and file drops are always default-prevented to avoid browser navigation.

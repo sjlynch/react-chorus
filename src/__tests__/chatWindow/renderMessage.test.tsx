@@ -426,4 +426,51 @@ describe('ChatWindow renderMessage and message actions', () => {
     render(<ChatWindow messages={[USER_MSG]} markdownSanitizer={sanitizer} />);
     expect(screen.getByTestId('markdown')).toHaveAttribute('data-sanitizer', 'true');
   });
+  it('warns in dev when renderMessage returns a non-self-tagging custom component root', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    function HostRow({ text }: { text: string }) {
+      return <p data-testid="host-row">{text}</p>;
+    }
+    render(
+      <ChatWindow
+        messages={[USER_MSG]}
+        renderMessage={(message) => <HostRow text={message.text} />}
+      />
+    );
+
+    // The custom component swallows messageProps, so the scroll target is lost.
+    expect(screen.getByTestId('host-row')).not.toHaveAttribute('data-chorus-message-id');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('ChorusRef.scrollToMessage'));
+    warn.mockRestore();
+  });
+  it('does not warn when renderMessage returns the self-tagging README MessageBubble + Fragment pattern', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    render(<ChatWindow messages={[USER_MSG]} renderMessage={readmeMessageRenderer} />);
+
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+  it('auto-resizes the inline message editor textarea to fit its content', async () => {
+    const user = userEvent.setup();
+    render(<ChatWindow messages={[USER_MSG]} onEdit={vi.fn()} />);
+
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    const textarea = screen.getByRole('textbox', { name: 'Edit message' });
+    // jsdom performs no layout, so feed a deterministic content height.
+    Object.defineProperty(textarea, 'scrollHeight', { configurable: true, value: 140 });
+    await user.type(textarea, ' more');
+
+    expect(textarea).toHaveStyle({ height: '140px' });
+  });
+  it('caps the inline message editor textarea height for very long content', async () => {
+    const user = userEvent.setup();
+    render(<ChatWindow messages={[USER_MSG]} onEdit={vi.fn()} />);
+
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    const textarea = screen.getByRole('textbox', { name: 'Edit message' });
+    Object.defineProperty(textarea, 'scrollHeight', { configurable: true, value: 5000 });
+    await user.type(textarea, ' more');
+
+    expect(textarea).toHaveStyle({ height: '320px' });
+  });
 });

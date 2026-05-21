@@ -59,7 +59,7 @@ Rules to preserve when touching theming:
 
 ## `MessageBubble`
 
-Exported from `ChatWindow.tsx` for use in `renderMessage` render-props and implemented in `message-row/bubble.tsx`. It wraps the default role class and bubble, renders `message.reasoning` as a collapsed details block, renders `message.attachments` (image previews or file names), and passes text through `Markdown`. The built-in `MessageRow` uses the same attachment/reasoning renderer and adds edit/regenerate/delete/copy/feedback actions.
+Exported from `ChatWindow.tsx` for use in `renderMessage` render-props and implemented in `message-row/bubble.tsx`. It wraps the default role class and bubble, renders `message.reasoning` as a details block (collapsed by default, but auto-opened while a reasoning-only turn is still streaming so chain-of-thought is visible), renders `message.attachments` (image previews or file names), and passes text through `Markdown`. The built-in `MessageRow` uses the same attachment/reasoning renderer and adds edit/regenerate/delete/copy/feedback actions.
 
 ## `ToolCallBlock`
 

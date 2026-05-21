@@ -39,13 +39,21 @@ export interface MessageReasoningProps {
   markdownSanitizer?: MarkdownSanitizer;
   reasoningLabel?: string;
   codeCopyLabels?: ChorusCodeCopyLabels;
+  /**
+   * Force the reasoning `<details>` open. When omitted the disclosure is
+   * uncontrolled — collapsed by default and freely toggled by the reader. The
+   * default transcript passes `true` for a reasoning-only streaming turn so a
+   * chain-of-thought model's output is visible as it arrives instead of looking
+   * frozen behind a collapsed summary with an empty bubble.
+   */
+  open?: boolean;
 }
 
-export function MessageReasoning({ reasoning, codeTheme, headless, streaming = false, markdownProps, markdownSanitizer, reasoningLabel = DEFAULT_REASONING_LABEL, codeCopyLabels }: MessageReasoningProps) {
+export function MessageReasoning({ reasoning, codeTheme, headless, streaming = false, markdownProps, markdownSanitizer, reasoningLabel = DEFAULT_REASONING_LABEL, codeCopyLabels, open }: MessageReasoningProps) {
   if (!reasoning) return null;
 
   return (
-    <details className="chorus-reasoning">
+    <details className="chorus-reasoning" open={open}>
       <summary className="chorus-reasoning-summary">{reasoningLabel}</summary>
       <div className="chorus-reasoning-body">
         <Markdown {...markdownProps} text={reasoning} codeTheme={codeTheme} headless={headless} streaming={streaming} sanitizer={markdownSanitizer ?? markdownProps?.sanitizer} codeCopyLabels={codeCopyLabels ?? markdownProps?.codeCopyLabels} />
@@ -101,7 +109,22 @@ export function MessageBubbleLayout<TMeta = Record<string, unknown>>({ message, 
       <div className="chorus-msg-content">
         {headerSlot}
         {message.role === 'assistant' && (
-          <MessageReasoning reasoning={message.reasoning} codeTheme={codeTheme} headless={headless} streaming={streaming} markdownProps={markdownProps} markdownSanitizer={markdownSanitizer} reasoningLabel={reasoningLabel} codeCopyLabels={codeCopyLabels} />
+          <MessageReasoning
+            reasoning={message.reasoning}
+            codeTheme={codeTheme}
+            headless={headless}
+            streaming={streaming}
+            markdownProps={markdownProps}
+            markdownSanitizer={markdownSanitizer}
+            reasoningLabel={reasoningLabel}
+            codeCopyLabels={codeCopyLabels}
+            // Reveal the reasoning while it is the only thing streaming: a
+            // reasoning-first model emits chain-of-thought before any answer
+            // text, so a collapsed summary over an empty bubble looks frozen.
+            // Once answer text arrives the disclosure returns to uncontrolled
+            // (collapsed-by-default) state.
+            open={streaming && !hasBubbleText ? true : undefined}
+          />
         )}
         {shouldRenderBubble && (
           <div className="chorus-bubble">

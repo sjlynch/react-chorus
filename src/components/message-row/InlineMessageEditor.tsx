@@ -2,6 +2,15 @@ import React from 'react';
 import { Check, X } from 'lucide-react';
 import { DEFAULT_MESSAGE_ACTION_LABELS } from '../../labels/messageActions';
 import type { ChorusMessageActionLabels } from '../../labels/types';
+import { useTextareaAutosize } from '../chat-input/useTextareaAutosize';
+
+/**
+ * Max auto-grow height (px) for the inline message editor textarea. Larger than
+ * the composer's cap (`MAX_COMPOSER_TEXTAREA_HEIGHT`) because editing an
+ * existing multi-paragraph message needs more room than drafting a new one, and
+ * the editor sits in the roomier transcript rather than the bottom input bar.
+ */
+const MAX_EDIT_TEXTAREA_HEIGHT = 320;
 
 export interface InlineMessageEditorProps {
   initialText: string;
@@ -13,6 +22,10 @@ export interface InlineMessageEditorProps {
 export function InlineMessageEditor({ initialText, onSubmit, onCancel, labels = DEFAULT_MESSAGE_ACTION_LABELS }: InlineMessageEditorProps) {
   const [editText, setEditText] = React.useState(initialText);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+
+  // Auto-grow to fit the content, matching the composer textarea — the hook
+  // sizes the editor to `initialText` on mount and re-measures on every edit.
+  useTextareaAutosize(textareaRef, editText, MAX_EDIT_TEXTAREA_HEIGHT);
 
   React.useEffect(() => {
     const el = textareaRef.current;

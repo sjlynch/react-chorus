@@ -27,6 +27,23 @@ export interface ChatInputHandle {
   focus(options?: ChatInputFocusOptions): void;
 }
 
+/**
+ * Props for the `ChatInput` composer.
+ *
+ * `ChatInputProps` extends `React.HTMLAttributes<HTMLDivElement>` (minus
+ * `onChange`, which is the controlled-value callback here). Any such extra
+ * attribute — `id`, `data-*`, `aria-*`, and event handlers including
+ * `onKeyDown` — is spread onto the **root container `<div>`**, never the inner
+ * textarea. Consequences worth knowing:
+ *
+ * - An `onKeyDown` passed this way fires for the root container. The composer's
+ *   own Enter-to-send handler lives on the textarea and calls `preventDefault()`,
+ *   so a root `onKeyDown` will NOT observe textarea keystrokes the composer
+ *   consumes (notably Enter). It still sees keys the composer ignores.
+ * - `style` is merged after the palette CSS variables. `aria-disabled` and
+ *   `title` are used only as fallbacks: the composer overrides them while it is
+ *   disabled/read-only (`aria-disabled`) or has a disabled reason (`title`).
+ */
 export interface ChatInputProps extends Omit<React.HTMLAttributes<HTMLDivElement>, 'onChange'> {
   value: string;
   onChange: (v: string) => void;

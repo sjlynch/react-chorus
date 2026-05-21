@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { ArrowUp, Paperclip } from 'lucide-react';
 import { DEFAULT_COMPOSER_LABELS } from '../labels/composer';
 import { DEFAULT_ATTACHMENT_LABELS } from '../labels/attachments';
@@ -40,6 +41,13 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(funct
   onDragOver: onDragOverProp,
   onDragLeave: onDragLeaveProp,
   onDrop: onDropProp,
+  // `aria-disabled` and `title` are pulled out of `...rest` because the composer
+  // derives its own values for them (from `disabled`/`readOnly`/`disabledReason`).
+  // Leaving them in `rest` would spread a host value that the explicit attribute
+  // below then immediately overrides — a confusing double-apply. A host value is
+  // still honoured: it is used as the fallback when the composer is active.
+  'aria-disabled': ariaDisabledProp,
+  title: titleProp,
   ...rest
 }: ChatInputProps, ref) {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -165,6 +173,17 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(funct
 
   const paletteVars = React.useMemo(() => styleVarsFromPalette(palette), [palette]);
 
+  // The "Drop to attach" overlay must blanket the whole widget so it always
+  // renders under the cursor — `useChatSurfaceFileDrop` also accepts file drops
+  // over the transcript, far above the composer. Portal it onto the surrounding
+  // `.chorus` surface when one exists; a standalone ChatInput (no surface) keeps
+  // the overlay inside its own composer-sized root. Resolved once on mount: the
+  // `.chorus` ancestor of a mounted ChatInput does not change.
+  const [dropOverlayHost, setDropOverlayHost] = React.useState<HTMLElement | null>(null);
+  React.useEffect(() => {
+    setDropOverlayHost(rootRef.current?.closest<HTMLElement>('.chorus') ?? null);
+  }, [rootRef]);
+
   const attachmentErrorNode = attachmentError && renderAttachmentError !== null
     ? (renderAttachmentError
       ? renderAttachmentError({ error: attachmentError, dismiss: dismissAttachmentError })
@@ -177,8 +196,19 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(funct
       ))
     : null;
 
-  return (
+  const dropOverlay = draggingFiles && canIngestFiles ? (
+    <div className="chorus-drop-overlay" aria-hidden="true">
+      <span className="chorus-drop-overlay-label">{labels.dropToAttach}</span>
+    </div>
+  ) : null;
+
+  const root = (
     <div
+      // Any unrecognised props (`...rest`) — including event handlers such as
+      // `onKeyDown` — attach to this root container, NOT the inner textarea.
+      // The composer's own Enter-to-send `onKeyDown` lives on the textarea and
+      // calls preventDefault(), so a host `onKeyDown` passed via `rest` will not
+      // observe the textarea key events the composer consumes (notably Enter).
       {...rest}
       ref={rootRef}
       className={rootClassName}
@@ -188,8 +218,8 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(funct
       onDragOver={handleRootDragOver}
       onDragLeave={handleRootDragLeave}
       onDrop={handleRootDrop}
-      aria-disabled={composerInactive ? true : rest['aria-disabled']}
-      title={inactiveReason ?? rest.title}
+      aria-disabled={composerInactive ? true : ariaDisabledProp}
+      title={inactiveReason ?? titleProp}
     >
       {inactiveReason && <span id={reasonId} className="chorus-sr-only">{inactiveReason}</span>}
       <AttachmentChips
@@ -239,11 +269,11 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(funct
           {sending ? <span className="chorus-stop-fill" /> : <ArrowUp size={18} strokeWidth={2} />}
         </button>
       </div>
-      {draggingFiles && canIngestFiles && (
-        <div className="chorus-drop-overlay" aria-hidden="true">
-          <span className="chorus-drop-overlay-label">{labels.dropToAttach}</span>
-        </div>
-      )}
+      {dropOverlay && !dropOverlayHost && dropOverlay}
     </div>
   );
+
+  return dropOverlay && dropOverlayHost
+    ? <>{root}{createPortal(dropOverlay, dropOverlayHost)}</>
+    : root;
 });

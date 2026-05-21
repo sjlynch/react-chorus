@@ -1,5 +1,32 @@
 import React from 'react';
 import { DEFAULT_TRANSCRIPT_LABELS } from '../../labels/transcript';
+import { MessageBubble, MessageRow } from '../MessageRow';
+
+// `renderMessage` roots that are react-chorus components rendering their own
+// `data-chorus-message-id` scroll target (directly or via a nested bubble).
+// Returning one of these — or `ctx.defaultRender()`, which is a `MessageRow` —
+// does not break `ChorusRef.scrollToMessage`, so it must not trigger a warning.
+const SELF_TAGGING_MESSAGE_ROOTS: ReadonlySet<unknown> = new Set([MessageBubble, MessageRow]);
+
+// Inlined dev-mode gate + once-guard for the warning below. Importing the
+// shared `utils/warnings` helper here would drag its chunk (merged with the
+// assistant-session chunk) into the ChatWindow graph and blow its bundle-size
+// budget. `ChatWindow.tsx` and `conversation-list/useDeleteConversationConfirmation.ts`
+// inline the same gate for the same reason; see `src/utils/CLAUDE.md`.
+function isChorusDevMode() {
+  try {
+    return typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production';
+  } catch {
+    return false;
+  }
+}
+
+let didWarnNonHostMessageRoot = false;
+function warnNonHostMessageRootOnce(message: string) {
+  if (didWarnNonHostMessageRoot || !isChorusDevMode()) return;
+  didWarnNonHostMessageRoot = true;
+  console.warn(message);
+}
 
 export interface DefaultEmptyStateProps {
   prompts: string[];
@@ -88,10 +115,35 @@ export function DefaultEmptyState({
 }
 
 export function attachMessageRootProps<TMessageProps extends { 'data-chorus-message-id': string }>(node: React.ReactNode, messageProps: TMessageProps) {
-  if (!React.isValidElement(node) || typeof node.type !== 'string') return node;
+  if (!React.isValidElement(node)) return node;
 
   const props = node.props as Partial<TMessageProps>;
-  if (props['data-chorus-message-id'] != null) return node;
+  const alreadyTagged = props['data-chorus-message-id'] != null;
+
+  // A custom component (or Fragment) as the message root cannot be tagged here:
+  // we cannot know which DOM node it ultimately renders, and cloning would only
+  // pass `data-chorus-message-id` as a prop the component most likely ignores.
+  // Warn (once) so the host knows `ChorusRef.scrollToMessage(id)` will not be
+  // able to find this row — unless the id is already covered: the host either
+  // forwarded it onto the root themselves, returned a Fragment (the README
+  // `<MessageBubble/>` + actions pattern), or returned a self-tagging
+  // react-chorus component.
+  if (typeof node.type !== 'string') {
+    const coversScrollTarget = alreadyTagged
+      || node.type === React.Fragment
+      || SELF_TAGGING_MESSAGE_ROOTS.has(node.type);
+    if (!coversScrollTarget) {
+      warnNonHostMessageRootOnce(
+        '[react-chorus] renderMessage returned a custom component as the message root, so '
+          + 'data-chorus-message-id could not be attached and ChorusRef.scrollToMessage(id) '
+          + 'cannot scroll to this message. Spread ctx.messageProps onto a DOM element (e.g. '
+          + 'the outermost <div>) in your renderMessage output.',
+      );
+    }
+    return node;
+  }
+
+  if (alreadyTagged) return node;
 
   return React.cloneElement(
     node as React.ReactElement<Record<string, unknown>>,

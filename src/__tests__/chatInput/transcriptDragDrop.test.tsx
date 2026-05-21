@@ -54,6 +54,23 @@ describe('ChatInput transcript-wide drag-and-drop', () => {
       expect(local.queryByText('Drop to attach')).not.toBeInTheDocument();
     });
 
+    it('portals the drop overlay onto the .chorus surface so it covers the whole widget', async () => {
+      const { container } = render(<ChorusSurface accept="image/*" />);
+      const transcript = screen.getByTestId('transcript');
+      const file = new File(['bytes'], 'over.png', { type: 'image/png' });
+
+      await act(async () => {
+        fireEvent.dragEnter(transcript, { dataTransfer: fileTransfer(file) });
+      });
+
+      const overlay = container.querySelector('.chorus-drop-overlay');
+      expect(overlay).not.toBeNull();
+      // The overlay is sized to its positioned ancestor: it must blanket the
+      // whole `.chorus` widget, not be nested inside the small composer.
+      expect(overlay!.parentElement).toHaveClass('chorus');
+      expect(overlay!.closest('.chorus-input')).toBeNull();
+    });
+
     it('still preventDefaults transcript drops when attachments are disabled, without an overlay', async () => {
       const { container } = render(<ChorusSurface accept={undefined} />);
       const local = within(container);
