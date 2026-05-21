@@ -1,6 +1,7 @@
 import React from 'react';
 import type { Attachment, Message } from '../../types';
 import { appendUserTurn, createRetryHistory } from './sessionCommandTransforms';
+import { isTransportPresent } from './transportResolver';
 import type {
   ChorusAbortReason,
   ChorusAbortSource,
@@ -42,7 +43,10 @@ export function useSendRetryStopCommands<TMeta>({
     if (isBusy()) return false;
     const text = rawText.trim();
     if (!text && !attachments.length) return false;
-    if (!transportRef.current && !onSendRef.current) {
+    // Branch on transport *presence*, not bare truthiness: a misconfigured
+    // `transport=""` is still a transport prop and must reach the rejecting
+    // transport rather than trip the missing-handler warning.
+    if (!isTransportPresent(transportRef.current) && !onSendRef.current) {
       warnMissingResponseHandler();
       return false;
     }
