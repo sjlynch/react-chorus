@@ -1,8 +1,8 @@
-import type { Message, ToolMessage } from '../types';
-import { resolveProviderAttachmentSource, unsupportedAttachmentPart } from './attachments';
+import type { Attachment, Message, ToolMessage } from '../types';
+import { attachmentPartFromSource, messageContentParts } from './contentParts';
 import { isRecord } from './metadata';
 import { resolveProviderSystem, stripGeminiOptions, systemTextFromHistory } from './options';
-import { messageText, objectToolInput, safeStringify, toolContextText, toolOutputValue } from './toolOutput';
+import { objectToolInput, safeStringify, toolContextText, toolOutputValue } from './toolOutput';
 import { mapHistoryWithToolRuns } from './toolRunMapper';
 import type { ProviderMappingOptions } from './types/common';
 import type {
@@ -46,25 +46,20 @@ function geminiSystemInstruction(history: Message<unknown>[]) {
   return system ? { parts: [{ text: system }] } : undefined;
 }
 
+function geminiAttachmentPart(attachment: Attachment): GeminiPart | null {
+  return attachmentPartFromSource<GeminiPart>(attachment, {
+    dataUrlMimeTypes: GEMINI_INLINE_DATA_MIME_TYPES,
+    allowFileUri: true,
+    dataUrl: source => ({ inlineData: { mimeType: source.mimeType, data: source.base64 } }),
+    fileUri: source => ({ fileData: { mimeType: source.mimeType, fileUri: source.fileUri } }),
+  });
+}
+
 function geminiParts<TMeta>(message: Message<TMeta>, options: ProviderMappingOptions<TMeta>): GeminiPart[] {
-  const parts: GeminiPart[] = [];
-  const text = messageText(message);
-  if (text.trim()) parts.push({ text });
-
-  if (message.role === 'user') {
-    for (const attachment of message.attachments ?? []) {
-      const source = resolveProviderAttachmentSource(attachment, GEMINI_INLINE_DATA_MIME_TYPES, { allowFileUri: true });
-      if (source.kind === 'data-url') {
-        parts.push({ inlineData: { mimeType: source.mimeType, data: source.base64 } });
-      } else if (source.kind === 'file-uri') {
-        parts.push({ fileData: { mimeType: source.mimeType, fileUri: source.fileUri } });
-      } else {
-        parts.push(unsupportedAttachmentPart(attachment, message, options, text => ({ text })));
-      }
-    }
-  }
-
-  return parts;
+  return messageContentParts<TMeta, GeminiPart>(message, options, {
+    createTextPart: text => ({ text }),
+    mapAttachment: geminiAttachmentPart,
+  });
 }
 
 function geminiFunctionResponsePayload(value: unknown): Record<string, unknown> {
