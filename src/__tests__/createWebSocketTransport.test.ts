@@ -300,6 +300,34 @@ describe('createWebSocketTransport', () => {
     await expect(reader.read()).rejects.toThrow(/code 4000: unmounting/);
   });
 
+  it('delivers onMessage only for live frames in transient mode', async () => {
+    const seen: string[] = [];
+    const transport = createWebSocketTransport('wss://api.example.com/chat', {
+      onMessage: (data) => seen.push(data),
+    });
+
+    const promise = transport('hello', [], new AbortController().signal);
+    const ws = MockWebSocket.instances[0];
+    ws.emitOpen();
+    const response = await promise;
+
+    // A live in-flight frame reaches both the response stream and onMessage.
+    ws.onmessage?.({ data: '{"chunk":"live"}' } as MessageEvent);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(seen).toEqual(['{"chunk":"live"}']);
+
+    // Consumer cancels the reader — this closes the response stream and socket.
+    await response.body!.cancel();
+
+    // A late in-flight frame must reach neither: transient onMessage mirrors
+    // what the response stream receives, so post-cancel frames are not observed.
+    ws.onmessage?.({ data: '{"chunk":"late"}' } as MessageEvent);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(seen).toEqual(['{"chunk":"live"}']);
+  });
+
   it('errors active streams on abnormal 1006 close in persistent mode', async () => {
     const transport = createWebSocketTransport('wss://api.example.com/chat', { persistent: true });
     const promise = transport('hello', [], new AbortController().signal);
@@ -634,5 +662,74 @@ describe('createWebSocketTransport', () => {
     const decoder = new TextDecoder();
     expect(decoder.decode((await firstReader.read()).value)).toBe('data: shared\n\n');
     expect(decoder.decode((await secondReader.read()).value)).toBe('data: shared\n\n');
+  });
+});
+
+describe('createWebSocketTransport correlate-without-persistent dev warning', () => {
+  const ORIGINAL_NODE_ENV = process.env.NODE_ENV;
+
+  beforeEach(() => {
+    MockWebSocket.instances = [];
+    vi.stubGlobal('WebSocket', MockWebSocket);
+  });
+
+  afterEach(() => {
+    process.env.NODE_ENV = ORIGINAL_NODE_ENV;
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    vi.resetModules();
+  });
+
+  // The transient transport warns at most once per process, so each case
+  // re-imports the module to get a fresh warn-once flag.
+  async function freshCreateWebSocketTransport() {
+    vi.resetModules();
+    return (await import('../streaming/createWebSocketTransport')).createWebSocketTransport;
+  }
+
+  it('warns once in dev when correlate is provided without persistent: true', async () => {
+    process.env.NODE_ENV = 'development';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const create = await freshCreateWebSocketTransport();
+
+    create('wss://api.example.com/chat', { correlate: () => null });
+    create('wss://api.example.com/chat', {
+      correlate: () => null,
+      formatMessage: (text) => ({ payload: text, correlationId: text }),
+    });
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('`correlate`'));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('persistent'));
+  });
+
+  it('does not warn when correlate is provided with persistent: true', async () => {
+    process.env.NODE_ENV = 'development';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const create = await freshCreateWebSocketTransport();
+
+    create('wss://api.example.com/chat', { persistent: true, correlate: () => null });
+
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('does not warn for a transient transport without a correlate callback', async () => {
+    process.env.NODE_ENV = 'development';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const create = await freshCreateWebSocketTransport();
+
+    create('wss://api.example.com/chat');
+
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('does not warn in production', async () => {
+    process.env.NODE_ENV = 'production';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const create = await freshCreateWebSocketTransport();
+
+    create('wss://api.example.com/chat', { correlate: () => null });
+
+    expect(warn).not.toHaveBeenCalled();
   });
 });

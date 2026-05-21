@@ -12,6 +12,11 @@ export function createAbortError(message = 'Aborted'): Error {
   return error;
 }
 
+// Frames a raw WS payload as one SSE `data:` event for `readSSEStream`. `data`
+// must be the unframed payload value only (what goes AFTER `data: `); a WS
+// message that is already SSE-framed (e.g. built with `formatSSEEvent`) would
+// be double-wrapped here into `data: data: {...}`. See the createWebSocketTransport
+// JSDoc and `websocket/CLAUDE.md` for the WS-message framing contract.
 export function encodeSSEDataEvent(data: string) {
   return `${data.split(/\r\n|\r|\n/).map(line => `data: ${line}`).join('\n')}\n\n`;
 }

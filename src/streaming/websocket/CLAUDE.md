@@ -11,11 +11,17 @@ Internals behind `createWebSocketTransport` (see `../createWebSocketTransport.ts
 - `managedResponseStream.ts` — `ReadableStream` wrapper used by both modes. Idempotent `close`/`error`, swallows post-close enqueue, runs caller-supplied cleanup on cancel.
 - `shared.ts` — SSE event encoding, message decoding (string/Blob/ArrayBuffer/typed array), abort/close-code helpers, `safeCloseSocket`, `normalizeFormatMessageResult`.
 
+## WS message payload framing
+
+Each inbound WS message is treated as one SSE payload: `shared.ts`'s `encodeSSEDataEvent` prefixes `data: ` to every line of the message before `readSSEStream`/connectors parse it. A WS message must therefore carry the **raw payload value only** — exactly what an SSE server would put AFTER `data: ` on a `data:` line — and **never** a pre-framed SSE event.
+
+Do not build WS messages with `formatSSEEvent`/`encodeSSEEvent` from `react-chorus/server`: those frame a full SSE event (`data: {...}\n\n`), so the transport would double-wrap it into `data: data: {...}` and the connector would receive a literal `data: {...}` string as its payload. The `react-chorus/server` SSE framing helpers are for HTTP SSE proxy routes only; WebSocket servers send the unframed payload directly. This contract is also documented in the `createWebSocketTransport` JSDoc.
+
 ## Correlation contract (persistent mode only)
 
 `formatMessage` may return either a `string` payload or `{ payload, correlationId }`. When it returns an id and `opts.correlate(frame)` is supplied, inbound frames are routed only to the stream registered under the matching id; frames whose `correlate` returns `null`/`undefined` fall through to broadcast (server-pushed messages).
 
-Without `correlate`, every inbound frame is broadcast to every active stream — fine for serial sends, but overlapping sends will see each other's payloads duplicated into their assistant messages. `persistent.ts` emits a one-time `console.warn` (dev mode only) the first time a second send starts while another is still streaming on a transport that has no `correlate`. Transient mode has no correlation concept: each send owns its own socket.
+Without `correlate`, every inbound frame is broadcast to every active stream — fine for serial sends, but overlapping sends will see each other's payloads duplicated into their assistant messages. `persistent.ts` emits a one-time `console.warn` (dev mode only) the first time a second send starts while another is still streaming on a transport that has no `correlate`. Transient mode has no correlation concept: each send owns its own socket. Passing `correlate` (or a `formatMessage` that returns a `correlationId`) without `persistent: true` is silently inert — `transient.ts` emits its own one-time dev-mode `console.warn` so the dropped option is caught, mirroring `createFetchSSETransport`'s warning for a `formatBody` paired with a body-less GET/HEAD method.
 
 ## Close-code semantics
 
@@ -37,4 +43,4 @@ Net contract: **server closed normally → reader sees `done`; client called `cl
 
 ## Dev-mode duplication (do not "fix")
 
-`persistent.ts` defines a local `isPersistentWebSocketDevMode()` and intentionally does **not** import `isChorusDevMode` from `src/utils/devMode.ts`. Importing the shared helper pulls the utils chunk into the transport-only subpath and blows its bundle-size budget tracked in the root README. See `../CLAUDE.md` and the inline comment in `persistent.ts` before changing this.
+`persistent.ts` and `transient.ts` each define a local dev-mode check (`isPersistentWebSocketDevMode()` / `isTransientWebSocketDevMode()`) and intentionally do **not** import `isChorusDevMode` from `src/utils/devMode.ts`. Importing the shared helper pulls the utils chunk into the transport-only subpath and blows its bundle-size budget tracked in the root README. See `../CLAUDE.md` and the inline comments in those files before changing this.

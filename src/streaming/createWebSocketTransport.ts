@@ -23,9 +23,17 @@ export interface WebSocketTransportOptions<TMeta = Record<string, unknown>> {
   /** Called when the WebSocket reports an error, in addition to rejecting/erroring the transport. */
   onError?: (event: Event) => void;
   /**
-   * Receives every decoded WebSocket message before it is wrapped as an SSE
-   * payload. In persistent mode this also observes server-pushed messages when
-   * no send response stream is currently active.
+   * Receives each decoded WebSocket message before it is wrapped as an SSE
+   * payload.
+   *
+   * In transient mode this mirrors what the response stream receives: it fires
+   * only for frames actually delivered to the active stream. Frames that arrive
+   * after the consumer cancels the reader (which closes the stream and the
+   * socket) are not observed, so token-counting/telemetry consumers stay in
+   * sync with what reached the UI.
+   *
+   * In persistent mode this observes raw socket frames, including server-pushed
+   * messages that arrive when no send response stream is currently active.
    */
   onMessage?: (data: string, event: MessageEvent) => void;
   /**
@@ -53,7 +61,9 @@ export interface WebSocketTransportOptions<TMeta = Record<string, unknown>> {
    *
    * Only consulted in persistent mode. Without this callback every inbound
    * frame is broadcast to every active response stream, which duplicates
-   * payloads when sends overlap.
+   * payloads when sends overlap. Providing `correlate` without `persistent:
+   * true` has no effect — transient sends each own their own socket — and logs
+   * a one-time dev-mode warning so the silently-inert option is not missed.
    */
   correlate?: (frame: string) => string | null | undefined;
 }
@@ -80,8 +90,16 @@ export type WebSocketTransport<TMeta = Record<string, unknown>> = Transport<TMet
  *
  * Each incoming WS message is treated as one SSE payload so the rest of the
  * Chorus pipeline (connector extraction, chunk callbacks) works unchanged.
- * The server should send one message per token/chunk in the same JSON format
- * that an SSE server would put in a `data:` line.
+ * The server should send one message per token/chunk carrying the *raw payload
+ * value only* — exactly the JSON (or text) an SSE server would place AFTER the
+ * `data: ` prefix on a `data:` line, never a pre-framed SSE event.
+ *
+ * The transport prefixes `data: ` to every line of each WS message itself, so
+ * do NOT build WS messages with `formatSSEEvent`/`encodeSSEEvent` from
+ * `react-chorus/server`: an already-`data:`-framed string would be
+ * double-wrapped (`data: data: {...}`) and the connector would receive a
+ * literal `data: {...}` string as its payload. Those SSE framing helpers are
+ * for HTTP SSE proxy routes only — send the unframed payload over WebSockets.
  *
  * By default the connection is opened fresh for each call and closed when the
  * stream ends, when the connector reports a done sentinel, or when the
