@@ -152,6 +152,37 @@ describe('ChatWindow copy and feedback actions', () => {
       else Reflect.deleteProperty(navigator, 'clipboard');
     }
   });
+  it('announces a copy failure through a polite live region', async () => {
+    vi.useFakeTimers();
+    const writeText = vi.fn().mockRejectedValue(new Error('Permission denied'));
+    const originalClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+
+    try {
+      const { container } = render(<ChatWindow messages={[ASST_MSG]} />);
+      // The live region is mounted (and empty) before the failure so the
+      // announcement is reliably picked up when its text changes.
+      const status = container.querySelector('.chorus-actions .chorus-sr-only') as HTMLElement;
+      expect(status).toHaveAttribute('aria-live', 'polite');
+      expect(status.textContent).toBe('');
+
+      fireEvent.click(screen.getByRole('button', { name: 'Copy' }));
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(status).toHaveTextContent('Copy failed');
+
+      // The live region clears on the same timer that resets the button.
+      await act(async () => { await vi.advanceTimersByTimeAsync(1200); });
+      expect(status.textContent).toBe('');
+    } finally {
+      vi.useRealTimers();
+      if (originalClipboard) Object.defineProperty(navigator, 'clipboard', originalClipboard);
+      else Reflect.deleteProperty(navigator, 'clipboard');
+    }
+  });
   it('shows failed feedback when a custom onCopy returns false', async () => {
     vi.useFakeTimers();
     const onCopy = vi.fn(() => false);
