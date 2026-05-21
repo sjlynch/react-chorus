@@ -140,4 +140,30 @@ describe('anthropicConnector', () => {
     const data = JSON.stringify({ type: 'message_delta', delta: { stop_sequence: null }, usage: { output_tokens: 1 } });
     expect(anthropicConnector.extract(data)).toBeNull();
   });
+
+  it('flush() resets per-send tool-id maps on an abnormal close and emits no buffered tail', () => {
+    const state = anthropicConnector.createState?.();
+    const start = JSON.stringify({
+      type: 'content_block_start',
+      index: 2,
+      content_block: { type: 'tool_use', id: 'toolu_1', name: 'search', input: {} },
+    });
+    anthropicConnector.extract(start, state);
+    // The connector buffers no partial output, so flush() returns null...
+    expect(anthropicConnector.flush?.(state)).toBeNull();
+    // ...but it clears the block-index → tool-id map, so a later input_json_delta
+    // for the same block falls back to a generated id instead of `toolu_1`.
+    const delta = JSON.stringify({
+      type: 'content_block_delta',
+      index: 2,
+      delta: { type: 'input_json_delta', partial_json: '{"q":"x"}' },
+    });
+    expect(anthropicConnector.extract(delta, state)).toEqual({
+      toolDelta: { id: 'anthropic-tool-2', input: '{"q":"x"}', provider: 'anthropic', generated: true },
+    });
+  });
+
+  it('flush() tolerates being called with no state argument', () => {
+    expect(anthropicConnector.flush?.()).toBeNull();
+  });
 });

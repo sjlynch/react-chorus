@@ -144,5 +144,14 @@ export const anthropicConnector: Connector<AnthropicConnectorState> = {
     } catch {
       return null;
     }
-  }
+  },
+  flush(state = createAnthropicConnectorState()): ConnectorResult | null {
+    // This connector buffers no partial output between chunks — its only
+    // per-send memory is the block-index → tool-id maps, normally cleared on
+    // `message_stop`. On an abnormal close (body ends without `message_stop`)
+    // reset them so a reused state object cannot leak ids into a later send;
+    // there is no buffered tail to emit, so the result is always null.
+    resetAnthropicState(state);
+    return null;
+  },
 };
