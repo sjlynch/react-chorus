@@ -11,7 +11,7 @@
 - `crossTabSync.ts` — localStorage `storage` event synchronization for the conversation index.
 - `actions.ts` — create/select/rename/rename-from-first-message/delete/pin callbacks and transcript deletion fallback.
 - `indexCodec.ts` — index parsing/migration/serialization, active-id selection, timestamps, pending-create merge, and first-message title generation.
-- `indexWriteQueue.ts` — debounced/serialized index writes.
+- `indexWriteQueue.ts` — debounced/serialized index writes. Exposes a `writeCoordination` (`isWritePending`/`whenWriteSettles`) so `crossTabSync` can defer external events behind in-flight writes, and an `onWriteSuccess(version)` callback so the facade can clear a stale `error` once a later write lands.
 - `storageAdapter.ts` — transcript storage wrapper that touches conversation timestamps.
 - `storageErrors.ts` — conversation storage error normalization.
 
@@ -22,3 +22,11 @@
 - Active IDs always flow through `chooseActiveId()` on commits, while cross-tab reads prefer the current active ID when it still exists in the incoming index.
 - Transcript deletion uses `removeItem()` when available and falls back to `setItem(key, '[]')`; failures are reported as `delete` errors while the index entry is still removed.
 - Debounced index writes must flush on source changes, unmount, `pagehide`, and hidden `visibilitychange`.
+- `crossTabSync` must defer an incoming `storage` event behind any in-flight index write (`writeCoordination`) and rebase it against the freshest `stateRef.current` on settle — an external value applied mid-write would be clobbered when the in-flight write persists its stale snapshot.
+- `error` is cleared by the read lifecycle, by cross-tab sync, and by `onWriteSuccess` after a successful index write (version-gated). A transient `setItem` failure must not leave `error` populated forever once later writes succeed.
+- `storageAdapter` never derives a conversation id from a key equal to `indexKey`; an index write is not a transcript write even when `indexKey` shares the `messageKeyPrefix`.
+
+## Known ordering hazards
+
+- **Transcript delete vs. in-flight message write.** `deleteConversation` calls `removeConversationMessages(id)` on the raw storage, while `<Chorus>` writes that conversation's transcript through the wrapped `conversationStorage` adapter on an independent `useChorusPersistence` write chain. With an async adapter, a debounced/in-flight message `setItem` for the key can be ordered *after* the delete's `removeItem`, resurrecting the deleted transcript key as an orphan (no index entry). There is no shared write coordination between the two chains. Hosts that delete a conversation while its `<Chorus>` is still mounted must unmount that `<Chorus>` (or `flush()` its persistence) before calling `deleteConversation` for that id.
+- **Send before the index loads.** While the async index read is pending, `loaded` is false and `activePersistenceKey` is `''`. A message sent in that window mounts `useChorusPersistence('')`, whose `onChange` drops the message silently (it is not even queued as a pending pre-load change). Hosts must gate the composer — disable `<Chorus>` or the send action — on `useConversations().loaded`. See the `loaded` JSDoc in `types.ts`.

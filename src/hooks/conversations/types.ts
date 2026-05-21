@@ -51,11 +51,25 @@ export interface UseConversationsResult {
   conversations: ConversationSummary[];
   activeId: string | null;
   activeConversation: ConversationSummary | null;
-  /** Persistence key for the active conversation, suitable for <Chorus persistenceKey>. */
+  /**
+   * Persistence key for the active conversation, suitable for <Chorus persistenceKey>.
+   * Empty (`''`) while `loaded` is false — there is no active conversation until the
+   * index read resolves. See `loaded` for the message-drop hazard this creates.
+   */
   activePersistenceKey: string;
   /** Storage wrapper suitable for <Chorus persistenceStorage>; message writes update conversation timestamps. */
   storage: StorageAdapter | null;
-  /** False while an async conversation index read is pending; gate custom sidebars on this. */
+  /**
+   * False while an async conversation index read is pending. Gate custom sidebars
+   * on this — and gate message sending too.
+   *
+   * While `loaded` is false there is no active conversation, so `activePersistenceKey`
+   * is `''`. A message sent in that window has no transcript key to persist to:
+   * `<Chorus>` mounts `useChorusPersistence('')`, whose `onChange` drops the message
+   * silently — it is not even queued as a pending pre-load change. The user loses
+   * the message with no error. Disable the composer (or the whole `<Chorus>` widget)
+   * until `loaded` is true so a conversation exists before the user can send.
+   */
   loaded: boolean;
   /** Last conversation storage error, if any. */
   error: ConversationStorageError | null;

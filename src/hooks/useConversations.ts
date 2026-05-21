@@ -2,6 +2,7 @@ import React from 'react';
 import type { StorageAdapter } from '../types';
 import { useLatestRef } from './useLatestRef';
 import { isChorusDevMode } from '../utils/devMode';
+import { warnOnceInDev } from '../utils/warnings';
 import { chooseActiveId, type ConversationsState, type PendingConversationCreate } from './conversations/indexCodec';
 import { createConversationStorageError, isConversationStorageError } from './conversations/storageErrors';
 import { useConversationIndexWriteQueue, type IndexPersistMode } from './conversations/indexWriteQueue';
@@ -102,10 +103,23 @@ export function useConversations(options: UseConversationsOptions = {}): UseConv
 
   const getPersistenceKey = React.useCallback((id: string) => `${messageKeyPrefixRef.current}${id}`, []);
 
-  const { flushPendingIndexWrite, persistIndex } = useConversationIndexWriteQueue({
+  // Clear a stale index-write error once a later index write succeeds. Mirrors
+  // `useChorusPersistence`'s `markWriteSuccess`: version-gated so a write that
+  // landed before a newer in-memory change cannot clear an error that still
+  // reflects un-persisted state. Only `write` errors are cleared — a successful
+  // index write proves the index-write path recovered, but says nothing about a
+  // prior failed transcript `delete` or index `read`.
+  const handleIndexWriteSuccess = React.useCallback((writeVersion: number) => {
+    if (writeVersion !== versionRef.current) return;
+    setError(prev => (prev?.operation === 'write' ? null : prev));
+  }, []);
+
+  const { flushPendingIndexWrite, persistIndex, writeCoordination } = useConversationIndexWriteQueue({
     storageRef,
     indexKeyRef,
+    versionRef,
     debounceMs: INDEX_TOUCH_WRITE_DEBOUNCE_MS,
+    onWriteSuccess: handleIndexWriteSuccess,
     reportError,
   });
 
@@ -143,9 +157,20 @@ export function useConversations(options: UseConversationsOptions = {}): UseConv
     reportError,
   });
 
+  React.useEffect(() => {
+    if (!indexKey.startsWith(messageKeyPrefix)) return;
+    warnOnceInDev(
+      `conversations-index-key-collision:${messageKeyPrefix}:${indexKey}`,
+      `[Chorus] useConversations indexKey "${indexKey}" starts with messageKeyPrefix `
+        + `"${messageKeyPrefix}". A conversation whose id is "${indexKey.slice(messageKeyPrefix.length)}" `
+        + 'would derive the same storage key as the index. Choose an indexKey that does not '
+        + 'share the messageKeyPrefix.',
+    );
+  }, [indexKey, messageKeyPrefix]);
+
   const conversationStorage = React.useMemo<StorageAdapter | null>(() => (
-    createConversationStorageAdapter(storage, messageKeyPrefix, touchConversation)
-  ), [messageKeyPrefix, storage, touchConversation]);
+    createConversationStorageAdapter(storage, messageKeyPrefix, indexKey, touchConversation)
+  ), [indexKey, messageKeyPrefix, storage, touchConversation]);
 
   useConversationIndexFlushLifecycle({
     storage,
@@ -163,6 +188,7 @@ export function useConversations(options: UseConversationsOptions = {}): UseConv
     setState,
     setError,
     reportError,
+    writeCoordination,
   });
 
   useConversationIndexReadLifecycle({

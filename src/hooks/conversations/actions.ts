@@ -64,6 +64,12 @@ export function useConversationActions({
     commit(conversations, current.activeId, 'debounced');
   }, [commit, nowRef, stateRef]);
 
+  // Ordering hazard: this removeItem runs on the raw storage, on a different
+  // promise chain from `<Chorus>`'s `useChorusPersistence` message writes. With
+  // an async adapter, an in-flight transcript `setItem` for this key can land
+  // *after* this removeItem and resurrect the deleted transcript as an orphan.
+  // Hosts must unmount (or flush) the conversation's `<Chorus>` before deleting
+  // it — see "Known ordering hazards" in conversations/CLAUDE.md.
   const removeConversationMessages = React.useCallback((id: string) => {
     const targetStorage = storageRef.current;
     if (!targetStorage) return;

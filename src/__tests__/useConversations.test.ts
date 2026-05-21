@@ -1,7 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useConversations } from '../hooks/useConversations';
-import type { StorageAdapter } from '../types';
+import { useChorusPersistence } from '../hooks/useChorusPersistence';
+import type { Message, StorageAdapter } from '../types';
+
+async function flushMicrotasks(times = 6) {
+  for (let i = 0; i < times; i += 1) await Promise.resolve();
+}
 
 function makeSyncStorage(initial: Record<string, string> = {}): StorageAdapter & {
   store: Record<string, string>;
@@ -541,6 +546,67 @@ describe('useConversations', () => {
 
       expect(result.current.conversations.map(c => c.id)).toEqual(['b']);
     });
+
+    it('defers a cross-tab index event behind an in-flight index write (no lost update)', async () => {
+      const indexKey = 'chorus-cross-tab-index-inflight';
+      const setItemGate = deferred<void>();
+      let indexSetItemCalls = 0;
+      const store: Record<string, string> = {};
+      const asyncLocalStorage: StorageAdapter = {
+        getItem: (key) => Promise.resolve(store[key] ?? null),
+        setItem: (key, value) => {
+          store[key] = value;
+          if (key !== indexKey) return Promise.resolve();
+          indexSetItemCalls += 1;
+          return setItemGate.promise;
+        },
+      };
+      const descriptor = Object.getOwnPropertyDescriptor(window, 'localStorage');
+      const originalLocalStorage = window.localStorage;
+      Object.defineProperty(window, 'localStorage', { configurable: true, value: asyncLocalStorage });
+
+      try {
+        const { result } = renderHook(() => useConversations({
+          indexKey,
+          createId: () => 'tab-a',
+          now: () => '2026-05-21T00:00:00.000Z',
+        }));
+        await act(async () => { await flushMicrotasks(); });
+        expect(result.current.loaded).toBe(true);
+
+        // A local index write starts and stays in flight (its setItem is gated).
+        act(() => { result.current.createConversation('Tab A chat'); });
+        expect(indexSetItemCalls).toBe(1);
+        expect(result.current.conversations.map(c => c.id)).toEqual(['tab-a']);
+
+        // Another tab's index event arrives mid-write — applying it now would be
+        // clobbered when the in-flight write persists its stale snapshot.
+        const externalPayload = JSON.stringify({
+          activeId: 'tab-b',
+          conversations: [makeConversation('tab-b', 'Tab B chat')],
+        });
+        // Dispatched without storageArea — the swapped-in async adapter is not a
+        // real Storage instance, which jsdom's StorageEvent constructor rejects.
+        act(() => {
+          window.dispatchEvent(new StorageEvent('storage', {
+            key: indexKey,
+            newValue: externalPayload,
+            oldValue: null,
+          }));
+        });
+        expect(result.current.conversations.map(c => c.id)).toEqual(['tab-a']);
+
+        // Once the local write settles, the deferred event is rebased and applied.
+        await act(async () => {
+          setItemGate.resolve();
+          await flushMicrotasks();
+        });
+        expect(result.current.conversations.map(c => c.id)).toEqual(['tab-b']);
+      } finally {
+        if (descriptor) Object.defineProperty(window, 'localStorage', descriptor);
+        else Object.defineProperty(window, 'localStorage', { configurable: true, value: originalLocalStorage });
+      }
+    });
   });
 
   it('surfaces failed transcript deletion through error and onError while deleting the index entry', async () => {
@@ -561,5 +627,152 @@ describe('useConversations', () => {
     }));
     expect(result.current.error?.cause).toBe(deleteError);
     expect(onError).toHaveBeenCalledWith(expect.objectContaining({ operation: 'delete', key: 'chorus-conversation:abc' }));
+  });
+
+  it('clears a stale write error once a later index write succeeds', async () => {
+    let indexWriteCount = 0;
+    const store: Record<string, string> = {};
+    const storage: StorageAdapter = {
+      getItem: (key) => store[key] ?? null,
+      setItem: (key, value) => {
+        store[key] = value;
+        indexWriteCount += 1;
+        return indexWriteCount === 1 ? Promise.reject(new Error('quota')) : Promise.resolve();
+      },
+      removeItem: () => {},
+    };
+    const ids = ['first', 'second'];
+    const { result } = renderHook(() => useConversations({
+      storage,
+      createId: () => ids.shift() ?? 'fallback',
+      now: () => '2026-05-21T00:00:00.000Z',
+    }));
+
+    act(() => { result.current.createConversation('First'); });
+    await act(async () => { await flushMicrotasks(); });
+    expect(result.current.error).toEqual(expect.objectContaining({ operation: 'write' }));
+
+    // A later successful index write must dismiss the stale error so a host's
+    // persistence-error banner can clear without a full index reload.
+    act(() => { result.current.createConversation('Second'); });
+    await act(async () => { await flushMicrotasks(); });
+    expect(result.current.error).toBeNull();
+  });
+
+  it('warns and does not misclassify an index write when indexKey shares the messageKeyPrefix', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const storage = makeSyncStorage();
+    let currentTime = '2026-05-21T00:00:00.000Z';
+    try {
+      const { result } = renderHook(() => useConversations({
+        storage,
+        indexKey: 'chorus-index',
+        messageKeyPrefix: 'chorus-',
+        createId: () => 'index',
+        now: () => currentTime,
+      }));
+
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('starts with messageKeyPrefix'));
+
+      act(() => { result.current.createConversation('Index-named'); });
+      const updatedAtBefore = result.current.conversations[0].updatedAt;
+      expect(updatedAtBefore).toBe('2026-05-21T00:00:00.000Z');
+
+      // Writing the index key through the wrapped transcript adapter must not be
+      // treated as a transcript write for the conversation whose id is 'index'.
+      currentTime = '2026-05-21T12:00:00.000Z';
+      act(() => { result.current.storage?.setItem('chorus-index', '{"conversations":[],"activeId":null}'); });
+
+      expect(result.current.conversations[0].updatedAt).toBe(updatedAtBefore);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  describe('pre-index-load send window', () => {
+    function makeIndexAsyncStorage(pendingRead: Promise<string | null>) {
+      const store: Record<string, string> = {};
+      const storage: StorageAdapter = {
+        getItem: vi.fn((key: string) => (
+          key === 'chorus-conversations-index' ? pendingRead : (store[key] ?? null)
+        )),
+        setItem: vi.fn((key: string, value: string) => { store[key] = value; }),
+        removeItem: vi.fn((key: string) => { delete store[key]; }),
+      };
+      return { storage, store };
+    }
+
+    const existingIndex = JSON.stringify({
+      activeId: 'existing',
+      conversations: [{
+        id: 'existing',
+        title: 'Existing chat',
+        createdAt: '2026-05-21T00:00:00.000Z',
+        updatedAt: '2026-05-21T00:00:00.000Z',
+        pristine: false,
+      }],
+    });
+
+    // Models exactly what <Chorus> wires internally: useChorusPersistence keyed
+    // on useConversations().activePersistenceKey.
+    function renderConversationPersistence(storage: StorageAdapter) {
+      return renderHook(() => {
+        const conversations = useConversations({ storage });
+        const persistence = useChorusPersistence(conversations.activePersistenceKey, {
+          storage: conversations.activePersistenceKey ? conversations.storage : null,
+        });
+        return { conversations, persistence };
+      });
+    }
+
+    it('drops a message persisted before the conversation index finishes loading', async () => {
+      const pendingRead = deferred<string | null>();
+      const { storage, store } = makeIndexAsyncStorage(pendingRead.promise);
+      const { result } = renderConversationPersistence(storage);
+
+      // Pre-index-load window: no active conversation, so no persistence key.
+      expect(result.current.conversations.loaded).toBe(false);
+      expect(result.current.conversations.activePersistenceKey).toBe('');
+
+      // A user sends a message during the window.
+      const earlyMessage: Message[] = [{ id: 'lost', role: 'user', text: 'sent too early' }];
+      act(() => { result.current.persistence.onChange(earlyMessage); });
+
+      // The index read resolves and an existing conversation becomes active.
+      await act(async () => {
+        pendingRead.resolve(existingIndex);
+        await flushMicrotasks();
+      });
+
+      expect(result.current.conversations.loaded).toBe(true);
+      expect(result.current.conversations.activePersistenceKey).toBe('chorus-conversation:existing');
+
+      // The early message was dropped: it never reached a transcript key and the
+      // now-active conversation loads empty.
+      expect(result.current.persistence.value).toEqual([]);
+      expect(store['chorus-conversation:existing']).toBeUndefined();
+      const wroteEarlyMessage = (storage.setItem as ReturnType<typeof vi.fn>).mock.calls
+        .some(([, value]) => typeof value === 'string' && value.includes('sent too early'));
+      expect(wroteEarlyMessage).toBe(false);
+    });
+
+    it('persists a message sent once the conversation index reports loaded', async () => {
+      // The documented remedy for the window above: gate sending on `loaded`.
+      const pendingRead = deferred<string | null>();
+      const { storage, store } = makeIndexAsyncStorage(pendingRead.promise);
+      const { result } = renderConversationPersistence(storage);
+
+      await act(async () => {
+        pendingRead.resolve(existingIndex);
+        await flushMicrotasks();
+      });
+      expect(result.current.conversations.loaded).toBe(true);
+
+      const message: Message[] = [{ id: 'kept', role: 'user', text: 'sent after load' }];
+      act(() => { result.current.persistence.onChange(message, { flush: true }); });
+
+      expect(result.current.persistence.value).toEqual(message);
+      expect(store['chorus-conversation:existing']).toContain('sent after load');
+    });
   });
 });
