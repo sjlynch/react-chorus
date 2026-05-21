@@ -8,6 +8,7 @@ export interface SessionHelpersDeps<TMeta> {
   appendAssistantReasoningNow: (chunk: string) => void;
   appendToolDeltaNow: (delta: ConnectorToolDelta) => void;
   safeOnStreamWarning: (warning: ConnectorWarning) => void;
+  safeOnStreamMetadata: (metadata: Record<string, unknown>) => void;
   completeActiveSession: (
     sessionId: number,
     finish?: { reason: ChorusFinishContext<TMeta>['reason']; response?: Response; message?: import('../../types').Message<TMeta> },
@@ -42,6 +43,7 @@ export function createSessionHelpers<TMeta>(
     appendAssistantReasoningNow,
     appendToolDeltaNow,
     safeOnStreamWarning,
+    safeOnStreamMetadata,
     completeActiveSession,
     isAssistantSessionActive,
     minAssistantDelayMsRef,
@@ -146,6 +148,7 @@ export function createSessionHelpers<TMeta>(
     onReasoning: appendReasoning,
     onToolDelta: appendToolDelta,
     onWarning: safeOnStreamWarning,
+    onMetadata: safeOnStreamMetadata,
     onDone: finalizeAssistant,
   });
 

@@ -199,6 +199,16 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
    * blocked. A throwing handler is warned in development and otherwise ignored.
    */
   onStreamWarning?: (warning: ConnectorWarning) => void;
+  /**
+   * Called with free-form provider metadata on the `transport` path as connectors emit it —
+   * e.g. OpenAI Responses token `usage`, Anthropic `stopReason`/`stopSequence`, Gemini
+   * `safetyRatings`/`finishReason`, OpenAI Chat `finishReason`. The stream still completes
+   * normally (`onFinish`/`onStreamDone` fire as usual); wire this for usage/cost telemetry or
+   * to persist safety ratings. A throwing handler is warned in development and otherwise
+   * ignored. Fires once per connector result that carries metadata, so a handler may be
+   * called multiple times during a single turn.
+   */
+  onStreamMetadata?: (metadata: Record<string, unknown>) => void;
   /** Called when a completed streamed tool call is ready; return a value to append it as tool output. */
   onToolCall?: ChorusOnToolCall<TMeta>;
   /** Observes every accumulated streamed tool-call delta on the transport path. */
