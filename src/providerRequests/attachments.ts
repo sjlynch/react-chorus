@@ -66,6 +66,20 @@ export function dataUrlFromAttachment(attachment: Attachment) {
   return data ? parseDataUrl(data) : null;
 }
 
+export type ProviderAttachmentSource =
+  | { kind: 'data-url'; mimeType: string; base64: string }
+  | { kind: 'file-uri'; mimeType: string; fileUri: string }
+  | { kind: 'unsupported' };
+
+export function unsupportedAttachmentPart<TMeta, TPart>(
+  attachment: Attachment,
+  message: Message<TMeta>,
+  options: ProviderMappingOptions<TMeta>,
+  createPart: (text: string) => TPart,
+): TPart {
+  return createPart(unsupportedAttachmentText(attachment, message, options));
+}
+
 /**
  * Resolve the effective MIME type for a base64 `data:` URL attachment.
  *
@@ -86,4 +100,32 @@ export function fileUriFromAttachment(attachment: Attachment) {
     if (typeof candidate === 'string' && candidate && !candidate.startsWith('data:')) return candidate;
   }
   return null;
+}
+
+/**
+ * Resolve an attachment for providers that accept a bounded set of inline
+ * data-URL MIME types and may also accept previously uploaded file URIs.
+ * A parseable data URL is authoritative: if its effective MIME type is not in
+ * the provider allow-list, the attachment falls back to text instead of
+ * silently switching to a file URI from another attachment field.
+ */
+export function resolveProviderAttachmentSource(
+  attachment: Attachment,
+  dataUrlMimeTypes: ReadonlySet<string>,
+  options: { allowFileUri?: boolean } = {},
+): ProviderAttachmentSource {
+  const dataUrl = dataUrlFromAttachment(attachment);
+  if (dataUrl) {
+    const mimeType = resolveDataUrlMimeType(attachment, dataUrl);
+    return dataUrlMimeTypes.has(mimeType)
+      ? { kind: 'data-url', mimeType, base64: dataUrl.base64 }
+      : { kind: 'unsupported' };
+  }
+
+  if (options.allowFileUri) {
+    const fileUri = fileUriFromAttachment(attachment);
+    if (fileUri) return { kind: 'file-uri', mimeType: attachment.type || 'application/octet-stream', fileUri };
+  }
+
+  return { kind: 'unsupported' };
 }

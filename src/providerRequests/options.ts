@@ -1,3 +1,4 @@
+import type { Message } from '../types';
 import { toToolDefinitionList } from '../tools';
 import { warnOnceInDev } from './devWarn';
 import type { ProviderToolsOption } from './types/common';
@@ -32,6 +33,14 @@ function isChorusToolsSource(tools: unknown): tools is ProviderToolsOption<unkno
 }
 
 type ToolSerializer<T> = (source: ProviderToolsOption<unknown>) => T[];
+
+export function systemTextFromHistory(history: Message<unknown>[]) {
+  const system = history
+    .filter(message => message.role === 'system' && message.text.trim())
+    .map(message => message.text)
+    .join('\n\n');
+  return system || undefined;
+}
 
 function injectTools<T>(body: Record<string, unknown>, tools: unknown, serialize: ToolSerializer<T>) {
   if (tools === undefined) return;

@@ -1,7 +1,7 @@
 import type { Message, ToolMessage } from '../types';
-import { dataUrlFromAttachment, fileUriFromAttachment, resolveDataUrlMimeType, unsupportedAttachmentText } from './attachments';
+import { resolveProviderAttachmentSource, unsupportedAttachmentPart } from './attachments';
 import { isRecord } from './metadata';
-import { resolveProviderSystem, stripGeminiOptions } from './options';
+import { resolveProviderSystem, stripGeminiOptions, systemTextFromHistory } from './options';
 import { messageText, objectToolInput, safeStringify, toolContextText, toolOutputValue } from './toolOutput';
 import { mapHistoryWithToolRuns } from './toolRunMapper';
 import type { ProviderMappingOptions } from './types/common';
@@ -42,10 +42,7 @@ const GEMINI_INLINE_DATA_MIME_TYPES = new Set([
 ]);
 
 function geminiSystemInstruction(history: Message<unknown>[]) {
-  const system = history
-    .filter(message => message.role === 'system' && message.text.trim())
-    .map(message => message.text)
-    .join('\n\n');
+  const system = systemTextFromHistory(history);
   return system ? { parts: [{ text: system }] } : undefined;
 }
 
@@ -56,24 +53,14 @@ function geminiParts<TMeta>(message: Message<TMeta>, options: ProviderMappingOpt
 
   if (message.role === 'user') {
     for (const attachment of message.attachments ?? []) {
-      const dataUrl = dataUrlFromAttachment(attachment);
-      if (dataUrl) {
-        const mimeType = resolveDataUrlMimeType(attachment, dataUrl);
-        if (GEMINI_INLINE_DATA_MIME_TYPES.has(mimeType)) {
-          parts.push({ inlineData: { mimeType, data: dataUrl.base64 } });
-        } else {
-          parts.push({ text: unsupportedAttachmentText(attachment, message, options) });
-        }
-        continue;
+      const source = resolveProviderAttachmentSource(attachment, GEMINI_INLINE_DATA_MIME_TYPES, { allowFileUri: true });
+      if (source.kind === 'data-url') {
+        parts.push({ inlineData: { mimeType: source.mimeType, data: source.base64 } });
+      } else if (source.kind === 'file-uri') {
+        parts.push({ fileData: { mimeType: source.mimeType, fileUri: source.fileUri } });
+      } else {
+        parts.push(unsupportedAttachmentPart(attachment, message, options, text => ({ text })));
       }
-
-      const fileUri = fileUriFromAttachment(attachment);
-      if (fileUri) {
-        parts.push({ fileData: { mimeType: attachment.type || 'application/octet-stream', fileUri } });
-        continue;
-      }
-
-      parts.push({ text: unsupportedAttachmentText(attachment, message, options) });
     }
   }
 

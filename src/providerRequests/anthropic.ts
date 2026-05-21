@@ -1,7 +1,7 @@
 import type { Attachment, Message } from '../types';
-import { dataUrlFromAttachment, resolveDataUrlMimeType, unsupportedAttachmentText } from './attachments';
+import { resolveProviderAttachmentSource, unsupportedAttachmentPart } from './attachments';
 import { metadataBoolean, metadataString } from './metadata';
-import { resolveProviderSystem, stripAnthropicOptions } from './options';
+import { resolveProviderSystem, stripAnthropicOptions, systemTextFromHistory } from './options';
 import { messageText, objectToolInput, toolContextText, toolOutputText } from './toolOutput';
 import { mapHistoryWithToolRuns } from './toolRunMapper';
 import type { ProviderMappingOptions } from './types/common';
@@ -61,14 +61,6 @@ function appendAnthropicToolUseBlocks(target: AnthropicMessage[], blocks: Anthro
   target.push({ role: 'assistant', content: blocks });
 }
 
-function anthropicSystem(history: Message<unknown>[]) {
-  const system = history
-    .filter(message => message.role === 'system' && message.text.trim())
-    .map(message => message.text)
-    .join('\n\n');
-  return system || undefined;
-}
-
 // The Anthropic Messages API accepts image blocks only for this MIME set. Any
 // other `image/*` attachment (svg, bmp, tiff, heic, …) must fall through to an
 // unsupported-attachment text block rather than a 400-producing image block.
@@ -78,21 +70,26 @@ const ANTHROPIC_IMAGE_MIME_TYPES = new Set([
   'image/gif',
   'image/webp',
 ]);
+const ANTHROPIC_DOCUMENT_MIME_TYPES = new Set(['application/pdf']);
+const ANTHROPIC_DATA_URL_MIME_TYPES = new Set([
+  ...ANTHROPIC_IMAGE_MIME_TYPES,
+  ...ANTHROPIC_DOCUMENT_MIME_TYPES,
+]);
 
 function anthropicAttachmentBlock(attachment: Attachment): AnthropicImageBlock | AnthropicDocumentBlock | null {
-  const dataUrl = dataUrlFromAttachment(attachment);
-  if (!dataUrl) return null;
-  const mimeType = resolveDataUrlMimeType(attachment, dataUrl);
-  if (ANTHROPIC_IMAGE_MIME_TYPES.has(mimeType)) {
+  const source = resolveProviderAttachmentSource(attachment, ANTHROPIC_DATA_URL_MIME_TYPES);
+  if (source.kind !== 'data-url') return null;
+
+  if (ANTHROPIC_IMAGE_MIME_TYPES.has(source.mimeType)) {
     return {
       type: 'image',
-      source: { type: 'base64', media_type: mimeType, data: dataUrl.base64 },
+      source: { type: 'base64', media_type: source.mimeType, data: source.base64 },
     };
   }
-  if (mimeType === 'application/pdf') {
+  if (ANTHROPIC_DOCUMENT_MIME_TYPES.has(source.mimeType)) {
     return {
       type: 'document',
-      source: { type: 'base64', media_type: 'application/pdf', data: dataUrl.base64 },
+      source: { type: 'base64', media_type: source.mimeType, data: source.base64 },
     };
   }
   return null;
@@ -112,7 +109,7 @@ function anthropicContentBlocks<TMeta>(
       if (block) {
         blocks.push(block);
       } else {
-        blocks.push({ type: 'text', text: unsupportedAttachmentText(attachment, message, options) });
+        blocks.push(unsupportedAttachmentPart(attachment, message, options, text => ({ type: 'text', text })));
       }
     }
   }
@@ -189,7 +186,7 @@ export function toAnthropicMessagesBody<
     'Anthropic',
     'system',
     callerSystem,
-    anthropicSystem(history as Message<unknown>[]),
+    systemTextFromHistory(history as Message<unknown>[]),
   );
   const body = {
     ...bodyOptions,
