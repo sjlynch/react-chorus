@@ -23,6 +23,19 @@ export class ChorusStreamError extends Error {
   }
 }
 
+/**
+ * Slice `text` to at most `maxChars` UTF-16 code units without leaving a lone
+ * surrogate at the boundary. If the last kept unit is a high surrogate, its
+ * low surrogate sits just past the cut, so drop the high surrogate too — that
+ * keeps the diagnostic snippet free of invalid characters.
+ */
+function sliceOnCodePointBoundary(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  const lastUnit = text.charCodeAt(maxChars - 1);
+  const isHighSurrogate = lastUnit >= 0xd800 && lastUnit <= 0xdbff;
+  return text.slice(0, isHighSurrogate ? maxChars - 1 : maxChars);
+}
+
 export async function readErrorBodySnippet(
   res: Response,
   maxChars = MAX_ERROR_BODY_CHARS,
@@ -55,15 +68,11 @@ export async function readErrorBodySnippet(
   try {
     while (text.length < maxChars) {
       const { value, done } = await readWithTimeout();
-      if (done) {
-        text += decoder.decode();
-        return { text, truncated, timedOut };
-      }
+      if (done) break;
 
       text += decoder.decode(value, { stream: true });
       if (text.length >= maxChars) {
         truncated = true;
-        text = text.slice(0, maxChars);
         break;
       }
     }
@@ -74,7 +83,11 @@ export async function readErrorBodySnippet(
     if (timeout !== null) clearTimeout(timeout);
   }
 
-  return { text, truncated, timedOut };
+  // Flush any bytes the streaming decoder buffered at the final chunk boundary
+  // — the loop can `break` mid-sequence on truncation, so this is not reached
+  // only on the `done` path — then bound the snippet on a code-point boundary.
+  text += decoder.decode();
+  return { text: sliceOnCodePointBoundary(text, maxChars), truncated, timedOut };
 }
 
 export async function createHttpResponseError(res: Response) {
