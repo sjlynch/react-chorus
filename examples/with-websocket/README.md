@@ -39,7 +39,7 @@ npm start
 
 The server logs `Mock Anthropic WebSocket backend listening on ws://localhost:8787`.
 Override the port with `PORT=9000 npm start`; if you do, update `WS_URL` in
-[`../src/App.tsx`](./src/App.tsx) to match.
+[`src/App.tsx`](./src/App.tsx) to match.
 
 ### 3. Terminal 2 — Vite frontend
 
