@@ -11,7 +11,7 @@ section of the root README.
 
 ## Prerequisites
 
-- Node.js 20+
+- Node.js 20.19+ or 22.12+ (required by the example's `vite: ^8` toolchain)
 - No API keys — the reply is generated locally by the mock transport in `src/App.tsx`.
 
 ## Run from a fresh clone

@@ -41,7 +41,7 @@ react-chorus is for React developers who want a drop-in AI chat UI that stays co
 
 ## Install
 
-react-chorus requires Node.js 20 or newer for package installation and server-side usage. Contributors running the Vite-powered dev/build tooling should use Node 20.19+ or Node 22.12+.
+react-chorus requires Node.js 20.19+ or 22.12+ for package installation, server-side usage, and the Vite-powered dev/build tooling. Installing on an older Node 20 release (20.0–20.18) emits an `npm WARN EBADENGINE` warning.
 
 ```bash
 npm install react-chorus
@@ -841,7 +841,7 @@ With either route the client just needs `<Chorus transport="/api/chat" connector
 
 ## Examples
 
-Runnable examples live in the [`/examples`](./examples) directory. They declare the same Node.js 20+ floor as the root package and consume the local build after `npm run build`. `npm run verify:examples` recursively checks example `package.json` metadata (including nested packages such as `examples/with-openai/server`), build-smokes every example with a `build` script (including the Next.js App Router example), and, for start-only example packages (such as the Express proxy server), syntax-checks the entry file and import-resolves any `react-chorus` subpath exports it uses so a breaking change to `react-chorus/server` or `react-chorus/provider-requests` fails CI. Each example that ships a committed `package-lock.json` is installed with `npm ci`, so a registry-side dependency release cannot silently change what CI builds.
+Runnable examples live in the [`/examples`](./examples) directory. They declare a Node.js 20.19+ or 22.12+ floor — matching what their `vite: ^8` toolchain requires — and consume the local build after `npm run build`. `npm run verify:examples` recursively checks example `package.json` metadata (including nested packages such as `examples/with-openai/server`), build-smokes every example with a `build` script (including the Next.js App Router example), and, for start-only example packages (such as the Express proxy server), syntax-checks the entry file and import-resolves any `react-chorus` subpath exports it uses so a breaking change to `react-chorus/server` or `react-chorus/provider-requests` fails CI. Each example that ships a committed `package-lock.json` is installed with `npm ci`, so a registry-side dependency release cannot silently change what CI builds.
 
 | Example | Description |
 |---------|-------------|
@@ -2573,7 +2573,7 @@ The provider connector singletons (`openaiConnector`, `anthropicConnector`, `gem
 
 ## Development and release
 
-Use Node.js 20 or newer (Node 20.19+ or 22.12+ recommended for the Vite toolchain), then install dependencies with `npm ci`.
+Use Node.js 20.19+ or 22.12+ (the floor the root `package.json` `engines.node` and the Vite toolchain both require), then install dependencies with `npm ci`.
 
 Release/CI quality gates:
 

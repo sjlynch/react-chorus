@@ -42,7 +42,7 @@ function reactExample({ major, name = `react-${major}-example` } = {}) {
   const range = `^${major}.0.0`;
   return {
     name,
-    engines: { node: '>=20' },
+    engines: { node: '>=20.19.0' },
     scripts: { build: 'vite build' },
     dependencies: { react: range, 'react-dom': range },
     devDependencies: { '@types/react': range, '@types/react-dom': range },
@@ -58,7 +58,7 @@ describe('example metadata verification', () => {
     const cwd = await makeTempRepo();
     await writePackage(cwd, 'examples/basic', {
       name: 'basic',
-      engines: { node: '>=20' },
+      engines: { node: '>=20.19.0' },
       scripts: { build: 'vite build' },
     });
     await writePackage(cwd, 'examples/with-openai/server', {
@@ -69,7 +69,7 @@ describe('example metadata verification', () => {
     await expect(
       findExampleMetadataProblems({ cwd, checkReactCompat: false }),
     ).resolves.toEqual([
-      'examples/with-openai/server/package.json must declare engines.node ">=20".',
+      'examples/with-openai/server/package.json must declare engines.node ">=20.19.0".',
     ]);
   });
 
@@ -77,12 +77,12 @@ describe('example metadata verification', () => {
     const cwd = await makeTempRepo();
     await writePackage(cwd, 'examples/basic', {
       name: 'basic',
-      engines: { node: '>=20' },
+      engines: { node: '>=20.19.0' },
       scripts: { build: 'vite build' },
     });
     await writePackage(cwd, 'examples/with-openai/server', {
       name: 'server',
-      engines: { node: '>=20' },
+      engines: { node: '>=20.19.0' },
       scripts: { start: 'node index.js' },
     });
 
@@ -94,12 +94,12 @@ describe('example metadata verification', () => {
     const cwd = await makeTempRepo();
     await writePackage(cwd, 'examples/basic', {
       name: 'basic',
-      engines: { node: '>=20' },
+      engines: { node: '>=20.19.0' },
       scripts: { build: 'vite build' },
     });
     await writePackage(cwd, 'examples/with-openai/server', {
       name: 'server',
-      engines: { node: '>=20' },
+      engines: { node: '>=20.19.0' },
       scripts: { start: 'node index.js' },
     });
 
@@ -136,7 +136,7 @@ describe('runStartOnlyExampleChecks', () => {
     await writePackage(cwd, relativeDir, {
       name: relativeDir.replace(/\W+/g, '-'),
       type: 'module',
-      engines: { node: '>=20' },
+      engines: { node: '>=20.19.0' },
       scripts: { start: `node ${entry}` },
     });
     await fs.writeFile(path.join(cwd, relativeDir, entry), entrySource);
@@ -173,7 +173,7 @@ describe('runStartOnlyExampleChecks', () => {
     const cwd = await makeTempRepo();
     await writePackage(cwd, 'examples/basic', {
       name: 'basic',
-      engines: { node: '>=20' },
+      engines: { node: '>=20.19.0' },
       scripts: { build: 'vite build' },
     });
     await expect(runStartOnlyExampleChecks({ cwd, logger: silentLogger })).resolves.toEqual([]);
@@ -208,7 +208,7 @@ describe('React peer compatibility checks', () => {
   it('flags an example whose @types/react major differs from its react runtime major', () => {
     const drifted = {
       name: 'drifted',
-      engines: { node: '>=20' },
+      engines: { node: '>=20.19.0' },
       scripts: { build: 'vite build' },
       dependencies: { react: '^18.3.1', 'react-dom': '^18.3.1' },
       devDependencies: { '@types/react': '^19.0.0', '@types/react-dom': '^19.0.0' },
@@ -226,7 +226,7 @@ describe('React peer compatibility checks', () => {
   it('flags missing React-family deps when react is declared', () => {
     const partial = {
       name: 'partial',
-      engines: { node: '>=20' },
+      engines: { node: '>=20.19.0' },
       dependencies: { react: '^19.0.0' },
     };
     const records = [record('examples/partial/package.json', partial)];
@@ -261,7 +261,7 @@ describe('React peer compatibility checks', () => {
         'examples/b/package.json',
         {
           name: 'b',
-          engines: { node: '>=20' },
+          engines: { node: '>=20.19.0' },
           scripts: { build: 'vite build' },
           dependencies: { react: '^19.1.0', 'react-dom': '^19.1.0' },
           devDependencies: { '@types/react': '^19.1.0', '@types/react-dom': '^19.1.0' },
@@ -278,7 +278,7 @@ describe('React peer compatibility checks', () => {
   it('ignores example packages that do not declare react', () => {
     const serverOnly = {
       name: 'server-only',
-      engines: { node: '>=20' },
+      engines: { node: '>=20.19.0' },
       scripts: { start: 'node index.js' },
       dependencies: { express: '^4.0.0' },
     };
