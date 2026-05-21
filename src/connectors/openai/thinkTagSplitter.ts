@@ -1,3 +1,4 @@
+import { appendField } from '../resultHelpers';
 import type { ConnectorResult } from '../types';
 
 const DEFAULT_START = '<think>';
@@ -74,11 +75,6 @@ export function compileThinkTags(options: ThinkTagSplitterOptions = {}): Compile
 
 function isCompiledThinkTags(value: ThinkTagSplitterOptions | CompiledThinkTags): value is CompiledThinkTags {
   return 'startTag' in value && 'endTag' in value;
-}
-
-function appendField(target: Pick<ConnectorResult, 'text' | 'reasoning'>, key: 'text' | 'reasoning', value: string) {
-  if (!value) return;
-  target[key] = `${target[key] ?? ''}${value}`;
 }
 
 function trailingPartialTagLength(value: string, tag: string, caseInsensitive: boolean) {

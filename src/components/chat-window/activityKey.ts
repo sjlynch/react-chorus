@@ -1,5 +1,8 @@
 import type { Message } from '../../types';
 
+const FNV_1A_OFFSET_BASIS = 0x811c9dc5;
+const FNV_1A_PRIME = 0x01000193;
+
 const objectActivityIds = new WeakMap<object, number>();
 let nextObjectActivityId = 1;
 
@@ -14,11 +17,11 @@ function objectActivityKey(value: object) {
 }
 
 function codePointHash(value: string) {
-  let hash = 0x811c9dc5;
+  let hash = FNV_1A_OFFSET_BASIS;
 
   for (const char of value) {
     hash ^= char.codePointAt(0) ?? 0;
-    hash = Math.imul(hash, 0x01000193) >>> 0;
+    hash = Math.imul(hash, FNV_1A_PRIME) >>> 0;
   }
 
   return hash.toString(36);
