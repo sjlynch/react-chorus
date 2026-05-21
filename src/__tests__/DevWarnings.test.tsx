@@ -168,6 +168,53 @@ describe('development warnings', () => {
     ));
   });
 
+  it('warns when tools is provided for an onSend-only flow', async () => {
+    process.env.NODE_ENV = 'development';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    render(<Chorus tools={{ search: () => 'ok' }} onSend={vi.fn()} />);
+
+    await waitFor(() => expect(warn).toHaveBeenCalledWith(
+      '[Chorus] `tools` only runs on the `transport` send path. With `onSend` you execute tools yourself — registered tool handlers never run and tool callbacks never fire. Run tools inside your `onSend` client, or pass `transport`.',
+    ));
+  });
+
+  it('warns once listing every tool-execution prop passed on the onSend path', async () => {
+    process.env.NODE_ENV = 'development';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    render(
+      <Chorus
+        onSend={vi.fn()}
+        tools={{ search: () => 'ok' }}
+        onToolCall={vi.fn()}
+        onToolDelta={vi.fn()}
+        continueOnToolError
+      />,
+    );
+
+    await waitFor(() => expect(warn).toHaveBeenCalledWith(
+      '[Chorus] `tools`/`onToolCall`/`onToolDelta`/`continueOnToolError` only run on the `transport` send path. With `onSend` you execute tools yourself — registered tool handlers never run and tool callbacks never fire. Run tools inside your `onSend` client, or pass `transport`.',
+    ));
+  });
+
+  it('does not warn about tool-execution props when transport is set', async () => {
+    process.env.NODE_ENV = 'development';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    render(
+      <Chorus
+        transport={async () => new Response(null, { status: 200 })}
+        tools={{ search: () => 'ok' }}
+        onToolCall={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(warn).not.toHaveBeenCalledWith(
+      expect.stringMatching(/only runs? on the `transport` send path/),
+    ));
+  });
+
   it('warns when an unknown connector string falls back to auto', async () => {
     process.env.NODE_ENV = 'development';
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);

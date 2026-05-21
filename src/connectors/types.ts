@@ -40,8 +40,10 @@ export interface ConnectorResult {
   warning?: ConnectorWarning;
   /**
    * Free-form provider metadata surfaced alongside text/reasoning (e.g. Anthropic `stop_reason`,
-   * Gemini `safetyRatings`, OpenAI `response.id`). Consumers may persist or log this; the
-   * pipeline itself only forwards it to callbacks.
+   * Gemini `safetyRatings`, OpenAI `usage`/`response.id`). The pipeline forwards it to the
+   * `onMetadata` send callback (surfaced on `<Chorus>` as the `onStreamMetadata` prop and on
+   * the `onSend` bridge via `helpers.streamCallbacks()`); it never affects rendering or
+   * terminates the stream. Consumers wire it to persist or log usage/cost telemetry.
    */
   metadata?: Record<string, unknown>;
 }

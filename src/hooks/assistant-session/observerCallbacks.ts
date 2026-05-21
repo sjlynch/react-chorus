@@ -21,6 +21,7 @@ export interface ObserverCallbackRefs<TMeta> {
   onAbortRef: React.MutableRefObject<ChorusOnAbort<TMeta> | undefined>;
   onStreamDoneRef: React.MutableRefObject<ChorusOnStreamDone<TMeta> | undefined>;
   onStreamWarningRef: React.MutableRefObject<((warning: ConnectorWarning) => void) | undefined>;
+  onStreamMetadataRef: React.MutableRefObject<((metadata: Record<string, unknown>) => void) | undefined>;
   onToolDeltaRef: React.MutableRefObject<ChorusOnToolDelta<TMeta> | undefined>;
   onToolCallRef: React.MutableRefObject<ChorusOnToolCall<TMeta> | undefined>;
 }
@@ -32,6 +33,7 @@ export interface ObserverCallbacks<TMeta> {
   safeOnAbort: (context: ChorusAbortContext<TMeta>) => void;
   safeOnStreamDone: (context: ChorusStreamDoneContext<TMeta>) => void;
   safeOnStreamWarning: (warning: ConnectorWarning) => void;
+  safeOnStreamMetadata: (metadata: Record<string, unknown>) => void;
   safeOnToolDelta: (context: ChorusToolDeltaContext<TMeta>) => void;
   safeNotifyToolCall: (context: ChorusToolCallContext<TMeta>) => Promise<void>;
 }
@@ -42,7 +44,7 @@ export interface ObserverCallbacks<TMeta> {
  * the factory can be invoked once per `useAssistantSession` instance.
  */
 export function createObserverCallbacks<TMeta>(refs: ObserverCallbackRefs<TMeta>): ObserverCallbacks<TMeta> {
-  const { onChunkRef, onErrorRef, onFinishRef, onAbortRef, onStreamDoneRef, onStreamWarningRef, onToolDeltaRef, onToolCallRef } = refs;
+  const { onChunkRef, onErrorRef, onFinishRef, onAbortRef, onStreamDoneRef, onStreamWarningRef, onStreamMetadataRef, onToolDeltaRef, onToolCallRef } = refs;
 
   return {
     safeOnChunk: (chunk, messageId) => {
@@ -68,6 +70,10 @@ export function createObserverCallbacks<TMeta>(refs: ObserverCallbackRefs<TMeta>
     safeOnStreamWarning: (warning) => {
       try { onStreamWarningRef.current?.(warning); }
       catch (error) { warnObserverError('onStreamWarning', error); }
+    },
+    safeOnStreamMetadata: (metadata) => {
+      try { onStreamMetadataRef.current?.(metadata); }
+      catch (error) { warnObserverError('onStreamMetadata', error); }
     },
     safeOnToolDelta: (context) => {
       try { onToolDeltaRef.current?.(context); }
