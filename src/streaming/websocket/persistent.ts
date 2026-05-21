@@ -3,18 +3,7 @@ import type { FormatMessageResult, WebSocketTransport, WebSocketTransportOptions
 import { createOpenWaiterManager } from './openWaiters';
 import { createPersistentStreamRouter } from './persistentStreamRouter';
 import { createAbnormalCloseError, createAbortError, createClosedBeforeOpenError, createTransportClosedError, isNormalCloseCode, normalizeFormatMessageResult, safeCloseSocket, toError, webSocketMessageToText } from './shared';
-
-// Local duplicate of `isChorusDevMode` from `src/utils/devMode.ts`. Importing
-// the shared helper here would bundle the transport-only subpath with the
-// session/utils chunk and blow its tight size budget (the README documents this
-// subpath at a few kB). Same trade-off the CLAUDE.md notes for ChatWindow.
-function isPersistentWebSocketDevMode(): boolean {
-  try {
-    return typeof process !== 'undefined' && typeof process.env !== 'undefined' && process.env.NODE_ENV !== 'production';
-  } catch {
-    return false;
-  }
-}
+import { isStreamDevMode } from '../internal/devMode';
 
 const webSocketTransportFinalizer = typeof FinalizationRegistry === 'undefined'
   ? null
@@ -29,7 +18,7 @@ export function createPersistentWebSocketTransport<TMeta = Record<string, unknow
   const streamRouter = createPersistentStreamRouter({
     hasCorrelate: () => Boolean(opts?.correlate),
     correlateFrame: (frame) => opts?.correlate?.(frame),
-    isDevMode: isPersistentWebSocketDevMode,
+    isDevMode: isStreamDevMode,
   });
   let socket: WebSocket | null = null;
   let socketState: 'idle' | 'connecting' | 'open' | 'closed' = 'idle';
@@ -105,7 +94,7 @@ export function createPersistentWebSocketTransport<TMeta = Record<string, unknow
           // (dev only) and drop just this frame so the socket and all other
           // streams stay alive; `handleSocketFailure` is reserved for actual
           // socket-level errors.
-          if (isPersistentWebSocketDevMode()) {
+          if (isStreamDevMode()) {
             console.warn(
               '[react-chorus] createWebSocketTransport: dropped a WebSocket frame that could not be decoded to text on the persistent socket. The socket and other in-flight streams are unaffected.',
               toError(error),
