@@ -1,6 +1,7 @@
-import React from 'react';
+import type React from 'react';
 import type { AttachmentSource } from '../../types';
 import { filesFromTransfer, transferHasFiles } from './attachmentUtils';
+import { useChatSurfaceFileDrop } from './useChatSurfaceFileDrop';
 
 type HandleFiles = (files: FileList | File[] | null, source: AttachmentSource) => void | Promise<void>;
 
@@ -118,65 +119,15 @@ export function useFileIngestionHandlers({
     if (!e.defaultPrevented) handleDrop(e);
   };
 
-  // Drag-and-drop is wired to the ChatInput root via the React handlers above,
-  // but users naturally drag files onto the transcript too. Listen on the
-  // surrounding chat surface (the `.chorus` widget root, when present) so a drop
-  // anywhere in the widget is ingested — and, critically, preventDefault()'d so
-  // the browser never navigates away to the dropped file's URL. Composer-rooted
-  // events are skipped here because the React handlers already cover them.
-  React.useEffect(() => {
-    const root = rootRef.current;
-    if (!root) return;
-    const surface = root.closest<HTMLElement>('.chorus');
-    if (!surface || surface === root || !surface.contains(root)) return;
-
-    // Claim a file drag that lands on the surface outside the composer (the
-    // transcript): preventDefault() it so the browser never navigates to the
-    // file, and hand back its DataTransfer. Composer-rooted drags are left to
-    // the React handlers above. Returns null when the event is not ours.
-    const claimSurfaceDrag = (e: DragEvent): DataTransfer | null => {
-      const transfer = e.dataTransfer;
-      if (!transfer || !transferHasFiles(transfer)) return null;
-      if (e.target instanceof Node && root.contains(e.target)) return null;
-      e.preventDefault();
-      return transfer;
-    };
-
-    const onSurfaceDragEnter = (e: DragEvent) => {
-      if (claimSurfaceDrag(e) && canIngestFiles) markDragEnter();
-    };
-
-    const onSurfaceDragOver = (e: DragEvent) => {
-      const transfer = claimSurfaceDrag(e);
-      if (transfer && canIngestFiles) {
-        transfer.dropEffect = 'copy';
-        markDragOver();
-      }
-    };
-
-    const onSurfaceDragLeave = (e: DragEvent) => {
-      if (claimSurfaceDrag(e) && canIngestFiles) markDragLeave();
-    };
-
-    const onSurfaceDrop = (e: DragEvent) => {
-      const transfer = claimSurfaceDrag(e);
-      if (!transfer) return;
-      clearDragState();
-      if (canIngestFiles) void handleFiles(filesFromTransfer(transfer), 'drop');
-    };
-
-    surface.addEventListener('dragenter', onSurfaceDragEnter);
-    surface.addEventListener('dragover', onSurfaceDragOver);
-    surface.addEventListener('dragleave', onSurfaceDragLeave);
-    surface.addEventListener('drop', onSurfaceDrop);
-
-    return () => {
-      surface.removeEventListener('dragenter', onSurfaceDragEnter);
-      surface.removeEventListener('dragover', onSurfaceDragOver);
-      surface.removeEventListener('dragleave', onSurfaceDragLeave);
-      surface.removeEventListener('drop', onSurfaceDrop);
-    };
-  }, [rootRef, canIngestFiles, handleFiles, clearDragState, markDragEnter, markDragLeave, markDragOver]);
+  useChatSurfaceFileDrop({
+    rootRef,
+    canIngestFiles,
+    handleFiles,
+    clearDragState,
+    markDragEnter,
+    markDragLeave,
+    markDragOver,
+  });
 
   return {
     onFileInputChange,
