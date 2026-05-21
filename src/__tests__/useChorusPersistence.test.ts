@@ -768,6 +768,54 @@ describe('useChorusPersistence', () => {
       expect(result.current.value).toEqual([toolMessage]);
     });
 
+    it('loads an empty transcript and warns in dev for a non-array stored object', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const storage = makeSyncStorage(JSON.stringify({ messages: MSGS }));
+        const { result } = renderHook(() => useChorusPersistence('key', { storage }));
+
+        expect(result.current.value).toEqual([]);
+        expect(result.current.error).toBeNull();
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringContaining('Expected an array of persisted messages, got object'),
+        );
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('stays silent for a stored JSON null payload', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const storage = makeSyncStorage(JSON.stringify(null));
+        const { result } = renderHook(() => useChorusPersistence('key', { storage }));
+
+        expect(result.current.value).toEqual([]);
+        expect(result.current.error).toBeNull();
+        expect(warn).not.toHaveBeenCalled();
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('warns in dev when a custom deserializer returns a non-array value', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const storage = makeSyncStorage('custom:read');
+        const deserializeMessages = vi.fn(() => ({ messages: MSGS }) as unknown as Message[]);
+        const { result } = renderHook(() =>
+          useChorusPersistence('key', { storage, deserializeMessages }));
+
+        expect(result.current.value).toEqual([]);
+        expect(result.current.error).toBeNull();
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringContaining('Expected an array of persisted messages, got object'),
+        );
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
     it('returns an empty array (not a deserialize error) for a corrupted payload', async () => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
       try {
