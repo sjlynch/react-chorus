@@ -1,7 +1,8 @@
-import type { Message } from '../../types';
-import { isOpenAIImageAttachment, openAIImageUrlFromAttachment, unsupportedAttachmentText } from '../attachments';
+import type { Attachment, Message } from '../../types';
+import { isOpenAIImageAttachment, openAIImageUrlFromAttachment } from '../attachments';
+import { messageContentParts, messageTextParts } from '../contentParts';
 import { stripOpenAIResponsesOptions } from '../options';
-import { messageText, toolContextText, toolOutputText } from '../toolOutput';
+import { toolContextText, toolOutputText } from '../toolOutput';
 import { mapHistoryWithToolRuns } from '../toolRunMapper';
 import type { ProviderMappingOptions } from '../types/common';
 import type {
@@ -42,42 +43,27 @@ function openAIResponsesFilePart(attachment: { id?: string; url?: string }): Ope
   return null;
 }
 
+function openAIResponsesAttachmentPart(attachment: Attachment): OpenAIResponsesInputContentPart | null {
+  if (isOpenAIImageAttachment(attachment)) {
+    const imageUrl = openAIImageUrlFromAttachment(attachment);
+    return imageUrl ? { type: 'input_image', image_url: imageUrl } : null;
+  }
+
+  return openAIResponsesFilePart(attachment);
+}
+
 function openAIResponsesInputContent<TMeta>(
   message: Message<TMeta>,
   options: ProviderMappingOptions<TMeta>,
 ): OpenAIResponsesInputContentPart[] {
-  const parts: OpenAIResponsesInputContentPart[] = [];
-  const text = messageText(message);
-  if (text.trim()) parts.push({ type: 'input_text', text });
-
-  if (message.role === 'user') {
-    for (const attachment of message.attachments ?? []) {
-      if (isOpenAIImageAttachment(attachment)) {
-        const imageUrl = openAIImageUrlFromAttachment(attachment);
-        if (imageUrl) {
-          parts.push({ type: 'input_image', image_url: imageUrl });
-          continue;
-        }
-      } else {
-        const filePart = openAIResponsesFilePart(attachment);
-        if (filePart) {
-          parts.push(filePart);
-          continue;
-        }
-      }
-
-      parts.push({ type: 'input_text', text: unsupportedAttachmentText(attachment, message, options) });
-    }
-  }
-
-  return parts;
+  return messageContentParts<TMeta, OpenAIResponsesInputContentPart>(message, options, {
+    createTextPart: text => ({ type: 'input_text', text }),
+    mapAttachment: openAIResponsesAttachmentPart,
+  });
 }
 
 function openAIResponsesOutputContent<TMeta>(message: Message<TMeta>): OpenAIResponsesOutputTextPart[] {
-  const parts: OpenAIResponsesOutputTextPart[] = [];
-  const text = messageText(message);
-  if (text.trim()) parts.push({ type: 'output_text', text });
-  return parts;
+  return messageTextParts(message, text => ({ type: 'output_text', text }));
 }
 
 function toOpenAIResponsesInputItem<TMeta>(

@@ -1,8 +1,9 @@
-import type { Message } from '../../types';
-import { isOpenAIImageAttachment, openAIImageUrlFromAttachment, unsupportedAttachmentText } from '../attachments';
+import type { Attachment, Message } from '../../types';
+import { isOpenAIImageAttachment, openAIImageUrlFromAttachment } from '../attachments';
+import { messageContentParts } from '../contentParts';
 import { hasOwn, isRecord, metadataArray, nonEmptyString } from '../metadata';
 import { stripOpenAIChatOptions } from '../options';
-import { messageText, toolContextText, toolOutputText } from '../toolOutput';
+import { toolContextText, toolOutputText } from '../toolOutput';
 import { mapHistoryWithToolRuns } from '../toolRunMapper';
 import type { ProviderMappingOptions } from '../types/common';
 import type {
@@ -74,22 +75,19 @@ function appendOpenAIChatToolCalls(target: OpenAIChatCompletionsMessage[], toolC
   target.push({ role: 'assistant', content: null, tool_calls: dedupedToolCalls });
 }
 
+function openAIChatAttachmentPart(attachment: Attachment): OpenAIChatCompletionsUserContentPart | null {
+  const imageUrl = isOpenAIImageAttachment(attachment) ? openAIImageUrlFromAttachment(attachment) : null;
+  return imageUrl ? { type: 'image_url', image_url: { url: imageUrl } } : null;
+}
+
 function openAIChatUserContent<TMeta>(
   message: Message<TMeta>,
   options: ProviderMappingOptions<TMeta>,
 ): string | OpenAIChatCompletionsUserContentPart[] | null {
-  const parts: OpenAIChatCompletionsUserContentPart[] = [];
-  const text = messageText(message);
-  if (text.trim()) parts.push({ type: 'text', text });
-
-  for (const attachment of message.attachments ?? []) {
-    const imageUrl = isOpenAIImageAttachment(attachment) ? openAIImageUrlFromAttachment(attachment) : null;
-    if (imageUrl) {
-      parts.push({ type: 'image_url', image_url: { url: imageUrl } });
-    } else {
-      parts.push({ type: 'text', text: unsupportedAttachmentText(attachment, message, options) });
-    }
-  }
+  const parts = messageContentParts<TMeta, OpenAIChatCompletionsUserContentPart>(message, options, {
+    createTextPart: text => ({ type: 'text', text }),
+    mapAttachment: openAIChatAttachmentPart,
+  });
 
   if (!parts.length) return null;
   const single = parts[0];
