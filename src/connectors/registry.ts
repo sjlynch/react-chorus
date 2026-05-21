@@ -30,12 +30,16 @@ function warnIgnoredConnectorOptions(connector: Connector | ConnectorName | unde
   const key = typeof connector === 'string' ? connector : connector ? `object:${connector.name}` : 'auto';
   if (warnedIgnoredOptionsConnectors.has(key)) return;
   warnedIgnoredOptionsConnectors.add(key);
-  const target = typeof connector === 'string'
-    ? `the \`${connector}\` connector`
+  // Word the built-in and custom cases differently: a built-in connector other
+  // than `openai` genuinely does not consume options, whereas a custom
+  // connector object is not the limiting factor — the library simply has no
+  // mechanism to forward connector options to a custom connector.
+  const reason = typeof connector === 'string'
+    ? `the \`${connector}\` connector does not accept them`
     : connector
-      ? 'a custom connector object'
-      : 'the default `auto` connector';
-  console.warn(`[Chorus] getConnector() received connector options, but ${target} does not accept them. Connector options currently only apply to \`getConnector('openai', ...)\` (or \`connector="openai"\` with \`connectorOptions\`).`);
+      ? 'Chorus has no mechanism to forward connector options to a custom connector object'
+      : 'the default `auto` connector does not accept them';
+  console.warn(`[Chorus] getConnector() received connector options, but ${reason}. Connector options currently only apply to \`getConnector('openai', ...)\` (or \`connector="openai"\` with \`connectorOptions\`).`);
 }
 
 /**

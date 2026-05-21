@@ -36,8 +36,20 @@ export interface ConnectorResult {
   error?: string;
   /** Original provider payload that produced an in-band connector error, when available. */
   errorPayload?: unknown;
-  /** Non-fatal connector warning (truncation, safety, refusal-coming, telemetry). Stream continues. */
+  /**
+   * Non-fatal connector warning (truncation, safety, refusal-coming, telemetry). Stream continues.
+   * Kept as the legacy single slot — when a chunk carries several warnings it mirrors the first
+   * entry of `warnings` for back-compat with consumers reading this field directly.
+   */
   warning?: ConnectorWarning;
+  /**
+   * All non-fatal connector warnings produced by a single chunk. A chunk can legitimately carry
+   * more than one independent diagnostic — e.g. an unsupported Gemini `inlineData` part *and*
+   * `finishReason: MAX_TOKENS` truncation — and the single `warning` slot would silently drop
+   * all but the first. Connectors that can emit several warnings populate this array; the
+   * delivery pipeline routes every entry to `onWarning`, falling back to `warning` when absent.
+   */
+  warnings?: ConnectorWarning[];
   /**
    * Free-form provider metadata surfaced alongside text/reasoning (e.g. Anthropic `stop_reason`,
    * Gemini `safetyRatings`, OpenAI `usage`/`response.id`). The pipeline forwards it to the

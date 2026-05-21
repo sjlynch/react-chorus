@@ -28,10 +28,11 @@ export { isAiSdkFrameType } from './aiSdk/uiMessageStream';
  *   adapter).
  *
  * The connector returns text/reasoning/tool deltas, signals done on `finish` /
- * `finish-message` / `d:` / `e:` frames, and surfaces in-band errors (`type: 'error'`
+ * `finish-message` / `d:` frames, and surfaces in-band errors (`type: 'error'`
  * or `3:"..."`) with the original payload as `errorPayload`. Unknown or
- * lifecycle-only frames (`start`, `start-step`, `text-start`, `text-end`, etc.)
- * are silently ignored so the user never sees protocol text. Empty-string
+ * lifecycle-only frames (`start`, `start-step`, `text-start`, `text-end`, the
+ * `e:` / `finish-step` end-of-step markers, etc.) are silently ignored so the
+ * user never sees protocol text and a multi-step run is not cut short. Empty-string
  * argument deltas (`{type:'tool-input-delta', inputTextDelta:''}` and `c:`
  * frames with an empty `argsTextDelta`) are dropped the same way empty
  * `text-delta` / `reasoning-delta` frames are, so an empty fragment never
@@ -74,6 +75,16 @@ export const aiSdkConnector: Connector<AiSdkConnectorState> = {
       if (result) return result;
     }
 
+    return null;
+  },
+  flush(state = createAiSdkConnectorState()): ConnectorResult | null {
+    // This connector buffers no partial output between chunks — its only
+    // per-send memory is the `toolNamesById` map, normally cleared on `finish`
+    // / `finish-message` / `[DONE]` / `d:`. On an abnormal close (body ends
+    // without a done sentinel) reset it so a reused state object cannot leak
+    // names into a later send; there is no buffered tail to emit, so the
+    // result is always null.
+    resetAiSdkState(state);
     return null;
   },
 };

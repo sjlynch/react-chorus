@@ -1,6 +1,6 @@
 import { DEFAULT_CANDIDATE_INDEX } from '../geminiSemantics';
 import type { ConnectorResult } from '../types';
-import { appendField, appendToolDelta } from './result';
+import { addWarning, appendField, appendToolDelta } from './result';
 import { extractFunctionCallToolDelta } from './toolDeltas';
 import type { GeminiConnectorState } from './state';
 import { describeUnsupportedPart } from './unsupportedParts';
@@ -45,15 +45,16 @@ export function extractCandidateContent(
   // contains *only* inlineData/fileData is observable instead of returning a
   // silent null (a developer using a Gemini image model would otherwise see a
   // blank assistant turn with no diagnostic). The raw parts stay inspectable
-  // via `warning.payload`.
-  if (unsupportedParts.length > 0 && !result.warning) {
-    result.warning = {
+  // via `warning.payload`. `addWarning` appends rather than overwrites, so a
+  // later `truncated` warning on the same chunk does not clobber this one.
+  if (unsupportedParts.length > 0) {
+    addWarning(result, {
       code: 'unsupported-part',
       message:
         `Gemini emitted ${unsupportedParts.length} content part(s) react-chorus cannot render: ` +
         `${unsupportedParts.join(', ')}. Inline images / file references from Gemini multimodal or ` +
         `image-generation models are not surfaced as assistant content; inspect warning.payload for the raw chunk.`,
       payload,
-    };
+    });
   }
 }

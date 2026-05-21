@@ -36,16 +36,26 @@ export function useAssistantBuffer<TMeta>(deps: AssistantBufferDeps<TMeta>): Ass
   const pendingToolMessageIdsRef = React.useRef<Set<string>>(new Set());
   const toolMessageIdsByDeltaIdRef = React.useRef<Map<string, string>>(new Map());
 
-  const { enqueue: enqueueTextChunk, cancelPending: cancelPendingText } = useRAFQueue((add) => {
+  // `isUnmountFlush` is true only for the synchronous flush `useRAFQueue` runs
+  // during teardown. Routing it as `persistOnly` writes the final buffered token
+  // into persistence without invoking a controlled host's `onChange` (or the
+  // uncontrolled `setInternalMsgs`/`onMessagesChange`) after Chorus has unmounted.
+  const { enqueue: enqueueTextChunk, cancelPending: cancelPendingText } = useRAFQueue((add, isUnmountFlush) => {
     const id = pendingAssistantIdRef.current;
     if (!id) return;
-    updateSessionMessages(prev => prev.map(m => m.id === id && m.role === 'assistant' ? { ...m, text: m.text + add } : m), { reason: 'assistant' });
+    updateSessionMessages(
+      prev => prev.map(m => m.id === id && m.role === 'assistant' ? { ...m, text: m.text + add } : m),
+      { reason: 'assistant', persistOnly: isUnmountFlush },
+    );
   });
 
-  const { enqueue: enqueueReasoningChunk, cancelPending: cancelPendingReasoning } = useRAFQueue((add) => {
+  const { enqueue: enqueueReasoningChunk, cancelPending: cancelPendingReasoning } = useRAFQueue((add, isUnmountFlush) => {
     const id = pendingAssistantIdRef.current;
     if (!id) return;
-    updateSessionMessages(prev => prev.map(m => m.id === id ? { ...m, reasoning: `${m.reasoning ?? ''}${add}` } : m), { reason: 'assistant' });
+    updateSessionMessages(
+      prev => prev.map(m => m.id === id ? { ...m, reasoning: `${m.reasoning ?? ''}${add}` } : m),
+      { reason: 'assistant', persistOnly: isUnmountFlush },
+    );
   });
 
   const cancelPending = React.useCallback((flushPending: boolean) => {

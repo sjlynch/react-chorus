@@ -52,6 +52,30 @@ describe('useChorusStream connector delivery', () => {
     expect(onDone).toHaveBeenCalledTimes(1);
   });
 
+  it('routes every warning to onWarning when one chunk carries multiple', async () => {
+    // A Gemini chunk with an inlineData part that also hits MAX_TOKENS produces
+    // both an `unsupported-part` and a `truncated` warning; both must reach the
+    // consumer rather than the single `warning` slot dropping one.
+    const transport = vi.fn<Transport>(() => Promise.resolve(makeSseResponse([
+      JSON.stringify({ candidates: [{
+        finishReason: 'MAX_TOKENS',
+        content: { parts: [{ inlineData: { mimeType: 'image/png', data: 'AAAA' } }] },
+      }] }),
+    ])));
+    const onWarning = vi.fn();
+    const onDone = vi.fn();
+    const { result } = renderHook(() => useChorusStream(transport, { connector: 'gemini' }));
+
+    await act(async () => {
+      await result.current.send('hello', [], { onChunk: vi.fn(), onWarning, onDone });
+    });
+
+    expect(onWarning).toHaveBeenCalledTimes(2);
+    expect(onWarning).toHaveBeenNthCalledWith(1, expect.objectContaining({ code: 'unsupported-part' }));
+    expect(onWarning).toHaveBeenNthCalledWith(2, expect.objectContaining({ code: 'truncated' }));
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
   it('warns in dev rather than throwing when onWarning is omitted', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const transport = vi.fn<Transport>(() => Promise.resolve(makeSseResponse([

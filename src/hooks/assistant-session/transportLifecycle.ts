@@ -2,6 +2,7 @@ import React from 'react';
 import type { Message, ToolMessage } from '../../types';
 import type { ConnectorToolDelta } from '../../connectors/connectors';
 import { isAbortError } from '../../utils/errors';
+import { isUnstartedSendError } from '../../streaming/errors';
 import type { SendCallbacks } from '../useChorusStream';
 import type { ObserverCallbacks } from './observerCallbacks';
 import { normalizeMaxToolIterations } from './toolLoop';
@@ -142,7 +143,28 @@ export function useTransportLifecycle<TMeta>(deps: TransportLifecycleDeps<TMeta>
         });
       },
       minDelayMs: minAssistantDelayMsRef.current,
-    }, controller.signal).catch(() => {
+    }, controller.signal).catch((rejection: unknown) => {
+      if (isUnstartedSendError(rejection)) {
+        // doStream rejected before the transport ran — a concurrent-send overlap
+        // (this startTransportStream raced another send still in flight) or an
+        // already-aborted externalSignal. The send never started, so the cb.onError
+        // path above never fired. Route the rejection through the standard error
+        // finalizer so the turn surfaces an error banner / onError instead of
+        // silently releasing busy state and snapping back to the Send button.
+        finalizeErroredTransportStream({
+          sessionId,
+          error: rejection,
+          controllerRef,
+          controller,
+          isAssistantSessionActive,
+          removePendingAssistant,
+          invalidateAssistantSession,
+          setTransportBusy,
+          observers,
+          showStreamError,
+        });
+        return;
+      }
       releaseTransportController({ controllerRef, controller, setTransportBusy });
     });
   }, [appendAssistantNow, appendAssistantReasoningNow, appendToolDeltaNow, controllerRef, doStream, historyForTransport, invalidateAssistantSession, isAssistantSessionActive, minAssistantDelayMsRef, observers, removePendingAssistant, setTransportBusy, showStreamError]);

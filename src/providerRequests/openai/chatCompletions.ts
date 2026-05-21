@@ -1,5 +1,5 @@
 import type { Attachment, Message } from '../../types';
-import { isOpenAIImageAttachment, openAIImageUrlFromAttachment } from '../attachments';
+import { isOpenAIImageAttachment, openAIImageDetail, openAIImageUrlFromAttachment } from '../attachments';
 import { messageContentParts } from '../contentParts';
 import { hasOwn, isRecord, metadataArray, nonEmptyString } from '../metadata';
 import { stripOpenAIChatOptions } from '../options';
@@ -11,6 +11,7 @@ import type {
   OpenAIChatCompletionsBody,
   OpenAIChatCompletionsBodyOptions,
   OpenAIChatCompletionsMessage,
+  OpenAIChatCompletionsTextPart,
   OpenAIChatCompletionsToolCall,
   OpenAIChatCompletionsUserContentPart,
 } from '../types/openaiChat';
@@ -77,7 +78,9 @@ function appendOpenAIChatToolCalls(target: OpenAIChatCompletionsMessage[], toolC
 
 function openAIChatAttachmentPart(attachment: Attachment): OpenAIChatCompletionsUserContentPart | null {
   const imageUrl = isOpenAIImageAttachment(attachment) ? openAIImageUrlFromAttachment(attachment) : null;
-  return imageUrl ? { type: 'image_url', image_url: { url: imageUrl } } : null;
+  if (!imageUrl) return null;
+  const detail = openAIImageDetail(attachment);
+  return { type: 'image_url', image_url: { url: imageUrl, ...(detail ? { detail } : {}) } };
 }
 
 function openAIChatUserContent<TMeta>(
@@ -85,6 +88,7 @@ function openAIChatUserContent<TMeta>(
   options: ProviderMappingOptions<TMeta>,
 ): string | OpenAIChatCompletionsUserContentPart[] | null {
   const parts = messageContentParts<TMeta, OpenAIChatCompletionsUserContentPart>(message, options, {
+    provider: 'OpenAI Chat Completions',
     createTextPart: text => ({ type: 'text', text }),
     mapAttachment: openAIChatAttachmentPart,
   });
@@ -94,21 +98,41 @@ function openAIChatUserContent<TMeta>(
   return parts.length === 1 && single && single.type === 'text' ? single.text : parts;
 }
 
+function openAIChatAssistantContent<TMeta>(
+  message: Message<TMeta>,
+  options: ProviderMappingOptions<TMeta>,
+): string {
+  // Route assistant content through `messageContentParts` (no `mapAttachment`):
+  // Chat Completions does not accept image/file parts in an assistant turn, so
+  // an attachment carried on an assistant message surfaces as the observable
+  // unsupported-attachment text block (with a dev warning) joined into the
+  // assistant `content` string instead of being silently dropped.
+  const parts = messageContentParts<TMeta, OpenAIChatCompletionsTextPart>(message, options, {
+    provider: 'OpenAI Chat Completions',
+    createTextPart: text => ({ type: 'text', text }),
+  });
+  return parts.map(part => part.text).join('\n\n');
+}
+
 function toOpenAIChatCompletionsMessage<TMeta>(
   message: Message<TMeta>,
   options: ProviderMappingOptions<TMeta>,
 ): OpenAIChatCompletionsMessage | null {
   if (message.role === 'system') {
-    return message.text.trim() ? { role: 'system', content: message.text } : null;
+    // Emit the trimmed text: the Responses mapper routes system messages
+    // through `messageTextParts` (which trims), so Chat Completions matches.
+    const trimmed = message.text.trim();
+    return trimmed ? { role: 'system', content: trimmed } : null;
   }
 
   if (message.role === 'assistant') {
     const toolCalls = openAIAssistantToolCalls(message as Message<unknown>);
-    const hasText = Boolean(message.text.trim());
+    const content = openAIChatAssistantContent(message, options);
+    const hasText = Boolean(content);
     if (!hasText && !toolCalls?.length) return null;
     const assistant: OpenAIChatCompletionsAssistantMessage = toolCalls?.length
-      ? { role: 'assistant', content: hasText ? message.text : null, tool_calls: toolCalls }
-      : { role: 'assistant', content: message.text };
+      ? { role: 'assistant', content: hasText ? content : null, tool_calls: toolCalls }
+      : { role: 'assistant', content };
     return assistant;
   }
 

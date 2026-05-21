@@ -66,17 +66,23 @@ export function dataStreamProtocolResult(state: AiSdkConnectorState, data: strin
       if (!parsed || typeof parsed !== 'object') return null;
       const record = parsed as Record<string, unknown>;
       const output = record.result ?? record.output;
-      const toolDelta = toolDeltaFromToolResult(state, 'a:', record.toolCallId, output);
+      const hasOutput = hasOwn(record, 'result') || hasOwn(record, 'output');
+      const toolDelta = toolDeltaFromToolResult(state, 'a:', record.toolCallId, output, hasOutput);
       return toolDelta ? { toolDelta } : null;
     }
     case 'd':
       // `d:` is the finish-*message* part — the end of the whole HTTP stream.
       resetAiSdkState(state);
       return { done: true };
-    // Ignored: 1 (data), 2 (data array), 7/8 (annotations), e (finish-step —
-    // ends one step in a multi-step run, e.g. between a tool call and the
-    // model's follow-up turn; the stream keeps flowing, matching the
-    // `finish-step` handling in uiMessageStream.ts), f (start-step),
+    case 'e':
+      // `e:` is the finish-*step* part — it ends one step of a multi-step run
+      // (e.g. between a tool call and the model's follow-up turn) while the
+      // HTTP stream keeps flowing. Recognised explicitly and dropped (returns
+      // null), matching the `finish-step` handling in uiMessageStream.ts.
+      // Unlike `d:` it must NOT reset state or signal `done`, or a `streamText`
+      // agent with `maxSteps > 1` would be cut off after its first step.
+      return null;
+    // Ignored: 1 (data), 2 (data array), 7/8 (annotations), f (start-step),
     // h (reasoning signature), i (redacted reasoning), j (source).
     default:
       return null;
