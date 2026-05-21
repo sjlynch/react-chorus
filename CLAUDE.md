@@ -6,7 +6,8 @@ react-chorus is a composable React chat UI library with batteries-included messa
 
 - `src/index.ts` — root public barrel; update it when the exported API surface changes.
 - `src/types.ts` — core public types for messages, roles, attachments, tool calls, connectors, and storage adapters.
-- `src/Chorus.tsx` — main public component and `ChorusProps`; coordinates state, streaming, persistence, errors, retry/stop/edit/regenerate.
+- `src/Chorus.tsx` — main public component and `ChorusProps`; coordinates state, streaming, persistence, errors, retry/stop/edit/regenerate while delegating shell-derived state/composer actions.
+- `src/chorus-shell/` — internal helpers for `<Chorus>` shell derived flags, composer draft/reset state, and UI action handlers; see `src/chorus-shell/CLAUDE.md`.
 - `src/headless.ts` / `src/ChorusHeadless.tsx` — `react-chorus/headless` entry and wrapper that default supported components to `headless: true`.
 - `src/providerRequests.ts` — outbound request mappers and `formatXyzBody` helpers for OpenAI Chat/Responses, Anthropic Messages, and Gemini GenerateContent, exported via root and `react-chorus/provider-requests`.
 - `src/transport.ts` — `react-chorus/transport` barrel for transport factories and the `Transport` type.

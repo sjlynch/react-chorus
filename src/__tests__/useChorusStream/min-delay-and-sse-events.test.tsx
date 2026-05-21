@@ -1,67 +1,17 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
-import { useChorusStream, type Transport } from '../hooks/useChorusStream';
-import { ChorusStreamError } from '../streaming/errors';
+import { useChorusStream, type Transport } from '../../hooks/useChorusStream';
+import { ChorusStreamError } from '../../streaming/errors';
+import { makeResponse, makeSseResponse, resetUseChorusStreamTestEnv } from './fixtures';
 
-function makeResponse(body = 'data: hello\n\n'): Response {
-  const stream = new ReadableStream<Uint8Array>({
-    start(controller) {
-      controller.enqueue(new TextEncoder().encode(body));
-      controller.close();
-    },
-  });
-  return new Response(stream);
-}
+// ---------------------------------------------------------------------------
 
-describe('useChorusStream', () => {
-  it('prevents synchronous double sends before React state updates flush', async () => {
-    const transport = vi.fn<Transport>(async () => makeResponse());
-    const onChunk = vi.fn();
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const { result } = renderHook(() => useChorusStream(transport));
-
-    let secondError: unknown;
-    await act(async () => {
-      const first = result.current.send('hello', [], { onChunk });
-      const second = result.current.send('hello again', [], { onChunk }).catch((err) => {
-        secondError = err;
-      });
-      await Promise.all([first, second]);
-    });
-
-    expect(transport).toHaveBeenCalledTimes(1);
-    expect(transport).toHaveBeenCalledWith('hello', [], expect.any(AbortSignal));
-    expect(onChunk).toHaveBeenCalledTimes(1);
-    expect(secondError).toBeInstanceOf(ChorusStreamError);
-    expect((secondError as ChorusStreamError).code).toBe('concurrent-send');
-    warn.mockRestore();
+describe('useChorusStream minDelay and named SSE events', () => {
+  beforeEach(() => {
+    vi.useRealTimers();
   });
 
-  it('keeps the send callback stable across sending state changes', async () => {
-    let resolveTransport!: (response: Response) => void;
-    const transport = vi.fn<Transport>(() => new Promise<Response>(resolve => {
-      resolveTransport = resolve;
-    }));
-    const onChunk = vi.fn();
-    const { result } = renderHook(() => useChorusStream(transport));
-    const initialSend = result.current.send;
-    let sendPromise!: Promise<void>;
-
-    act(() => {
-      sendPromise = result.current.send('hello', [], { onChunk });
-    });
-
-    expect(result.current.sending).toBe(true);
-    expect(result.current.send).toBe(initialSend);
-
-    await act(async () => {
-      resolveTransport(makeResponse());
-      await sendPromise;
-    });
-
-    expect(result.current.sending).toBe(false);
-    expect(result.current.send).toBe(initialSend);
-  });
+  afterEach(resetUseChorusStreamTestEnv);
 
   it('calls onDone immediately after the last chunk when minDelayMs is 0', async () => {
     const transport = vi.fn<Transport>(async () => makeResponse());
@@ -203,6 +153,104 @@ describe('useChorusStream', () => {
       expect(onChunk).toHaveBeenCalledTimes(1);
       expect(onDone).toHaveBeenCalledTimes(1);
     } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('delays the first chunk until minDelayMs has elapsed', async () => {
+    vi.useFakeTimers();
+    const transport = vi.fn<Transport>(() => Promise.resolve(makeSseResponse(['token'])));
+    const onChunk = vi.fn();
+    const onDone = vi.fn();
+    const { result } = renderHook(() => useChorusStream(transport));
+
+    const sendPromise = result.current.send('hello', [], { onChunk, onDone, minDelayMs: 1000 });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(999);
+    });
+
+    expect(onChunk).not.toHaveBeenCalled();
+    expect(onDone).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+      await sendPromise;
+    });
+
+    expect(onChunk).toHaveBeenCalledWith('token');
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    {
+      name: 'onChunk',
+      connector: undefined,
+      tokens: ['token'],
+      callbacks: (error: Error) => ({
+        onChunk: () => { throw error; },
+      }),
+    },
+    {
+      name: 'onStart',
+      connector: undefined,
+      tokens: ['token'],
+      callbacks: (error: Error) => ({
+        onStart: () => { throw error; },
+      }),
+    },
+    {
+      name: 'onReasoning',
+      connector: 'openai' as const,
+      tokens: [JSON.stringify({ choices: [{ index: 0, delta: { reasoning_content: 'plan' } }] }), '[DONE]'],
+      callbacks: (error: Error) => ({
+        onReasoning: () => { throw error; },
+      }),
+    },
+    {
+      name: 'onToolDelta',
+      connector: 'openai' as const,
+      tokens: [JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'search', arguments: '{"q":"test"}' } }] } }] }), '[DONE]'],
+      callbacks: (error: Error) => ({
+        onToolDelta: () => { throw error; },
+      }),
+    },
+  ])('rejects send without an unhandled timer exception when delayed $name throws', async ({ connector, tokens, callbacks, name }) => {
+    vi.useFakeTimers();
+    const callbackError = new Error(`${name} failed`);
+    const transport = vi.fn<Transport>(() => Promise.resolve(makeSseResponse(tokens)));
+    const onDone = vi.fn();
+    const onError = vi.fn();
+    const uncaught = vi.fn();
+    const unhandled = vi.fn();
+    process.on('uncaughtException', uncaught);
+    process.on('unhandledRejection', unhandled);
+
+    try {
+      const { result } = renderHook(() => useChorusStream(transport, connector ? { connector } : undefined));
+      const sendPromise = result.current.send('hello', [], {
+        onChunk: vi.fn(),
+        ...callbacks(callbackError),
+        onDone,
+        onError,
+        minDelayMs: 100,
+      });
+      const rejection = expect(sendPromise).rejects.toThrow(callbackError.message);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+        await rejection;
+      });
+
+      expect(onDone).not.toHaveBeenCalled();
+      expect(onError).toHaveBeenCalledTimes(1);
+      expect(onError).toHaveBeenCalledWith(callbackError);
+      expect(uncaught).not.toHaveBeenCalled();
+      expect(unhandled).not.toHaveBeenCalled();
+      expect(result.current.sending).toBe(false);
+    } finally {
+      process.off('uncaughtException', uncaught);
+      process.off('unhandledRejection', unhandled);
       vi.useRealTimers();
     }
   });

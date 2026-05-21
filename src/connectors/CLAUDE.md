@@ -15,10 +15,12 @@ The parsing contract is:
   done?: boolean;
   error?: string;
   errorPayload?: unknown;
+  warning?: { code: string; message: string; payload?: unknown };
+  metadata?: Record<string, unknown>;
 } | null
 ```
 
-`text` appends output, `reasoning` appends the assistant thinking trace, `toolDelta`/`toolDeltas` update streamed tool-call messages, `done` stops the SSE reader, and `error` carries an in-band provider error. When present, `errorPayload` is attached to the thrown `ChorusStreamError` so `onError`/`streamRawError` can inspect the provider JSON.
+`text` appends output, `reasoning` appends the assistant thinking trace, `toolDelta`/`toolDeltas` update one or more streamed tool-call messages, `done` stops the SSE reader, `error` carries an in-band provider error, `warning` carries non-fatal diagnostics (for example truncation or unsupported Gemini parts), and `metadata` carries provider diagnostics such as safety ratings or response ids. When present, `errorPayload` is attached to the thrown `ChorusStreamError` so `onError`/`streamRawError` can inspect the provider JSON.
 
 The `Connector` type is exported from `types.ts`, `openai.ts`, and `connectors.ts`:
 
@@ -35,30 +37,40 @@ The `Connector` type is exported from `types.ts`, `openai.ts`, and `connectors.t
 
 Known string names use the centralized `ConnectorName` alias in `src/types.ts`.
 
-## Existing connectors
+## Module map
 
+- `connectors.ts` — stable public barrel for connector types, exposed connector singletons (`anthropicConnector`, `geminiConnector`, `aiSdkConnector`, `autoConnector`), `getConnector`, and OpenAI connector options/factory.
+- `registry.ts` — `getConnector()` string/custom-object registry plus dev-only warning-once logic for unknown names and ignored connector options.
+- `auto.ts` — `autoConnector`, provider shape detection, AI SDK UI-message-stream guards, conservative AI SDK data-stream detection, and flush routing to the first consumer.
 - `openai.ts` — public OpenAI facade and state factory. Internals are split under `connectors/openai/`: `thinkTagSplitter.ts` for `<think>` parsing + EOF flush, `chatCompletions.ts` for `choices[].delta`, `responses.ts` for `response.*` events, and `shared.ts` for small result helpers.
 - `anthropic.ts` — reads `content_block_delta` text/thinking events and `tool_use` / `input_json_delta`; treats `message_stop` as done.
-- `gemini.ts` — reads selected `candidates[0]` text/thought/functionCall parts; treats normal `STOP` / `MAX_TOKENS` as done and blocked finish reasons as errors.
+- `gemini.ts` — public Gemini facade preserving the `src/connectors/gemini` import path. Internals are split under `connectors/gemini/`: `connector.ts` orchestrates parse flow, `state.ts` keeps first-seen-wins function-call ids, `candidates.ts` selects candidate index 0 and extracts parts, `toolDeltas.ts` maps `functionCall` parts, `unsupportedParts.ts` warns on `inlineData`/`fileData`, `promptFeedback.ts` handles prompt blocking, `finish.ts` handles STOP/MAX_TOKENS/blocked/unspecified finish reasons, and `result.ts` holds result append helpers.
+- `geminiSemantics.ts` — Gemini finish-reason and safety-rating predicates/messages shared by Gemini parser modules.
 - `aiSdk.ts` — public AI SDK facade. Internals are split under `connectors/aiSdk/`: `uiMessageStream.ts` for SSE-wrapped UI-message-stream JSON (`text-delta`, `reasoning-delta`, `tool-input-*`, `tool-output-available`, `finish` / `finish-message`, `{ type: 'error', errorText }`) plus the `AI_SDK_FRAME_TYPES` set and `isAiSdkFrameType`; `dataStream.ts` for the prefix-coded data-stream protocol (`0:`, `g:`, `9:`, `b:`, `c:`, `a:`, `d:`, `e:`, `3:`) and `DATA_STREAM_PREFIX_PATTERN`; `shared.ts` for `AiSdkConnectorState`, `createAiSdkConnectorState`, `resetAiSdkState`, the `toolDeltaFrom*` helpers, and `warnMissingToolCallId`. Unknown frames return null instead of leaking protocol text. Data-stream lines must arrive through SSE — see the README recipe for the one-line server wrap.
-- All JSON connectors call `extractErrorMessage()` first and preserve the original provider payload as `errorPayload` when surfacing `{ error }`. `extractErrorMessage` also recognises the AI SDK's `{ type: 'error', errorText }` shape. To avoid misclassifying normal output, a bare top-level `error` *string* is only treated as terminal when the frame has no recognised streaming-event shape (`choices`, `candidates`, `delta`, `content_block`, or a non-`error` event `type`); structured `{ error: { message } }` objects and explicit `{ type: 'error' }` frames are always honoured.
+- `error.ts` / `objectUtils.ts` — shared in-band error extraction and small object helpers.
+
+OpenAI, Anthropic, and Gemini JSON connectors call `extractErrorMessage()` before provider-specific extraction. AI SDK and `autoConnector` first claim recognised AI SDK UI-message frames so `{ type: 'text-delta', error: 'stray' }` behaves the same through `connector="ai-sdk"` and `connector="auto"`. Error results preserve the original provider payload as `errorPayload`. To avoid misclassifying normal output, a bare top-level `error` *string* is only treated as terminal when the frame has no recognised streaming-event shape (`choices`, `candidates`, `delta`, `content_block`, or a non-`error` event `type`); structured `{ error: { message } }` objects and explicit `{ type: 'error' }` frames are always honoured.
 
 ## Auto detection
 
-`connectors.ts` exports `autoConnector`, which handles `[DONE]`, parses JSON, checks in-band errors, and dispatches by shape:
+`auto.ts` exports `autoConnector`, which handles `[DONE]`, parses JSON, and dispatches in this order:
 
-- `choices` array => OpenAI
-- `candidates` array => Gemini
-- `type` starting with `response.` => OpenAI Responses API
-- known Anthropic event `type` => Anthropic
-- known AI SDK event `type` (`text-delta`, `reasoning-delta`, `tool-input-*`, `tool-output-available`, `finish` / `finish-message` / `finish-step`, `start` / `start-step`, `source-*`, `file`) => AI SDK
-- non-JSON data starting with a single-character `<prefix>:` (the AI SDK data-stream protocol) => AI SDK
-- otherwise non-empty data is treated as plain text
+1. recognised AI SDK UI-message-stream `type` (including lifecycle frames and `data-*`) => AI SDK
+2. in-band provider error => `{ error, errorPayload }`
+3. `choices` array => OpenAI Chat Completions
+4. `candidates` array => Gemini
+5. `type` starting with `response.` => OpenAI Responses API
+6. known Anthropic event `type` => Anthropic
+7. generic JSON text fields (`text`, `content`, `delta`) => text
+8. non-JSON data that conservatively matches a real AI SDK data-stream frame (`<prefix>:` with valid JSON, and object payloads for `d:` / `e:` finish frames) => AI SDK
+9. otherwise non-empty data => OpenAI plain-text fallthrough so `<think>` traces still route to reasoning
+
+Do not loosen the AI SDK data-stream guard: `connector="auto"` must render prose like `a: see below`, `d:0`, or `e:"note"` as visible plain text rather than dropping it or terminating the stream.
 
 ## Adding a provider
 
 1. Implement `Connector` in a new file. If it needs parser memory, expose `createState()` and thread the state through helper functions.
-2. Export it from `connectors.ts` and register its string name in `getConnector()`.
+2. Export it from `connectors.ts` and register its string name in `registry.ts` / `getConnector()`.
 3. If exposing a string option, add the name once to centralized `ConnectorName` in `src/types.ts`; `ChorusProps` and `useChorusStream` import that alias.
-4. Add shape detection to `autoConnector` when safe and unambiguous, including `errorPayload` handling and a `flush()` hook if the parser buffers partial output.
-5. Add connector tests for text, reasoning/tool deltas, done, in-band errors, EOF flushes, empty/invalid payloads, and auto-detection.
+4. Add shape detection to `auto.ts` when safe and unambiguous, including `errorPayload` handling and a `flush()` hook if the parser buffers partial output.
+5. Add connector tests for text, reasoning/tool deltas, done, warnings/metadata, in-band errors, EOF flushes, empty/invalid payloads, and auto-detection.
