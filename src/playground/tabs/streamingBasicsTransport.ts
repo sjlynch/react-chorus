@@ -1,5 +1,8 @@
 import type { Transport } from '../../hooks/useChorusStream';
-import { DEMO_CHUNK_DELAY_MS, makeSSEResponse, sleep, sseDone, sseLine, streamReasoningTokens, streamTextTokens } from './sseUtils';
+import { streamOpenAIDemoPlan, type OpenAIDemoStreamPlan } from './demoStreamPlan';
+import { extractWeatherLocation, isErrorPrompt } from './promptIntent';
+import { makeSSEResponse } from './sseUtils';
+import { makeBasicWeatherFixture } from './weatherFixtures';
 
 const REPLY_TEXTS = {
   code: "Here's the smallest possible integration:\n\n```tsx\nimport { Chorus } from 'react-chorus';\nimport 'react-chorus/styles.css';\n\nexport default function App() {\n  return <Chorus transport=\"/api/chat\" />;\n}\n```\n\nPoint `transport` at any SSE endpoint (OpenAI, Anthropic, Gemini, or your own) and the connector auto-detects the format.",
@@ -7,33 +10,6 @@ const REPLY_TEXTS = {
   retry: "Streaming a second reply after the error was dismissed. Notice that retry preserved your turn while the failed assistant turn was rolled back.",
   default: "react-chorus keeps the drop-in defaults while exposing composable hooks and components. The reply you just saw streamed through a mock `Transport` — swap it for your real SSE endpoint and the same UI keeps working.",
 };
-
-interface StreamPlan {
-  reasoning?: string;
-  toolCall?: {
-    id: string;
-    name: string;
-    input: Record<string, unknown>;
-    output: unknown;
-  };
-  text?: string;
-  /** Emit an OpenAI-shape in-band error after a brief delay. */
-  errorMessage?: string;
-}
-
-/**
- * Substrings that select the in-band error demo. The list includes the words
- * of the shipped "Force a transport error" suggested-prompt chip ('transport
- * error' / 'force a transport') so clicking the chip actually reaches the
- * error path instead of falling through to a normal streamed reply.
- */
-function isErrorPrompt(p: string): boolean {
-  return p.includes('force error')
-    || p.includes('make this fail')
-    || p.includes('trigger error')
-    || p.includes('transport error')
-    || p.includes('force a transport');
-}
 
 /**
  * Error-triggering prompts that have already streamed the in-band error once.
@@ -44,7 +20,7 @@ function isErrorPrompt(p: string): boolean {
  */
 const erroredPrompts = new Set<string>();
 
-function planFor(prompt: string, isErrorResend: boolean): StreamPlan {
+function planFor(prompt: string, isErrorResend: boolean): OpenAIDemoStreamPlan {
   const p = prompt.toLowerCase();
 
   if (isErrorPrompt(p)) {
@@ -61,22 +37,19 @@ function planFor(prompt: string, isErrorResend: boolean): StreamPlan {
   }
 
   if (p.includes('weather')) {
-    const location = /weather\s+(?:in|at|for)\s+([a-zA-Z\s]+)/i.exec(prompt)?.[1]?.trim() || 'Tokyo';
+    const location = extractWeatherLocation(prompt);
     return {
       reasoning: `The user is asking about current weather conditions for ${location}. I'll call the weather tool with the location and metric units, then summarize the result in plain language.`,
-      toolCall: {
+      toolCalls: [{
         id: 'call_weather_basics',
         name: 'get_weather',
         input: { location, units: 'metric' },
-        output: {
-          location,
-          temperature_c: 22,
-          condition: 'Partly cloudy',
-          humidity: 0.58,
-          wind_kmh: 12,
-          wind_direction: 'E',
-        },
-      },
+        // `output` is a react-chorus connector extension, not part of
+        // OpenAI's Chat Completions wire format. It lets this basics tab show
+        // a completed tool call in a single streamed turn; the Tool agent tab
+        // demonstrates the full execute-and-continue loop instead.
+        output: makeBasicWeatherFixture(location),
+      }],
       text: REPLY_TEXTS.weather.replace('Tokyo', location),
     };
   }
@@ -94,51 +67,6 @@ function planFor(prompt: string, isErrorResend: boolean): StreamPlan {
   };
 }
 
-async function* streamSSE(plan: StreamPlan, signal: AbortSignal): AsyncGenerator<string> {
-  if (plan.reasoning) yield* streamReasoningTokens(plan.reasoning, signal);
-
-  if (plan.toolCall) {
-    await sleep(DEMO_CHUNK_DELAY_MS * 3, signal);
-    yield sseLine({
-      choices: [{
-        index: 0,
-        delta: {
-          tool_calls: [{
-            index: 0,
-            id: plan.toolCall.id,
-            function: {
-              name: plan.toolCall.name,
-              arguments: JSON.stringify(plan.toolCall.input),
-            },
-            // `output` is a react-chorus connector extension, not part of
-            // OpenAI's Chat Completions wire format. The OpenAI connector
-            // intentionally reads it from a tool_calls delta — see
-            // `extractChatToolDelta` in connectors/openai/chatCompletions.ts
-            // and the documented `toolDelta.output` contract in
-            // connectors/CLAUDE.md — and populates the rendered tool-call
-            // block's output section. It lets this basics tab show a
-            // *completed* tool call in a single streamed turn without wiring
-            // a tools registry; the Tool agent tab demonstrates the full
-            // execute-and-continue loop a real backend would use instead.
-            output: plan.toolCall.output,
-          }],
-        },
-      }],
-    });
-    await sleep(DEMO_CHUNK_DELAY_MS * 4, signal);
-  }
-
-  if (plan.errorMessage) {
-    await sleep(DEMO_CHUNK_DELAY_MS * 6, signal);
-    yield sseLine({ error: { message: plan.errorMessage, type: 'demo_error' } });
-    return;
-  }
-
-  if (plan.text) yield* streamTextTokens(plan.text, signal);
-
-  yield sseDone();
-}
-
 export const streamingBasicsTransport: Transport = (text, _history, signal) => {
   // Toggle the error/retry demo: the first error-triggering send streams the
   // in-band error; the immediate resend streams the recovery reply instead.
@@ -150,5 +78,11 @@ export const streamingBasicsTransport: Transport = (text, _history, signal) => {
     else erroredPrompts.add(key);
   }
   const plan = planFor(text, isErrorResend);
-  return makeSSEResponse((sig) => streamSSE(plan, sig), signal);
+  return makeSSEResponse(
+    (sig) => streamOpenAIDemoPlan(plan, sig, {
+      toolCallDelayMultiplier: 3,
+      afterToolCallsDelayMultiplier: 4,
+    }),
+    signal,
+  );
 };
