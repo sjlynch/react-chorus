@@ -28,7 +28,11 @@ export function dataStreamProtocolResult(state: AiSdkConnectorState, data: strin
       return typeof parsed === 'string' && parsed ? { reasoning: parsed } : null;
     case '3': {
       const message = typeof parsed === 'string' && parsed ? parsed : 'AI SDK stream reported an error';
-      return { error: message, errorPayload: parsed };
+      // Preserve the original `3:` frame line as `errorPayload` so an `onError`
+      // handler can identify the data-stream protocol and inspect the raw
+      // line, matching the full-payload `errorPayload` of the other connectors
+      // (a bare `parsed` string would just duplicate `message`).
+      return { error: message, errorPayload: data };
     }
     case '9': {
       if (!parsed || typeof parsed !== 'object') return null;
@@ -66,10 +70,13 @@ export function dataStreamProtocolResult(state: AiSdkConnectorState, data: strin
       return toolDelta ? { toolDelta } : null;
     }
     case 'd':
-    case 'e':
+      // `d:` is the finish-*message* part — the end of the whole HTTP stream.
       resetAiSdkState(state);
       return { done: true };
-    // Ignored: 1 (data), 2 (data array), 7/8 (annotations), f (start-step),
+    // Ignored: 1 (data), 2 (data array), 7/8 (annotations), e (finish-step —
+    // ends one step in a multi-step run, e.g. between a tool call and the
+    // model's follow-up turn; the stream keeps flowing, matching the
+    // `finish-step` handling in uiMessageStream.ts), f (start-step),
     // h (reasoning signature), i (redacted reasoning), j (source).
     default:
       return null;

@@ -348,5 +348,21 @@ describe('geminiConnector', () => {
       expect(result?.warning?.code).toBe('unsupported-part');
       expect(result?.warning?.message).toContain('inlineData (image/webp)');
     });
+
+    it('keeps the unsupported-part warning when the same chunk also hits MAX_TOKENS', () => {
+      // A multimodal model can emit an inlineData part *and* finishReason
+      // MAX_TOKENS in one chunk; the truncation warning must not clobber the
+      // unsupported-part warning, the only signal that content was dropped.
+      const data = JSON.stringify({
+        candidates: [{
+          finishReason: 'MAX_TOKENS',
+          content: { parts: [{ inlineData: { mimeType: 'image/png', data: 'AAAA' } }] },
+        }],
+      });
+      const result = geminiConnector.extract(data);
+      expect(result?.done).toBe(true);
+      expect(result?.metadata).toEqual({ finishReason: 'MAX_TOKENS' });
+      expect(result?.warning?.code).toBe('unsupported-part');
+    });
   });
 });
