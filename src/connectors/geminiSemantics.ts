@@ -17,6 +17,14 @@ const SAFETY_PROBABILITY_RANK: Record<string, number> = {
   HIGH: 3,
 };
 
+/**
+ * True when a candidate carries a `finishReason` — i.e. this is the stream's terminal frame.
+ * Mid-stream Gemini frames omit `finishReason` entirely; only the final frame sets it.
+ */
+export function hasFinishReason(finishReason: unknown): finishReason is string {
+  return typeof finishReason === 'string' && finishReason !== '';
+}
+
 export function isUnspecifiedFinishReason(finishReason: unknown): finishReason is string {
   return typeof finishReason === 'string' && UNSPECIFIED_FINISH_REASONS.has(finishReason);
 }

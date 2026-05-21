@@ -113,6 +113,12 @@ export function startOnSendLifecycle<TMeta>({
 
         const returnedMessage = res as Partial<Message<TMeta>>;
         const normalizedMessage = normalizeReturnedMessage(returnedMessage);
+        // Append to the LIVE transcript (`prev` is `messagesRef.current`), not
+        // the `history` snapshot passed to `onSend`. The `isAssistantSessionActive`
+        // guard above only catches aborts/supersedes — an in-place edit/delete
+        // within the same session is NOT detected here, so the documented
+        // contract (see `ChorusOnSend`) is that the transcript must not be
+        // mutated while an `onSend` is in flight.
         updateSessionMessages(prev => prev.concat(normalizedMessage), { reason: 'assistant' });
         completeActiveSession(sessionId, { reason: 'returned-message', message: normalizedMessage });
       }

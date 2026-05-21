@@ -47,6 +47,13 @@ export function createPersistentWebSocketTransport<TMeta = Record<string, unknow
     // as a clean close in `ws.onclose`.
     streamRouter.errorAll(createTransportClosedError(code, reason));
     safeCloseSocket(ws, code, reason);
+    // `ws.onclose` is now scoped to the still-current socket (see below), and
+    // `socket` was just nulled — so the close frame this triggers will no-op
+    // there. Report the client-initiated close here so `onClose` still fires
+    // exactly once for a socket the caller tears down, matching transient mode.
+    // A bare `transport.close()` closes the socket with the WebSocket default
+    // (code 1000, empty reason), so report those when no code/reason was given.
+    opts?.onClose?.(code ?? 1000, reason ?? '');
   };
 
   const handleSocketFailure = (ws: WebSocket, error: unknown) => {
@@ -75,18 +82,52 @@ export function createPersistentWebSocketTransport<TMeta = Record<string, unknow
     };
 
     ws.onmessage = (event: MessageEvent) => {
-      void webSocketMessageToText(event.data).then(data => {
-        opts?.onMessage?.(data, event);
-        streamRouter.enqueueFrame(data);
-      }).catch(error => handleSocketFailure(ws, error));
+      void webSocketMessageToText(event.data).then(
+        data => {
+          // A throw from the `onMessage` callback or frame routing is a genuine
+          // failure of this socket's processing — keep treating it as a socket
+          // failure. Only the decode step (rejection handler below) is
+          // downgraded to a dropped frame.
+          try {
+            opts?.onMessage?.(data, event);
+            streamRouter.enqueueFrame(data);
+          } catch (error) {
+            handleSocketFailure(ws, error);
+          }
+        },
+        error => {
+          // A frame we cannot decode to text (e.g. a stray binary ping or any
+          // other unsupported data type — including a pure server push that
+          // arrives while no send is active) is a malformed *frame*, not a
+          // broken socket. Routing it through `handleSocketFailure` would null
+          // the shared persistent socket and error every concurrent in-flight
+          // stream — one bad frame killing a durable shared connection. Warn
+          // (dev only) and drop just this frame so the socket and all other
+          // streams stay alive; `handleSocketFailure` is reserved for actual
+          // socket-level errors.
+          if (isPersistentWebSocketDevMode()) {
+            console.warn(
+              '[react-chorus] createWebSocketTransport: dropped a WebSocket frame that could not be decoded to text on the persistent socket. The socket and other in-flight streams are unaffected.',
+              toError(error),
+            );
+          }
+        },
+      );
     };
 
     ws.onclose = (event: CloseEvent) => {
-      const closedBeforeOpening = socket === ws && socketState === 'connecting';
-      if (socket === ws) {
-        socket = null;
-        socketState = 'closed';
-      }
+      // A real WebSocket fires `onerror` then `onclose` for a failed
+      // connection, and `handleSocketFailure` (from `onerror`) or
+      // `closePersistentSocket` (from `transport.close()`) may already have
+      // nulled `socket` and torn everything down. Scope the whole handler to
+      // the still-current socket — like transient.ts's naturally single-socket
+      // onclose — so stream fan-out and `onClose` fire at most once per socket:
+      // never re-running after `onError`, and never closing a stream that a
+      // newer send registered after this socket already failed.
+      if (socket !== ws) return;
+      const closedBeforeOpening = socketState === 'connecting';
+      socket = null;
+      socketState = 'closed';
       openWaiters.reject(closedBeforeOpening ? createClosedBeforeOpenError(event) : new Error('WebSocket closed'));
       if (isNormalCloseCode(event.code)) {
         streamRouter.closeAll();

@@ -277,6 +277,11 @@ function createBufferedDelivery(args: {
     else if (deliveryPromise) await deliveryPromise;
     delivery.throwIfFailed();
     cancellation.throwIfCancelled();
+    // `cancellation.cancelled` is only set by the release-timer abort listener;
+    // an abort that lands after `minDelayMs` elapsed (timer settled, listener
+    // removed) with nothing buffered leaves that flag clear. Check the signal
+    // directly so a late abort during finalize still surfaces to the caller.
+    if (signal.aborted) throw createAbortError();
   };
 
   return {

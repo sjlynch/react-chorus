@@ -109,9 +109,10 @@ function extractResponseUsage(usage: unknown): Record<string, number> | undefine
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
-// `response.completed.response.incomplete_details.reason` values that mean the
-// response was cut short — surfaced as a non-fatal `warning`, mirroring the
-// Chat Completions / Gemini / Anthropic truncation signals.
+// `incomplete_details.reason` values (carried on `response.completed` and the
+// terminal `response.incomplete` event) that mean the response was cut short —
+// surfaced as a non-fatal `warning`, mirroring the Chat Completions / Gemini /
+// Anthropic truncation signals.
 const INCOMPLETE_REASON_WARNINGS: Record<string, { code: string; message: string }> = {
   max_output_tokens: { code: 'truncated', message: 'OpenAI response truncated by max_output_tokens' },
   max_tokens: { code: 'truncated', message: 'OpenAI response truncated by max_output_tokens' },
@@ -119,9 +120,10 @@ const INCOMPLETE_REASON_WARNINGS: Record<string, { code: string; message: string
 };
 
 /**
- * Surface the terminal `response.completed` payload: token usage and, when the
- * response stopped early, its `incomplete_details` reason as a finish reason +
- * non-fatal warning. Without this a truncated completion looks successful.
+ * Surface a terminal response payload (`response.completed` / `response.incomplete`):
+ * token usage and, when the response stopped early, its `incomplete_details`
+ * reason as a finish reason + non-fatal warning. Without this a truncated
+ * completion looks successful.
  */
 function applyResponseCompletion(result: ConnectorResult, obj: Record<string, unknown>) {
   const response = obj.response && typeof obj.response === 'object'
@@ -151,7 +153,11 @@ export function extractOpenAIResponseEvent(obj: Record<string, unknown>, state: 
 
   if (IGNORED_RESPONSE_EVENT_TYPES.has(type)) return null;
 
-  if (type === 'response.completed') {
+  // `response.incomplete` is a separate terminal event the API emits when a
+  // response stops early (e.g. `max_output_tokens`); treat it exactly like
+  // `response.completed` so the stream ends and `applyResponseCompletion`
+  // still surfaces token usage plus the truncation finish reason / warning.
+  if (type === 'response.completed' || type === 'response.incomplete') {
     mergeResult(result, createThinkTagSplitter(state.thinkState, state.thinkTags).flush());
     // Replay tool-call deltas whose `output_item.added` was dropped entirely.
     for (const toolDelta of drainResponseToolBuffer(state)) appendToolDelta(result, toolDelta);

@@ -663,6 +663,119 @@ describe('createWebSocketTransport', () => {
     expect(decoder.decode((await firstReader.read()).value)).toBe('data: shared\n\n');
     expect(decoder.decode((await secondReader.read()).value)).toBe('data: shared\n\n');
   });
+
+  it('fires onClose once on a server-initiated persistent close', async () => {
+    const events: string[] = [];
+    const transport = createWebSocketTransport('wss://api.example.com/chat', {
+      persistent: true,
+      onClose: (code, reason) => events.push(`close:${code}:${reason}`),
+    });
+
+    const promise = transport('hello', [], new AbortController().signal);
+    const ws = MockWebSocket.instances[0];
+    ws.emitOpen();
+    await promise;
+
+    ws.emitClose(1000, 'done');
+
+    expect(events).toEqual(['close:1000:done']);
+  });
+
+  it('does not fire onClose again after onError tore down a failed persistent socket', async () => {
+    const events: string[] = [];
+    const transport = createWebSocketTransport('wss://api.example.com/chat', {
+      persistent: true,
+      onError: () => events.push('error'),
+      onClose: (code) => events.push(`close:${code}`),
+    });
+
+    const promise = transport('hello', [], new AbortController().signal);
+    const ws = MockWebSocket.instances[0];
+    ws.emitOpen();
+    const response = await promise;
+    const reader = response.body!.getReader();
+
+    // A real WebSocket fires onerror then onclose for a failed connection.
+    ws.emitError();
+    ws.emitClose(1006, 'abnormal');
+
+    await expect(reader.read()).rejects.toThrow('WebSocket connection error');
+    // onError reported the failure once; the trailing onclose must not also
+    // fire onClose — the socket's lifecycle is reported at most once.
+    expect(events).toEqual(['error']);
+  });
+
+  it('does not close a stream registered by a new send after a persistent socket failed', async () => {
+    const transport = createWebSocketTransport('wss://api.example.com/chat', { persistent: true });
+
+    const firstPromise = transport('one', [], new AbortController().signal);
+    const firstWs = MockWebSocket.instances[0];
+    firstWs.emitOpen();
+    const firstReader = (await firstPromise).body!.getReader();
+
+    // The first socket fails via onerror.
+    firstWs.emitError();
+    await expect(firstReader.read()).rejects.toThrow('WebSocket connection error');
+
+    // A new send opens a fresh socket and registers a new stream...
+    const secondPromise = transport('two', [], new AbortController().signal);
+    const secondWs = MockWebSocket.instances[1];
+    secondWs.emitOpen();
+    const secondReader = (await secondPromise).body!.getReader();
+
+    // ...before the failed socket's trailing onclose runs.
+    firstWs.emitClose(1006, 'abnormal');
+
+    // The new stream must be unaffected — no spurious close/error.
+    secondWs.onmessage?.({ data: '{"chunk":"live"}' } as MessageEvent);
+    const chunk = await secondReader.read();
+    expect(new TextDecoder().decode(chunk.value)).toBe('data: {"chunk":"live"}\n\n');
+    expect(MockWebSocket.instances).toHaveLength(2);
+  });
+
+  it('drops an undecodable push frame without failing the persistent socket or concurrent streams', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const transport = createWebSocketTransport('wss://api.example.com/chat', {
+        persistent: true,
+        formatMessage: (text) => ({ payload: text, correlationId: text }),
+        correlate: (frame) => {
+          try { return (JSON.parse(frame) as { id?: string }).id ?? null; } catch { return null; }
+        },
+      });
+
+      const firstPromise = transport('one', [], new AbortController().signal);
+      const ws = MockWebSocket.instances[0];
+      ws.emitOpen();
+      const firstReader = (await firstPromise).body!.getReader();
+      const secondReader = (await transport('two', [], new AbortController().signal)).body!.getReader();
+
+      // A stray frame the decoder rejects (a bare number is neither string,
+      // Blob, ArrayBuffer, nor typed array) must not be treated as a socket
+      // failure that nulls the shared socket and errors every active stream.
+      ws.onmessage?.({ data: 999 } as unknown as MessageEvent);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(ws.closedWith).toEqual([]);
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('could not be decoded'),
+        expect.any(Error),
+      );
+
+      // Both concurrent streams stay alive and keep receiving their frames.
+      ws.onmessage?.({ data: JSON.stringify({ id: 'one', token: 'A' }) } as MessageEvent);
+      ws.onmessage?.({ data: JSON.stringify({ id: 'two', token: 'B' }) } as MessageEvent);
+      const decoder = new TextDecoder();
+      expect(decoder.decode((await firstReader.read()).value)).toBe(`data: ${JSON.stringify({ id: 'one', token: 'A' })}\n\n`);
+      expect(decoder.decode((await secondReader.read()).value)).toBe(`data: ${JSON.stringify({ id: 'two', token: 'B' })}\n\n`);
+
+      await firstReader.cancel();
+      await secondReader.cancel();
+    } finally {
+      warn.mockRestore();
+    }
+  });
 });
 
 describe('createWebSocketTransport correlate-without-persistent dev warning', () => {

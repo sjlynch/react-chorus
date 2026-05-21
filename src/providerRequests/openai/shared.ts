@@ -31,22 +31,27 @@ export function openAIToolCallId(message: Message<unknown>) {
  * `arguments` field. Chat Completions `tool_calls[].function.arguments` and
  * Responses `function_call.arguments` are both required to be JSON-encoded.
  *
- * `compactJSONString` returns string input verbatim, so a plain (non-JSON)
- * string would otherwise become bare, invalid JSON in the request body. Here a
- * string is passed through only when it already encodes a JSON object or array;
- * otherwise it is wrapped as `{ "input": "<text>" }` — mirroring how
- * `objectToolInput` normalizes the same value for Gemini and Anthropic.
+ * Tool-call inputs are conceptually argument objects, so the result is always a
+ * JSON object. `compactJSONString` returns string input verbatim, so a plain
+ * (non-JSON) string would otherwise become bare, invalid JSON in the request
+ * body. Here a string is passed through only when it already encodes a JSON
+ * object; any other value — a JSON-array string, a bare array, or a non-JSON
+ * string — is wrapped as `{ "input": <value> }`. This mirrors how
+ * `objectToolInput` normalizes the same value for Gemini and Anthropic, where an
+ * array is likewise never a valid `tool_use.input` / `functionCall.args` object.
  */
 export function openAIToolCallArguments(input: unknown): string {
   if (typeof input === 'string') {
     try {
       const parsed: unknown = JSON.parse(input);
-      if (isRecord(parsed) || Array.isArray(parsed)) return input;
+      if (isRecord(parsed)) return input;
+      if (Array.isArray(parsed)) return JSON.stringify({ input: parsed });
     } catch {
       // Not JSON — fall through and wrap below.
     }
     return JSON.stringify({ input });
   }
+  if (Array.isArray(input)) return JSON.stringify({ input });
   return compactJSONString(input ?? {});
 }
 
