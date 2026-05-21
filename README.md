@@ -969,20 +969,20 @@ react-chorus keeps React/ReactDOM as peer dependencies and externalizes runtime 
 
 | Entry | Initial JS | gzip | Notes |
 |-------|------------|------|-------|
-| `react-chorus` (`<Chorus>`) | 204.9 kB | 66.9 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
-| `react-chorus/headless` | 205.2 kB | 67.0 kB | Headless defaults, same behavior surface. |
-| `react-chorus` (`useChorusStream`) | 59.9 kB | 18.4 kB | Root hook import; CI fails if it pulls UI, Markdown, or icon dependencies. |
+| `react-chorus` (`<Chorus>`) | 211.4 kB | 68.1 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
+| `react-chorus/headless` | 211.7 kB | 68.3 kB | Headless defaults, same behavior surface. |
+| `react-chorus` (`useChorusStream`) | 64.8 kB | 19.3 kB | Root hook import; CI fails if it pulls UI, Markdown, or icon dependencies. |
 | `react-chorus` (`Markdown`) | 75.7 kB | 25.6 kB | Standalone Markdown renderer; includes Markdown parsing/sanitization, not chat icons. |
 | `react-chorus` (`ChatWindow`) | 127.2 kB | 42.3 kB | Transcript renderer with Markdown and message action icons, without the composer/widget shell. |
 | `react-chorus` (`ConversationList`) | 8.7 kB | 3.0 kB | Conversation sidebar component only; no Markdown/icon graph. |
-| `react-chorus/transport` | 5.8 kB | 2.5 kB | Transport factories only; no React/UI/Markdown runtime. |
-| `react-chorus/provider-requests` | 10.9 kB | 3.4 kB | Provider request mappers and tool serializers; no React/UI/Markdown runtime. |
+| `react-chorus/transport` | 6.3 kB | 2.6 kB | Transport factories only; no React/UI/Markdown runtime. |
+| `react-chorus/provider-requests` | 11.2 kB | 3.5 kB | Provider request mappers and tool serializers; no React/UI/Markdown runtime. |
 | `react-chorus/server` | 0.7 kB | 0.4 kB | SSE framing helpers for proxy routes (headers, encode/format, [DONE], error envelope); no React/UI runtime. |
 | Lazy `highlight.js` runtime | 891.4 kB | 295.9 kB | Async code-fence chunk, never part of initial JS. |
 
 `highlight.js` is only fetched the first time a fenced code block (` ``` ` or `~~~`) appears in rendered text. The matching GitHub dark/light token-color stylesheet is also injected on demand based on `codeBlockTheme`; code renders immediately as plain text and is re-rendered with syntax highlighting once the chunk arrives. While an assistant message is actively streaming, Chorus renders that growing message as React-escaped plain text and switches to full Markdown parsing/sanitization when the stream finalizes.
 
-The playground has a separate budget because it intentionally bundles a complete demo app. `npm run build:playground` also runs `npm run verify:playground-size`, writes `.cache/react-chorus/playground-bundle-size-report.json`, and checks this paragraph. The current playground initial JS graph is 426.6 kB / 134.1 kB gzip and its largest lazy chunk (highlight.js) is 890.9 kB / 295.7 kB gzip. Vite's chunk warning limit is raised to that documented lazy budget so the playground build stays free of Vite chunk warnings while the budget script tracks regressions.
+The playground has a separate budget because it intentionally bundles a complete demo app. `npm run build:playground` also runs `npm run verify:playground-size`, writes `.cache/react-chorus/playground-bundle-size-report.json`, and checks this paragraph. The current playground initial JS graph is 433.2 kB / 135.5 kB gzip and its largest lazy chunk (highlight.js) is 890.9 kB / 295.7 kB gzip. Vite's chunk warning limit is raised to that documented lazy budget so the playground build stays free of Vite chunk warnings while the budget script tracks regressions.
 
 To refresh the published size claims after dependency or feature changes, run `npm run build`, `npm run verify:bundle-size`, and `npm run build:playground`, then copy the updated values from stdout or the `.cache/react-chorus/*-bundle-size-report.json` files into this section. The verification commands may fail until the README values are updated to match their reports.
 
