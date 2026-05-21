@@ -15,6 +15,7 @@ export interface Palette {
   errorBg?: string; errorBorder?: string; errorText?: string;
   toolBorder?: string; toolHeaderBg?: string; toolHeaderText?: string; toolHeaderHover?: string;
   toolNameText?: string; toolBodyBg?: string; toolLabelText?: string; toolCodeText?: string;
+  toolRunningText?: string;
 }
 
 /**
@@ -39,5 +40,6 @@ export function styleVarsFromPalette(p?: Palette): CSSProperties {
   set('--chorus-error-bg', p.errorBg); set('--chorus-error-border', p.errorBorder); set('--chorus-error-text', p.errorText);
   set('--chorus-tool-border', p.toolBorder); set('--chorus-tool-header-bg', p.toolHeaderBg); set('--chorus-tool-header-text', p.toolHeaderText); set('--chorus-tool-header-hover', p.toolHeaderHover);
   set('--chorus-tool-name-text', p.toolNameText); set('--chorus-tool-body-bg', p.toolBodyBg); set('--chorus-tool-label-text', p.toolLabelText); set('--chorus-tool-code-text', p.toolCodeText);
+  set('--chorus-tool-running-text', p.toolRunningText);
   return v;
 }

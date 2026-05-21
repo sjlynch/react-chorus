@@ -2302,7 +2302,7 @@ Reasoning blocks reuse existing palette variables (`--chorus-chat-bg`, `--chorus
 
 ### CSS custom properties for tool blocks
 
-Built-in tool call blocks can be themed through palette keys (`toolBorder`, `toolHeaderBg`, `toolHeaderText`, `toolHeaderHover`, `toolNameText`, `toolBodyBg`, `toolLabelText`, and `toolCodeText`). For advanced CSS-only overrides, use the underlying CSS variables directly:
+Built-in tool call blocks can be themed through palette keys (`toolBorder`, `toolHeaderBg`, `toolHeaderText`, `toolHeaderHover`, `toolNameText`, `toolBodyBg`, `toolLabelText`, `toolCodeText`, and `toolRunningText`). For advanced CSS-only overrides, use the underlying CSS variables directly:
 
 ```css
 :root {
@@ -2314,6 +2314,7 @@ Built-in tool call blocks can be themed through palette keys (`toolBorder`, `too
   --chorus-tool-body-bg: #111;
   --chorus-tool-label-text: #666;
   --chorus-tool-code-text: #e6edf3;
+  --chorus-tool-running-text: #a3a3a3; /* "Running…" status while a call is in flight */
 }
 ```
 
@@ -2358,7 +2359,7 @@ Theming resolves through the **standard CSS custom-property cascade** — there 
 
 So `<ChorusTheme palette={A}><Chorus palette={B} /></ChorusTheme>` renders `<Chorus>` with `B` winning, falling back to `A` for any key `B` omits, then to host CSS variables, then to the built-in defaults.
 
-Available palette keys: `chatBg`, `chatText`, `border`, `assistantBubbleBg`, `assistantText`, `assistantBorder`, `userBubbleBg`, `userText`, `userBorder`, `inputAreaBg`, `inputBg`, `inputText`, `inputBorder`, `sendButtonBg`, `sendButtonText`, `focusRing`, `actionText`, `actionHoverBg`, `actionHoverText`, `errorBg`, `errorBorder`, `errorText`, `toolBorder`, `toolHeaderBg`, `toolHeaderText`, `toolHeaderHover`, `toolNameText`, `toolBodyBg`, `toolLabelText`, `toolCodeText`.
+Available palette keys: `chatBg`, `chatText`, `border`, `assistantBubbleBg`, `assistantText`, `assistantBorder`, `userBubbleBg`, `userText`, `userBorder`, `inputAreaBg`, `inputBg`, `inputText`, `inputBorder`, `sendButtonBg`, `sendButtonText`, `focusRing`, `actionText`, `actionHoverBg`, `actionHoverText`, `errorBg`, `errorBorder`, `errorText`, `toolBorder`, `toolHeaderBg`, `toolHeaderText`, `toolHeaderHover`, `toolNameText`, `toolBodyBg`, `toolLabelText`, `toolCodeText`, `toolRunningText`.
 
 ### Reduced motion
 
@@ -2385,6 +2386,8 @@ import { ChatWindow, ChatInput, ChorusTheme, Markdown } from 'react-chorus';
 ### Headless subpath
 
 Import from `react-chorus/headless` when you want semantic markup and behavior without default styling. The headless subpath preserves class names as styling hooks, and its `Chorus`, `ChatWindow`, `MessageBubble`, `ConversationList`, and `Markdown` exports default `headless={true}` so Markdown styles and syntax-highlight theme CSS are not injected unless you explicitly pass `headless={false}`. It re-exports the same public message, attachment, upload, streaming, and persistence types as the root entry point so `ChatInput` handlers can be typed from the subpath alone.
+
+When `headless` is in effect, the `ChatWindow` and `ConversationList` roots also carry a `--headless` modifier class (`chorus-window--headless` and `chorus-conversation-list--headless`) alongside their base class, so a stylesheet can target the headless build specifically (for example, to opt those roots into a custom layout).
 
 Because `showJumpToBottomButton` defaults to `!headless`, the floating jump button is off on the headless exports. Pass `showJumpToBottomButton={true}` to opt the built-in button back in, or leave it off and render your own jump-to-latest UI from the same "auto-scroll paused" + "has unread activity" signals the built-in button reacts to — track them with a scroll listener on the `ChatWindow` ref (the built-in `useAutoScroll` helper compares `scrollHeight - scrollTop - clientHeight` against a 48 px near-bottom threshold and flags unread activity when a new message arrives while paused).
 

@@ -52,6 +52,13 @@ describe('ChatWindow rendering behavior', () => {
     expect(transcript.style.getPropertyValue('--chorus-user-bg')).toBe('');
     expect(transcript.style.borderRadius).toBe('4px');
   });
+  it('adds the chorus-window--headless hook class only in headless mode', () => {
+    const { rerender } = render(<ChatWindow messages={[USER_MSG]} data-testid="chat-window" />);
+    expect(screen.getByTestId('chat-window')).not.toHaveClass('chorus-window--headless');
+
+    rerender(<ChatWindow messages={[USER_MSG]} data-testid="chat-window" headless />);
+    expect(screen.getByTestId('chat-window')).toHaveClass('chorus-window--headless');
+  });
   it('builds activity keys for trailing emoji without lone surrogates', () => {
     const value = `${'x'.repeat(23)}\u{1F44B}`;
     const key = stringActivityKey(value);
