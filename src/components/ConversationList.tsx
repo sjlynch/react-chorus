@@ -132,7 +132,11 @@ export function ConversationList({
         </button>
       )}
 
-      <div className="chorus-conversation-items" role={conversations.length === 0 ? undefined : 'list'} ref={itemsRef} tabIndex={-1}>
+      {/* `aria-label` is stable across empty/non-empty: when the list empties
+          after a delete, `role` drops to `undefined` and the post-delete focus
+          effect moves focus onto this container — without a label a screen
+          reader would announce a bare, role-less <div>. */}
+      <div className="chorus-conversation-items" role={conversations.length === 0 ? undefined : 'list'} aria-label={labels.navAriaLabel} ref={itemsRef} tabIndex={-1}>
         {conversations.length === 0 && <div className="chorus-conversation-empty">{resolvedEmpty}</div>}
         {orderedConversations.map(conversation => {
           const active = conversation.id === activeId;

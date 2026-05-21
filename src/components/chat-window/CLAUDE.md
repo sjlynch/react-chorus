@@ -35,6 +35,16 @@ Re-pinning is gated by `shouldAutoScrollRef.current`, so a user who
 scrolled away still sees the jump-to-bottom button (via
 `hasUnreadActivity`) instead of getting yanked back.
 
+`onScroll` distinguishes scroll _direction_ via `lastScrollTopRef` (the
+scrollTop at the end of the previous scroll event — content growth never
+moves scrollTop, so it always equals scrollTop just before the current
+event). Any user-originated **upward** scroll pauses pinning immediately,
+even one smaller than `SCROLL_BOTTOM_THRESHOLD_PX`: during fast streaming
+the resize-driven repin would otherwise re-pin every frame until the user
+crossed 48px in a single gesture. The 48px threshold applies only to
+**re-arming** — a downward gesture that lands back near the bottom
+rejoins auto-scroll.
+
 Every automatic pin (the `activityKey` layout effect and the
 `ResizeObserver` repin) runs through `pinToBottom`, which arms a
 `programmaticScrollRef` flag — but only when `scrollTop` actually moves,
