@@ -13,6 +13,10 @@ export function useAutoScroll<TElement extends HTMLElement>(activityKey: string,
   // Set just before an automatic pin so the scroll event the browser fires in
   // response is not mistaken for the user choosing to leave/rejoin the bottom.
   const programmaticScrollRef = React.useRef(false);
+  // scrollTop as of the previous scroll event. Content growth alone never
+  // moves scrollTop, so this always equals scrollTop before the current
+  // event — letting onScroll tell a user's gesture direction precisely.
+  const lastScrollTopRef = React.useRef(0);
   const [hasUnreadActivity, setHasUnreadActivity] = React.useState(false);
   const [isAutoScrollPaused, setIsAutoScrollPaused] = React.useState(false);
 
@@ -51,8 +55,22 @@ export function useAutoScroll<TElement extends HTMLElement>(activityKey: string,
       // not re-arm auto-scroll after the user has deliberately scrolled away.
       if (programmaticScrollRef.current) {
         programmaticScrollRef.current = false;
+        lastScrollTopRef.current = el.scrollTop;
         return;
       }
+      const scrolledUp = el.scrollTop < lastScrollTopRef.current;
+      lastScrollTopRef.current = el.scrollTop;
+      // Any user-originated upward scroll pauses pinning immediately, even one
+      // smaller than SCROLL_BOTTOM_THRESHOLD_PX. During fast streaming the
+      // resize-driven repin would otherwise yank the user back every frame
+      // until they cross 48px in a single gesture — the transcript feels stuck.
+      if (scrolledUp) {
+        shouldAutoScrollRef.current = false;
+        setIsAutoScrollPaused(true);
+        return;
+      }
+      // The 48px threshold only governs RE-ARMING: a downward gesture that
+      // lands back near the bottom rejoins auto-scroll.
       const nearBottom = isNearBottom(el);
       shouldAutoScrollRef.current = nearBottom;
       setIsAutoScrollPaused(!nearBottom);
