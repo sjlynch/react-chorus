@@ -226,7 +226,7 @@ export default function App() {
 
 For reusable callbacks, import `ChorusOnSend<TMeta>` or the lower-level `ChorusSendHelpers` type instead of duplicating the helper shape. `ChorusOnSend<TMeta>` preserves your `Message<TMeta>.metadata` type through the `messages` argument and returned assistant message. If you pass `systemPrompt`, read it from `helpers.systemPrompt`; Chorus intentionally does not prepend it to `messages` on the `onSend` path so custom senders that already manage system messages do not get duplicates.
 
-For a non-streaming client, `onSend` may return a complete assistant `Message`. Chorus appends it after the user message (and after `minAssistantDelayMs`):
+For a non-streaming client, `onSend` may return a complete assistant `Message`. Chorus appends it to the **live** transcript when the promise resolves (after `minAssistantDelayMs`). The `messages` argument is a snapshot taken at send time, so do not mutate the transcript while an `onSend` is in flight — resolving a delete confirmation, re-deriving the controlled array in `onChange`, or a persistence load mid-send lands the returned message on a transcript that no longer matches what `onSend` saw. Stream via `helpers.appendAssistant()` instead if the transcript can change during the turn:
 
 ```tsx
 <Chorus
@@ -1260,7 +1260,7 @@ The `attachments` slice localizes the attachment composer end-to-end: chip remov
 |--------|-------------|
 | `appendAssistant(chunk)` | Append a text chunk to the current assistant message. Chunks are buffered until `minAssistantDelayMs` has elapsed before the first token is shown. |
 | `appendReasoning(chunk)` | Append a reasoning/thinking chunk to the current assistant message. |
-| `appendToolDelta(delta)` | Create/update a `role: 'tool'` message from an accumulated connector tool delta. |
+| `appendToolDelta(delta)` | Create/update a `role: 'tool'` row from an accumulated connector tool delta. **Presentation only** — it does not execute registered `tools` handlers, fire `onToolCall`/`onToolDelta`, or drive the auto-continue loop, so `toolCall.output` stays unset. On the `onSend` path you run the tool yourself, then call `appendToolDelta` again with the same `delta.id` and an `output` to fill the row and `appendAssistant` for the follow-up turn. |
 | `streamCallbacks()` | Convenience helper returning `{ onChunk, onReasoning, onToolDelta, onWarning, onMetadata, onDone }` for `useChorusStream(...).send()`. `onWarning` forwards non-fatal connector warnings to the `<Chorus onStreamWarning>` prop and `onMetadata` forwards free-form provider metadata to the `<Chorus onStreamMetadata>` prop. It is present at runtime; optional chaining keeps older hand-written helper mocks type-compatible. |
 | `finalizeAssistant()` | Mark the assistant message complete. If first-token chunks are still buffered, completion waits until they flush. |
 | `signal` | `AbortSignal` — aborted when Stop, clear-while-sending, or a superseding session cancels the active send. |
