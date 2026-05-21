@@ -59,6 +59,9 @@ function useMarkdownStyles(headless: boolean) {
     applyChorusStyleNonce(style);
     style.textContent =
       `.chorus-md.chorus-md-streaming{white-space:pre-wrap}
+       .chorus-md table{border-collapse:collapse;margin:8px 0;max-width:100%;font-size:inherit;line-height:1.4}
+       .chorus-md th,.chorus-md td{border:1px solid var(--chorus-md-table-border,rgba(128,128,128,0.45));padding:6px 11px;text-align:start;vertical-align:top}
+       .chorus-md th{font-weight:600;background:var(--chorus-md-table-header-bg,rgba(128,128,128,0.16))}
        .chorus-md .chorus-codeblock{position:relative;margin:8px 0;border-radius:8px;overflow:auto;border:1px solid var(--chorus-code-border,#30363d)}
        .chorus-md .chorus-codeblock pre{margin:0;padding:12px 16px;background:transparent}
        .chorus-md .chorus-codeblock pre code.hljs{display:block;overflow-x:auto;padding:0;background:transparent}
