@@ -106,6 +106,11 @@ export function MessageActions({ actions, onEditRequested, labels = DEFAULT_MESS
       {actions.canDelete && actions.delete && (
         <button type="button" className="chorus-action-btn" onClick={actions.delete} title={labels.delete} aria-label={labels.delete}><Trash2 size={13} /></button>
       )}
+      {/* Polite live region: a Copy-button label change on an already-rendered,
+          non-focused button is not announced, so mirror the code-block
+          `chorus-copy-status` pattern and surface copy failures here. The text
+          is written and cleared on the same timer that drives `copyFailed`. */}
+      <span className="chorus-sr-only" role="status" aria-live="polite">{copyFailed ? labels.copyFailed : ''}</span>
     </div>
   );
 }

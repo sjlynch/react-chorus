@@ -50,7 +50,7 @@ and frames the Gemini SDK stream with `react-chorus/server`:
 import express from 'express';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { toGeminiGenerateContentBody } from 'react-chorus/provider-requests';
-import { formatSSEError, formatSSEEvent, sseHeaders } from 'react-chorus/server';
+import { formatSSEDone, formatSSEError, formatSSEEvent, sseHeaders } from 'react-chorus/server';
 
 const app = express();
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY); // keep server-side
@@ -68,6 +68,9 @@ app.post('/api/chat', async (req, res) => {
     for await (const chunk of result.stream) {
       res.write(formatSSEEvent(chunk));
     }
+    // Always emit `[DONE]` — a turn that ends without a STOP/MAX_TOKENS
+    // finishReason would otherwise leave the client waiting.
+    res.write(formatSSEDone());
   } catch (err) {
     res.write(formatSSEError(err));
   } finally {

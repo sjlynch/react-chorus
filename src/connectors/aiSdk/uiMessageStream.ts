@@ -95,7 +95,8 @@ export function uiMessageStreamResult(state: AiSdkConnectorState, obj: Record<st
 
   if (type === 'tool-output-available' || type === 'tool-result') {
     const output = obj.output ?? obj.result;
-    const toolDelta = toolDeltaFromToolResult(state, type, obj.toolCallId, output);
+    const hasOutput = hasOwn(obj, 'output') || hasOwn(obj, 'result');
+    const toolDelta = toolDeltaFromToolResult(state, type, obj.toolCallId, output, hasOutput);
     return toolDelta ? { toolDelta } : null;
   }
 
