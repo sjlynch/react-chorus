@@ -44,6 +44,21 @@ describe('Gemini functionResponse fallback when no output is present', () => {
     ]);
   });
 
+  it('falls back to safe text context instead of throwing on a tool message with no toolCall', () => {
+    // `ToolMessage.toolCall` is required at the type level, but the request
+    // mappers tolerate loose runtime history (raw JSON, hand-built entries, a
+    // connector bug). A `{ role: 'tool' }` entry with no `toolCall` must reach
+    // the guarded text fallback, not crash inside `extractToolBlock`.
+    const history = [
+      { id: 'tool', role: 'tool', text: 'tool ran but lost its call' },
+    ] as Message[];
+
+    expect(() => toGeminiContents(history)).not.toThrow();
+    expect(toGeminiContents(history)).toEqual([
+      { role: 'user', parts: [{ text: 'Tool result:\ntool ran but lost its call' }] },
+    ]);
+  });
+
   it('honors an explicit toolCall.output of null instead of falling back to message text', () => {
     // A tool that legitimately returned null. `hasOwn` (via the shared
     // `toolOutputValue` helper) must use the explicit null rather than echoing
