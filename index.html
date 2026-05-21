@@ -6,6 +6,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="react-chorus playground for streaming AI chat UI components." />
     <title>react-chorus Playground</title>
+    <style>
+      /* Reset the browser-default body margin so the 100dvh app shell does not
+         overflow the viewport and show a stray outer scrollbar. playground.css
+         also resets this, but it loads with the JS bundle — this inline copy
+         applies at parse time so there is no scrollbar flash before then. */
+      body {
+        margin: 0;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>

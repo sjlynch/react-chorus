@@ -39,7 +39,8 @@ describe('useRAFQueue', () => {
 
     act(() => { fireRAF(); });
     expect(flush).toHaveBeenCalledTimes(1);
-    expect(flush).toHaveBeenCalledWith('foobar');
+    // A normal RAF-driven flush is not an unmount flush.
+    expect(flush).toHaveBeenCalledWith('foobar', false);
   });
 
   it('flushes pending chunks on unmount instead of discarding them', () => {
@@ -56,7 +57,9 @@ describe('useRAFQueue', () => {
     unmount();
 
     expect(flush).toHaveBeenCalledTimes(1);
-    expect(flush).toHaveBeenCalledWith('mid-token');
+    // The unmount flush is tagged so the callback can route it into persistence
+    // only, without invoking a controlled host's `onChange` after teardown.
+    expect(flush).toHaveBeenCalledWith('mid-token', true);
     // The scheduled frame is also cancelled so it cannot double-flush later.
     expect(cafSpy).toHaveBeenCalled();
   });
@@ -89,7 +92,8 @@ describe('useRAFQueue', () => {
     act(() => { result.current.enqueue('sync'); });
     act(() => { result.current.cancelPending(true); });
 
-    expect(flush).toHaveBeenCalledWith('sync');
+    // A manual cancelPending(true) is not an unmount flush.
+    expect(flush).toHaveBeenCalledWith('sync', false);
   });
 
   it('cancelPending(false) discards the queue without flushing', () => {

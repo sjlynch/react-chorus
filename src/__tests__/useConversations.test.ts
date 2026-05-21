@@ -182,6 +182,26 @@ describe('useConversations', () => {
     expect(result.current.activeId).toBe('b');
   });
 
+  it('drops a stored index entry with an empty-string id during parse', () => {
+    const storage = makeSyncStorage({
+      'chorus-conversations-index': JSON.stringify({
+        activeId: 'b',
+        conversations: [
+          { id: '', title: 'Blank id', createdAt: '2026-05-14T00:00:00.000Z', updatedAt: '2026-05-14T00:00:00.000Z' },
+          { id: '   ', title: 'Whitespace id', createdAt: '2026-05-14T00:00:00.000Z', updatedAt: '2026-05-14T00:00:00.000Z' },
+          { id: 'b', title: 'B', createdAt: '2026-05-14T00:00:01.000Z', updatedAt: '2026-05-14T00:00:01.000Z' },
+        ],
+      }),
+    });
+
+    const { result } = renderHook(() => useConversations({ storage }));
+
+    // A zero-length or blank id collapses getPersistenceKey() to the bare
+    // messageKeyPrefix, so such entries are dropped like a malformed message.
+    expect(result.current.conversations.map(conversation => conversation.id)).toEqual(['b']);
+    expect(result.current.activeId).toBe('b');
+  });
+
   it('preserves legacy index entries that are missing timestamps', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const storage = makeSyncStorage({
@@ -357,6 +377,31 @@ describe('useConversations', () => {
       title: 'Workspace question',
       pristine: false,
     }));
+  });
+
+  it('titles an assistant-first conversation when includeRoles allows the assistant role', () => {
+    const storage = makeSyncStorage();
+    const { result } = renderHook(() => useConversations({
+      storage,
+      createId: () => 'abc',
+      now: () => '2026-05-14T00:00:00.000Z',
+      defaultTitle: 'New chat',
+    }));
+
+    act(() => { result.current.createConversation(); });
+
+    const seeded: Pick<Message, 'role' | 'text'>[] = [
+      { role: 'system', text: 'You are a helpful assistant.' },
+      { role: 'assistant', text: 'Hi! How can I help you today?' },
+    ];
+
+    // Default (user-only) sourcing ignores the assistant greeting.
+    act(() => result.current.renameFromFirstMessage('abc', seeded));
+    expect(result.current.conversations[0].title).toBe('New chat');
+
+    // includeRoles lets the title come from the first assistant message.
+    act(() => result.current.renameFromFirstMessage('abc', seeded, { includeRoles: ['assistant'] }));
+    expect(result.current.conversations[0].title).toBe('Hi! How can I help you today?');
   });
 
   it('surfaces invalid index JSON through error and onError while falling back to empty state', async () => {
@@ -627,6 +672,69 @@ describe('useConversations', () => {
     }));
     expect(result.current.error?.cause).toBe(deleteError);
     expect(onError).toHaveBeenCalledWith(expect.objectContaining({ operation: 'delete', key: 'chorus-conversation:abc' }));
+  });
+
+  it('reports a fallback transcript-delete (no removeItem) setItem failure as a delete error', () => {
+    const deleteError = new Error('quota exceeded');
+    const onError = vi.fn();
+    const store: Record<string, string> = {};
+    // Adapter with no removeItem: transcript deletion falls back to
+    // setItem(key, '[]'). A failure of that fallback is still classified as a
+    // 'delete' error (matching the removeItem path) so a later successful index
+    // write cannot dismiss it — see the "Known divergence" in conversations/CLAUDE.md.
+    const storage: StorageAdapter = {
+      getItem: (key) => store[key] ?? null,
+      setItem: (key, value) => {
+        if (key === 'chorus-conversation:abc') throw deleteError;
+        store[key] = value;
+      },
+    };
+    const { result } = renderHook(() => useConversations({ storage, onError, createId: () => 'abc' }));
+
+    act(() => { result.current.createConversation('Delete me'); });
+    act(() => result.current.deleteConversation('abc'));
+
+    expect(result.current.conversations).toEqual([]);
+    expect(result.current.error).toEqual(expect.objectContaining({
+      operation: 'delete',
+      key: 'chorus-conversation:abc',
+      conversationId: 'abc',
+    }));
+    expect(result.current.error?.cause).toBe(deleteError);
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ operation: 'delete', key: 'chorus-conversation:abc' }));
+  });
+
+  it('skips setError but still notifies onError when an async index write rejects after unmount', async () => {
+    const writeError = new Error('quota exceeded');
+    const onError = vi.fn();
+    const writeGate = deferred<void>();
+    const store: Record<string, string> = {};
+    const storage: StorageAdapter = {
+      getItem: (key) => store[key] ?? null,
+      setItem: (key, value) => {
+        store[key] = value;
+        return writeGate.promise;
+      },
+      removeItem: () => {},
+    };
+    const { result, unmount } = renderHook(() => useConversations({
+      storage,
+      onError,
+      createId: () => 'abc',
+      now: () => '2026-05-21T00:00:00.000Z',
+    }));
+
+    act(() => { result.current.createConversation('First'); });
+    unmount();
+
+    // The index write rejects only after the component unmounted: setError is
+    // gated on mountedRef, but onError still fires so the host can log it.
+    await act(async () => {
+      writeGate.reject(writeError);
+      await flushMicrotasks();
+    });
+
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ operation: 'write' }));
   });
 
   it('clears a stale write error once a later index write succeeds', async () => {

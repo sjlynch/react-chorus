@@ -1,5 +1,5 @@
 import type { ConversationStorageError, ConversationStorageOperation } from './types';
-import { toError } from '../../utils/errors';
+import { wrapError } from '../../utils/errors';
 
 export function createConversationStorageError(
   key: string,
@@ -7,11 +7,13 @@ export function createConversationStorageError(
   error: unknown,
   conversationId?: string,
 ): ConversationStorageError {
-  const nextError = toError(error) as ConversationStorageError;
+  // wrapError returns a fresh Error every time (with the original kept as
+  // `cause`), so attaching metadata here never mutates a shared/frozen
+  // DOMException and never clobbers the original's `cause` with a self-reference.
+  const nextError = wrapError(error) as ConversationStorageError;
   nextError.key = key;
   nextError.operation = operation;
   nextError.conversationId = conversationId;
-  nextError.cause = error;
   return nextError;
 }
 

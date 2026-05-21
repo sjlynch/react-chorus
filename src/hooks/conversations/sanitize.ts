@@ -19,7 +19,14 @@ export interface SanitizedConversation {
 export function isConversationSummary(value: unknown): value is ConversationSummaryCandidate {
   return typeof value === 'object'
     && value !== null
+    // Trim before the emptiness check: a zero-length or whitespace-only `id`
+    // survives a bare `typeof === 'string'` test, but `getPersistenceKey('')`
+    // then collapses to the bare `messageKeyPrefix` — two such entries share
+    // one transcript key and the bare prefix can collide with unrelated app
+    // storage. Drop the entry like a malformed message (see messageCodec's
+    // `validateStoredMessage`, which rejects an empty message `id`).
     && typeof (value as ConversationSummaryCandidate).id === 'string'
+    && (value as ConversationSummaryCandidate).id.trim().length > 0
     && typeof (value as ConversationSummaryCandidate).title === 'string';
 }
 
