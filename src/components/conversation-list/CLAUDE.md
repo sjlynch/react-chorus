@@ -14,4 +14,4 @@ Module map:
 
 `ConversationList.tsx` owns post-mutation focus management: it re-focuses the rename trigger after rename mode exits and moves focus to a sibling row's select control (or the list container) after a delete, and renders the polite `role="status"` live region that announces deletions.
 
-`useDeleteConversationConfirmation.ts` intentionally duplicates small async/dev helpers instead of importing shared utilities. Importing `utils/async` or the shared dev-mode gate would couple this component to the assistant-session chunk and can change the tracked ConversationList bundle-size numbers. Keep the bundle-isolation comments with any future duplicate helper changes.
+`useDeleteConversationConfirmation.ts` keeps a local `isPromiseLike` helper instead of importing `utils/async`, whose chunk would couple this component to the assistant-session tree and shift the tracked ConversationList bundle-size numbers. Keep the bundle-isolation comment with any future `isPromiseLike` change. The dev-mode gate, by contrast, is the shared `isChorusDevMode` from `src/utils/devMode.ts` — a zero-dependency leaf that is safe to import directly.
