@@ -102,6 +102,7 @@ function anthropicContentBlocks<TMeta>(
   options: ProviderMappingOptions<TMeta>,
 ): AnthropicContentBlock[] {
   return messageContentParts<TMeta, AnthropicContentBlock>(message, options, {
+    provider: 'Anthropic',
     createTextPart: text => ({ type: 'text', text }),
     mapAttachment: anthropicAttachmentBlock,
   });

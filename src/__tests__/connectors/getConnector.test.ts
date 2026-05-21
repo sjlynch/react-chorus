@@ -68,7 +68,7 @@ describe('getConnector', () => {
     expect(warn).toHaveBeenCalledTimes(3);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('the `anthropic` connector does not accept them'));
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('the default `auto` connector does not accept them'));
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('a custom connector object does not accept them'));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Chorus has no mechanism to forward connector options to a custom connector object'));
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("only apply to `getConnector('openai', ...)`"));
 
     // The "openai" connector consumes options without warning.

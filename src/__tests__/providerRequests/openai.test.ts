@@ -366,4 +366,16 @@ describe('OpenAI tool-call arguments are always valid JSON', () => {
     expect(chatToolArguments(toolCallHistory({ q: 'x' }))).toBe('{"q":"x"}');
     expect(responsesToolArguments(toolCallHistory({ q: 'x' }))).toBe('{"q":"x"}');
   });
+
+  it('wraps a JSON-array string input as an object, never a bare top-level array', () => {
+    const arrayJson = '["a","b"]';
+
+    expect(JSON.parse(chatToolArguments(toolCallHistory(arrayJson)))).toEqual({ input: ['a', 'b'] });
+    expect(JSON.parse(responsesToolArguments(toolCallHistory(arrayJson)))).toEqual({ input: ['a', 'b'] });
+  });
+
+  it('wraps a bare array input as an object, mirroring objectToolInput', () => {
+    expect(JSON.parse(chatToolArguments(toolCallHistory(['a', 'b'])))).toEqual({ input: ['a', 'b'] });
+    expect(JSON.parse(responsesToolArguments(toolCallHistory(['a', 'b'])))).toEqual({ input: ['a', 'b'] });
+  });
 });

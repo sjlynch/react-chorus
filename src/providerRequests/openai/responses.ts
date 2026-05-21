@@ -1,6 +1,6 @@
 import type { Attachment, Message } from '../../types';
-import { isOpenAIImageAttachment, openAIImageUrlFromAttachment } from '../attachments';
-import { messageContentParts, messageTextParts } from '../contentParts';
+import { isOpenAIImageAttachment, openAIImageDetail, openAIImageUrlFromAttachment } from '../attachments';
+import { messageContentParts } from '../contentParts';
 import { stripOpenAIResponsesOptions } from '../options';
 import { toolContextText, toolOutputText } from '../toolOutput';
 import { mapHistoryWithToolRuns } from '../toolRunMapper';
@@ -33,12 +33,19 @@ function openAIResponsesFunctionCall(message: Message<unknown>): OpenAIResponses
   };
 }
 
-function openAIResponsesFilePart(attachment: { id?: string; url?: string }): OpenAIResponsesInputFilePart | null {
+function openAIResponsesFilePart(attachment: Attachment): OpenAIResponsesInputFilePart | null {
   if (typeof attachment.id === 'string' && attachment.id) {
     return { type: 'input_file', file_id: attachment.id };
   }
-  if (typeof attachment.url === 'string' && attachment.url && !attachment.url.startsWith('data:')) {
-    return { type: 'input_file', file_url: attachment.url };
+  // Mirror the shared `fileUriFromAttachment` helper (which Gemini uses): a
+  // non-`data:` string in `.url` *or* `.data` is a valid file URL. The
+  // `Attachment.data` JSDoc documents that custom uploadAttachment handlers may
+  // store an uploaded URL / provider file id in `.data`, so consulting only
+  // `.url` here silently dropped a supported attachment shape.
+  for (const candidate of [attachment.url, attachment.data]) {
+    if (typeof candidate === 'string' && candidate && !candidate.startsWith('data:')) {
+      return { type: 'input_file', file_url: candidate };
+    }
   }
   return null;
 }
@@ -46,7 +53,9 @@ function openAIResponsesFilePart(attachment: { id?: string; url?: string }): Ope
 function openAIResponsesAttachmentPart(attachment: Attachment): OpenAIResponsesInputContentPart | null {
   if (isOpenAIImageAttachment(attachment)) {
     const imageUrl = openAIImageUrlFromAttachment(attachment);
-    return imageUrl ? { type: 'input_image', image_url: imageUrl } : null;
+    if (!imageUrl) return null;
+    const detail = openAIImageDetail(attachment);
+    return { type: 'input_image', image_url: imageUrl, ...(detail ? { detail } : {}) };
   }
 
   return openAIResponsesFilePart(attachment);
@@ -57,13 +66,24 @@ function openAIResponsesInputContent<TMeta>(
   options: ProviderMappingOptions<TMeta>,
 ): OpenAIResponsesInputContentPart[] {
   return messageContentParts<TMeta, OpenAIResponsesInputContentPart>(message, options, {
+    provider: 'OpenAI Responses',
     createTextPart: text => ({ type: 'input_text', text }),
     mapAttachment: openAIResponsesAttachmentPart,
   });
 }
 
-function openAIResponsesOutputContent<TMeta>(message: Message<TMeta>): OpenAIResponsesOutputTextPart[] {
-  return messageTextParts(message, text => ({ type: 'output_text', text }));
+function openAIResponsesOutputContent<TMeta>(
+  message: Message<TMeta>,
+  options: ProviderMappingOptions<TMeta>,
+): OpenAIResponsesOutputTextPart[] {
+  // Route assistant content through `messageContentParts` (no `mapAttachment`):
+  // the Responses assistant item only accepts `output_text`, so any attachment
+  // carried on an assistant turn surfaces as the observable unsupported-
+  // attachment text block with a dev warning instead of being silently dropped.
+  return messageContentParts<TMeta, OpenAIResponsesOutputTextPart>(message, options, {
+    provider: 'OpenAI Responses',
+    createTextPart: text => ({ type: 'output_text', text }),
+  });
 }
 
 function toOpenAIResponsesInputItem<TMeta>(
@@ -78,7 +98,7 @@ function toOpenAIResponsesInputItem<TMeta>(
   }
 
   if (message.role === 'assistant') {
-    const content = openAIResponsesOutputContent(message);
+    const content = openAIResponsesOutputContent(message, options);
     if (!content.length) return null;
     const item: OpenAIResponsesAssistantInputItem = { role: 'assistant', content };
     return item;

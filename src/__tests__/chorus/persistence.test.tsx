@@ -288,8 +288,13 @@ describe('Chorus', () => {
     await sendMessage(user, 'will persist');
 
     expect(screen.getByText('will persist')).toBeInTheDocument();
-    await waitFor(() => expect(onPersistenceError).toHaveBeenCalledWith(quotaError));
-    expect(warn).toHaveBeenCalledWith('[Chorus] Failed to persist messages.', quotaError);
+    await waitFor(() => expect(onPersistenceError).toHaveBeenCalledWith(
+      expect.objectContaining({ key: 'chat', operation: 'write', cause: quotaError }),
+    ));
+    expect(warn).toHaveBeenCalledWith(
+      '[Chorus] Failed to persist messages.',
+      expect.objectContaining({ key: 'chat', operation: 'write', cause: quotaError }),
+    );
     warn.mockRestore();
   });
 

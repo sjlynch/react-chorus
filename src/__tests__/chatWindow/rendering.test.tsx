@@ -435,6 +435,18 @@ describe('ChatWindow rendering behavior', () => {
     render(<ChatWindow messages={[TOOL_MSG]} showSystemMessages />);
     expect(screen.getByText('search')).toBeInTheDocument();
   });
+  it('renders a tool message\'s text summary above the ToolCallBlock', () => {
+    const toolWithText: Message = { ...TOOL_MSG, id: 't-text', text: 'Found 3 matching results.' };
+    render(<ChatWindow messages={[toolWithText]} showSystemMessages />);
+    expect(screen.getByText('Found 3 matching results.')).toBeInTheDocument();
+    expect(screen.getByText('search')).toBeInTheDocument();
+  });
+  it('omits the tool text bubble when text is empty or whitespace', () => {
+    const blankTool: Message = { ...TOOL_MSG, id: 't-blank', text: '   ' };
+    render(<ChatWindow messages={[blankTool]} showSystemMessages />);
+    expect(screen.queryByTestId('markdown')).not.toBeInTheDocument();
+    expect(screen.getByText('search')).toBeInTheDocument();
+  });
   it('shows a running status for an empty-bodied tool row inside the streaming turn', () => {
     const emptyTool: Message = { id: 't-empty', role: 'tool', text: '', toolCall: { name: 'lookup' } };
     render(
