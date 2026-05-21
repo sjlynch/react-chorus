@@ -5,7 +5,9 @@ Internals behind `createWebSocketTransport` (see `../createWebSocketTransport.ts
 ## Files
 
 - `transient.ts` — one WebSocket per send. Opens on call, sends the formatted payload on `onopen`, streams inbound frames into the response body, closes on done/abort.
-- `persistent.ts` — one shared socket across sends. Holds an `openWaiters` pool so concurrent sends share a single connect, tracks `activeStreams` for fan-out, exposes `transport.close()`, and registers a `FinalizationRegistry` finalizer to close the socket if the transport is GC'd.
+- `persistent.ts` — one shared socket across sends. Coordinates socket lifecycle, exposes `transport.close()`, and registers a `FinalizationRegistry` finalizer to close the socket if the transport is GC'd.
+- `openWaiters.ts` — waiter pool used by persistent mode so concurrent sends share a single connect and abort-before-open listeners are cleaned up consistently.
+- `persistentStreamRouter.ts` — persistent-mode active response stream registry, correlation-id router, close/error fan-out, and the one-time overlap dev warning.
 - `managedResponseStream.ts` — `ReadableStream` wrapper used by both modes. Idempotent `close`/`error`, swallows post-close enqueue, runs caller-supplied cleanup on cancel.
 - `shared.ts` — SSE event encoding, message decoding (string/Blob/ArrayBuffer/typed array), abort/close-code helpers, `safeCloseSocket`, `normalizeFormatMessageResult`.
 
