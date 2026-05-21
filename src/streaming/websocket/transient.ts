@@ -2,12 +2,23 @@ import type { Message } from '../../types';
 import type { FormatMessageResult, WebSocketTransport, WebSocketTransportOptions } from '../createWebSocketTransport';
 import { createManagedResponseStream } from './managedResponseStream';
 import { createAbnormalCloseError, createAbortError, createClosedBeforeOpenError, createTransportClosedError, encodeSSEDataEvent, isNormalCloseCode, normalizeFormatMessageResult, safeCloseSocket, toError, webSocketMessageToText } from './shared';
-import { isStreamDevMode } from '../internal/devMode';
 
 // Per-send handler that settles an in-flight send with an error: it errors the
 // response stream if the send already resolved, otherwise rejects the outer
 // promise. `closeCode`/`closeReason` are forwarded to the socket close frame.
 type TransientFailHandler = (error: unknown, closeCode?: number, closeReason?: string) => void;
+
+// Local duplicate of `isChorusDevMode` from `src/utils/devMode.ts`. Importing
+// the shared helper here would bundle the transport-only subpath with the
+// session/utils chunk and blow its tight size budget — the same trade-off
+// `persistent.ts` and `createFetchSSETransport.ts` document for these chunks.
+function isTransientWebSocketDevMode(): boolean {
+  try {
+    return typeof process !== 'undefined' && typeof process.env !== 'undefined' && process.env.NODE_ENV !== 'production';
+  } catch {
+    return false;
+  }
+}
 
 // Warn at most once per process when `correlate` is supplied without
 // `persistent: true`. Correlation routing only exists in persistent mode; a
@@ -28,7 +39,7 @@ export function createTransientWebSocketTransport<TMeta = Record<string, unknown
   const activeSends = new Map<WebSocket, TransientFailHandler>();
   const encoder = new TextEncoder();
 
-  if (opts?.correlate && !warnedCorrelateIgnoredInTransientMode && isStreamDevMode()) {
+  if (opts?.correlate && !warnedCorrelateIgnoredInTransientMode && isTransientWebSocketDevMode()) {
     warnedCorrelateIgnoredInTransientMode = true;
     console.warn(
       `[react-chorus] createWebSocketTransport: a \`correlate\` callback was provided `

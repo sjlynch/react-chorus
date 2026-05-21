@@ -1,7 +1,6 @@
 import React from 'react';
 import type { Message } from '../types';
 import { resolveChorusLabels } from '../labels/resolve';
-import { isChorusDevMode } from '../utils/devMode';
 import { useCanWriteTextToClipboard, writeTextToClipboard } from '../utils/messageCopy';
 import { visibleActivityKey } from './chat-window/activityKey';
 import { useMessageFeedbackState } from './chat-window/feedback';
@@ -20,6 +19,15 @@ export type { ChatWindowProps, RenderErrorContext, RenderMessageContext, RenderM
 export type { GetMessageFeedback, MessageBubbleProps, MessageBubbleSlots, MessageCopyResult, MessageFeedback, MessageMarkdownProps, MessageRenderActions, MessageTimestampFormatter } from './MessageRow';
 
 let didWarnShowSystemMessages = false;
+
+// Keep this local so hook-only chunks do not share a dev-mode module with ChatWindow.
+function isChorusDevMode() {
+  try {
+    return typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production';
+  } catch {
+    return false;
+  }
+}
 
 function ChatWindowInner<TMeta = Record<string, unknown>>({
   messages,

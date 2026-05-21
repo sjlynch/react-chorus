@@ -1,6 +1,17 @@
 import type { Message } from '../types';
 import type { Transport } from '../hooks/useChorusStream';
-import { isStreamDevMode } from './internal/devMode';
+
+// Local duplicate of `isChorusDevMode` from `src/utils/devMode.ts`. Importing the
+// shared helper (or `streaming/internal/devMode.ts`) would add a cross-chunk
+// dependency to the transport-only subpath and risk its tight size budget — the
+// same trade-off `websocket/persistent.ts` documents for this chunk.
+function isFetchSSETransportDevMode(): boolean {
+  try {
+    return typeof process !== 'undefined' && typeof process.env !== 'undefined' && process.env.NODE_ENV !== 'production';
+  } catch {
+    return false;
+  }
+}
 
 // Warn at most once per process when a `formatBody` serializer is paired with a
 // body-less method, mirroring `warnIgnoredConnectorOptions` in
@@ -58,7 +69,7 @@ export function createFetchSSETransport<TMeta = Record<string, unknown>>(
     bodyless &&
     hasCustomFormatBody &&
     !warnedFormatBodyIgnoredForBodylessMethod &&
-    isStreamDevMode()
+    isFetchSSETransportDevMode()
   ) {
     warnedFormatBodyIgnoredForBodylessMethod = true;
     console.warn(

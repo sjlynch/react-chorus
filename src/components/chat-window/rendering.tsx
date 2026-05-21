@@ -1,6 +1,5 @@
 import React from 'react';
 import { DEFAULT_TRANSCRIPT_LABELS } from '../../labels/transcript';
-import { isChorusDevMode } from '../../utils/devMode';
 import { MessageBubble, MessageRow } from '../MessageRow';
 
 // `renderMessage` roots that are react-chorus components rendering their own
@@ -9,8 +8,19 @@ import { MessageBubble, MessageRow } from '../MessageRow';
 // does not break `ChorusRef.scrollToMessage`, so it must not trigger a warning.
 const SELF_TAGGING_MESSAGE_ROOTS: ReadonlySet<unknown> = new Set([MessageBubble, MessageRow]);
 
-// Once-guard for the warning below; the dev-mode gate is the shared
-// `isChorusDevMode` from `src/utils/devMode.ts` (a zero-dependency leaf).
+// Inlined dev-mode gate + once-guard for the warning below. Importing the
+// shared `utils/warnings` helper here would drag its chunk (merged with the
+// assistant-session chunk) into the ChatWindow graph and blow its bundle-size
+// budget. `ChatWindow.tsx` and `conversation-list/useDeleteConversationConfirmation.ts`
+// inline the same gate for the same reason; see `src/utils/CLAUDE.md`.
+function isChorusDevMode() {
+  try {
+    return typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production';
+  } catch {
+    return false;
+  }
+}
+
 let didWarnNonHostMessageRoot = false;
 function warnNonHostMessageRootOnce(message: string) {
   if (didWarnNonHostMessageRoot || !isChorusDevMode()) return;

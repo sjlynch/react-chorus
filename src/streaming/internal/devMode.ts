@@ -1,15 +1,7 @@
-// Streaming/transport-side dev-mode leaf module, deliberately kept SEPARATE
-// from `src/utils/devMode.ts`. The streaming hook chunk (`useChorusStream`) and
-// the transport sub-bundles (`createFetchSSETransport`, `websocket/persistent`,
-// `websocket/transient`) import `isStreamDevMode`/`warnInDev` from here so they
-// never pull the utils-owned chunk into their graph and blow the tight
-// bundle-size budgets tracked in the root README.
-//
-// `isStreamDevMode` is therefore an intentional one-line duplicate of
-// `isChorusDevMode`. Do NOT "de-duplicate" it by importing from
-// `src/utils/devMode.ts`: that would re-introduce the exact cross-chunk
-// dependency this module exists to avoid. See `streamErrors.ts` for the same
-// rationale.
+// Streaming-only leaf module shared by `useChorusStream` and (transitively
+// via the hook) any other streaming-chunk consumer. Kept here so the hook
+// chunk does not need to import from `src/utils/devMode.ts` and pull in the
+// utils-owned chunk — see `streamErrors.ts` for the same rationale.
 
 export function isStreamDevMode(): boolean {
   try {
