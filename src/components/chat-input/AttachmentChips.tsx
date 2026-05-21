@@ -35,6 +35,9 @@ export function AttachmentChips({ attachments, disabled, onRemove, onRetry, labe
         const isImage = att.type.startsWith('image/');
         // Alt text is only meaningful for an attachment that actually resolved.
         const allowAltEditor = ready && isImage && !disabled && onAltChange;
+        // Open via `openAltEditor` once the user interacts (see the input's `onFocus`);
+        // the content-length clause only handles the first render of a pre-populated
+        // alt (e.g. restored from a draft) so the editor isn't hidden behind the button.
         const altEditorOpen = openAltEditor === uid || (allowAltEditor && typeof att.alt === 'string' && att.alt.length > 0);
         const chipImageAlt = att.alt && att.alt.length > 0 ? att.alt : att.name;
         // Drives `aria-describedby` so a screen-reader user hears the pending/failed
@@ -77,7 +80,14 @@ export function AttachmentChips({ attachments, disabled, onRemove, onRetry, labe
                 type="text"
                 className="chorus-attachment-alt-input"
                 value={att.alt ?? ''}
-                onChange={(e) => onAltChange(uid, e.target.value)}
+                // Pin the editor to this uid as soon as the user starts editing so it
+                // stays mounted even if they clear the field to empty mid-edit — the
+                // content-length fallback in `altEditorOpen` would otherwise unmount it.
+                onFocus={() => setOpenAltEditor(uid)}
+                onChange={(e) => {
+                  setOpenAltEditor(uid);
+                  onAltChange(uid, e.target.value);
+                }}
                 placeholder={labels.describeImagePlaceholder}
                 aria-label={labels.describeImageInputAriaLabel(att.name)}
                 autoFocus={openAltEditor === uid}

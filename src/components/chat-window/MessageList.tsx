@@ -1,7 +1,7 @@
 import React from 'react';
 import type { ResolvedChorusLabels } from '../../labels/types';
 import type { Message } from '../../types';
-import type { MarkdownSanitizer } from '../Markdown';
+import { Markdown, type MarkdownSanitizer } from '../Markdown';
 import { MessageActionControls, MessageRenderStateContext, MessageRenderStateProvider, MessageRow, MessageSpeakerLabel } from '../MessageRow';
 import type { MessageBubbleSlots, MessageCopyResult, MessageFeedback, MessageMarkdownProps, MessageRenderActions, MessageTimestampFormatter } from '../MessageRow';
 import { ToolCallBlock } from '../ToolCallBlock';
@@ -97,11 +97,31 @@ export function MessageList<TMeta = Record<string, unknown>>({
         const feedback = feedbackEnabled ? (variant: MessageFeedback | null) => onMessageFeedback(message, variant) : undefined;
         const defaultRender = (slots?: MessageBubbleSlots) => {
           if (message.role === 'tool') {
+            // `ToolMessage.text` is an optional host-authored summary of the tool
+            // result (see types.ts). Render it above the call block as finalized
+            // Markdown so a populated `text` is visible instead of silently
+            // dropped. It is not incrementally streamed by Chorus, so it is
+            // always parsed (streaming=false) regardless of the turn state.
+            const toolText = message.text ?? '';
+            const hasToolText = toolText.trim().length > 0;
             return (
               <div className="chorus-msg chorus-tool" data-chorus-message-id={message.id}>
                 <MessageSpeakerLabel role={message.role} speakers={resolvedLabels.speakers} />
                 {slots?.before}
                 {slots?.headerSlot}
+                {hasToolText && (
+                  <div className="chorus-bubble">
+                    <Markdown
+                      {...markdownProps}
+                      text={toolText}
+                      codeTheme={codeTheme}
+                      headless={headless}
+                      streaming={false}
+                      sanitizer={markdownSanitizer ?? markdownProps?.sanitizer}
+                      codeCopyLabels={resolvedLabels.codeCopy ?? markdownProps?.codeCopyLabels}
+                    />
+                  </div>
+                )}
                 <ToolCallBlock toolCall={message.toolCall} labels={resolvedLabels.toolCall} streaming={toolStreaming} />
                 {slots?.footerSlot}
                 {slots?.after}

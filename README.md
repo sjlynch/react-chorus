@@ -226,7 +226,7 @@ export default function App() {
 
 For reusable callbacks, import `ChorusOnSend<TMeta>` or the lower-level `ChorusSendHelpers` type instead of duplicating the helper shape. `ChorusOnSend<TMeta>` preserves your `Message<TMeta>.metadata` type through the `messages` argument and returned assistant message. If you pass `systemPrompt`, read it from `helpers.systemPrompt`; Chorus intentionally does not prepend it to `messages` on the `onSend` path so custom senders that already manage system messages do not get duplicates.
 
-For a non-streaming client, `onSend` may return a complete assistant `Message`. Chorus appends it after the user message (and after `minAssistantDelayMs`):
+For a non-streaming client, `onSend` may return a complete assistant `Message`. Chorus appends it to the **live** transcript when the promise resolves (after `minAssistantDelayMs`). The `messages` argument is a snapshot taken at send time, so do not mutate the transcript while an `onSend` is in flight — resolving a delete confirmation, re-deriving the controlled array in `onChange`, or a persistence load mid-send lands the returned message on a transcript that no longer matches what `onSend` saw. Stream via `helpers.appendAssistant()` instead if the transcript can change during the turn:
 
 ```tsx
 <Chorus
@@ -709,7 +709,7 @@ Example backend proxy (Express + `@google/generative-ai`):
 ```js
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { toGeminiGenerateContentBody } from 'react-chorus/provider-requests';
-import { formatSSEError, formatSSEEvent, sseHeaders } from 'react-chorus/server';
+import { formatSSEDone, formatSSEError, formatSSEEvent, sseHeaders } from 'react-chorus/server';
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY); // keep this server-side
 
@@ -725,6 +725,9 @@ app.post('/api/chat', async (req, res) => {
     for await (const chunk of result.stream) {
       res.write(formatSSEEvent(chunk));
     }
+    // Emit `[DONE]` so the client always sees a terminal frame — a Gemini turn
+    // that ends without a STOP/MAX_TOKENS finishReason would otherwise hang.
+    res.write(formatSSEDone());
   } catch (err) {
     res.write(formatSSEError(err));
   } finally {
@@ -801,7 +804,10 @@ export async function POST(request: Request) {
     messages: (body.history ?? []).map(m => ({ role: m.role as 'user' | 'assistant', content: m.text ?? '' })),
   });
 
-  const upstream = result.toDataStream(); // newline-delimited prefix lines
+  // AI SDK v4 exposes the data stream through `toDataStreamResponse()`, whose
+  // `Response.body` is the `ReadableStream` of newline-delimited prefix lines.
+  const upstream = result.toDataStreamResponse().body;
+  if (!upstream) return new Response('No stream body', { status: 500 });
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
   let buffered = '';
@@ -1091,7 +1097,7 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 
 | Prop | Type | Default | Description |
 |------|------|---------|-------------|
-| `transport` | `string \| Transport<TMeta>` | — | Simple path: URL to POST to, or a custom Transport function. Chorus handles all streaming. |
+| `transport` | `string \| FetchTransportInit<TMeta> \| Transport<TMeta>` | — | Simple path: a URL to POST to, a `{ url, headers, credentials, method, … }` config object (`FetchTransportInit`), or a custom Transport function. Chorus handles all streaming. |
 | `systemPrompt` | `string` | — | Hidden instruction for both send paths. With `transport`, Chorus prepends it as a `system` message in request history. With `onSend`, read it from `helpers.systemPrompt`; `messages` is left unchanged to avoid duplicates. |
 | `connector` | `Connector \| 'auto' \| 'openai' \| 'anthropic' \| 'gemini' \| 'ai-sdk'` | `'auto'` | SSE connector used to parse the stream. `'auto'` detects OpenAI, Anthropic, Gemini, and Vercel AI SDK frames; pass an explicit name when the format is known. |
 | `connectorOptions` | `OpenAIConnectorOptions` | — | Options forwarded to the built-in connector resolved from a `connector` string. Currently only the `'openai'` connector consumes options (e.g. `{ thinkTag }` for a custom reasoning tag pair). Ignored for other names and for custom `Connector` objects — build those with `createOpenAIConnector(options)`. |
@@ -1133,7 +1139,7 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `onStreamDone` | `({ assistantMessage, toolMessages, messages, response, reason, willContinue, iteration, maxToolIterations }) => void` | — | Called after each `transport` stream completes normally and tool handlers (if any) finish. Fires for tool-only turns where `onFinish` has no assistant message. `reason` is `'completed'`, `'tool-loop-continue'`, `'tool-loop-veto'`, or `'max-tool-iterations'` — use it to detect when `autoContinueTools` stops because the safety cap was reached. |
 | `onStreamWarning` | `(warning: ConnectorWarning) => void` | — | Observation hook for non-fatal connector warnings on the `transport` path (`{ code, message, payload? }`) — e.g. a `truncated` warning when the model hit its max-token limit, or safety-rating notices. The stream still completes normally (`onFinish`/`onStreamDone` fire as usual); use it to tell the user the response may be cut off or partially blocked. A throwing handler is warned in development and otherwise ignored. |
 | `onStreamMetadata` | `(metadata: Record<string, unknown>) => void` | — | Observation hook for free-form provider metadata on the `transport` path as connectors emit it — OpenAI Responses token `usage`, Anthropic `stopReason`/`stopSequence`, Gemini `safetyRatings`/`finishReason`, OpenAI Chat `finishReason`. Fires once per connector result that carries metadata, so it may be called several times per turn; the stream still completes normally. Wire it for usage/cost telemetry (e.g. a live budget meter) or to persist safety ratings. A throwing handler is warned in development and otherwise ignored. |
-| `onCopy` | `(message: Message<TMeta>) => void` | Clipboard copy when available | Overrides the built-in per-message Copy action. If omitted, Chorus copies `message.text` with `navigator.clipboard.writeText` when the Clipboard API is available. |
+| `onCopy` | `(message: Message<TMeta>) => MessageCopyResult` | Clipboard copy when available | Overrides the built-in per-message Copy action. Return `false` (or `Promise<false>`) to show the "Copy failed" indicator; return `void` to keep the assume-success behavior. If omitted, Chorus copies `message.text` with `navigator.clipboard.writeText` when the Clipboard API is available. |
 | `getMessageFeedback` | `(message: Message<TMeta>) => 'up' \| 'down' \| null \| undefined` | `message.metadata.feedback` | Seeds the pressed thumb state from persisted feedback. Return `null` for no selection; return `undefined` to fall back to `message.metadata.feedback` when it is `'up'` or `'down'`. |
 | `onFeedback` | `(message: Message<TMeta>, feedback: 'up' \| 'down' \| null) => void` | — | Enables built-in thumbs-up / thumbs-down per-message feedback actions and reports changes. Clicking the already-selected thumb toggles the rating off and reports `null` so a mis-click can be undone. |
 | `confirmDeleteMessage` | `({ message, messages }) => boolean \| void \| Promise<boolean \| void>` | — | Optional gate for built-in message delete actions. Return or resolve `false` to cancel; persistence is flushed only after deletion is confirmed. |
@@ -1254,7 +1260,7 @@ The `attachments` slice localizes the attachment composer end-to-end: chip remov
 |--------|-------------|
 | `appendAssistant(chunk)` | Append a text chunk to the current assistant message. Chunks are buffered until `minAssistantDelayMs` has elapsed before the first token is shown. |
 | `appendReasoning(chunk)` | Append a reasoning/thinking chunk to the current assistant message. |
-| `appendToolDelta(delta)` | Create/update a `role: 'tool'` message from an accumulated connector tool delta. |
+| `appendToolDelta(delta)` | Create/update a `role: 'tool'` row from an accumulated connector tool delta. **Presentation only** — it does not execute registered `tools` handlers, fire `onToolCall`/`onToolDelta`, or drive the auto-continue loop, so `toolCall.output` stays unset. On the `onSend` path you run the tool yourself, then call `appendToolDelta` again with the same `delta.id` and an `output` to fill the row and `appendAssistant` for the follow-up turn. |
 | `streamCallbacks()` | Convenience helper returning `{ onChunk, onReasoning, onToolDelta, onWarning, onMetadata, onDone }` for `useChorusStream(...).send()`. `onWarning` forwards non-fatal connector warnings to the `<Chorus onStreamWarning>` prop and `onMetadata` forwards free-form provider metadata to the `<Chorus onStreamMetadata>` prop. It is present at runtime; optional chaining keeps older hand-written helper mocks type-compatible. |
 | `finalizeAssistant()` | Mark the assistant message complete. If first-token chunks are still buffered, completion waits until they flush. |
 | `signal` | `AbortSignal` — aborted when Stop, clear-while-sending, or a superseding session cancels the active send. |
@@ -2417,13 +2423,14 @@ Components (default `headless={true}`):
 
 Pass-through components and theming (re-exported from the root barrel):
 
-- `ChatInput`, `ToolCallBlock`, `ChorusTheme`.
+- `ChatInput`, `ToolCallBlock`, `ChorusTheme`. These are re-exported unchanged — unlike the wrapped components above, they do **not** default `headless={true}`. Only `Chorus`/`ChatWindow`/`MessageBubble`/`Markdown`/`ConversationList` are wrapped with that default. For an unstyled composer or tool-call block, pass `headless` explicitly (e.g. `<ChatInput headless />`, `<ToolCallBlock headless />`).
 
 Hooks:
 
 - `useChorusStream` — core SSE streaming hook for the simple `transport` path.
 - `useChorusPersistence` — read/write a single transcript through a `StorageAdapter`.
 - `useConversations` — conversation index + per-conversation transcript storage.
+- `useChorusTranscriptActions` — headless transcript search / copy-all / export-as helper for a search box, "copy conversation" button, or "download transcript" affordance.
 
 Helpers and constants:
 
@@ -2434,7 +2441,7 @@ Helpers and constants:
 - `ChorusStreamError` — error class thrown by `useChorusStream` and the transport path.
 - `DEFAULT_CHORUS_LABELS`, `DEFAULT_ATTACHMENT_LABELS`, `resolveChorusLabels` — built-in localization helpers and label defaults (`DEFAULT_ATTACHMENT_LABELS` is the English `attachments` slice).
 
-Types: every public type re-exported from the root barrel is also importable from `react-chorus/headless` — including `Message`, `AnyChorusMessage`, `UserMessage`, `AssistantMessage`, `SystemMessage`, `ToolMessage`, `Role`, `ToolCall`, `Attachment`, `AttachmentError`, `AttachmentErrorReason`, `AttachmentSource`, `AttachmentUploadResult`, `UploadAttachment`, `UploadAttachmentOptions`, `StorageAdapter`, `ConnectorName`, `Connector`, `ConnectorResult`, `ConnectorToolDelta`, `Transport`, `FetchSSETransportOptions`, `FetchTransportInit`, `WebSocketTransport`, `WebSocketTransportOptions`, `SendCallbacks`, `StreamOptions`, `ChorusProps` (aliased to `ChorusHeadlessProps`), `ChorusRef`, `ChorusSendHelpers`, `ChorusSendPath`, `ChorusOnSend`, `ChorusOnFinish`, `ChorusOnAbort`, `ChorusOnStreamDone`, `ChorusOnToolCall`, `ChorusOnToolDelta`, `ChorusAbortContext`, `ChorusAbortReason`, `ChorusAbortSource`, `ChorusFinishContext`, `ChorusStreamDoneContext`, `ChorusStreamDoneReason`, `ChorusToolCallContext`, `ChorusToolDeltaContext`, `ChorusToolLoopContext`, `ChorusToolRegistry`, `ChorusToolHandler`, `ChorusConfirmClearConversation`, `ChorusClearConversationContext`, `ChorusConfirmDeleteMessage`, `ChorusDeleteMessageContext`, `ChorusShouldContinueToolLoop`, `ChorusMessagesChangeContext`, `ChorusMessagesChangeReason`, `ChorusMessagesChangeSource`, `ChorusToolDefinition`, `RenderErrorContext`, `RenderMessageContext`, `RenderMessageRootProps`, `MessageBubbleProps`, `MessageBubbleSlots`, `MessageMarkdownProps`, `MessageRenderActions`, `MessageTimestampFormatter`, `MessageCopyResult`, `MessageFeedback`, `GetMessageFeedback`, `ChatInputProps`, `ChatInputHandle`, `ChatInputFocusOptions`, `ChatWindowProps`, `ConversationListProps`, `ConfirmDeleteConversation`, `ConfirmDeleteConversationContext`, `ConversationStorageError`, `ConversationStorageOperation`, `ConversationSummary`, `RenameFromFirstMessageOptions`, `UseConversationsOptions`, `UseConversationsResult`, `ChorusPersistenceError`, `PersistenceOperation`, `PersistenceWriteOptions`, `SerializeMessages`, `DeserializeMessages`, `UseChorusPersistenceOptions`, `UseChorusPersistenceResult`, `RenderAttachmentErrorContext`, `Palette`, `MarkdownProps`, `MarkdownSanitizer`, `CodeBlockCopy`, `CodeBlockCopyContext`, `CodeBlockCopyRenderer`, all `ChorusLabels` sub-shapes, and every provider request type (`AnthropicMessagesBody`, `AnthropicTool`, `OpenAIChatCompletionsBody`, `GeminiGenerateContentBody`, etc.).
+Types: every public type re-exported from the root barrel is also importable from `react-chorus/headless` — including `Message`, `AnyChorusMessage`, `UserMessage`, `AssistantMessage`, `SystemMessage`, `ToolMessage`, `Role`, `ToolCall`, `Attachment`, `AttachmentError`, `AttachmentErrorReason`, `AttachmentSource`, `AttachmentUploadResult`, `UploadAttachment`, `UploadAttachmentOptions`, `StorageAdapter`, `ConnectorName`, `Connector`, `ConnectorResult`, `ConnectorToolDelta`, `Transport`, `FetchSSETransportOptions`, `FetchTransportInit`, `WebSocketTransport`, `WebSocketTransportOptions`, `SendCallbacks`, `StreamOptions`, `ChorusProps` (aliased to `ChorusHeadlessProps`), `ChorusRef`, `ChorusSendHelpers`, `ChorusSendPath`, `ChorusOnSend`, `ChorusOnFinish`, `ChorusOnAbort`, `ChorusOnStreamDone`, `ChorusOnToolCall`, `ChorusOnToolDelta`, `ChorusAbortContext`, `ChorusAbortReason`, `ChorusAbortSource`, `ChorusFinishContext`, `ChorusStreamDoneContext`, `ChorusStreamDoneReason`, `ChorusToolCallContext`, `ChorusToolDeltaContext`, `ChorusToolLoopContext`, `ChorusToolRegistry`, `ChorusToolHandler`, `ChorusConfirmClearConversation`, `ChorusClearConversationContext`, `ChorusConfirmDeleteMessage`, `ChorusDeleteMessageContext`, `ChorusShouldContinueToolLoop`, `ChorusMessagesChangeContext`, `ChorusMessagesChangeReason`, `ChorusMessagesChangeSource`, `ChorusToolDefinition`, `RenderErrorContext`, `RenderMessageContext`, `RenderMessageRootProps`, `MessageBubbleProps`, `MessageBubbleSlots`, `MessageMarkdownProps`, `MessageRenderActions`, `MessageTimestampFormatter`, `MessageCopyResult`, `MessageFeedback`, `GetMessageFeedback`, `ChatInputProps`, `ChatInputHandle`, `ChatInputFocusOptions`, `ChatWindowProps`, `ConversationListProps`, `ConfirmDeleteConversation`, `ConfirmDeleteConversationContext`, `ConversationStorageError`, `ConversationStorageOperation`, `ConversationSummary`, `RenameFromFirstMessageOptions`, `UseConversationsOptions`, `UseConversationsResult`, `ChorusPersistenceError`, `PersistenceOperation`, `PersistenceWriteOptions`, `SerializeMessages`, `DeserializeMessages`, `UseChorusPersistenceOptions`, `UseChorusPersistenceResult`, `ChorusTranscriptActions`, `ChorusTranscriptActionsOptions`, `TranscriptExportFormat`, `RenderAttachmentErrorContext`, `Palette`, `MarkdownProps`, `MarkdownSanitizer`, `CodeBlockCopy`, `CodeBlockCopyContext`, `CodeBlockCopyRenderer`, all `ChorusLabels` sub-shapes, and every provider request type (`AnthropicMessagesBody`, `AnthropicTool`, `OpenAIChatCompletionsBody`, `GeminiGenerateContentBody`, etc.).
 
 ## Message Shape
 
@@ -2562,6 +2569,22 @@ This section is the canonical place to look up breaking changes and deprecations
 There is exactly one supported way to obtain a connector. Select a built-in connector **by name** — `connector="openai"` on `<Chorus>`, `{ connector: 'openai' }` on `useChorusStream`, or `getConnector('openai')` for a connector object. Customize it with `connectorOptions` (widget/hook) or the `options` argument of `getConnector`. For a connector object you build yourself, use `createOpenAIConnector(options)` or implement the `Connector` interface directly.
 
 The provider connector singletons (`openaiConnector`, `anthropicConnector`, `geminiConnector`, `aiSdkConnector`) and `autoConnector` are **`@internal`** and are not exported from `react-chorus` or `react-chorus/headless`. They duplicated the string registry — a second public API doing the same job — so the barrel exports only `getConnector` and `createOpenAIConnector`. If a pre-release imported a singleton directly, switch to the equivalent name: `openaiConnector` → `getConnector('openai')`, `anthropicConnector` → `getConnector('anthropic')`, `geminiConnector` → `getConnector('gemini')`, `aiSdkConnector` → `getConnector('ai-sdk')`, `autoConnector` → `getConnector('auto')` (or `getConnector()`).
+
+### Unreleased — upgrade notes
+
+These changes land in the next release off `[Unreleased]`. None break `ChorusProps` or an exported component/hook contract, but two are visible behavior changes worth checking before you upgrade.
+
+#### GFM tables are now styled by the bundled `chorus-md` stylesheet
+
+`marked`'s `gfm: true` already emitted real `<table>` markup, but the injected `chorus-md` sheet only styled code blocks, so Markdown tables rendered as borderless rows of text. The sheet now gives them collapsed borders, 1px cell borders, cell padding, and an emphasized header row. **This is a visible rendering change for every `<Markdown>` / `<Chorus>` consumer that renders tables** — review table-heavy transcripts after upgrading. Two new CSS variables theme the result: `--chorus-md-table-border` (cell border color) and `--chorus-md-table-header-bg` (header row background). Override them alongside the other `--chorus-*` variables (see [Theming](#theming)). The headless build injects no stylesheet, so style tables yourself there.
+
+#### New `ai-sdk` connector
+
+A built-in `'ai-sdk'` connector parses [Vercel AI SDK](#vercel-ai-sdk-stream-format) streams — both the v5+ UI message stream (`toUIMessageStreamResponse()`) and the v4 data-stream protocol (`toDataStreamResponse()`). Select it with `connector="ai-sdk"`, or rely on the default `connector="auto"`, which now detects AI SDK frames too. Like the other built-in connectors it is reachable by name only — there is no exported `aiSdkConnector` singleton; see [Connector public API](#connector-public-api-getconnector-is-canonical).
+
+#### Default error banner gains a dismiss button
+
+The built-in transcript error banner now renders a dismiss (X) button whenever `onDismissError` is wired — which it always is under `<Chorus>`. Consumers using the default error UI (not a custom `renderError`) can now clear the banner without retrying. The new `labels.transcript.dismissError` string localizes its accessible label.
 
 ### Unreleased — deprecation candidates
 

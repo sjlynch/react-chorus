@@ -280,9 +280,9 @@ describe('useChorusPersistence', () => {
     await act(async () => { await Promise.resolve(); });
 
     expect(result.current.value).toEqual([]);
-    expect(result.current.error).toBe(readError);
     expect(result.current.error).toEqual(expect.objectContaining({ key: 'key', operation: 'read' }));
-    expect(onError).toHaveBeenCalledWith(readError);
+    expect(result.current.error?.cause).toBe(readError);
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ key: 'key', operation: 'read' }));
   });
 
   it('lets pending async reads win over pre-load changes so existing storage is not clobbered', async () => {
@@ -342,10 +342,10 @@ describe('useChorusPersistence', () => {
     }));
 
     expect(result.current.value).toEqual([]);
-    expect(result.current.error).toBe(deserializeError);
     expect(result.current.error).toEqual(expect.objectContaining({ key: 'key', operation: 'deserialize' }));
+    expect(result.current.error?.cause).toBe(deserializeError);
     await act(async () => { await Promise.resolve(); });
-    expect(onError).toHaveBeenCalledWith(deserializeError);
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ key: 'key', operation: 'deserialize' }));
   });
 
   it('uses custom serializer and deserializer hooks', () => {
@@ -393,9 +393,9 @@ describe('useChorusPersistence', () => {
 
     act(() => result.current.onChange([message]));
 
-    expect(result.current.error).toBeInstanceOf(TypeError);
     expect(result.current.error).toEqual(expect.objectContaining({ key: 'key', operation: 'write' }));
-    expect(onError).toHaveBeenCalledWith(expect.any(TypeError));
+    expect(result.current.error?.cause).toBeInstanceOf(TypeError);
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ key: 'key', operation: 'write' }));
     expect(storage.store.key).toBeUndefined();
     warn.mockRestore();
   });
@@ -415,10 +415,10 @@ describe('useChorusPersistence', () => {
 
     await act(async () => { await Promise.resolve(); });
 
-    expect(result.current.error).toBe(quotaError);
     expect(result.current.error).toEqual(expect.objectContaining({ key: 'key', operation: 'write' }));
-    expect(onError).toHaveBeenCalledWith(quotaError);
-    expect(warn).toHaveBeenCalledWith('[Chorus] Failed to persist messages.', quotaError);
+    expect(result.current.error?.cause).toBe(quotaError);
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ key: 'key', operation: 'write' }));
+    expect(warn).toHaveBeenCalledWith('[Chorus] Failed to persist messages.', expect.objectContaining({ key: 'key', operation: 'write' }));
     warn.mockRestore();
   });
 
@@ -440,8 +440,9 @@ describe('useChorusPersistence', () => {
       expect(() => act(() => result.current.onChange(MSGS))).not.toThrow();
       await act(async () => { await Promise.resolve(); });
 
-      expect(result.current.error).toBe(quotaError);
-      expect(onError).toHaveBeenCalledWith(quotaError);
+      expect(result.current.error).toEqual(expect.objectContaining({ key: 'key', operation: 'write' }));
+      expect(result.current.error?.cause).toBe(quotaError);
+      expect(onError).toHaveBeenCalledWith(expect.objectContaining({ key: 'key', operation: 'write' }));
     } finally {
       Object.defineProperty(globalThis, 'process', { value: originalProcess, configurable: true, writable: true });
     }
@@ -456,9 +457,9 @@ describe('useChorusPersistence', () => {
 
     act(() => result.current.onChange([], { flush: true, removeIfEmpty: true }));
 
-    expect(result.current.error).toBe(removeError);
     expect(result.current.error).toEqual(expect.objectContaining({ key: 'key', operation: 'remove' }));
-    expect(onError).toHaveBeenCalledWith(removeError);
+    expect(result.current.error?.cause).toBe(removeError);
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ key: 'key', operation: 'remove' }));
   });
 
   it('records and surfaces rejected async write failures without throwing', async () => {
@@ -476,9 +477,10 @@ describe('useChorusPersistence', () => {
 
     await act(async () => { await Promise.resolve(); });
 
-    expect(result.current.error).toBe(writeError);
-    expect(onError).toHaveBeenCalledWith(writeError);
-    expect(warn).toHaveBeenCalledWith('[Chorus] Failed to persist messages.', writeError);
+    expect(result.current.error).toEqual(expect.objectContaining({ key: 'key', operation: 'write' }));
+    expect(result.current.error?.cause).toBe(writeError);
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ key: 'key', operation: 'write' }));
+    expect(warn).toHaveBeenCalledWith('[Chorus] Failed to persist messages.', expect.objectContaining({ key: 'key', operation: 'write' }));
     warn.mockRestore();
   });
 
@@ -766,6 +768,54 @@ describe('useChorusPersistence', () => {
       const { result } = renderHook(() => useChorusPersistence('key', { storage }));
 
       expect(result.current.value).toEqual([toolMessage]);
+    });
+
+    it('loads an empty transcript and warns in dev for a non-array stored object', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const storage = makeSyncStorage(JSON.stringify({ messages: MSGS }));
+        const { result } = renderHook(() => useChorusPersistence('key', { storage }));
+
+        expect(result.current.value).toEqual([]);
+        expect(result.current.error).toBeNull();
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringContaining('Expected an array of persisted messages, got object'),
+        );
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('stays silent for a stored JSON null payload', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const storage = makeSyncStorage(JSON.stringify(null));
+        const { result } = renderHook(() => useChorusPersistence('key', { storage }));
+
+        expect(result.current.value).toEqual([]);
+        expect(result.current.error).toBeNull();
+        expect(warn).not.toHaveBeenCalled();
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('warns in dev when a custom deserializer returns a non-array value', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const storage = makeSyncStorage('custom:read');
+        const deserializeMessages = vi.fn(() => ({ messages: MSGS }) as unknown as Message[]);
+        const { result } = renderHook(() =>
+          useChorusPersistence('key', { storage, deserializeMessages }));
+
+        expect(result.current.value).toEqual([]);
+        expect(result.current.error).toBeNull();
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringContaining('Expected an array of persisted messages, got object'),
+        );
+      } finally {
+        warn.mockRestore();
+      }
     });
 
     it('returns an empty array (not a deserialize error) for a corrupted payload', async () => {

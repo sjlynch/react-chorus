@@ -190,6 +190,91 @@ describe('ChatWindow windowing and scroll behavior', () => {
       vi.unstubAllGlobals();
     }
   });
+  it('pauses re-pinning after a small upward scroll within the 48px threshold', () => {
+    const callbacks: ResizeObserverCallback[] = [];
+    class StubResizeObserver {
+      callback: ResizeObserverCallback;
+      constructor(cb: ResizeObserverCallback) {
+        this.callback = cb;
+        callbacks.push(cb);
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    vi.stubGlobal('ResizeObserver', StubResizeObserver);
+
+    try {
+      render(<ChatWindow messages={[ASST_MSG]} />);
+      const transcript = screen.getByRole('log', { name: /chat transcript/i });
+
+      Object.defineProperty(transcript, 'clientHeight', { configurable: true, value: 200 });
+      Object.defineProperty(transcript, 'scrollHeight', { configurable: true, value: 1000 });
+
+      // User sits at the bottom -> auto-scroll engaged.
+      transcript.scrollTop = 800;
+      fireEvent.scroll(transcript);
+
+      // A small (20px) upward nudge keeps the user well within the 48px
+      // threshold, but it must still pause pinning immediately.
+      transcript.scrollTop = 780;
+      fireEvent.scroll(transcript);
+
+      // Streaming grows the content and fires a resize callback.
+      Object.defineProperty(transcript, 'scrollHeight', { configurable: true, value: 1500 });
+      act(() => {
+        for (const cb of callbacks) cb([], {} as ResizeObserver);
+      });
+
+      // The repin is suppressed: the user keeps their scrolled-up position
+      // instead of being yanked back to the bottom.
+      expect(transcript.scrollTop).toBe(780);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+  it('re-arms auto-scroll when a downward scroll lands back near the bottom', () => {
+    const callbacks: ResizeObserverCallback[] = [];
+    class StubResizeObserver {
+      callback: ResizeObserverCallback;
+      constructor(cb: ResizeObserverCallback) {
+        this.callback = cb;
+        callbacks.push(cb);
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    vi.stubGlobal('ResizeObserver', StubResizeObserver);
+
+    try {
+      render(<ChatWindow messages={[ASST_MSG]} />);
+      const transcript = screen.getByRole('log', { name: /chat transcript/i });
+
+      Object.defineProperty(transcript, 'clientHeight', { configurable: true, value: 200 });
+      Object.defineProperty(transcript, 'scrollHeight', { configurable: true, value: 1000 });
+
+      transcript.scrollTop = 800;
+      fireEvent.scroll(transcript);
+
+      // A small upward nudge pauses auto-scroll.
+      transcript.scrollTop = 780;
+      fireEvent.scroll(transcript);
+
+      // Scrolling back down to within 48px of the bottom re-arms it.
+      transcript.scrollTop = 800;
+      fireEvent.scroll(transcript);
+
+      Object.defineProperty(transcript, 'scrollHeight', { configurable: true, value: 1500 });
+      act(() => {
+        for (const cb of callbacks) cb([], {} as ResizeObserver);
+      });
+
+      expect(transcript.scrollTop).toBe(1500);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
   it('treats the scroll event echoed by an auto-pin as programmatic, not a user scroll-away', () => {
     const { rerender } = render(<ChatWindow messages={[ASST_MSG]} />);
     const transcript = screen.getByRole('log', { name: /chat transcript/i });
