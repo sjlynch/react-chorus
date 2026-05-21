@@ -29,7 +29,9 @@ function fallbackToolId(index: unknown) {
  * Expects SSE data lines with JSON objects containing a "type" field.
  * Yields text from content_block_delta events (delta.type === 'text_delta'),
  * reasoning from thinking blocks/deltas, tool-use deltas from tool_use blocks
- * and input_json_delta events, and signals done on message_stop.
+ * and input_json_delta events, the extended-thinking signature from
+ * signature_delta events (as `metadata.thinkingSignature`), and signals done
+ * on message_stop.
  *
  * Usage example:
  *   const { send } = useChorusStream(transport, { connector: 'anthropic' });
@@ -125,6 +127,19 @@ export const anthropicConnector: Connector<AnthropicConnectorState> = {
           obj.delta.thinking
         ) {
           return { reasoning: obj.delta.thinking };
+        }
+
+        // The signature_delta event closes a thinking block with the cryptographic
+        // signature the Anthropic Messages API requires when that thinking block is
+        // replayed (e.g. during an autoContinueTools round trip). Surface it as
+        // metadata so the provider-request mapper can re-attach it; without this the
+        // signature is lost and the replayed request 400s.
+        if (
+          obj.delta?.type === 'signature_delta' &&
+          typeof obj.delta.signature === 'string' &&
+          obj.delta.signature
+        ) {
+          return { metadata: { thinkingSignature: obj.delta.signature } };
         }
 
         if (obj.delta?.type === 'input_json_delta' && typeof obj.delta.partial_json === 'string') {
