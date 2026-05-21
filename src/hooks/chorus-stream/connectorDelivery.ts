@@ -27,6 +27,23 @@ function deliverConnectorWarning(cb: SendCallbacks, warning: ConnectorWarning) {
   warnInDev(`[Chorus] connector warning (${warning.code}): ${warning.message}`, warning.payload);
 }
 
+/**
+ * Deliver free-form connector metadata (usage, finish/stop reason, safety
+ * ratings). When the host wired `onMetadata` the metadata is routed there; a
+ * throw is warned-and-ignored so it can never fail an otherwise-successful
+ * send. Unlike a warning, metadata without an observer is dropped silently —
+ * it carries no diagnostic a developer needs surfaced, so dev-logging every
+ * turn's finish reason would only be noise. The stream keeps flowing either way.
+ */
+function deliverConnectorMetadata(cb: SendCallbacks, metadata: Record<string, unknown>) {
+  if (!cb.onMetadata) return;
+  try {
+    cb.onMetadata(metadata);
+  } catch (callbackError) {
+    safeOnObserverError('onMetadata', callbackError);
+  }
+}
+
 function connectorErrorFromResult(out: ConnectorResult) {
   // Any present `error` field is a connector error — including `error: ''`. A
   // provider that emits an empty error string is still reporting a failure, so
@@ -57,6 +74,10 @@ export function createConnectorResultDeliverer(
     // the optional onWarning observer; without one they are logged in dev so they stay
     // discoverable. Either way the stream keeps flowing.
     if (out.warning) deliverConnectorWarning(cb, out.warning);
+
+    // Free-form provider metadata (usage, finish/stop reason, safety ratings). Routed to the
+    // optional onMetadata observer; without one it is dropped silently. The stream continues.
+    if (out.metadata) deliverConnectorMetadata(cb, out.metadata);
 
     const connectorError = connectorErrorFromResult(out);
     if (connectorError) throw connectorError;
