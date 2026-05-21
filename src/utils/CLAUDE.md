@@ -6,7 +6,9 @@
 
 ## `devMode.ts`
 
-`isChorusDevMode()` is the shared dev-warning gate for modules that can import this util. `ChatWindow.tsx` intentionally keeps a local duplicate to avoid coupling hook-only chunks to ChatWindow code, and `components/conversation-list/useDeleteConversationConfirmation.ts` inlines the same gate inside `warnDeleteConfirmationError` for the same reason (the shared helper would pull the assistant-session chunk into ConversationList's graph). Keep new diagnostics behind one of these gates and, when inlining, mirror the explanatory comment so a future reader knows the duplication is deliberate.
+`isChorusDevMode()` is the shared dev-warning gate for the component- and hook-side bundle. It is a zero-dependency leaf, so importing it does not drag any heavier chunk along — the hooks plus the component files (`ChatWindow.tsx`, `chat-window/rendering.tsx`, `conversation-list/useDeleteConversationConfirmation.ts`) all import it directly from here.
+
+The streaming/transport sub-bundles deliberately do **not** import this util: they keep their own leaf copy in `src/streaming/internal/devMode.ts` (`isStreamDevMode`) so the transport-only subpaths never pull in the utils-owned chunk and blow their bundle-size budgets. Keep new diagnostics behind one of these two gates — pick the `streaming/internal` one only for code that ships in the transport/streaming chunks.
 
 ## `hljsLoader.ts` and `hljs/`
 
