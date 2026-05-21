@@ -11,6 +11,25 @@ const MISCONFIGURED_TRANSPORT_ERROR = '[Chorus] transport is misconfigured: no u
 
 export type AssistantSessionTransport<TMeta> = string | FetchTransportInit<TMeta> | Transport<TMeta> | undefined;
 
+/**
+ * Whether a `transport` prop is *present at all* — i.e. not `null`/`undefined`.
+ *
+ * The send pipeline (`send` command, `triggerAssistant`, the `sending`/`isBusy`
+ * busy derivations) must select the transport-vs-`onSend` branch on this, NOT
+ * on bare truthiness. The most common real misconfiguration is `transport=""`
+ * — an unset env var or unsubstituted build-time placeholder resolving to an
+ * empty string. That empty string is falsy, yet it is still a transport prop:
+ * it must reach the rejecting transport `resolveAssistantSessionTransport`
+ * builds for misconfigured URLs (Case 3) so the stream-error banner surfaces,
+ * instead of being mistaken for an absent handler and producing the
+ * "neither transport nor onSend" warning. `resolveAssistantSessionTransport`
+ * itself treats only `null`/`undefined` as genuinely absent (Case 1), so the
+ * resolver and the send pipeline stay in lockstep.
+ */
+export function isTransportPresent(transport: unknown): boolean {
+  return transport != null;
+}
+
 export function resolveAssistantSessionTransport<TMeta>(transport: AssistantSessionTransport<TMeta>): Transport<TMeta> {
   // Case 1: transport genuinely absent — keep the silent empty-200 fallback.
   // This is the ONLY case for which that stub should remain reachable; an

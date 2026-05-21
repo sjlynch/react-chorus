@@ -1,4 +1,5 @@
 import React from 'react';
+import { X } from 'lucide-react';
 import type { ChorusTranscriptLabels } from '../../labels/types';
 import { DefaultEmptyState } from './rendering';
 import type { RenderErrorContext } from './types';
@@ -68,12 +69,13 @@ export interface ErrorRowProps {
   error?: string | null;
   rawError: Error | null;
   retryLabel: string;
+  dismissLabel: string;
   onRetry?: () => void;
   onDismissError?: () => void;
   renderError?: (context: RenderErrorContext) => React.ReactNode;
 }
 
-export function ErrorRow({ error, rawError, retryLabel, onRetry, onDismissError, renderError }: ErrorRowProps) {
+export function ErrorRow({ error, rawError, retryLabel, dismissLabel, onRetry, onDismissError, renderError }: ErrorRowProps) {
   if (!error) return null;
 
   if (renderError) {
@@ -86,6 +88,17 @@ export function ErrorRow({ error, rawError, retryLabel, onRetry, onDismissError,
     <div className="chorus-error">
       <span className="chorus-error-text">{error}</span>
       {onRetry && <button type="button" className="chorus-retry-btn" onClick={onRetry}>{retryLabel}</button>}
+      {onDismissError && (
+        <button
+          type="button"
+          className="chorus-error-dismiss"
+          onClick={onDismissError}
+          aria-label={dismissLabel}
+          title={dismissLabel}
+        >
+          <X size={14} strokeWidth={2} />
+        </button>
+      )}
     </div>
   );
 }

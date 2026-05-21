@@ -7,8 +7,8 @@ import type { Transport } from './hooks/useChorusStream';
 import type { ChorusLabels } from './labels/types';
 import type { FetchTransportInit } from './hooks/assistant-session/transport';
 import type { DeserializeMessages, SerializeMessages } from './hooks/useChorusPersistence';
-import type { ChorusMessagesChangeContext } from './hooks/useChorusMessages';
-import type { ChorusAbortContext, ChorusAbortReason, ChorusAbortSource, ChorusClearConversationContext, ChorusConfirmClearConversation, ChorusConfirmDeleteMessage, ChorusDeleteMessageContext, ChorusFinishContext, ChorusOnAbort, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusSendHelpers, ChorusSendPath, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusStreamDoneReason, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolLoopContext, ChorusToolRegistry } from './hooks/useAssistantSession';
+import type { ChorusMessagesChangeContext, ChorusMessagesChangeReason, ChorusMessagesChangeSource } from './hooks/useChorusMessages';
+import type { ChorusAbortContext, ChorusAbortReason, ChorusAbortSource, ChorusClearConversationContext, ChorusConfirmClearConversation, ChorusConfirmDeleteMessage, ChorusDeleteMessageContext, ChorusFinishContext, ChorusOnAbort, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusSendHelpers, ChorusSendPath, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusStreamDoneReason, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolHandler, ChorusToolLoopContext, ChorusToolRegistry } from './hooks/useAssistantSession';
 import type { Connector, ConnectorWarning } from './connectors/connectors';
 import type { OpenAIConnectorOptions } from './connectors/openai';
 import type { MarkdownSanitizer } from './components/Markdown';
@@ -17,7 +17,7 @@ export type { Transport };
 export type { FetchTransportInit };
 export type { Connector, ConnectorWarning };
 export type { RenderAttachmentErrorContext };
-export type { ChorusAbortContext, ChorusAbortReason, ChorusAbortSource, ChorusClearConversationContext, ChorusConfirmClearConversation, ChorusConfirmDeleteMessage, ChorusDeleteMessageContext, ChorusFinishContext, ChorusMessagesChangeContext, ChorusOnAbort, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusSendHelpers, ChorusSendPath, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusStreamDoneReason, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolLoopContext, ChorusToolRegistry };
+export type { ChorusAbortContext, ChorusAbortReason, ChorusAbortSource, ChorusClearConversationContext, ChorusConfirmClearConversation, ChorusConfirmDeleteMessage, ChorusDeleteMessageContext, ChorusFinishContext, ChorusMessagesChangeContext, ChorusMessagesChangeReason, ChorusMessagesChangeSource, ChorusOnAbort, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusSendHelpers, ChorusSendPath, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusStreamDoneReason, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolHandler, ChorusToolLoopContext, ChorusToolRegistry };
 
 export const DEFAULT_MIN_ASSISTANT_DELAY_MS = 300;
 export const DEFAULT_PERSISTENCE_WRITE_DEBOUNCE_MS = 80;
@@ -199,6 +199,16 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
    * blocked. A throwing handler is warned in development and otherwise ignored.
    */
   onStreamWarning?: (warning: ConnectorWarning) => void;
+  /**
+   * Called with free-form provider metadata on the `transport` path as connectors emit it —
+   * e.g. OpenAI Responses token `usage`, Anthropic `stopReason`/`stopSequence`, Gemini
+   * `safetyRatings`/`finishReason`, OpenAI Chat `finishReason`. The stream still completes
+   * normally (`onFinish`/`onStreamDone` fire as usual); wire this for usage/cost telemetry or
+   * to persist safety ratings. A throwing handler is warned in development and otherwise
+   * ignored. Fires once per connector result that carries metadata, so a handler may be
+   * called multiple times during a single turn.
+   */
+  onStreamMetadata?: (metadata: Record<string, unknown>) => void;
   /** Called when a completed streamed tool call is ready; return a value to append it as tool output. */
   onToolCall?: ChorusOnToolCall<TMeta>;
   /** Observes every accumulated streamed tool-call delta on the transport path. */

@@ -6,6 +6,7 @@ import { cloneHistoryForRetry, findLastUserMessage } from './messageUtils';
 import type { ObserverCallbacks } from './observerCallbacks';
 import { startOnSendLifecycle } from './onSendLifecycle';
 import type { StartTransportStream } from './transportLifecycle';
+import { isTransportPresent } from './transportResolver';
 import type {
   ChorusAbortReason,
   ChorusAbortSource,
@@ -29,8 +30,10 @@ export interface SessionOrchestratorLateDeps<TMeta> {
 
 export interface SessionOrchestratorDeps<TMeta> {
   messagesRef: React.MutableRefObject<Message<TMeta>[]>;
-  // The orchestrator only reads truthiness of transport (for the
-  // transport/onSend branch selection); the facade passes its full
+  // The orchestrator only reads whether transport is *present* (not
+  // null/undefined, via `isTransportPresent`) for the transport/onSend branch
+  // selection — never bare truthiness, so a misconfigured `transport=""` still
+  // takes the transport branch. The facade passes its full
   // FetchTransportInit/Transport ref.
   transportRef: React.MutableRefObject<unknown>;
   onSendRef: React.MutableRefObject<ChorusOnSend<TMeta> | undefined>;
@@ -207,7 +210,7 @@ export function useSessionOrchestrator<TMeta>(deps: SessionOrchestratorDeps<TMet
   }, [pendingAssistantIdRef, pendingToolMessageIdsRef, resetStreamState, updateSessionMessages]);
 
   const abortActiveAssistant = React.useCallback((reason: ChorusAbortReason, source: ChorusAbortSource) => {
-    const path = activeSendPathRef.current ?? (transportRef.current ? 'transport' : 'onSend');
+    const path = activeSendPathRef.current ?? (isTransportPresent(transportRef.current) ? 'transport' : 'onSend');
 
     invalidateAssistantSession();
     // On the transport path `controllerRef.current` IS the external signal
@@ -239,7 +242,7 @@ export function useSessionOrchestrator<TMeta>(deps: SessionOrchestratorDeps<TMet
     const currentTransport = transportRef.current;
     const currentOnSend = onSendRef.current;
 
-    if (currentTransport) {
+    if (isTransportPresent(currentTransport)) {
       if (isChorusDevMode() && currentOnSend && !warnedTransportOnSendRef.current) {
         warnedTransportOnSendRef.current = true;
         console.warn('[Chorus] Both `transport` and `onSend` props were provided. `transport` takes precedence and `onSend` will be ignored. Remove one of the two props to silence this warning.');

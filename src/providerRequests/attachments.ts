@@ -95,6 +95,23 @@ export function resolveDataUrlMimeType(attachment: Attachment, dataUrl: { mimeTy
   return attachment.type || header;
 }
 
+/**
+ * Decide whether an attachment should be sent to OpenAI as an image.
+ *
+ * Mirrors `resolveDataUrlMimeType` (and therefore the routing Anthropic and
+ * Gemini already use): when the attachment carries a parseable base64 `data:`
+ * URL, its header MIME is authoritative — a UI may relabel an attachment so
+ * `attachment.type` disagrees with the bytes the provider actually receives.
+ * Falls back to `attachment.type` only when there is no data-URL header (a URL
+ * or file-id attachment), so an `image/*`-headed data URL with a generic
+ * `attachment.type` is still delivered as an image.
+ */
+export function isOpenAIImageAttachment(attachment: Attachment): boolean {
+  const dataUrl = dataUrlFromAttachment(attachment);
+  if (dataUrl) return resolveDataUrlMimeType(attachment, dataUrl).startsWith('image/');
+  return attachment.type.startsWith('image/');
+}
+
 export function fileUriFromAttachment(attachment: Attachment) {
   for (const candidate of [attachment.url, attachment.id, attachment.data]) {
     if (typeof candidate === 'string' && candidate && !candidate.startsWith('data:')) return candidate;

@@ -52,6 +52,13 @@ describe('ChatWindow rendering behavior', () => {
     expect(transcript.style.getPropertyValue('--chorus-user-bg')).toBe('');
     expect(transcript.style.borderRadius).toBe('4px');
   });
+  it('adds the chorus-window--headless hook class only in headless mode', () => {
+    const { rerender } = render(<ChatWindow messages={[USER_MSG]} data-testid="chat-window" />);
+    expect(screen.getByTestId('chat-window')).not.toHaveClass('chorus-window--headless');
+
+    rerender(<ChatWindow messages={[USER_MSG]} data-testid="chat-window" headless />);
+    expect(screen.getByTestId('chat-window')).toHaveClass('chorus-window--headless');
+  });
   it('builds activity keys for trailing emoji without lone surrogates', () => {
     const value = `${'x'.repeat(23)}\u{1F44B}`;
     const key = stringActivityKey(value);
@@ -231,6 +238,43 @@ describe('ChatWindow rendering behavior', () => {
     render(<ChatWindow messages={[]} error="Oops" />);
     expect(screen.queryByRole('button', { name: /retry/i })).not.toBeInTheDocument();
   });
+  it('shows a dismiss button when onDismissError is provided alongside an error', () => {
+    render(<ChatWindow messages={[]} error="Oops" onDismissError={vi.fn()} />);
+    expect(screen.getByRole('button', { name: 'Dismiss error' })).toBeInTheDocument();
+  });
+  it('calls onDismissError when the dismiss button is clicked', async () => {
+    const user = userEvent.setup();
+    const onDismissError = vi.fn();
+    render(<ChatWindow messages={[]} error="Oops" onDismissError={onDismissError} />);
+    await user.click(screen.getByRole('button', { name: 'Dismiss error' }));
+    expect(onDismissError).toHaveBeenCalledOnce();
+  });
+  it('does not show dismiss button when error is present but onDismissError is absent', () => {
+    render(<ChatWindow messages={[]} error="Oops" />);
+    expect(screen.queryByRole('button', { name: 'Dismiss error' })).not.toBeInTheDocument();
+  });
+  it('dismiss button does not submit an enclosing form', async () => {
+    const user = userEvent.setup();
+    const onDismissError = vi.fn();
+    const onSubmit = vi.fn((event: React.FormEvent) => event.preventDefault());
+    render(<form onSubmit={onSubmit}><ChatWindow messages={[]} error="Oops" onDismissError={onDismissError} /></form>);
+
+    await user.click(screen.getByRole('button', { name: 'Dismiss error' }));
+
+    expect(onDismissError).toHaveBeenCalledOnce();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+  it('localizes the dismiss button label via the labels prop', () => {
+    render(
+      <ChatWindow
+        messages={[]}
+        error="Oops"
+        onDismissError={vi.fn()}
+        labels={{ transcript: { dismissError: "Masquer l'erreur" } }}
+      />,
+    );
+    expect(screen.getByRole('button', { name: "Masquer l'erreur" })).toBeInTheDocument();
+  });
   it('renders reasoning in a collapsed details block above the message bubble', () => {
     render(<ChatWindow messages={[{ ...ASST_MSG, reasoning: 'private plan' }]} />);
     const summary = screen.getByText('Reasoning');
@@ -390,5 +434,37 @@ describe('ChatWindow rendering behavior', () => {
   it('renders a ToolCallBlock for tool messages', () => {
     render(<ChatWindow messages={[TOOL_MSG]} showSystemMessages />);
     expect(screen.getByText('search')).toBeInTheDocument();
+  });
+  it('shows a running status for an empty-bodied tool row inside the streaming turn', () => {
+    const emptyTool: Message = { id: 't-empty', role: 'tool', text: '', toolCall: { name: 'lookup' } };
+    render(
+      <ChatWindow
+        messages={[USER_MSG, emptyTool, { id: 'a2', role: 'assistant', text: '' }]}
+        streamingMessageId="a2"
+        hiddenRoles={[]}
+      />,
+    );
+    expect(screen.getByText('Running…')).toBeInTheDocument();
+    expect(screen.queryByText('No output')).not.toBeInTheDocument();
+  });
+  it('keeps a finished empty-bodied tool row settled when a separate later turn streams', () => {
+    // The empty-bodied tool call precedes a finalized assistant message; an
+    // unrelated streaming turn afterwards must not flip it back to "Running…".
+    const emptyTool: Message = { id: 't-empty', role: 'tool', text: '', toolCall: { name: 'lookup' } };
+    render(
+      <ChatWindow
+        messages={[
+          USER_MSG,
+          emptyTool,
+          ASST_MSG,
+          { id: 'u2', role: 'user', text: 'Again' },
+          { id: 'a2', role: 'assistant', text: '' },
+        ]}
+        streamingMessageId="a2"
+        hiddenRoles={[]}
+      />,
+    );
+    expect(screen.getByText('No output')).toBeInTheDocument();
+    expect(screen.queryByText('Running…')).not.toBeInTheDocument();
   });
 });
