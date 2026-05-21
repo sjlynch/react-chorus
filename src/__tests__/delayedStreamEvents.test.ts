@@ -62,6 +62,27 @@ describe('createDelayedChunkEmitter', () => {
     expect(onChunk).not.toHaveBeenCalled();
   });
 
+  it('rejects flushBeforeDone when the signal aborts after the release timer settled', async () => {
+    const controller = new AbortController();
+    const onChunk = vi.fn();
+    const emitter = createDelayedChunkEmitter({
+      minDelayMs: 100,
+      onChunk,
+    }, Date.now(), controller.signal);
+
+    emitter.handleChunk('token');
+    // Let the release timer fire — this delivers the buffered event and tears
+    // down the abort listener that would have set the cancellation flag.
+    await vi.advanceTimersByTimeAsync(100);
+    expect(onChunk).toHaveBeenCalledWith('token');
+
+    // Abort lands after minDelayMs elapsed with nothing buffered, so the
+    // release-timer abort listener is gone and cancellation is never flagged.
+    controller.abort();
+
+    await expect(emitter.flushBeforeDone()).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
   it('propagates callback errors thrown during delayed timer delivery', async () => {
     const controller = new AbortController();
     const callbackError = new Error('chunk observer failed');

@@ -54,6 +54,32 @@ describe('anthropicConnector', () => {
     expect(anthropicConnector.extract(data)).toEqual({ reasoning: 'considering' });
   });
 
+  it('surfaces signature_delta as thinkingSignature metadata', () => {
+    const data = JSON.stringify({
+      type: 'content_block_delta',
+      index: 0,
+      delta: { type: 'signature_delta', signature: 'Er8BCkY...sig' },
+    });
+    expect(anthropicConnector.extract(data)).toEqual({
+      metadata: { thinkingSignature: 'Er8BCkY...sig' },
+    });
+  });
+
+  it('returns null for signature_delta with an empty or missing signature', () => {
+    const empty = JSON.stringify({
+      type: 'content_block_delta',
+      index: 0,
+      delta: { type: 'signature_delta', signature: '' },
+    });
+    const missing = JSON.stringify({
+      type: 'content_block_delta',
+      index: 0,
+      delta: { type: 'signature_delta' },
+    });
+    expect(anthropicConnector.extract(empty)).toBeNull();
+    expect(anthropicConnector.extract(missing)).toBeNull();
+  });
+
   it('extracts tool_use blocks and input_json_delta chunks', () => {
     const state = anthropicConnector.createState?.();
     const start = JSON.stringify({
