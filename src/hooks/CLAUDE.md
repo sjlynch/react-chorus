@@ -22,14 +22,15 @@ The facade owns React lifecycle wiring (state setters, refs, `useChorusStream` i
 
 ## `useChorusStream`
 
-Core streaming hook for the simple `transport` path. The facade is `useChorusStream.ts`; focused internals are in `src/streaming/`:
+Core streaming hook for the simple `transport` path. The facade is `useChorusStream.ts`; focused hook internals live in `hooks/chorus-stream/` (see its CLAUDE.md):
 
-- `readSSEStream.ts` — line-by-line SSE parser (BOM, colonless fields, CR/LF, chunk boundaries, named `event:` capture).
-- `delayedStreamEvents.ts` — `minDelayMs` buffering and callback-error propagation.
-- `errors.ts` — `ChorusStreamError`, HTTP error-body snippets/timeouts, connector `errorPayload` preservation.
-- `toolDeltaAccumulator.ts` — merges streamed tool-call argument/output deltas.
+- `types.ts` — public `SendCallbacks`, `StreamOptions`, and `Transport` types re-exported by the facade.
+- `session.ts` — abort-controller/session wiring and forward-abort listener teardown.
+- `namedSSEEvents.ts` — named SSE `event:` handling before connector extraction.
+- `connectorDelivery.ts` — connector-result delivery, warning routing, and connector error promotion.
+- `sendLifecycle.ts` — transport/HTTP validation, SSE pumping, connector `flush()`, onDone success path, and error teardown.
 
-The hook creates connector state once per send, feeds SSE payloads through `extract()`, calls connector `flush()` at EOF, delivers text/reasoning/tool events, and finalizes or reports errors. Named SSE `event:` frames are routed before `extract()`: `event: error` is surfaced as a `ChorusStreamError` (even for a bare-string payload), `event: heartbeat`/`event: ping` keepalives are dropped, and unnamed/`event: message` frames go to the connector unchanged.
+Shared streaming primitives stay in `src/streaming/`: `readSSEStream.ts` parses SSE frames, `delayedStreamEvents.ts` owns `minDelayMs` buffering and callback-error propagation, `errors.ts` defines `ChorusStreamError`/HTTP snippets, and `toolDeltaAccumulator.ts` merges streamed tool-call deltas. The hook creates connector state once per send, feeds SSE payloads through `extract()`, calls connector `flush()` at EOF, delivers text/reasoning/tool events, and finalizes or reports errors. Named SSE `event:` frames are routed before `extract()`: `event: error` is surfaced as a `ChorusStreamError` (even for a bare-string payload), `event: heartbeat`/`event: ping` keepalives are dropped, and unnamed/`event: message` frames go to the connector unchanged.
 
 ## `useChorusPersistence`
 
