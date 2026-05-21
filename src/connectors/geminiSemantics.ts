@@ -1,7 +1,7 @@
 /**
  * Gemini provider-semantics constants, predicates, and messaging helpers.
- * Separate from `gemini.ts` so the SSE wire-parsing (`extract`, candidate
- * selection, tool-delta extraction) stays focused on stream shape, while
+ * Separate from `connectors/gemini/` wire-parsing modules so `extract`, candidate
+ * selection, and tool-delta extraction stay focused on stream shape, while
  * meaning-of-finish-reasons / safety-rating ranking lives here.
  */
 
