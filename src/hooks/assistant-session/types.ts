@@ -139,6 +139,14 @@ export type ChorusShouldContinueToolLoop<TMeta = Record<string, unknown>> = (con
 export interface UpdateMessagesOptions {
   flushPersistence?: boolean;
   removePersistenceIfEmpty?: boolean;
+  /**
+   * Route this update straight to the persistence write queue, bypassing the
+   * controlled-host `onChange`, the uncontrolled `setInternalMsgs`, and the
+   * `onMessagesChange` observer. Used by the `useRAFQueue` unmount flush so a
+   * final buffered token is persisted without a host callback firing after the
+   * component has torn down.
+   */
+  persistOnly?: boolean;
   reason?: 'send' | 'assistant' | 'retry' | 'edit' | 'regenerate' | 'delete' | 'clear' | 'update';
 }
 
