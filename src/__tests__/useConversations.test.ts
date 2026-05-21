@@ -182,6 +182,26 @@ describe('useConversations', () => {
     expect(result.current.activeId).toBe('b');
   });
 
+  it('drops a stored index entry with an empty-string id during parse', () => {
+    const storage = makeSyncStorage({
+      'chorus-conversations-index': JSON.stringify({
+        activeId: 'b',
+        conversations: [
+          { id: '', title: 'Blank id', createdAt: '2026-05-14T00:00:00.000Z', updatedAt: '2026-05-14T00:00:00.000Z' },
+          { id: '   ', title: 'Whitespace id', createdAt: '2026-05-14T00:00:00.000Z', updatedAt: '2026-05-14T00:00:00.000Z' },
+          { id: 'b', title: 'B', createdAt: '2026-05-14T00:00:01.000Z', updatedAt: '2026-05-14T00:00:01.000Z' },
+        ],
+      }),
+    });
+
+    const { result } = renderHook(() => useConversations({ storage }));
+
+    // A zero-length or blank id collapses getPersistenceKey() to the bare
+    // messageKeyPrefix, so such entries are dropped like a malformed message.
+    expect(result.current.conversations.map(conversation => conversation.id)).toEqual(['b']);
+    expect(result.current.activeId).toBe('b');
+  });
+
   it('preserves legacy index entries that are missing timestamps', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const storage = makeSyncStorage({

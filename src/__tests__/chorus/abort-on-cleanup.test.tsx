@@ -1,9 +1,10 @@
+import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Chorus } from '../../Chorus';
 import { sendMessage, deferred, makeSyncStorage } from './testUtils';
-import type { OnSend, OnSendHelpers, Transport } from './testUtils';
+import type { Message, OnSend, OnSendHelpers, Transport } from './testUtils';
 
 vi.mock('../../components/Markdown', () => ({
   Markdown: ({ text }: { text: string }) => <span data-testid="markdown">{text}</span>,
@@ -126,5 +127,124 @@ describe('Chorus abort-on-cleanup', () => {
     expect(onFinish).not.toHaveBeenCalled();
     expect(onAbort).not.toHaveBeenCalled();
     warn.mockRestore();
+  });
+
+  describe('unmount flush of a buffered assistant token', () => {
+    // Capture requestAnimationFrame callbacks without firing them so a token
+    // appended via the onSend helpers stays buffered until <Chorus> unmounts.
+    function stubRAF() {
+      const frames: FrameRequestCallback[] = [];
+      const rafSpy = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => {
+        frames.push(cb);
+        return frames.length;
+      });
+      const cafSpy = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {});
+      return { frames, restore: () => { rafSpy.mockRestore(); cafSpy.mockRestore(); } };
+    }
+
+    // First token starts the assistant message (applied synchronously); the
+    // second is buffered behind a RAF the test never fires, so the unmount
+    // flush is the only thing that can deliver it.
+    const bufferingOnSend: OnSend = (_text, _messages, helpers) => {
+      helpers.appendAssistant('first ');
+      helpers.appendAssistant('second');
+      return new Promise<void>(() => undefined);
+    };
+
+    it('does not invoke a controlled host onChange after unmount', async () => {
+      const raf = stubRAF();
+      try {
+        const user = userEvent.setup();
+        const onChange = vi.fn<(messages: Message[]) => void>();
+        const onSend = vi.fn<OnSend>(bufferingOnSend);
+
+        function Harness() {
+          const [messages, setMessages] = React.useState<Message[]>([]);
+          return (
+            <Chorus
+              value={messages}
+              onChange={(next) => { onChange(next); setMessages(next); }}
+              onSend={onSend}
+              minAssistantDelayMs={0}
+            />
+          );
+        }
+
+        const { unmount } = render(<Harness />);
+        await sendMessage(user, 'controlled hi');
+        await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
+
+        // The trailing token is buffered behind a RAF that never fires.
+        expect(raf.frames.length).toBeGreaterThan(0);
+        const onChangeCallsBeforeUnmount = onChange.mock.calls.length;
+
+        unmount();
+
+        // The unmount flush must not call the controlled host's onChange after
+        // teardown — a host driving routing from onChange would otherwise get a
+        // surprise callback. The buffered token is dropped instead.
+        expect(onChange.mock.calls.length).toBe(onChangeCallsBeforeUnmount);
+      } finally {
+        raf.restore();
+      }
+    });
+
+    it('does not invoke the onMessagesChange observer after an uncontrolled unmount', async () => {
+      const raf = stubRAF();
+      try {
+        const user = userEvent.setup();
+        const onMessagesChange = vi.fn();
+        const onSend = vi.fn<OnSend>(bufferingOnSend);
+
+        const { unmount } = render(
+          <Chorus onSend={onSend} onMessagesChange={onMessagesChange} minAssistantDelayMs={0} />,
+        );
+        await sendMessage(user, 'uncontrolled hi');
+        await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
+
+        expect(raf.frames.length).toBeGreaterThan(0);
+        const observerCallsBeforeUnmount = onMessagesChange.mock.calls.length;
+
+        unmount();
+
+        expect(onMessagesChange.mock.calls.length).toBe(observerCallsBeforeUnmount);
+      } finally {
+        raf.restore();
+      }
+    });
+
+    it('still persists the final buffered token when a persistence-backed chat unmounts', async () => {
+      const raf = stubRAF();
+      try {
+        const user = userEvent.setup();
+        const storage = makeSyncStorage();
+        const onSend = vi.fn<OnSend>(bufferingOnSend);
+
+        const { unmount } = render(
+          <Chorus
+            persistenceKey="chat"
+            persistenceStorage={storage}
+            onSend={onSend}
+            minAssistantDelayMs={0}
+          />,
+        );
+        await sendMessage(user, 'persist me');
+        await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
+        expect(raf.frames.length).toBeGreaterThan(0);
+
+        unmount();
+
+        // The unmount flush routes the buffered token into persistence, so the
+        // stored transcript ends with the complete assistant text rather than
+        // mid-token.
+        const persisted = JSON.parse(storage.store.chat ?? '[]') as Message[];
+        expect(persisted).toEqual([
+          expect.objectContaining({ role: 'user', text: 'persist me' }),
+          expect.objectContaining({ role: 'assistant', text: 'first second' }),
+        ]);
+      } finally {
+        raf.restore();
+      }
+    });
   });
 });
