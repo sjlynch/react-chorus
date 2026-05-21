@@ -1,4 +1,4 @@
-import type { SendCallbacks } from '../hooks/useChorusStream';
+import type { SendCallbacks } from '../hooks/chorus-stream/types';
 import type { ConnectorToolDelta } from '../connectors/types';
 import { createAbortError, isAbortError, toError } from './internal/streamErrors';
 

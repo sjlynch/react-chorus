@@ -2,15 +2,14 @@ import React from 'react';
 import './Chorus.css';
 import { ChatWindow } from './components/ChatWindow';
 import { ChatInput } from './components/ChatInput';
-import type { ChatInputHandle } from './components/ChatInput';
-import { styleVarsFromPalette } from './utils/paletteVars';
-import type { Attachment, Message } from './types';
 import { resolveChorusLabels } from './labels/resolve';
 import { useChorusPersistence } from './hooks/useChorusPersistence';
 import { useChorusMessages } from './hooks/useChorusMessages';
 import { useAssistantSession } from './hooks/useAssistantSession';
 import { useChorusPropWarnings } from './hooks/useChorusPropWarnings';
 import { useChorusRef } from './hooks/useChorusRef';
+import { useChorusComposerActions, useChorusComposerState } from './chorus-shell/useComposerActions';
+import { resolveBuiltInPersistenceKey, useChorusShellDerivedState } from './chorus-shell/derivedState';
 import { DEFAULT_CHORUS_HIDDEN_ROLES, DEFAULT_MIN_ASSISTANT_DELAY_MS, DEFAULT_PERSISTENCE_WRITE_DEBOUNCE_MS, type ChorusProps, type ChorusRef } from './Chorus.types';
 
 export type { Transport, FetchTransportInit, Connector, RenderAttachmentErrorContext, ChorusAbortContext, ChorusAbortReason, ChorusAbortSource, ChorusClearConversationContext, ChorusConfirmClearConversation, ChorusConfirmDeleteMessage, ChorusDeleteMessageContext, ChorusFinishContext, ChorusMessagesChangeContext, ChorusOnAbort, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusProps, ChorusRef, ChorusSendHelpers, ChorusSendPath, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusStreamDoneReason, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolLoopContext, ChorusToolRegistry } from './Chorus.types';
@@ -89,12 +88,12 @@ function ChorusInner<TMeta = Record<string, unknown>>({
   const resolvedLabels = React.useMemo(() => resolveChorusLabels(labels), [labels]);
   const resolvedClearLabel = clearLabel ?? resolvedLabels.clearConversation;
   const rootRef = React.useRef<HTMLDivElement>(null);
-  const inputRef = React.useRef<ChatInputHandle>(null);
-  const [draft, setDraft] = React.useState('');
-  const [composerResetKey, setComposerResetKey] = React.useState(0);
   const fallbackErrorMessage = errorMessage ?? 'Something went wrong. Please try again.';
-
-  const builtInPersistenceKey = value === undefined ? persistenceKey ?? '' : '';
+  const builtInPersistenceKey = resolveBuiltInPersistenceKey<TMeta>(value, persistenceKey);
+  const composer = useChorusComposerState<TMeta>({
+    persistenceKey: builtInPersistenceKey,
+    onClear,
+  });
   const persisted = useChorusPersistence<TMeta>(builtInPersistenceKey, {
     storage: builtInPersistenceKey ? persistenceStorage : null,
     writeDebounceMs: DEFAULT_PERSISTENCE_WRITE_DEBOUNCE_MS,
@@ -133,21 +132,6 @@ function ChorusInner<TMeta = Record<string, unknown>>({
     shouldContinueToolLoop,
   });
 
-  const resetComposer = React.useCallback(() => {
-    setDraft('');
-    setComposerResetKey(key => key + 1);
-  }, []);
-
-  const onClearRef = React.useRef(onClear);
-  React.useEffect(() => {
-    onClearRef.current = onClear;
-  }, [onClear]);
-
-  const handleClearCommit = React.useCallback((next: Message<TMeta>[]) => {
-    resetComposer();
-    onClearRef.current?.(next);
-  }, [resetComposer]);
-
   const session = useAssistantSession<TMeta>({
     messages: msgs,
     updateMessages: updateMsgs,
@@ -177,67 +161,41 @@ function ChorusInner<TMeta = Record<string, unknown>>({
     persistenceKey: builtInPersistenceKey || undefined,
     flushPersistence: persisted.flush,
     resetToInitialMessages,
-    onClear: handleClearCommit,
+    onClear: composer.handleClearCommit,
   });
 
-  const visualSending = sendingProp ?? session.sending;
-  const paletteVars = React.useMemo(() => styleVarsFromPalette(palette), [palette]);
-  const canAssistantRespond = Boolean(transport || onSend);
-  const resolvedShowJumpToBottomButton = showJumpToBottomButton ?? !headless;
-  const persistenceLoading = Boolean(builtInPersistenceKey) && !persisted.loaded;
-  const canRenderEmptyAffordance = value !== undefined || !builtInPersistenceKey || persisted.loaded;
-  const writesDisabled = disabled || readOnly || persistenceLoading;
-  const composerDisabled = disabled || persistenceLoading;
-  const resolvedDisabledReason = persistenceLoading ? disabledReason ?? 'Loading saved conversation…' : disabledReason;
-
-  const previousPersistenceKeyRef = React.useRef(builtInPersistenceKey);
-  React.useEffect(() => {
-    if (previousPersistenceKeyRef.current === builtInPersistenceKey) return;
-    previousPersistenceKeyRef.current = builtInPersistenceKey;
-    resetComposer();
-  }, [builtInPersistenceKey, resetComposer]);
-
-  const handleInputSend = React.useCallback((attachments: Attachment[] = []) => {
-    if (writesDisabled) return false;
-    const accepted = session.send(draft, attachments);
-    if (accepted) setDraft('');
-    return accepted;
-  }, [draft, session, writesDisabled]);
-
-  const handleStop = React.useCallback(() => {
-    session.stop('user');
-  }, [session]);
-
-  const handleClear = React.useCallback(() => {
-    if (writesDisabled || session.clearConfirmationPending) return;
-    session.clear('user');
-  }, [session, writesDisabled]);
-
-  const handleSuggestedPrompt = React.useCallback((prompt: string) => {
-    if (writesDisabled) return;
-    setDraft(prompt);
-
-    const focusComposer = () => {
-      inputRef.current?.focus({ caret: 'end' });
-    };
-
-    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
-      window.requestAnimationFrame(focusComposer);
-    } else {
-      focusComposer();
-    }
-  }, [writesDisabled]);
-
-  const controlledWithoutOnChange = value !== undefined && !onChange;
+  const shellState = useChorusShellDerivedState<TMeta>({
+    palette,
+    sending: sendingProp,
+    sessionSending: session.sending,
+    transport,
+    onSend,
+    showJumpToBottomButton,
+    headless,
+    disabled,
+    disabledReason,
+    readOnly,
+    builtInPersistenceKey,
+    persistenceLoaded: persisted.loaded,
+    value,
+    onChange,
+  });
+  const composerActions = useChorusComposerActions({
+    draft: composer.draft,
+    setDraft: composer.setDraft,
+    inputRef: composer.inputRef,
+    session,
+    writesDisabled: shellState.writesDisabled,
+  });
 
   useChorusRef<TMeta>(ref, {
     session,
-    resetComposer,
+    resetComposer: composer.resetComposer,
     messagesRef,
     rootRef,
-    inputRef,
-    writesDisabled,
-    controlledWithoutOnChange,
+    inputRef: composer.inputRef,
+    writesDisabled: shellState.writesDisabled,
+    controlledWithoutOnChange: shellState.controlledWithoutOnChange,
   });
 
   return (
@@ -245,14 +203,14 @@ function ChorusInner<TMeta = Record<string, unknown>>({
       {...rest}
       ref={rootRef}
       className={["chorus", disabled && "chorus--disabled", readOnly && "chorus--readonly", alwaysShowMessageActions && "chorus--always-show-actions", className].filter(Boolean).join(" ")}
-      style={{ ...paletteVars, ...style }}
-      aria-disabled={writesDisabled ? true : rest['aria-disabled']}
+      style={{ ...shellState.paletteVars, ...style }}
+      aria-disabled={shellState.writesDisabled ? true : rest['aria-disabled']}
     >
       <ChatWindow<TMeta>
         messages={msgs}
-        typing={canAssistantRespond && visualSending && !session.hasStartedAssistant}
+        typing={shellState.canAssistantRespond && shellState.visualSending && !session.hasStartedAssistant}
         codeTheme={codeBlockTheme}
-        emptyState={canRenderEmptyAffordance ? emptyState : undefined}
+        emptyState={shellState.canRenderEmptyAffordance ? emptyState : undefined}
         error={session.streamError}
         headless={headless}
         hiddenRoles={hiddenRoles ?? DEFAULT_CHORUS_HIDDEN_ROLES}
@@ -261,43 +219,43 @@ function ChorusInner<TMeta = Record<string, unknown>>({
         maxRenderedMessages={maxRenderedMessages}
         getMessageFeedback={getMessageFeedback}
         onCopy={onCopy}
-        onDelete={writesDisabled || session.sending ? undefined : session.handleDelete}
+        onDelete={shellState.canDeleteMessages ? session.handleDelete : undefined}
         onDismissError={session.dismissError}
-        onEdit={!writesDisabled && canAssistantRespond ? session.handleEdit : undefined}
-        onFeedback={writesDisabled ? undefined : onFeedback}
-        onRegenerate={!writesDisabled && canAssistantRespond ? session.handleRegenerate : undefined}
-        onRetry={writesDisabled ? undefined : session.retry}
-        onSuggestedPrompt={writesDisabled ? undefined : handleSuggestedPrompt}
+        onEdit={shellState.canRunAssistantActions ? session.handleEdit : undefined}
+        onFeedback={shellState.canSubmitFeedback ? onFeedback : undefined}
+        onRegenerate={shellState.canRunAssistantActions ? session.handleRegenerate : undefined}
+        onRetry={shellState.canRetry ? session.retry : undefined}
+        onSuggestedPrompt={shellState.canSuggestPrompt ? composerActions.handleSuggestedPrompt : undefined}
         rawError={session.streamRawError}
         renderError={renderError}
         renderMessage={renderMessage}
-        showJumpToBottomButton={resolvedShowJumpToBottomButton}
+        showJumpToBottomButton={shellState.resolvedShowJumpToBottomButton}
         showTimestamps={showTimestamps}
         formatTimestamp={formatTimestamp}
         streamingMessageId={session.streamingMessageId}
-        suggestedPrompts={canRenderEmptyAffordance ? suggestedPrompts : undefined}
-        suggestedPromptsDisabled={writesDisabled}
-        suggestedPromptsDisabledReason={resolvedDisabledReason}
+        suggestedPrompts={shellState.canRenderEmptyAffordance ? suggestedPrompts : undefined}
+        suggestedPromptsDisabled={shellState.writesDisabled}
+        suggestedPromptsDisabledReason={shellState.resolvedDisabledReason}
         labels={labels}
       />
       {showClearButton && (
         <div className="chorus-clear-row">
-          <button type="button" className="chorus-clear-btn" onClick={handleClear} disabled={writesDisabled || session.clearConfirmationPending || (!session.sending && msgs.length === 0)}>
+          <button type="button" className="chorus-clear-btn" onClick={composerActions.handleClear} disabled={shellState.writesDisabled || session.clearConfirmationPending || (!session.sending && msgs.length === 0)}>
             {resolvedClearLabel}
           </button>
         </div>
       )}
       <ChatInput
-        ref={inputRef}
-        value={draft}
-        onChange={setDraft}
-        onSend={handleInputSend}
-        onStop={handleStop}
-        sending={visualSending}
-        disabled={composerDisabled}
+        ref={composer.inputRef}
+        value={composer.draft}
+        onChange={composer.setDraft}
+        onSend={composerActions.handleInputSend}
+        onStop={composerActions.handleStop}
+        sending={shellState.visualSending}
+        disabled={shellState.composerDisabled}
         readOnly={readOnly}
-        disabledReason={resolvedDisabledReason}
-        resetKey={composerResetKey}
+        disabledReason={shellState.resolvedDisabledReason}
+        resetKey={composer.composerResetKey}
         placeholder={placeholder}
         labels={resolvedLabels.composer}
         attachmentLabels={resolvedLabels.attachments}

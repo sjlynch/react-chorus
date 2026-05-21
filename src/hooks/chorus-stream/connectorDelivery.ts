@@ -1,0 +1,65 @@
+import type { ConnectorResult, ConnectorWarning } from '../../connectors/connectors';
+import type { createDelayedChunkEmitter } from '../../streaming/delayedStreamEvents';
+import { createConnectorStreamError } from '../../streaming/errors';
+import type { createToolDeltaAccumulator } from '../../streaming/toolDeltaAccumulator';
+import { warnInDev } from '../../streaming/internal/devMode';
+import { safeOnObserverError } from './observer';
+import type { SendCallbacks } from './types';
+
+export type DelayedChunkEmitter = ReturnType<typeof createDelayedChunkEmitter>;
+export type ToolDeltaAccumulator = ReturnType<typeof createToolDeltaAccumulator>;
+
+/**
+ * Deliver a non-fatal connector warning. When the host wired `onWarning`, the
+ * warning is routed there; a throw is warned-and-ignored so it can never fail
+ * an otherwise-successful send. Without an observer the warning is logged in
+ * dev so the signal stays discoverable. The stream keeps flowing either way.
+ */
+function deliverConnectorWarning(cb: SendCallbacks, warning: ConnectorWarning) {
+  if (cb.onWarning) {
+    try {
+      cb.onWarning(warning);
+    } catch (callbackError) {
+      safeOnObserverError('onWarning', callbackError);
+    }
+    return;
+  }
+  warnInDev(`[Chorus] connector warning (${warning.code}): ${warning.message}`, warning.payload);
+}
+
+function connectorErrorFromResult(out: ConnectorResult) {
+  // Any present `error` field is a connector error — including `error: ''`. A
+  // provider that emits an empty error string is still reporting a failure, so
+  // a truthiness check would silently complete the stream with no error
+  // surfaced. Use `'error' in out` as the sentinel so a missing key (no error)
+  // stays distinct from a present-but-empty value.
+  return 'error' in out ? createConnectorStreamError(out.error ?? '', out.errorPayload) : null;
+}
+
+export function createConnectorResultDeliverer(
+  cb: SendCallbacks,
+  delayedChunks: DelayedChunkEmitter,
+  accumulateToolDelta: ToolDeltaAccumulator,
+) {
+  return (out: ConnectorResult | null | undefined): boolean => {
+    if (!out) return false;
+
+    const chunk = out.text || '';
+    if (chunk) delayedChunks.handleChunk(chunk);
+
+    const reasoning = out.reasoning || '';
+    if (reasoning) delayedChunks.handleReasoning(reasoning);
+
+    const toolDeltas = out.toolDeltas?.length ? out.toolDeltas : out.toolDelta ? [out.toolDelta] : [];
+    for (const toolDelta of toolDeltas) delayedChunks.handleToolDelta(accumulateToolDelta(toolDelta));
+
+    // Non-fatal connector signals (truncation, safety ratings, telemetry events). Routed to
+    // the optional onWarning observer; without one they are logged in dev so they stay
+    // discoverable. Either way the stream keeps flowing.
+    if (out.warning) deliverConnectorWarning(cb, out.warning);
+
+    const connectorError = connectorErrorFromResult(out);
+    if (connectorError) throw connectorError;
+    return Boolean(out.done);
+  };
+}
