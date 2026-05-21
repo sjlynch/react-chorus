@@ -1,5 +1,6 @@
 import React from 'react';
 import type { ConversationSummary } from '../../hooks/useConversations';
+import { isChorusDevMode } from '../../utils/devMode';
 import type { ConfirmDeleteConversation } from './types';
 
 // Inlined — importing `utils/async` would put ConversationList on a shared
@@ -13,9 +14,7 @@ function isPromiseLike<T>(value: unknown): value is PromiseLike<T> {
 }
 
 function warnDeleteConfirmationError(callbackName: string, error: unknown) {
-  // Inlined dev-mode gate: importing the shared helper would pull the heavy chorus-session
-  // chunk into ConversationList's initial graph, blowing the bundle budget.
-  if (typeof process === 'undefined' || process.env?.NODE_ENV === 'production') return;
+  if (!isChorusDevMode()) return;
   console.warn(`[Chorus] \`${callbackName}\` callback threw/rejected; delete was cancelled.`, error);
 }
 
