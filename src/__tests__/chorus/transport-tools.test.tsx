@@ -498,6 +498,50 @@ describe('Chorus', () => {
     ]));
   });
 
+  it('fires onFinish once for a multi-iteration auto-continue turn', async () => {
+    const user = userEvent.setup();
+    const search = vi.fn(async () => ({ ok: true }));
+    const onFinish = vi.fn();
+    // Iterations 1 and 3 stream assistant text; iteration 3 is terminal. onFinish
+    // must honor the documented once-per-turn contract rather than firing for the
+    // intermediate iteration that also streamed text.
+    const transport = vi.fn<Transport>(async () => {
+      const call = transport.mock.calls.length;
+      if (call === 1) {
+        return sseResponse([
+          JSON.stringify({ choices: [{ index: 0, delta: { content: 'Working on it.', tool_calls: [{ index: 0, id: 'call_1', function: { name: 'search', arguments: '{"q":"a"}' } }] } }] }),
+          '[DONE]',
+        ]);
+      }
+      if (call === 2) {
+        return sseResponse([
+          JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_2', function: { name: 'search', arguments: '{"q":"b"}' } }] } }] }),
+          '[DONE]',
+        ]);
+      }
+      return sseResponse([
+        JSON.stringify({ choices: [{ index: 0, delta: { content: 'All done.' } }] }),
+        '[DONE]',
+      ]);
+    });
+
+    render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0} autoContinueTools tools={{ search }} onFinish={onFinish} />);
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'go');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByText('All done.')).toBeInTheDocument();
+    await waitFor(() => expect(transport).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument());
+    expect(search).toHaveBeenCalledTimes(2);
+
+    expect(onFinish).toHaveBeenCalledTimes(1);
+    expect(onFinish).toHaveBeenCalledWith(expect.objectContaining({
+      message: expect.objectContaining({ text: 'All done.' }),
+      reason: 'done',
+    }));
+  });
+
   it('stops automatic tool loops at maxToolIterations', async () => {
     const user = userEvent.setup();
     const search = vi.fn(async () => ({ ok: true }));

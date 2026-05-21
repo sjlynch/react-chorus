@@ -199,12 +199,6 @@ export function useTransportLifecycle<TMeta>(deps: TransportLifecycleDeps<TMeta>
       if (!isAssistantSessionActive(sessionId)) return;
 
       const assistantMessage = finalizeAssistantNow();
-      emitFinishForAssistantMessage({
-        assistantMessage,
-        response,
-        messages: messagesRef.current,
-        observers,
-      });
 
       const toolMessages = getToolMessagesByIds(toolMessageIds);
       const decision = await safeDecideToolLoopContinuation(
@@ -216,6 +210,20 @@ export function useTransportLifecycle<TMeta>(deps: TransportLifecycleDeps<TMeta>
         controller.signal,
       );
       if (!isAssistantSessionActive(sessionId)) return;
+
+      // Fire onFinish only on the terminal iteration. An autoContinueTools turn
+      // runs finishTransportStream once per loop iteration; emitting here, after
+      // the continuation decision, keeps onFinish to the documented once-per-turn
+      // contract instead of firing for every intermediate iteration that streamed
+      // assistant text.
+      if (!decision.willContinue) {
+        emitFinishForAssistantMessage({
+          assistantMessage,
+          response,
+          messages: messagesRef.current,
+          observers,
+        });
+      }
 
       observers.safeOnStreamDone(createStreamDoneContext({
         assistantMessage,
