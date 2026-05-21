@@ -130,6 +130,10 @@ function ChorusInner<TMeta = Record<string, unknown>>({
     autoContinueTools,
     maxToolIterations,
     shouldContinueToolLoop,
+    tools,
+    onToolCall,
+    onToolDelta,
+    continueOnToolError,
   });
 
   const session = useAssistantSession<TMeta>({
