@@ -50,7 +50,7 @@ Conversation index persistence is split into focused helpers (see `conversations
 - `conversations/storageSource.ts` and `conversations/indexReadLifecycle.ts` — default storage/key setup and sync/async index read orchestration.
 - `conversations/lifecycle.ts` and `conversations/crossTabSync.ts` — page/unmount flushes and localStorage cross-tab sync.
 - `conversations/actions.ts` — create/select/rename/delete/pin callbacks plus transcript deletion.
-- `conversations/indexCodec.ts` — index parsing/migration, title derivation, active-id selection.
+- `conversations/indexCodec.ts` plus `parse.ts`/`sanitize.ts`/`activeId.ts`/`timestamp.ts`/`pendingCreates.ts`/`title.ts` — conversation index parsing/migration/serialization, default title derivation, and active-id/timestamp/pending-create helpers.
 - `conversations/storageErrors.ts` — storage error normalization.
 - `conversations/indexWriteQueue.ts` — debounced/serialized index writes.
 - `conversations/storageAdapter.ts` — transcript storage wrapper that touches conversation timestamps.
