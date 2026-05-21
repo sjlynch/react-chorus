@@ -10,7 +10,9 @@
 - `lifecycle.ts` — unmount, `pagehide`, and hidden-visibility flushing for debounced index writes.
 - `crossTabSync.ts` — localStorage `storage` event synchronization for the conversation index.
 - `actions.ts` — create/select/rename/rename-from-first-message/delete/pin callbacks and transcript deletion fallback.
-- `indexCodec.ts` — index parsing/migration/serialization, active-id selection, timestamps, pending-create merge, and first-message title generation.
+- `indexCodec.ts` — compatibility barrel that re-exports the conversation index helper API for existing internal callers.
+- `parse.ts` / `sanitize.ts` — index JSON parse/serialize/state conversion plus summary sanitization, timestamp backfill migration warnings, pinned coercion, and pristine default-title migration.
+- `activeId.ts` / `timestamp.ts` / `pendingCreates.ts` / `title.ts` — focused helpers for active-id selection, timestamp normalization, pre-load create merging, and first-message/default-title derivation.
 - `indexWriteQueue.ts` — debounced/serialized index writes. Exposes a `writeCoordination` (`isWritePending`/`whenWriteSettles`) so `crossTabSync` can defer external events behind in-flight writes, and an `onWriteSuccess(version)` callback so the facade can clear a stale `error` once a later write lands.
 - `storageAdapter.ts` — transcript storage wrapper that touches conversation timestamps.
 - `storageErrors.ts` — conversation storage error normalization.
