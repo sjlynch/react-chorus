@@ -6,6 +6,11 @@ export type SanitizerFn = (html: string) => string;
 type DOMPurifyInstance = { sanitize?: SanitizerFn };
 type DOMPurifyFactory = ((window: Window) => DOMPurifyInstance) & DOMPurifyInstance;
 
+const MAX_VALID_CODEPOINT = 0x10ffff;
+const SURROGATE_RANGE_START = 0xd800;
+const SURROGATE_RANGE_END = 0xdfff;
+const REPLACEMENT_CHAR = '\ufffd';
+
 const SAFE_LINK_PROTOCOLS = new Set(['http', 'https', 'mailto', 'tel']);
 const SAFE_IMAGE_PROTOCOLS = new Set(['http', 'https']);
 const URL_CHARACTER_REFERENCES = new Map([
@@ -94,7 +99,7 @@ function decodeNumericCharacterReference(value: string, radix: 10 | 16) {
     codePoint = codePoint * radix + digit;
   }
 
-  if (codePoint <= 0 || codePoint > 0x10ffff || (codePoint >= 0xd800 && codePoint <= 0xdfff)) return '\ufffd';
+  if (codePoint <= 0 || codePoint > MAX_VALID_CODEPOINT || (codePoint >= SURROGATE_RANGE_START && codePoint <= SURROGATE_RANGE_END)) return REPLACEMENT_CHAR;
   return String.fromCodePoint(codePoint);
 }
 
