@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
 import { toGeminiGenerateContentBody } from '../../providerRequests';
-import type { Message } from '../../types';
 import { history, nonOpenAIUriImageHistory } from './fixtures';
 
 describe('Gemini provider request mapping', () => {
