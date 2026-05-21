@@ -41,6 +41,6 @@ A *client*-initiated `transport.close()` is **not** a clean end-of-stream — th
 
 Net contract: **server closed normally → reader sees `done`; client called `close()` → reader rejects** with a transport-closed error. The `code`/`reason` passed to `transport.close()` are still forwarded to the socket close frame.
 
-## Dev-mode duplication (do not "fix")
+## Dev-mode gate (streaming-side, do not "fix")
 
-`persistent.ts` and `transient.ts` each define a local dev-mode check (`isPersistentWebSocketDevMode()` / `isTransientWebSocketDevMode()`) and intentionally do **not** import `isChorusDevMode` from `src/utils/devMode.ts`. Importing the shared helper pulls the utils chunk into the transport-only subpath and blows its bundle-size budget tracked in the root README. See `../CLAUDE.md` and the inline comments in those files before changing this.
+`persistent.ts` and `transient.ts` use `isStreamDevMode()` from `../internal/devMode.ts` — the streaming/transport-side dev-mode leaf — and intentionally do **not** import `isChorusDevMode` from `src/utils/devMode.ts`. Importing the utils helper pulls the utils-owned chunk into the transport-only subpath and blows its bundle-size budget tracked in the root README. `src/streaming/internal/devMode.ts` exists precisely so the streaming chunks have their own copy; `isStreamDevMode` is an intentional one-line duplicate of `isChorusDevMode`. See that module's header comment and `../CLAUDE.md` before changing this.

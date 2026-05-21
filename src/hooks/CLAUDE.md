@@ -38,7 +38,8 @@ Loads and saves message arrays through a `StorageAdapter`. Internals mirror `use
 
 - `persistence/messageCodec.ts` — JSON defaults, parse/sanitize, raw-to-state conversion.
 - `persistence/errors.ts` — `ChorusPersistenceError` normalization and dev warnings using shared error helpers.
-- `persistence/writeQueue.ts` — debounced/serialized writes plus page-lifecycle flush support.
+- `persistence/writeQueueCore.ts` — generic serialized/debounced write-queue core (`useWriteQueueCore`) shared with `useConversations`' index write queue.
+- `persistence/writeQueue.ts` — message-persistence wrapper over the core: serialization, `removeIfEmpty`, and page-lifecycle flush support.
 
 The facade keeps storage resolution, initial sync/async read coordination, pre-load `onChange` deferral, and the public result shape.
 
