@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readSSEStream } from '../hooks/useChorusStream';
 import { ChorusStreamError } from '../streaming/errors';
+import { createSSEParser } from '../streaming/readSSEStream';
 
 function makeResponse(body: string, init?: ResponseInit): Response {
   const stream = new ReadableStream<Uint8Array>({
@@ -25,6 +26,55 @@ function makeChunkedResponse(chunks: string[]): Response {
 }
 
 // ---------------------------------------------------------------------------
+
+describe('createSSEParser', () => {
+  it('splits lines across chunks and dispatches a named trailing event at finish', () => {
+    const frames: Array<[string, string | undefined]> = [];
+    const parser = createSSEParser((payload, name) => { frames.push([payload, name]); });
+
+    parser.push('\uFEFFevent: update\r');
+    parser.push('\ndata: one\r\ndata: two');
+    parser.finish();
+
+    expect(frames).toEqual([['one\ntwo', 'update']]);
+    expect(parser.getSnapshot()).toEqual({ sawDataField: true, sawSseFrame: true, stopped: false });
+  });
+
+  it('strips only one leading BOM at the start of the stream', () => {
+    const frames: string[] = [];
+    const parser = createSSEParser(payload => { frames.push(payload); });
+
+    parser.push('\uFEFFdata: first\n\n\uFEFFdata: ignored\n\ndata: third\n\n');
+    parser.finish();
+
+    expect(frames).toEqual(['first', 'third']);
+  });
+
+  it('treats comments and event-only frames as SSE-shaped without dispatching payloads', () => {
+    const frames: string[] = [];
+    const parser = createSSEParser(payload => { frames.push(payload); });
+
+    parser.push(': keepalive\n\nevent: heartbeat\n\n');
+    parser.finish();
+
+    expect(frames).toEqual([]);
+    expect(parser.getSnapshot()).toEqual({ sawDataField: false, sawSseFrame: true, stopped: false });
+  });
+
+  it('stops parsing the current chunk when the callback returns false', () => {
+    const frames: string[] = [];
+    const parser = createSSEParser(payload => {
+      frames.push(payload);
+      return false;
+    });
+
+    parser.push('data: first\n\ndata: second\n\n');
+    parser.finish();
+
+    expect(frames).toEqual(['first']);
+    expect(parser.stopped).toBe(true);
+  });
+});
 
 describe('readSSEStream', () => {
   it('emits nothing for a response with no body', async () => {
