@@ -1565,11 +1565,12 @@ For one-off reads from outside React state, call `chorusRef.current?.getMessages
 
 ### Transcript search, copy, and export
 
-`useChorusTranscriptActions` is a headless utility hook for building a search box, a "copy conversation" button, or a "download transcript" affordance around `<Chorus>` or a custom headless shell — without writing the indexing, clipboard, and serialization layers yourself. Pass it the same `messages` array you render (from `chorusRef.getMessages()`, `onMessagesChange`, or your own state) and it returns three callbacks with stable identities:
+`useChorusTranscriptActions` is a headless utility hook for building a search box, a "copy conversation" button, or a "download transcript" affordance around `<Chorus>` or a custom headless shell — without writing the indexing, clipboard, and serialization layers yourself. Pass it the same `messages` array you render (from `chorusRef.getMessages()`, `onMessagesChange`, or your own state) and it returns four callbacks with stable identities:
 
-- `searchMessages(query)` — case-insensitive substring search across each message's `text`, `reasoning`, and — for tool messages — `toolCall.name` plus its serialized `input` and `output` (the same I/O `exportAs` renders, so a value visible in the export is also findable here). Returns the matching `Message[]`; a blank/whitespace-only query returns `[]`. Pair it with `chorusRef.scrollToMessage(id)` to jump to a hit.
+- `searchMessages(query)` — case-insensitive substring search across each message's `text`, each attachment's file `name`, the `reasoning` of assistant messages, and — for tool messages — `toolCall.name` plus its serialized `input` and `output`. These are exactly the values `exportAs('markdown')` renders, so a string visible in the export is findable here and vice versa. Returns the matching `Message[]`; a blank/whitespace-only query returns `[]`. Pair it with `chorusRef.scrollToMessage(id)` to jump to a hit.
 - `copyAll(format?)` — copies the whole transcript to the clipboard. Defaults to `'markdown'`; pass `'json'` for the raw structure. Resolves `false` without touching the clipboard when the transcript is empty (a non-error signal — `onCopyError` is not called — so you can disable the button). Also resolves `false`, and calls the optional `onCopyError`, when the Clipboard API is unavailable or the write rejects.
-- `exportAs(format)` — serializes the transcript to a string. `'markdown'` renders a readable transcript with one heading per message (tool calls include their input/output); `'json'` returns `JSON.stringify(messages, null, 2)`, which round-trips through `JSON.parse`.
+- `exportAs(format)` — serializes the transcript to a string. `'markdown'` renders a readable transcript with one heading per message (assistant messages include a `**Reasoning:**` block; tool calls include their input/output); `'json'` returns `JSON.stringify(messages, null, 2)`, which round-trips through `JSON.parse`.
+- `downloadAs(format, filename?)` — serializes the transcript and saves it to a file by triggering a transient `<a download>`, so you skip the `Blob`/`createObjectURL`/anchor/`revokeObjectURL` dance. `filename` defaults to `transcript.md` / `transcript.json` per format (a name with no extension gets the format's appended); the MIME type is picked for you. Returns `false` without downloading when the transcript is empty or no DOM is available (e.g. SSR), and `true` once the download starts. The `TRANSCRIPT_FORMAT_INFO` record (`{ markdown, json }` → `{ mimeType, extension }`) is exported too if you need those values for your own download or upload code.
 
 ```tsx
 import React from 'react';
@@ -1578,23 +1579,18 @@ import { Chorus, useChorusTranscriptActions, type ChorusRef, type Message } from
 export function SearchableChat() {
   const chorusRef = React.useRef<ChorusRef>(null);
   const [messages, setMessages] = React.useState<Message[]>([]);
-  const { searchMessages, copyAll, exportAs } = useChorusTranscriptActions(messages);
+  const { searchMessages, copyAll, downloadAs } = useChorusTranscriptActions(messages);
 
   const jumpToFirstHit = (query: string) => {
     const [hit] = searchMessages(query);
     if (hit) chorusRef.current?.scrollToMessage(hit.id);
   };
 
-  const downloadTranscript = () => {
-    const blob = new Blob([exportAs('markdown')], { type: 'text/markdown' });
-    window.open(URL.createObjectURL(blob), '_blank');
-  };
-
   return (
     <>
       <input type="search" placeholder="Search transcript…" onChange={(e) => jumpToFirstHit(e.target.value)} />
       <button type="button" onClick={() => copyAll()}>Copy conversation</button>
-      <button type="button" onClick={downloadTranscript}>Download .md</button>
+      <button type="button" onClick={() => downloadAs('markdown')}>Download .md</button>
       <Chorus ref={chorusRef} transport="/api/chat" onMessagesChange={setMessages} />
     </>
   );
