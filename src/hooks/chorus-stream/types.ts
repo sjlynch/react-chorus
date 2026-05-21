@@ -28,6 +28,17 @@ export interface SendCallbacks {
    */
   onWarning?: (warning: ConnectorWarning) => void;
   /**
+   * Receives free-form provider metadata (`ConnectorResult.metadata`) as the connector emits
+   * it — e.g. Anthropic `stopReason`/`stopSequence`, Gemini `safetyRatings`/`finishReason`,
+   * OpenAI Responses `usage`/`finishReason`, OpenAI Chat `finishReason`. Like onWarning it
+   * never aborts the stream — delivery continues after the callback returns — and a throwing
+   * handler is warned in development and otherwise ignored, so a misbehaving metadata observer
+   * cannot fail an otherwise-successful send. Wire this for usage/cost telemetry or to persist
+   * safety ratings. Unlike onWarning, omitting it drops metadata silently (no dev log): it is
+   * opt-in diagnostics, not a signal a developer needs to discover.
+   */
+  onMetadata?: (metadata: Record<string, unknown>) => void;
+  /**
    * Called after a successful stream completes. If this callback throws, send() rejects
    * with that callback error; onError is not invoked because no stream error occurred.
    */

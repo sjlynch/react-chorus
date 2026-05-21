@@ -141,6 +141,33 @@ describe('Chorus', () => {
     expect(onFinish).toHaveBeenCalled();
   });
 
+  it('routes connector metadata to onStreamMetadata while the stream still completes', async () => {
+    const user = userEvent.setup();
+    const onStreamMetadata = vi.fn();
+    const onFinish = vi.fn();
+    const transport = vi.fn<Transport>(async () => sseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { content: 'all done' }, finish_reason: 'stop' }] }),
+    ]));
+
+    render(
+      <Chorus
+        transport={transport}
+        connector="openai"
+        minAssistantDelayMs={0}
+        onStreamMetadata={onStreamMetadata}
+        onFinish={onFinish}
+      />,
+    );
+
+    await user.type(screen.getByPlaceholderText('Send a message'), 'wrap up');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByText('all done')).toBeInTheDocument();
+    await waitFor(() => expect(onStreamMetadata).toHaveBeenCalledTimes(1));
+    expect(onStreamMetadata).toHaveBeenCalledWith({ finishReason: 'stop' });
+    expect(onFinish).toHaveBeenCalled();
+  });
+
   it('finishes a tool-only Anthropic stream and invokes onToolCall with actionable context', async () => {
     const user = userEvent.setup();
     const onToolCall = vi.fn();

@@ -75,6 +75,7 @@ export interface UseAssistantSessionOptions<TMeta = Record<string, unknown>> {
   onAbort?: ChorusOnAbort<TMeta>;
   onStreamDone?: ChorusOnStreamDone<TMeta>;
   onStreamWarning?: (warning: ConnectorWarning) => void;
+  onStreamMetadata?: (metadata: Record<string, unknown>) => void;
   onToolCall?: ChorusOnToolCall<TMeta>;
   onToolDelta?: ChorusOnToolDelta<TMeta>;
   tools?: ChorusToolRegistry<TMeta>;
@@ -124,6 +125,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
   onAbort,
   onStreamDone,
   onStreamWarning,
+  onStreamMetadata,
   onToolCall,
   onToolDelta,
   tools,
@@ -147,6 +149,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     onAbort: onAbortRef,
     onStreamDone: onStreamDoneRef,
     onStreamWarning: onStreamWarningRef,
+    onStreamMetadata: onStreamMetadataRef,
     onToolCall: onToolCallRef,
     onToolDelta: onToolDeltaRef,
     tools: toolsRef,
@@ -172,6 +175,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     onAbort,
     onStreamDone,
     onStreamWarning,
+    onStreamMetadata,
     onToolCall,
     onToolDelta,
     tools,
@@ -220,9 +224,10 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     onAbortRef,
     onStreamDoneRef,
     onStreamWarningRef,
+    onStreamMetadataRef,
     onToolDeltaRef,
     onToolCallRef,
-  }), [onAbortRef, onChunkRef, onErrorRef, onFinishRef, onStreamDoneRef, onStreamWarningRef, onToolCallRef, onToolDeltaRef]);
+  }), [onAbortRef, onChunkRef, onErrorRef, onFinishRef, onStreamDoneRef, onStreamWarningRef, onStreamMetadataRef, onToolCallRef, onToolDeltaRef]);
 
   const buffer = useAssistantBuffer<TMeta>({
     updateSessionMessages,
