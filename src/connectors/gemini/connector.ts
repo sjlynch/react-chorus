@@ -1,6 +1,7 @@
 import { extractErrorMessage } from '../error';
 import { findWorstSafetyCategory, hasFinishReason } from '../geminiSemantics';
 import type { Connector, ConnectorResult } from '../types';
+import { extractUsage } from '../usage';
 import { extractCandidateContent, getCandidateKey, selectedCandidate } from './candidates';
 import { applyFinishReason } from './finish';
 import { handlePromptFeedback } from './promptFeedback';
@@ -22,6 +23,7 @@ import { createGeminiConnectorState, type GeminiConnectorState } from './state';
  * surface as connector errors. Gemini's
  * UNSPECIFIED finish reasons are also surfaced as explicit errors (rather than
  * ignored) so callers receive a terminal signal instead of hanging.
+ * The terminal frame's `usageMetadata` token counts surface as `metadata.usage`.
  *
  * `createState()` is called once per `send()`; the returned state keeps the
  * fallback function-call id map stable across SSE frames.
@@ -71,6 +73,16 @@ export const geminiConnector: Connector<GeminiConnectorState> = {
       // chunk, which would over-count any non-idempotent metadata consumer.
       if (hasFinishReason(candidateObj.finishReason) && Array.isArray(safetyRatings) && safetyRatings.length > 0) {
         result.metadata = { ...(result.metadata ?? {}), safetyRatings };
+      }
+
+      // Gemini repeats `usageMetadata` on every streamed chunk (the token
+      // counts are cumulative). Attach it as `metadata.usage` only on the
+      // terminal frame so onMetadata/onStreamMetadata fires once per stream —
+      // matching the safetyRatings handling above and the OpenAI/Anthropic
+      // connectors — instead of once per chunk.
+      if (hasFinishReason(candidateObj.finishReason)) {
+        const usage = extractUsage(payload.usageMetadata);
+        if (usage) result.metadata = { ...(result.metadata ?? {}), usage };
       }
 
       const finalResult = applyFinishReason(result, candidateObj.finishReason, worstSafetyCategory, obj);

@@ -87,6 +87,24 @@ export function startOnSendLifecycle<TMeta>({
   clearStreamError();
   resetStreamState();
 
+  // Shared stream-error handler for the `onSend` path: drop the half-streamed
+  // partial, close the session, release `sending`, then surface the error to
+  // the `onError` observer + the UI banner. Used both by the catch below (a
+  // rejected `onSend` promise) and by `createSessionHelpers`' bridged
+  // `streamCallbacks().onError` (a `useChorusStream` send that errors when the
+  // host's `onSend` did not return/await it). AbortErrors clean up but are not
+  // surfaced — the host already sees `sending: false`.
+  const reportStreamError = (rawError: unknown) => {
+    removePendingAssistant();
+    invalidateAssistantSession(sessionId);
+    setInternalSending(false);
+    if (controllerRef.current === controller) controllerRef.current = null;
+    if (isAbortError(rawError)) return;
+    const error = rawError instanceof Error ? rawError : new Error(String(rawError));
+    observers.safeOnError(error);
+    showStreamError(error);
+  };
+
   const startedAt = Date.now();
   const sessionHelpers = createSessionHelpers<TMeta>({
     appendAssistantNow,
@@ -96,6 +114,7 @@ export function startOnSendLifecycle<TMeta>({
     safeOnStreamMetadata: observers.safeOnStreamMetadata,
     completeActiveSession,
     isAssistantSessionActive,
+    reportStreamError,
     minAssistantDelayMsRef,
     systemPromptRef,
     hasStartedAssistantRef,
@@ -130,18 +149,10 @@ export function startOnSendLifecycle<TMeta>({
         sessionHelpers.autoFinalizeAssistant();
       }
     } catch (e: unknown) {
-      if (isAssistantSessionActive(sessionId)) {
-        removePendingAssistant();
-        invalidateAssistantSession(sessionId);
-        setInternalSending(false);
-        if (controllerRef.current === controller) controllerRef.current = null;
-
-        if (!isAbortError(e)) {
-          const error = e instanceof Error ? e : new Error(String(e));
-          observers.safeOnError(error);
-          showStreamError(error);
-        }
-      }
+      // A bridged `streamCallbacks().onError` may have already reported the
+      // same stream error and invalidated the session; the active-session
+      // guard makes this catch a no-op in that case so the error surfaces once.
+      if (isAssistantSessionActive(sessionId)) reportStreamError(e);
     } finally {
       if (isAssistantSessionActive(sessionId) && !hasStartedAssistantRef.current && !sessionHelpers.hasPendingAssistant()) {
         // `onSend` resolved without appending assistant chunks or returning a
