@@ -48,8 +48,9 @@ Then add a Next.js App Router route that returns `toUIMessageStreamResponse()`:
 ```ts
 // app/api/chat/route.ts  —  npm install ai @ai-sdk/openai
 import { openai } from '@ai-sdk/openai';
-import { streamText, convertToModelMessages } from 'ai';
+import { streamText } from 'ai';
 import type { Message } from 'react-chorus';
+import { toAiSdkModelMessages } from 'react-chorus/provider-requests';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -60,18 +61,8 @@ export async function POST(request: Request) {
 
   const result = streamText({
     model: openai('gpt-4o-mini'),
-    // Chorus `history` can include `system` and `tool` rows; convertToModelMessages
-    // only accepts plain user/assistant text-part messages, so filter first — the
-    // unfiltered map type-errors (and breaks) for a host with a systemPrompt or tools.
-    messages: convertToModelMessages(
-      history
-        .filter((m) => m.role === 'user' || m.role === 'assistant')
-        .map((m) => ({
-          id: m.id,
-          role: m.role,
-          parts: [{ type: 'text', text: m.text ?? '' }],
-        })),
-    ),
+    // Preserves Chorus systemPrompt/system rows, tool calls/results, and supported attachments.
+    messages: toAiSdkModelMessages(history),
   });
 
   // toUIMessageStreamResponse returns text/event-stream with `data: {...}` frames.

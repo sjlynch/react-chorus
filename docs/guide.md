@@ -390,10 +390,13 @@ Connectors parse provider streams on the way back; request helpers serialize Cho
 
 ```ts
 import {
+  formatAiSdkModelMessagesBody,
   formatAnthropicMessagesBody,
   formatGeminiGenerateContentBody,
   formatOpenAIChatCompletionsBody,
   formatOpenAIResponsesBody,
+  toAiSdkModelMessages,
+  toAiSdkModelMessagesBody,
   toAnthropicMessagesBody,
   toGeminiGenerateContentBody,
   toOpenAIChatCompletionsBody,
@@ -409,6 +412,7 @@ These helpers are also re-exported from `react-chorus` for browser apps; the `re
 | `toOpenAIResponsesBody(history, opts)` / `formatOpenAIResponsesBody(opts)` | `{ model, input, stream }` | Uses Responses `input_text` / `input_image` / `output_text` items and `function_call_output` when an OpenAI call id is present in metadata. Image attachments accept the same URL shapes as `toOpenAIChatCompletionsBody` (`http(s):`, base64 `data:`, or relative paths). Non-image attachments with an uploaded `id` map to `{ type: 'input_file', file_id }` and ones with an uploaded `url` map to `{ type: 'input_file', file_url }`; otherwise they fall back to text notes (base64 file data is not inlined). |
 | `toAnthropicMessagesBody(history, opts)` / `formatAnthropicMessagesBody(opts)` | `{ model, max_tokens, system, messages, stream }` | Joins Chorus `system` messages into Anthropic's top-level `system`, maps data-URL images to base64 `image` blocks, maps `application/pdf` data URLs to base64 `document` blocks, and maps `metadata.anthropic.toolUseId` (or `metadata.tool_use_id`) to `tool_result`. Other non-image MIME types still fall back to text notes. When `metadata.anthropic.isError === true` (or top-level `metadata.isError === true`), the emitted `tool_result` block includes `is_error: true` so Claude knows the tool execution failed. The OpenAI and Gemini helpers accept the same `isError` metadata, but their request shapes have no equivalent slot, so the flag is currently Anthropic-only. Built-in tool execution via `autoContinueTools` + a `tools` handler sets this flag automatically when a handler throws. |
 | `toGeminiGenerateContentBody(history, opts)` / `formatGeminiGenerateContentBody(opts)` | `{ systemInstruction, contents, ...opts }` | Maps `system` to `systemInstruction`, `assistant` to Gemini `model`, and Chorus tool outputs to `functionResponse` parts when `toolCall.name` is available. Any user attachment with a data URL maps to `inlineData` and any with an uploaded URL/file id maps to `fileData` — both honour the attachment's actual MIME type, so PDFs, audio, and video all pass through. Only attachments lacking both data URL and uploaded URI fall back to text notes. |
+| `toAiSdkModelMessages(history, opts)` / `toAiSdkModelMessagesBody(history, opts)` / `formatAiSdkModelMessagesBody(opts)` | AI SDK `ModelMessage[]` (or `{ messages, ...opts }`) | Maps Chorus `system`, `user`, `assistant`, and `tool` rows to Vercel AI SDK model messages for `streamText({ messages })`. Tool rows become paired assistant `tool-call` parts plus `tool` `tool-result` parts, preserving `metadata.aiSdk.toolCallId` (or `toolCall.id`) when present and synthesizing a stable in-request id otherwise; `metadata.aiSdk.isError` / top-level `isError` maps tool outputs to AI SDK error output parts. Data-URL user attachments map to AI SDK `image` / `file` parts, absolute `http(s)` URLs map to `URL` data content, and unsupported sources fall back to explicit text notes with a dev-mode warning. |
 
 All helpers preserve extra provider options you pass (for example `model`, `max_tokens`, `generationConfig`, `tools`) and default OpenAI/Anthropic `stream` to `true`. They insert explicit text fallbacks for unsupported attachments so request mapping failures are visible to the model instead of silently dropping context. Override that text with `unsupportedAttachmentText` when needed.
 
@@ -654,8 +658,9 @@ The `'ai-sdk'` connector understands both shapes the Vercel AI SDK can emit:
 ```ts
 // app/api/chat/route.ts
 import { openai } from '@ai-sdk/openai';
-import { streamText, convertToModelMessages } from 'ai';
+import { streamText } from 'ai';
 import type { Message } from 'react-chorus';
+import { toAiSdkModelMessages } from 'react-chorus/provider-requests';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -666,18 +671,8 @@ export async function POST(request: Request) {
 
   const result = streamText({
     model: openai('gpt-4o-mini'),
-    // Chorus `history` can include `system` and `tool` rows; convertToModelMessages
-    // only accepts plain user/assistant text-part messages, so filter before mapping —
-    // the unfiltered map breaks for a host with a systemPrompt or tool calls.
-    messages: convertToModelMessages(
-      history
-        .filter(m => m.role === 'user' || m.role === 'assistant')
-        .map(m => ({
-          id: m.id,
-          role: m.role,
-          parts: [{ type: 'text', text: m.text ?? '' }],
-        })),
-    ),
+    // Preserves Chorus systemPrompt/system rows, tool calls/results, and supported attachments.
+    messages: toAiSdkModelMessages(history),
   });
 
   // toUIMessageStreamResponse returns text/event-stream with `data: {...}\n\n` frames.
@@ -709,12 +704,15 @@ The AI SDK v4 data stream is plain `text/plain`, not SSE — its lines start wit
 // app/api/chat/route.ts
 import { openai } from '@ai-sdk/openai';
 import { streamText } from 'ai';
+import type { Message } from 'react-chorus';
+import { toAiSdkModelMessages } from 'react-chorus/provider-requests';
 
 export async function POST(request: Request) {
-  const body = (await request.json()) as { history?: Array<{ role: string; text?: string }> };
+  const body = (await request.json()) as { history?: Message[] };
+  const history = Array.isArray(body.history) ? body.history : [];
   const result = streamText({
     model: openai('gpt-4o-mini'),
-    messages: (body.history ?? []).map(m => ({ role: m.role as 'user' | 'assistant', content: m.text ?? '' })),
+    messages: toAiSdkModelMessages(history),
   });
 
   // AI SDK v4 exposes the data stream through `toDataStreamResponse()`, whose

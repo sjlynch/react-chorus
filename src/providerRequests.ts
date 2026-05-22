@@ -6,6 +6,7 @@ export {
   toOpenAIResponsesBody,
   toOpenAIResponsesInput,
 } from './providerRequests/openai';
+export { formatAiSdkModelMessagesBody, toAiSdkModelMessages, toAiSdkModelMessagesBody } from './providerRequests/aiSdk';
 export { formatAnthropicMessagesBody, toAnthropicMessages, toAnthropicMessagesBody } from './providerRequests/anthropic';
 export { formatGeminiGenerateContentBody, toGeminiContents, toGeminiGenerateContentBody } from './providerRequests/gemini';
 export {
@@ -29,6 +30,24 @@ export type { ChorusToolDefinition, ChorusToolRegistry } from './tools';
 // host-authored `system` message should match on this constant — see its JSDoc.
 export { RESERVED_SYSTEM_PROMPT_ID } from './reservedIds';
 export type {
+  AiSdkAssistantContentPart,
+  AiSdkAssistantModelMessage,
+  AiSdkDataContent,
+  AiSdkFilePart,
+  AiSdkImagePart,
+  AiSdkJsonValue,
+  AiSdkModelMessage,
+  AiSdkModelMessagesBody,
+  AiSdkModelMessagesBodyOptions,
+  AiSdkReasoningPart,
+  AiSdkSystemModelMessage,
+  AiSdkTextPart,
+  AiSdkToolCallPart,
+  AiSdkToolModelMessage,
+  AiSdkToolResultOutput,
+  AiSdkToolResultPart,
+  AiSdkUserContentPart,
+  AiSdkUserModelMessage,
   AnthropicContentBlock,
   AnthropicDocumentBlock,
   AnthropicImageBlock,
