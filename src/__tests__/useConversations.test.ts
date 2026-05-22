@@ -355,6 +355,25 @@ describe('useConversations', () => {
     expect(result.current.conversations[0].title).toBe('Please summarize this…');
   });
 
+  it('truncates a generated title on a code-point boundary instead of splitting a surrogate pair', () => {
+    const storage = makeSyncStorage();
+    const { result } = renderHook(() => useConversations({
+      storage,
+      createId: () => 'abc',
+      now: () => '2026-05-14T00:00:00.000Z',
+      defaultTitle: 'New chat',
+    }));
+
+    act(() => { result.current.createConversation(); });
+    act(() => result.current.renameFromFirstMessage('abc', [
+      { role: 'user', text: '😀😀😀😀😀 weekly leadership review summary' },
+    ], { maxLength: 4 }));
+
+    // Slicing by UTF-16 code unit would cut the 4th emoji mid-surrogate-pair and
+    // leave a lone surrogate; the code-point-aware slice keeps whole emoji.
+    expect(result.current.conversations[0].title).toBe('😀😀😀…');
+  });
+
   it('auto-renames an unmodified pristine conversation after defaultTitle changes', () => {
     const storage = makeSyncStorage();
     const { result, rerender } = renderHook(
@@ -455,6 +474,31 @@ describe('useConversations', () => {
 
     expect(result.current.error).toEqual(expect.objectContaining({ operation: 'write', key: 'chorus-conversations-index' }));
     expect(result.current.error?.cause).toBe(writeError);
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ operation: 'write', key: 'chorus-conversations-index' }));
+  });
+
+  it('wraps a foreign adapter error that happens to carry key/operation fields', async () => {
+    // A remote StorageAdapter rejects with its own error shape. It duck-types
+    // `key`/`operation` but is NOT a Chorus error, so it must be wrapped with
+    // the real index key/operation rather than passed through unchanged.
+    const foreignError = Object.assign(new Error('remote backend unavailable'), {
+      key: 'remote/index/key',
+      operation: 'remote-write',
+    });
+    const onError = vi.fn();
+    const storage: StorageAdapter = {
+      getItem: vi.fn(() => null),
+      setItem: vi.fn(() => Promise.reject(foreignError)),
+      removeItem: vi.fn(),
+    };
+
+    const { result } = renderHook(() => useConversations({ storage, onError, createId: () => 'abc' }));
+
+    act(() => { result.current.createConversation('Saved in memory'); });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(result.current.error).toEqual(expect.objectContaining({ operation: 'write', key: 'chorus-conversations-index' }));
+    expect(result.current.error?.cause).toBe(foreignError);
     expect(onError).toHaveBeenCalledWith(expect.objectContaining({ operation: 'write', key: 'chorus-conversations-index' }));
   });
 
@@ -674,34 +718,30 @@ describe('useConversations', () => {
     expect(onError).toHaveBeenCalledWith(expect.objectContaining({ operation: 'delete', key: 'chorus-conversation:abc' }));
   });
 
-  it('reports a fallback transcript-delete (no removeItem) setItem failure as a delete error', () => {
-    const deleteError = new Error('quota exceeded');
+  it('skips the transcript-delete write for removeItem-less adapters so no empty tombstone accumulates', () => {
     const onError = vi.fn();
     const store: Record<string, string> = {};
-    // Adapter with no removeItem: transcript deletion falls back to
-    // setItem(key, '[]'). A failure of that fallback is still classified as a
-    // 'delete' error (matching the removeItem path) so a later successful index
-    // write cannot dismiss it — see the "Known divergence" in conversations/CLAUDE.md.
+    const setItem = vi.fn((key: string, value: string) => { store[key] = value; });
+    // An adapter with no removeItem cannot truly delete a key. Writing a
+    // setItem(key, '[]') tombstone would leave an empty-transcript key that
+    // nothing ever garbage-collects — over many delete cycles those tombstones
+    // exhaust quota. Deletion skips the transcript write entirely instead.
     const storage: StorageAdapter = {
       getItem: (key) => store[key] ?? null,
-      setItem: (key, value) => {
-        if (key === 'chorus-conversation:abc') throw deleteError;
-        store[key] = value;
-      },
+      setItem,
     };
     const { result } = renderHook(() => useConversations({ storage, onError, createId: () => 'abc' }));
 
     act(() => { result.current.createConversation('Delete me'); });
     act(() => result.current.deleteConversation('abc'));
 
+    // The index entry is removed, but no transcript key is touched: no '[]'
+    // tombstone is written and no delete error is reported.
     expect(result.current.conversations).toEqual([]);
-    expect(result.current.error).toEqual(expect.objectContaining({
-      operation: 'delete',
-      key: 'chorus-conversation:abc',
-      conversationId: 'abc',
-    }));
-    expect(result.current.error?.cause).toBe(deleteError);
-    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ operation: 'delete', key: 'chorus-conversation:abc' }));
+    expect(setItem.mock.calls.some(([key]) => key === 'chorus-conversation:abc')).toBe(false);
+    expect(store['chorus-conversation:abc']).toBeUndefined();
+    expect(result.current.error).toBeNull();
+    expect(onError).not.toHaveBeenCalled();
   });
 
   it('skips setError but still notifies onError when an async index write rejects after unmount', async () => {

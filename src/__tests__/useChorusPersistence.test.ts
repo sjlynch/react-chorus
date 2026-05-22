@@ -484,6 +484,32 @@ describe('useChorusPersistence', () => {
     warn.mockRestore();
   });
 
+  it('wraps a foreign adapter error that happens to carry key/operation fields', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    // A remote StorageAdapter rejects with its own error shape. It is NOT a
+    // Chorus error even though it duck-types `key`/`operation`, so it must be
+    // wrapped with the real Chorus key/operation rather than passed through.
+    const foreignError = Object.assign(new Error('remote backend unavailable'), {
+      key: 'remote/transcripts/key',
+      operation: 'remote-write',
+    });
+    const onError = vi.fn();
+    const storage: StorageAdapter = {
+      getItem: vi.fn(() => null),
+      setItem: vi.fn(() => Promise.reject(foreignError)),
+    };
+
+    const { result } = renderHook(() => useChorusPersistence('key', { storage, onError }));
+
+    act(() => result.current.onChange([MSG]));
+    await act(async () => { await Promise.resolve(); });
+
+    expect(result.current.error).toEqual(expect.objectContaining({ key: 'key', operation: 'write' }));
+    expect(result.current.error?.cause).toBe(foreignError);
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ key: 'key', operation: 'write' }));
+    warn.mockRestore();
+  });
+
   describe('cross-tab sync', () => {
     function dispatchStorageEvent(key: string, newValue: string | null) {
       window.dispatchEvent(new StorageEvent('storage', {
@@ -688,6 +714,27 @@ describe('useChorusPersistence', () => {
         ]);
         expect(warn).toHaveBeenCalledWith(
           expect.stringContaining('Dropped 6 invalid persisted messages'),
+          expect.any(Array),
+        );
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('drops a persisted message whose id is whitespace-only', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const storage = makeSyncStorage(JSON.stringify([
+          { id: '   ', role: 'user', text: 'blank id' },
+          MSG,
+        ]));
+        const { result } = renderHook(() => useChorusPersistence('key', { storage }));
+
+        // A whitespace-only id is not a usable id: left in, it would reach
+        // render and warnDuplicateMessageIds and collide there as a duplicate.
+        expect(result.current.value).toEqual([MSG]);
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringContaining('Dropped 1 invalid persisted message'),
           expect.any(Array),
         );
       } finally {
