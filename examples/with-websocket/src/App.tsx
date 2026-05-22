@@ -13,12 +13,34 @@ import type { ChorusOnSend, Message } from 'react-chorus';
  * The bundled server uses canned frames so the demo runs with no API key. Its
  * README shows the one-line swap to the real `ws` + `@anthropic-ai/sdk` backend
  * documented in the root README's "Using the WebSocket transport" section.
+ *
+ * The transport's `onOpen`/`onClose`/`onError` lifecycle callbacks drive the
+ * connection-status banner below — this is the runnable reference for the
+ * connection-status pattern in that README section. There is no `'connecting'`
+ * state on purpose: in the default per-send-socket mode a socket opens and
+ * `onOpen` fires almost immediately, so a transient "Connecting…" banner would
+ * never actually be visible. A normal close reports code 1000, so only an
+ * abnormal close or a socket error surfaces a banner.
  */
 const WS_URL = 'ws://localhost:8787';
 
 export default function App() {
   const [messages, setMessages] = React.useState<Message[]>([]);
-  const transport = React.useMemo(() => createWebSocketTransport(WS_URL), []);
+  const [connectionStatus, setConnectionStatus] = React.useState('idle');
+
+  const transport = React.useMemo(
+    () =>
+      createWebSocketTransport(WS_URL, {
+        onOpen: () => setConnectionStatus('open'),
+        onClose: (code, reason) =>
+          setConnectionStatus(
+            code === 1000 ? 'closed' : `disconnected (${code}: ${reason || 'no reason'})`,
+          ),
+        onError: () => setConnectionStatus('error'),
+      }),
+    [],
+  );
+
   const { send, sending } = useChorusStream(transport, { connector: 'anthropic' });
 
   const handleSend: ChorusOnSend = async (text, msgs, helpers) => {
@@ -32,6 +54,12 @@ export default function App() {
 
   return (
     <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column' }}>
+      {connectionStatus.startsWith('disconnected') && (
+        <div role="alert">Disconnected from the WebSocket server.</div>
+      )}
+      {connectionStatus === 'error' && (
+        <div role="alert">WebSocket connection error — is the ws server running on port 8787?</div>
+      )}
       <Chorus
         value={messages}
         onChange={setMessages}

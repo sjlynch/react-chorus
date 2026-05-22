@@ -63,7 +63,7 @@ change.
 
 ## Where to look next
 
-- [`src/App.tsx`](./src/App.tsx) — `createWebSocketTransport` + `useChorusStream` wiring.
+- [`src/App.tsx`](./src/App.tsx) — `createWebSocketTransport` + `useChorusStream` wiring, plus an `onOpen`/`onClose`/`onError`-driven connection-status banner.
 - [`server/index.js`](./server/index.js) — the mock `ws` backend and its frame shape.
 - [`examples/with-anthropic`](../with-anthropic) — the same `anthropic` connector over an HTTP SSE transport.
 - [Root README](../../README.md) — full API reference and recipes.

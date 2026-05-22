@@ -92,6 +92,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Documented keyboard shortcuts, standalone `useChorusStream`, persistence examples, error handling, and OpenAI proxy buffering headers.
 - `<ConversationList palette>` now applies the palette in `headless` renders too, matching `<Chorus>`/`<ChatWindow>`/`<ChatInput>`; a host-supplied palette is treated as a theme rather than default styling.
 
+### Removed
+- Removed the `openaiConnector`, `anthropicConnector`, `geminiConnector`, `aiSdkConnector`, and `autoConnector` named exports from the `react-chorus` and `react-chorus/headless` barrels. The provider connector singletons and `autoConnector` are now `@internal` (see "Changed" above) — this is an export-surface break, not just an internal-tag change: pre-0.2.0 code importing them directly (e.g. `import { openaiConnector } from 'react-chorus'`) no longer resolves. Select a built-in connector by name through `getConnector` or the `connector` prop/option instead.
+
 ### Fixed
 - Fixed stream cleanup on unmount/pre-aborted signals, richer HTTP error details, WebSocket close-before-open hangs, safe dev-mode checks without `process`, observer callback isolation, and transport concurrency guards.
 - Fixed the object-form `transport` shorthand (`FetchTransportInit`) ignoring `method`: it now accepts the same `'GET' | 'HEAD' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'` set as `createFetchSSETransport`, including body-less `GET`/`HEAD` requests that skip `formatBody` and the default JSON `Content-Type`, instead of always issuing a `POST` against the configured `url`.
