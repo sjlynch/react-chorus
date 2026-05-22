@@ -53,7 +53,15 @@ export const geminiConnector: Connector<GeminiConnectorState> = {
       const error = extractErrorMessage(obj);
       if (error) return { error, errorPayload: obj };
 
-      if (!Array.isArray(payload.candidates) || payload.candidates.length === 0) return null;
+      if (!Array.isArray(payload.candidates)) return null;
+      if (payload.candidates.length === 0) {
+        // An atypical proxy may send a final `{ candidates: [], usageMetadata: {...} }`
+        // frame carrying only token usage — parity with the OpenAI Chat trailing
+        // `{ choices: [], usage }` chunk. Surface its usage so cost telemetry is
+        // not dropped; an empty-candidates frame with no usage stays null.
+        const usage = extractUsage(payload.usageMetadata);
+        return usage ? { metadata: { usage } } : null;
+      }
 
       const { candidate, arrayIndex } = selectedCandidate(payload.candidates);
       if (!candidate || typeof candidate !== 'object') return null;

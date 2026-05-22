@@ -4,7 +4,7 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Chorus } from '../../Chorus';
 import { sendMessage, sseResponse, erroringSSEResponse, deferred } from './testUtils';
-import type { Message, OnSend, OnSendHelpers, Transport } from './testUtils';
+import type { ChorusRef, Message, OnSend, OnSendHelpers, Transport } from './testUtils';
 
 vi.mock('../../components/Markdown', () => ({
   Markdown: ({ text }: { text: string }) => <span data-testid="markdown">{text}</span>,
@@ -255,6 +255,37 @@ describe('Chorus message actions', () => {
 
     expect(screen.queryByText('remove me')).not.toBeInTheDocument();
     expect(screen.getByText('keep me')).toBeInTheDocument();
+  });
+
+  it('deleting the errored user turn dismisses the banner and disarms Retry', async () => {
+    const user = userEvent.setup();
+    const ref = React.createRef<ChorusRef>();
+    const transport = vi.fn<Transport>(async () => erroringSSEResponse([]));
+
+    render(<Chorus ref={ref} transport={transport} connector="openai" minAssistantDelayMs={0} />);
+
+    await sendMessage(user, 'doomed turn');
+
+    // Stream error: the banner is armed while the user message stays visible.
+    expect(await screen.findByText('Something went wrong. Please try again.')).toBeInTheDocument();
+    await screen.findByRole('button', { name: /retry/i });
+
+    // The host deletes the user message tied to the error.
+    await user.click(screen.getByTitle('Delete'));
+
+    // The banner and its Retry button are gone with the message that caused them.
+    expect(screen.queryByText('doomed turn')).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByText('Something went wrong. Please try again.')).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByRole('button', { name: /retry/i })).not.toBeInTheDocument();
+
+    // Retry is disarmed: it no longer references — and cannot resurrect — the deleted turn.
+    let retryAfterDelete: boolean | undefined;
+    act(() => { retryAfterDelete = ref.current?.retry(); });
+    expect(retryAfterDelete).toBe(false);
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('doomed turn')).not.toBeInTheDocument();
   });
 
   it('hides the built-in Delete action on prior messages while a send is streaming', async () => {

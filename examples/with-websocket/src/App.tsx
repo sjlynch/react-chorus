@@ -61,6 +61,7 @@ export default function App() {
         <div role="alert">WebSocket connection error — is the ws server running on port 8787?</div>
       )}
       <Chorus
+        style={{ flex: 1, minHeight: 0 }}
         value={messages}
         onChange={setMessages}
         onSend={handleSend}

@@ -29,10 +29,10 @@ describe('aiSdkConnector', () => {
       const result = JSON.stringify({ type: 'tool-output-available', toolCallId: 'call_1', output: { ok: true } });
 
       expect(state).toBeDefined();
-      expect(aiSdkConnector.extract(start, state)).toEqual({ toolDelta: { id: 'call_1', providerId: 'call_1', name: 'search' } });
-      expect(aiSdkConnector.extract(delta, state)).toEqual({ toolDelta: { id: 'call_1', providerId: 'call_1', name: 'search', input: '{"q":"react"}' } });
-      expect(aiSdkConnector.extract(ready, state)).toEqual({ toolDelta: { id: 'call_1', providerId: 'call_1', name: 'search', input: { q: 'react' } } });
-      expect(aiSdkConnector.extract(result, state)).toEqual({ toolDelta: { id: 'call_1', providerId: 'call_1', name: 'search', output: { ok: true } } });
+      expect(aiSdkConnector.extract(start, state)).toEqual({ toolDelta: { id: 'call_1', providerId: 'call_1', provider: 'ai-sdk', name: 'search' } });
+      expect(aiSdkConnector.extract(delta, state)).toEqual({ toolDelta: { id: 'call_1', providerId: 'call_1', provider: 'ai-sdk', name: 'search', input: '{"q":"react"}' } });
+      expect(aiSdkConnector.extract(ready, state)).toEqual({ toolDelta: { id: 'call_1', providerId: 'call_1', provider: 'ai-sdk', name: 'search', input: { q: 'react' } } });
+      expect(aiSdkConnector.extract(result, state)).toEqual({ toolDelta: { id: 'call_1', providerId: 'call_1', provider: 'ai-sdk', name: 'search', output: { ok: true } } });
     });
 
     it('omits the output channel when a tool-output-available frame has no output/result key', () => {
@@ -42,7 +42,7 @@ describe('aiSdkConnector', () => {
       const state = aiSdkConnector.createState?.();
       const frame = JSON.stringify({ type: 'tool-output-available', toolCallId: 'call_1' });
       const result = aiSdkConnector.extract(frame, state);
-      expect(result).toStrictEqual({ toolDelta: { id: 'call_1', providerId: 'call_1' } });
+      expect(result).toStrictEqual({ toolDelta: { id: 'call_1', providerId: 'call_1', provider: 'ai-sdk' } });
       expect(Object.hasOwn((result as { toolDelta: object }).toolDelta, 'output')).toBe(false);
     });
 
@@ -52,12 +52,27 @@ describe('aiSdkConnector', () => {
       const state = aiSdkConnector.createState?.();
       const frame = JSON.stringify({ type: 'tool-output-available', toolCallId: 'call_1', output: false });
       expect(aiSdkConnector.extract(frame, state))
-        .toStrictEqual({ toolDelta: { id: 'call_1', providerId: 'call_1', output: false } });
+        .toStrictEqual({ toolDelta: { id: 'call_1', providerId: 'call_1', provider: 'ai-sdk', output: false } });
     });
 
-    it('returns done on finish frames', () => {
+    it('returns done on finish frames that carry no usage or finish reason', () => {
       expect(aiSdkConnector.extract(JSON.stringify({ type: 'finish' }))).toEqual({ done: true });
       expect(aiSdkConnector.extract(JSON.stringify({ type: 'finish-message' }))).toEqual({ done: true });
+    });
+
+    it('surfaces token usage and finish reason from a v5 finish frame', () => {
+      // The v5 UI-message-stream `finish` frame carries the run's token usage
+      // (the AI SDK names them `inputTokens` / `outputTokens`) and a finish
+      // reason; both must surface as `metadata` like every other connector.
+      const data = JSON.stringify({
+        type: 'finish',
+        finishReason: 'stop',
+        usage: { inputTokens: 12, outputTokens: 7, totalTokens: 19 },
+      });
+      expect(aiSdkConnector.extract(data)).toEqual({
+        done: true,
+        metadata: { usage: { promptTokens: 12, completionTokens: 7, totalTokens: 19 }, finishReason: 'stop' },
+      });
     });
 
     it('surfaces in-band errors with the original payload', () => {
@@ -85,13 +100,13 @@ describe('aiSdkConnector', () => {
     it('keeps the populated alias when a mixed-alias tool-input-delta carries an empty argsTextDelta', () => {
       const state = aiSdkConnector.createState?.();
       const frame = JSON.stringify({ type: 'tool-input-delta', toolCallId: 'call_1', argsTextDelta: '', inputTextDelta: 'hello world' });
-      expect(aiSdkConnector.extract(frame, state)).toEqual({ toolDelta: { id: 'call_1', providerId: 'call_1', input: 'hello world' } });
+      expect(aiSdkConnector.extract(frame, state)).toEqual({ toolDelta: { id: 'call_1', providerId: 'call_1', provider: 'ai-sdk', input: 'hello world' } });
     });
 
     it('keeps the populated alias when a mixed-alias tool-call-delta carries an empty inputTextDelta', () => {
       const state = aiSdkConnector.createState?.();
       const frame = JSON.stringify({ type: 'tool-call-delta', toolCallId: 'call_1', inputTextDelta: '', argsTextDelta: 'hello world' });
-      expect(aiSdkConnector.extract(frame, state)).toEqual({ toolDelta: { id: 'call_1', providerId: 'call_1', input: 'hello world' } });
+      expect(aiSdkConnector.extract(frame, state)).toEqual({ toolDelta: { id: 'call_1', providerId: 'call_1', provider: 'ai-sdk', input: 'hello world' } });
     });
 
     it('warns once in dev when a tool frame is missing toolCallId and stays silent on the second identical frame', () => {
@@ -129,32 +144,48 @@ describe('aiSdkConnector', () => {
       const result = 'a:{"toolCallId":"call_1","result":{"ok":true}}';
 
       expect(state).toBeDefined();
-      expect(aiSdkConnector.extract(start, state)).toEqual({ toolDelta: { id: 'call_1', providerId: 'call_1', name: 'search', input: { q: 'react' } } });
-      expect(aiSdkConnector.extract(fragment, state)).toEqual({ toolDelta: { id: 'call_1', providerId: 'call_1', name: 'search', input: ' extra' } });
-      expect(aiSdkConnector.extract(result, state)).toEqual({ toolDelta: { id: 'call_1', providerId: 'call_1', name: 'search', output: { ok: true } } });
+      expect(aiSdkConnector.extract(start, state)).toEqual({ toolDelta: { id: 'call_1', providerId: 'call_1', provider: 'ai-sdk', name: 'search', input: { q: 'react' } } });
+      expect(aiSdkConnector.extract(fragment, state)).toEqual({ toolDelta: { id: 'call_1', providerId: 'call_1', provider: 'ai-sdk', name: 'search', input: ' extra' } });
+      expect(aiSdkConnector.extract(result, state)).toEqual({ toolDelta: { id: 'call_1', providerId: 'call_1', provider: 'ai-sdk', name: 'search', output: { ok: true } } });
     });
 
     it('omits the output channel when an a: result frame has no result/output key', () => {
       const state = aiSdkConnector.createState?.();
       const result = aiSdkConnector.extract('a:{"toolCallId":"call_1"}', state);
-      expect(result).toStrictEqual({ toolDelta: { id: 'call_1', providerId: 'call_1' } });
+      expect(result).toStrictEqual({ toolDelta: { id: 'call_1', providerId: 'call_1', provider: 'ai-sdk' } });
       expect(Object.hasOwn((result as { toolDelta: object }).toolDelta, 'output')).toBe(false);
     });
 
     it('keeps an explicit falsy output (false) on an a: result frame', () => {
       const state = aiSdkConnector.createState?.();
       expect(aiSdkConnector.extract('a:{"toolCallId":"call_1","result":false}', state))
-        .toStrictEqual({ toolDelta: { id: 'call_1', providerId: 'call_1', output: false } });
+        .toStrictEqual({ toolDelta: { id: 'call_1', providerId: 'call_1', provider: 'ai-sdk', output: false } });
     });
 
     it('extracts a streaming tool-call start from b: frames', () => {
       expect(aiSdkConnector.extract('b:{"toolCallId":"call_2","toolName":"weather"}')).toEqual({
-        toolDelta: { id: 'call_2', providerId: 'call_2', name: 'weather' },
+        toolDelta: { id: 'call_2', providerId: 'call_2', provider: 'ai-sdk', name: 'weather' },
       });
     });
 
-    it('returns done on the finish-message (d:) frame', () => {
-      expect(aiSdkConnector.extract('d:{"finishReason":"stop","usage":{}}')).toEqual({ done: true });
+    it('returns done with the finish reason on a finish-message (d:) frame without usage', () => {
+      expect(aiSdkConnector.extract('d:{"finishReason":"stop","usage":{}}'))
+        .toEqual({ done: true, metadata: { finishReason: 'stop' } });
+    });
+
+    it('surfaces token usage and finish reason from a v4 d: finish-message frame', () => {
+      // The AI SDK v4 `d:` terminal frame carries `{ finishReason, usage }`;
+      // every other connector surfaces `metadata.usage`, so the AI SDK path
+      // must too (a cost/usage telemetry consumer wiring onMetadata).
+      expect(aiSdkConnector.extract('d:{"finishReason":"stop","usage":{"promptTokens":18,"completionTokens":24,"totalTokens":42}}'))
+        .toEqual({
+          done: true,
+          metadata: { usage: { promptTokens: 18, completionTokens: 24, totalTokens: 42 }, finishReason: 'stop' },
+        });
+    });
+
+    it('returns a bare done for a d: frame carrying neither usage nor a finish reason', () => {
+      expect(aiSdkConnector.extract('d:{}')).toEqual({ done: true });
     });
 
     it('does not terminate the stream on a finish-step (e:) frame mid multi-step run', () => {
@@ -194,13 +225,13 @@ describe('aiSdkConnector', () => {
     it('keeps the populated alias on a mixed-alias c: frame with an empty argsTextDelta', () => {
       const state = aiSdkConnector.createState?.();
       expect(aiSdkConnector.extract('c:{"toolCallId":"call_1","argsTextDelta":"","inputTextDelta":"hello world"}', state))
-        .toEqual({ toolDelta: { id: 'call_1', providerId: 'call_1', input: 'hello world' } });
+        .toEqual({ toolDelta: { id: 'call_1', providerId: 'call_1', provider: 'ai-sdk', input: 'hello world' } });
     });
 
     it('keeps the populated alias on a mixed-alias c: frame with an empty inputTextDelta', () => {
       const state = aiSdkConnector.createState?.();
       expect(aiSdkConnector.extract('c:{"toolCallId":"call_1","inputTextDelta":"","argsTextDelta":"hello world"}', state))
-        .toEqual({ toolDelta: { id: 'call_1', providerId: 'call_1', input: 'hello world' } });
+        .toEqual({ toolDelta: { id: 'call_1', providerId: 'call_1', provider: 'ai-sdk', input: 'hello world' } });
     });
 
     it('recognises the finish-step (e:) frame explicitly without leaking it as text', () => {
@@ -216,12 +247,12 @@ describe('aiSdkConnector', () => {
       // A streaming start records the tool name so later frames can reuse it.
       aiSdkConnector.extract('b:{"toolCallId":"call_1","toolName":"weather"}', state);
       expect(aiSdkConnector.extract('a:{"toolCallId":"call_1","result":{"ok":true}}', state))
-        .toEqual({ toolDelta: { id: 'call_1', providerId: 'call_1', name: 'weather', output: { ok: true } } });
+        .toEqual({ toolDelta: { id: 'call_1', providerId: 'call_1', provider: 'ai-sdk', name: 'weather', output: { ok: true } } });
       // The connector buffers nothing, so flush() returns null...
       expect(aiSdkConnector.flush?.(state)).toBeNull();
       // ...but it clears the remembered tool name, matching the [DONE]/d:/finish reset.
       expect(aiSdkConnector.extract('a:{"toolCallId":"call_1","result":{"ok":true}}', state))
-        .toEqual({ toolDelta: { id: 'call_1', providerId: 'call_1', output: { ok: true } } });
+        .toEqual({ toolDelta: { id: 'call_1', providerId: 'call_1', provider: 'ai-sdk', output: { ok: true } } });
     });
 
     it('tolerates being called with no state argument', () => {

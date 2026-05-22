@@ -205,6 +205,19 @@ describe('geminiConnector', () => {
     });
   });
 
+  it('surfaces token usage from a trailing { candidates: [], usageMetadata } frame', () => {
+    // Parity with the OpenAI Chat trailing `{ choices: [], usage }` chunk: an
+    // atypical proxy may send a final empty-candidates frame carrying only
+    // token usage. Surface it so cost telemetry is not dropped.
+    const data = JSON.stringify({
+      candidates: [],
+      usageMetadata: { promptTokenCount: 30, candidatesTokenCount: 12, totalTokenCount: 42 },
+    });
+    expect(geminiConnector.extract(data)).toEqual({
+      metadata: { usage: { promptTokens: 30, completionTokens: 12, totalTokens: 42 } },
+    });
+  });
+
   it('surfaces promptFeedback.blockReason as an error even when candidates is empty', () => {
     const safetyRatings = [{ category: 'HARM_CATEGORY_HATE_SPEECH', probability: 'HIGH' }];
     const payload = {

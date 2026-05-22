@@ -36,6 +36,19 @@ export interface OpenAIConnectorState {
   thinkState: ThinkTagSplitterState;
   /** Think-tag RegExps compiled once when state is created and reused across every chunk. */
   thinkTags: CompiledThinkTags;
+  /**
+   * Latest Chat Completions `usage` object seen on a non-terminal chunk,
+   * buffered so it is surfaced once on the terminating chunk rather than once
+   * per chunk (proxies that emit cumulative per-chunk usage would otherwise
+   * over-count a non-idempotent `onMetadata` consumer).
+   */
+  chatPendingUsage?: Record<string, number>;
+  /**
+   * True once `metadata.usage` has been surfaced for the current Chat
+   * Completions stream, so a second terminal-shaped frame (e.g. a trailing
+   * `choices: []` chunk after a `finish_reason` chunk) cannot emit it twice.
+   */
+  chatUsageEmitted?: boolean;
 }
 
 export function createOpenAIConnectorState(options: OpenAIConnectorOptions = {}): OpenAIConnectorState {
@@ -54,6 +67,8 @@ function resetOpenAIState(state: OpenAIConnectorState) {
   state.responseToolAliases.clear();
   state.responseToolArgBuffer.clear();
   state.responseRefusalText.clear();
+  state.chatPendingUsage = undefined;
+  state.chatUsageEmitted = false;
   createThinkTagSplitter(state.thinkState, state.thinkTags).reset();
 }
 
@@ -66,10 +81,15 @@ function flushOpenAIState(state: OpenAIConnectorState): ConnectorResult | null {
   // `refusal.done` never arrived before the body closed, mirroring the tool-arg
   // drain above — otherwise the refusal is lost and the turn renders blank.
   const refusal = drainResponseRefusalText(state);
+  // Surface Chat Completions `usage` buffered without a terminating chunk
+  // (`finish_reason` / trailing empty `choices`) so `include_usage` telemetry
+  // is not dropped when the stream closes on `[DONE]` or an abnormal EOF.
+  const pendingUsage = !state.chatUsageEmitted ? state.chatPendingUsage : undefined;
   resetOpenAIState(state);
   for (const toolDelta of orphanToolDeltas) appendToolDelta(result, toolDelta);
   if (refusal) result.error = refusal;
-  return result.text || result.reasoning || hasToolDelta(result) || result.error ? result : null;
+  if (pendingUsage) result.metadata = { ...(result.metadata ?? {}), usage: pendingUsage };
+  return result.text || result.reasoning || hasToolDelta(result) || result.error || result.metadata ? result : null;
 }
 
 function finishResult(result: ConnectorResult | null, state: OpenAIConnectorState) {

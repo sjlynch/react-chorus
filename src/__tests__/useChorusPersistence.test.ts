@@ -673,6 +673,45 @@ describe('useChorusPersistence', () => {
       }
     });
 
+    it('keeps an armed debounced write intact when a corrupt cross-tab event is rejected', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      vi.useFakeTimers();
+      const key = 'chorus-cross-tab-corrupt';
+      let unmount: (() => void) | undefined;
+      try {
+        const hook = renderHook(() => useChorusPersistence(key, { writeDebounceMs: 1000 }));
+        unmount = hook.unmount;
+        const { result } = hook;
+
+        // Arm a debounced local write: its setTimeout is scheduled but unfired,
+        // so nothing has reached storage yet.
+        const localMsgs: Message[] = [{ id: 'local', role: 'user', text: 'local edit' }];
+        act(() => result.current.onChange(localMsgs));
+        expect(result.current.value).toEqual(localMsgs);
+
+        // A corrupt payload (another tab, a browser extension, an older library
+        // version, or a partial QuotaExceededError write) arrives. It fails
+        // JSON.parse, so applyExternalValue rejects it before applying.
+        act(() => dispatchStorageEvent(key, '{ corrupt payload, not json'));
+
+        // The rejected event must not desync in-memory state from storage.
+        expect(result.current.value).toEqual(localMsgs);
+
+        // The armed debounced write was NOT dropped by the rejected event: its
+        // timer still fires and persists the local message that would otherwise
+        // be lost on reload.
+        act(() => { vi.advanceTimersByTime(2000); });
+        expect(JSON.parse(window.localStorage.getItem(key) ?? 'null')).toEqual(localMsgs);
+      } finally {
+        unmount?.();
+        vi.useRealTimers();
+        window.localStorage.removeItem(key);
+        errorSpy.mockRestore();
+        warn.mockRestore();
+      }
+    });
+
     it('does not subscribe when a custom StorageAdapter is supplied', () => {
       const storage = makeSyncStorage(JSON.stringify(MSGS));
       const { result } = renderHook(() => useChorusPersistence('key', { storage }));
@@ -838,6 +877,41 @@ describe('useChorusPersistence', () => {
       } finally {
         warn.mockRestore();
       }
+    });
+
+    it('drops persisted messages whose createdAt is present but not a string', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const payload = [
+          { id: 'a', role: 'user', text: 'numeric', createdAt: 12345 },
+          { id: 'b', role: 'assistant', text: 'object', createdAt: {} },
+          { id: 'c', role: 'tool', toolCall: { name: 'lookup' }, createdAt: 99 },
+          MSG,
+        ];
+        const storage = makeSyncStorage(JSON.stringify(payload));
+        const { result } = renderHook(() => useChorusPersistence('key', { storage }));
+
+        // A non-string createdAt would format to `Invalid Date` under
+        // <Chorus showTimestamps>, so the default deserializer rejects it.
+        expect(result.current.value).toEqual([MSG]);
+        expect(result.current.error).toBeNull();
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringContaining('Dropped 3 invalid persisted messages'),
+          expect.arrayContaining([
+            expect.objectContaining({ id: 'a', reason: expect.stringContaining('createdAt') }),
+          ]),
+        );
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('keeps a persisted message whose createdAt is a valid ISO-8601 string', () => {
+      const withTimestamp = { id: 't', role: 'user', text: 'hi', createdAt: '2026-05-22T15:28:55.354Z' };
+      const storage = makeSyncStorage(JSON.stringify([withTimestamp]));
+      const { result } = renderHook(() => useChorusPersistence('key', { storage }));
+
+      expect(result.current.value).toEqual([withTimestamp]);
     });
 
     it('accepts a valid tool message and preserves its toolCall fields', () => {
