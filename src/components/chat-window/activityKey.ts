@@ -3,6 +3,10 @@ import type { Message } from '../../types';
 const FNV_1A_OFFSET_BASIS = 0x811c9dc5;
 const FNV_1A_PRIME = 0x01000193;
 
+// Number of leading and trailing code points folded into a string fingerprint, so very
+// long strings still produce a bounded key while edits at either end still change the key.
+const ACTIVITY_KEY_EDGE_SAMPLE = 24;
+
 const objectActivityIds = new WeakMap<object, number>();
 let nextObjectActivityId = 1;
 
@@ -29,7 +33,7 @@ function codePointHash(value: string) {
 
 export function stringActivityKey(value: string) {
   const codePoints = Array.from(value);
-  return `s:${value.length}:${codePoints.length}:${codePointHash(value)}:${codePoints.slice(0, 24).join('')}:${codePoints.slice(-24).join('')}`;
+  return `s:${value.length}:${codePoints.length}:${codePointHash(value)}:${codePoints.slice(0, ACTIVITY_KEY_EDGE_SAMPLE).join('')}:${codePoints.slice(-ACTIVITY_KEY_EDGE_SAMPLE).join('')}`;
 }
 
 export function unknownActivityKey(value: unknown): string {
