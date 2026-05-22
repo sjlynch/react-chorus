@@ -233,6 +233,20 @@ export function useSessionOrchestrator<TMeta>(deps: SessionOrchestratorDeps<TMet
     });
   }, [finalizeAssistantNow, invalidateAssistantSession, messagesRef, observers, removePendingAssistant, setTransportBusy, transportRef]);
 
+  // Abort only the in-flight controller — the `onSend` `helpers.signal` and any
+  // transport fetch — without finalizing, removing, or rewriting the partial
+  // assistant message. The unmount cleanup uses this instead of
+  // `abortActiveAssistant`: on a real teardown the RAF-buffered trailing token
+  // is handed to persistence by `useRAFQueue`'s own persist-only unmount flush,
+  // and `removePendingAssistant`/`finalizeAssistantNow` here would instead
+  // discard that buffer and rewrite messages through `onChange` /
+  // `onMessagesChange` / `onAbort` after the host has already unmounted.
+  const abortInFlightOnUnmount = React.useCallback(() => {
+    invalidateAssistantSession();
+    controllerRef.current?.abort();
+    controllerRef.current = null;
+  }, [invalidateAssistantSession]);
+
   const triggerAssistant = React.useCallback((text: string, history: Message<TMeta>[] = messagesRef.current) => {
     if (activeSendPathRef.current) abortActiveAssistant('superseded', 'programmatic');
 
@@ -295,26 +309,49 @@ export function useSessionOrchestrator<TMeta>(deps: SessionOrchestratorDeps<TMet
 
   // `abortActiveAssistant` is stable in real <Chorus> usage, but a hook-level
   // consumer can pass an unstable `flushPersistence` whose identity ripples
-  // through the buffer into it. Read it from a ref so the cleanup effect below
-  // can depend ONLY on `persistenceKey`: its cleanup must run on unmount and on
-  // a conversation switch, never because an unrelated callback churned (that
-  // would abort a healthy in-flight turn on every render).
+  // through the buffer into it. Read both abort callbacks from refs so the
+  // cleanup effect below can depend ONLY on `persistenceKey`: its cleanup must
+  // run on unmount and on a conversation switch, never because an unrelated
+  // callback churned (that would abort a healthy in-flight turn on every
+  // render).
   const abortActiveAssistantRef = React.useRef(abortActiveAssistant);
   abortActiveAssistantRef.current = abortActiveAssistant;
+  const abortInFlightOnUnmountRef = React.useRef(abortInFlightOnUnmount);
+  abortInFlightOnUnmountRef.current = abortInFlightOnUnmount;
+
+  // The cleanup effect below fires on both a real unmount and a `persistenceKey`
+  // change because they share one effect. This ref — flipped true by a cleanup
+  // that runs only on a true unmount, and reset on (re)mount so a StrictMode
+  // remount does not leave it stuck — lets that shared cleanup tell the two
+  // apart. It is declared before the cleanup effect so its cleanup runs first
+  // on teardown.
+  const isUnmountingRef = React.useRef(false);
+  React.useEffect(() => {
+    isUnmountingRef.current = false;
+    return () => { isUnmountingRef.current = true; };
+  }, []);
 
   // Abort whatever assistant turn is in flight when <Chorus> unmounts or the
   // conversation switches (`persistenceKey` change). The assistant-session
   // layer has no other unmount cleanup: without this an `onSend` promise keeps
-  // resolving against a dead component — its `helpers.signal` never aborts and
-  // the host-registered `onAbort` never fires — and a transport/SSE fetch
-  // keeps streaming. On a `persistenceKey` switch it also stops the previous
-  // conversation's stream from appending its assistant reply into the chat the
-  // user just opened. One effect covers both cases because the mechanism is
-  // identical (abort the in-flight controller); the cleanup runs on unmount
-  // AND on every `persistenceKey` change. `activeSendPathRef` gates the abort
-  // so a teardown with nothing in flight does not emit a spurious `onAbort`.
+  // resolving against a dead component and a transport/SSE fetch keeps
+  // streaming. One effect covers both because aborting the in-flight controller
+  // is common to them; the cleanup runs on unmount AND on every `persistenceKey`
+  // change. `activeSendPathRef` gates the abort so a teardown with nothing in
+  // flight stays quiet.
+  //
+  // The two cases then diverge. A `persistenceKey` switch fully supersedes the
+  // stale turn — `abortActiveAssistant('superseded')` discards its half-streamed
+  // partial and routes `onAbort` — so the previous conversation's reply cannot
+  // land in the chat the user just opened. A real unmount instead aborts only
+  // the controller: the partial assistant message and its RAF-buffered trailing
+  // token are left to `useRAFQueue`'s persist-only unmount flush, which lands
+  // the final token in persistence without firing `onChange` / `onMessagesChange`
+  // / `onAbort` on a host that has already torn down.
   React.useEffect(() => () => {
-    if (activeSendPathRef.current) abortActiveAssistantRef.current('superseded', 'programmatic');
+    if (!activeSendPathRef.current) return;
+    if (isUnmountingRef.current) abortInFlightOnUnmountRef.current();
+    else abortActiveAssistantRef.current('superseded', 'programmatic');
   }, [persistenceKey]);
 
   return {

@@ -46,7 +46,14 @@ export function useRAFQueue(flushCallback: (queued: string, isUnmountFlush: bool
   // The flush is tagged as an unmount flush so the callback can route it into
   // persistence only: a controlled host's `onChange` (or the uncontrolled
   // `setInternalMsgs`) must not be invoked after the component has torn down.
-  React.useEffect(() => () => cancelPending(true, true), [cancelPending]);
+  //
+  // It runs as a layout effect so the flush lands in the commit phase, ahead of
+  // passive-effect cleanups — notably `useChorusPersistence`'s own unmount flush of
+  // its debounced write. That ordering lets the buffered token upgrade the pending
+  // persistence write in place; otherwise the stale pre-token snapshot is written
+  // first and the completed-token write chains behind it on the async write queue,
+  // so a synchronous post-unmount read of storage still sees the mid-token text.
+  React.useLayoutEffect(() => () => cancelPending(true, true), [cancelPending]);
 
   return { enqueue, cancelPending };
 }
