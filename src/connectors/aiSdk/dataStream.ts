@@ -1,6 +1,7 @@
 import type { ConnectorResult } from '../types';
 import {
   type AiSdkConnectorState,
+  aiSdkFinishResult,
   hasOwn,
   resetAiSdkState,
   toolDeltaFromToolCall,
@@ -70,10 +71,15 @@ export function dataStreamProtocolResult(state: AiSdkConnectorState, data: strin
       const toolDelta = toolDeltaFromToolResult(state, 'a:', record.toolCallId, output, hasOutput);
       return toolDelta ? { toolDelta } : null;
     }
-    case 'd':
+    case 'd': {
       // `d:` is the finish-*message* part — the end of the whole HTTP stream.
+      // It carries the v4 `{ finishReason, usage }` payload; surface both as
+      // metadata so usage telemetry matches the other connectors.
+      const record = parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : {};
+      const result = aiSdkFinishResult(record.usage, record.finishReason);
       resetAiSdkState(state);
-      return { done: true };
+      return result;
+    }
     case 'e':
       // `e:` is the finish-*step* part — it ends one step of a multi-step run
       // (e.g. between a tool call and the model's follow-up turn) while the

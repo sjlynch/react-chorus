@@ -78,16 +78,34 @@ const FINISH_REASON_WARNINGS: Record<string, { code: string; message: string }> 
   content_filter: { code: 'content_filter', message: 'OpenAI response stopped by the content filter' },
 };
 
+/**
+ * Surface token usage at most once per Chat Completions stream. Prefers the
+ * usage on the current (terminating) chunk, falling back to whatever was
+ * buffered from earlier chunks. Returns `undefined` once usage has already
+ * been emitted, so a stream with both a `finish_reason` chunk and a trailing
+ * `choices: []` chunk cannot fire `onMetadata` twice.
+ */
+function takeChatUsage(
+  state: OpenAIConnectorState,
+  chunkUsage: Record<string, number> | undefined,
+): Record<string, number> | undefined {
+  if (state.chatUsageEmitted) return undefined;
+  const usage = chunkUsage ?? state.chatPendingUsage;
+  if (!usage) return undefined;
+  state.chatUsageEmitted = true;
+  return usage;
+}
+
 export function extractChatCompletionEvent(obj: Record<string, unknown>, state: OpenAIConnectorState): ConnectorResult | null {
   const choices = obj.choices;
   if (!Array.isArray(choices)) return null;
   if (choices.length === 0) {
     // OpenAI Chat Completions with `stream_options: { include_usage: true }`
     // emits a final `{ choices: [], usage: {...} }` chunk that carries no
-    // delta or finish_reason. Surface its token usage as metadata — without
-    // this, a cost-telemetry consumer sees usage on the Responses path but
-    // silently nothing here.
-    const usage = extractUsage(obj.usage);
+    // delta or finish_reason. This is a terminating chunk, so surface its
+    // token usage as metadata — without this, a cost-telemetry consumer sees
+    // usage on the Responses path but silently nothing here.
+    const usage = takeChatUsage(state, extractUsage(obj.usage));
     return usage ? { metadata: { usage } } : null;
   }
 
@@ -120,6 +138,15 @@ export function extractChatCompletionEvent(obj: Record<string, unknown>, state: 
     }
   }
 
+  // Buffer the latest `usage`. Some OpenAI-compatible proxies (Azure OpenAI,
+  // OpenRouter) attach a cumulative `usage` object to every content chunk;
+  // emitting `metadata.usage` per chunk would make a non-idempotent
+  // `onMetadata` consumer (a running cost counter) over-count. Buffer it and
+  // surface it once, on the terminating chunk — matching the Gemini/Responses
+  // connectors and the trailing `choices: []` frame handled above.
+  const chunkUsage = extractUsage(obj.usage);
+  if (chunkUsage) state.chatPendingUsage = chunkUsage;
+
   // A non-null `finish_reason` terminates the stream. Many proxies (Azure
   // OpenAI, OpenRouter) omit the trailing `data: [DONE]`, so without this the
   // chat-completions branch never emits `done` and the reader hangs.
@@ -128,15 +155,13 @@ export function extractChatCompletionEvent(obj: Record<string, unknown>, state: 
     mergeResult(result, createThinkTagSplitter(state.thinkState, state.thinkTags).flush());
     result.done = true;
     result.metadata = { ...(result.metadata ?? {}), finishReason };
+    // This is the terminating chunk — surface the buffered usage (or this
+    // chunk's own usage) exactly once.
+    const usage = takeChatUsage(state, chunkUsage);
+    if (usage) result.metadata.usage = usage;
     const warning = FINISH_REASON_WARNINGS[finishReason];
     if (warning) result.warning = { code: warning.code, message: warning.message, payload: obj };
   }
-
-  // Some OpenAI-compatible proxies attach `usage` to the final content chunk
-  // rather than (or in addition to) the trailing `choices: []` usage chunk
-  // handled above. Surface it wherever it lands so the count is never dropped.
-  const usage = extractUsage(obj.usage);
-  if (usage) result.metadata = { ...(result.metadata ?? {}), usage };
 
   return result.text || result.reasoning || hasToolDelta(result) || result.done || result.metadata ? result : null;
 }

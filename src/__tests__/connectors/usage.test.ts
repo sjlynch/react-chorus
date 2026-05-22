@@ -26,6 +26,22 @@ describe('extractUsage', () => {
     });
   });
 
+  it('normalizes Vercel AI SDK v4 field names (promptTokens / completionTokens)', () => {
+    expect(extractUsage({ promptTokens: 18, completionTokens: 24, totalTokens: 42 })).toEqual({
+      promptTokens: 18,
+      completionTokens: 24,
+      totalTokens: 42,
+    });
+  });
+
+  it('normalizes Vercel AI SDK v5 field names (inputTokens / outputTokens)', () => {
+    expect(extractUsage({ inputTokens: 12, outputTokens: 7, totalTokens: 19 })).toEqual({
+      promptTokens: 12,
+      completionTokens: 7,
+      totalTokens: 19,
+    });
+  });
+
   it('keeps only the token counts that are present', () => {
     expect(extractUsage({ output_tokens: 5 })).toEqual({ completionTokens: 5 });
   });

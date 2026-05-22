@@ -28,6 +28,14 @@ export function metadataWithToolProvider<TMeta>(existing: TMeta | undefined, del
     const anthropic = isRecord(metadata.anthropic) ? { ...metadata.anthropic } : {};
     anthropic.toolUseId = delta.providerId;
     metadata.anthropic = anthropic;
+  } else if (delta.provider === 'ai-sdk') {
+    // The AI SDK connector cannot know the underlying provider family, so it
+    // tags deltas with a neutral `provider: 'ai-sdk'`. Persist the captured
+    // tool-call id under a provider-neutral `metadata.aiSdk.toolCallId` slot so
+    // `autoContinueTools` can re-attach it when replaying the tool result.
+    const aiSdk = isRecord(metadata.aiSdk) ? { ...metadata.aiSdk } : {};
+    aiSdk.toolCallId = delta.providerId;
+    metadata.aiSdk = aiSdk;
   }
 
   return Object.keys(metadata).length ? metadata as TMeta : existing;

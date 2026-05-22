@@ -260,6 +260,86 @@ describe('openaiConnector', () => {
     });
   });
 
+  it('buffers per-chunk usage and surfaces it once on the finish_reason chunk', () => {
+    const state = openaiConnector.createState?.();
+    // A proxy (OpenRouter, Azure) may attach a cumulative `usage` object to
+    // every content chunk; emitting `metadata.usage` per chunk would make a
+    // non-idempotent onMetadata consumer (running cost counter) over-count.
+    const first = openaiConnector.extract(JSON.stringify({
+      choices: [{ index: 0, delta: { content: 'hel' } }],
+      usage: { prompt_tokens: 3, completion_tokens: 1, total_tokens: 4 },
+    }), state);
+    expect(first).toEqual({ text: 'hel' });
+    expect(first?.metadata).toBeUndefined();
+
+    const second = openaiConnector.extract(JSON.stringify({
+      choices: [{ index: 0, delta: { content: 'lo' } }],
+      usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 },
+    }), state);
+    expect(second).toEqual({ text: 'lo' });
+    expect(second?.metadata).toBeUndefined();
+
+    // Only the terminating chunk surfaces usage — exactly once per turn.
+    const final = openaiConnector.extract(JSON.stringify({
+      choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 3, completion_tokens: 3, total_tokens: 6 },
+    }), state);
+    expect(final).toEqual({
+      done: true,
+      metadata: { finishReason: 'stop', usage: { promptTokens: 3, completionTokens: 3, totalTokens: 6 } },
+    });
+  });
+
+  it('surfaces the last buffered usage on a finish chunk that itself omits usage', () => {
+    const state = openaiConnector.createState?.();
+    openaiConnector.extract(JSON.stringify({
+      choices: [{ index: 0, delta: { content: 'hi' } }],
+      usage: { prompt_tokens: 8, completion_tokens: 4, total_tokens: 12 },
+    }), state);
+    const final = openaiConnector.extract(JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }] }), state);
+    expect(final?.metadata).toEqual({ finishReason: 'stop', usage: { promptTokens: 8, completionTokens: 4, totalTokens: 12 } });
+  });
+
+  it('does not re-emit usage on a trailing choices:[] chunk after the finish chunk surfaced it', () => {
+    const state = openaiConnector.createState?.();
+    const final = openaiConnector.extract(JSON.stringify({
+      choices: [{ delta: {}, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 },
+    }), state);
+    expect(final?.metadata?.usage).toEqual({ promptTokens: 5, completionTokens: 2, totalTokens: 7 });
+    // A second terminal-shaped frame must not fire onMetadata again.
+    const trailing = openaiConnector.extract(JSON.stringify({
+      choices: [],
+      usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 },
+    }), state);
+    expect(trailing).toBeNull();
+  });
+
+  it('surfaces usage from the trailing choices:[] chunk when the finish chunk carried none', () => {
+    // The standard OpenAI `include_usage` flow: a finish_reason chunk with no
+    // usage, then a final `{ choices: [], usage }` chunk — one onMetadata call.
+    const state = openaiConnector.createState?.();
+    const final = openaiConnector.extract(JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }] }), state);
+    expect(final).toEqual({ done: true, metadata: { finishReason: 'stop' } });
+    const trailing = openaiConnector.extract(JSON.stringify({
+      choices: [],
+      usage: { prompt_tokens: 9, completion_tokens: 5, total_tokens: 14 },
+    }), state);
+    expect(trailing).toEqual({ metadata: { usage: { promptTokens: 9, completionTokens: 5, totalTokens: 14 } } });
+  });
+
+  it('surfaces buffered usage on [DONE] when no terminating chunk carried it', () => {
+    const state = openaiConnector.createState?.();
+    openaiConnector.extract(JSON.stringify({
+      choices: [{ index: 0, delta: { content: 'hi' } }],
+      usage: { prompt_tokens: 6, completion_tokens: 3, total_tokens: 9 },
+    }), state);
+    expect(openaiConnector.extract('[DONE]', state)).toEqual({
+      done: true,
+      metadata: { usage: { promptTokens: 6, completionTokens: 3, totalTokens: 9 } },
+    });
+  });
+
   it('flushes a buffered partial think tag when finish_reason ends the stream', () => {
     const state = openaiConnector.createState?.();
     expect(openaiConnector.extract(JSON.stringify({ choices: [{ index: 0, delta: { content: 'hi <' } }] }), state)).toEqual({ text: 'hi ' });

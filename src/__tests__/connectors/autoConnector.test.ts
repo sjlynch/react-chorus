@@ -66,8 +66,8 @@ describe('autoConnector', () => {
     const delta = JSON.stringify({ type: 'tool-call-delta', toolCallId: 'call_1', argsTextDelta: '{"q":' });
     const reasoning = JSON.stringify({ type: 'reasoning', text: 'thinking' });
 
-    expect(autoConnector.extract(start, state)).toEqual({ toolDelta: { id: 'call_1', providerId: 'call_1', name: 'search' } });
-    expect(autoConnector.extract(delta, state)).toEqual({ toolDelta: { id: 'call_1', providerId: 'call_1', name: 'search', input: '{"q":' } });
+    expect(autoConnector.extract(start, state)).toEqual({ toolDelta: { id: 'call_1', providerId: 'call_1', provider: 'ai-sdk', name: 'search' } });
+    expect(autoConnector.extract(delta, state)).toEqual({ toolDelta: { id: 'call_1', providerId: 'call_1', provider: 'ai-sdk', name: 'search', input: '{"q":' } });
     expect(autoConnector.extract(reasoning, state)).toEqual({ reasoning: 'thinking' });
   });
 
@@ -81,7 +81,7 @@ describe('autoConnector', () => {
 
   it('delegates to aiSdkConnector for Vercel AI SDK data-stream protocol lines', () => {
     expect(autoConnector.extract('0:"hello"')).toEqual({ text: 'hello' });
-    expect(autoConnector.extract('d:{"finishReason":"stop","usage":{}}')).toEqual({ done: true });
+    expect(autoConnector.extract('d:{"finishReason":"stop","usage":{}}')).toEqual({ done: true, metadata: { finishReason: 'stop' } });
     // `e:` (finish-step) is still detected and delegated, but keeps the stream open.
     expect(autoConnector.extract('e:{"finishReason":"tool-calls","usage":{}}')).toBeNull();
     expect(autoConnector.extract('3:"upstream failed"'))
@@ -149,7 +149,7 @@ describe('autoConnector', () => {
 
   it('still routes genuine data-stream frames after tightening the auto dispatch', () => {
     expect(autoConnector.extract('0:"hello"')).toEqual({ text: 'hello' });
-    expect(autoConnector.extract('d:{"finishReason":"stop","usage":{}}')).toEqual({ done: true });
+    expect(autoConnector.extract('d:{"finishReason":"stop","usage":{}}')).toEqual({ done: true, metadata: { finishReason: 'stop' } });
   });
 
   it('parses an AI SDK frame carrying a stray top-level error key as its frame type, matching aiSdkConnector', () => {
