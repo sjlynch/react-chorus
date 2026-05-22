@@ -14,6 +14,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Exported `createOpenAIConnector`, a factory for OpenAI connectors with a configurable, case-insensitive `<think>` reasoning splitter (`thinkTag` option), along with the `OpenAIConnectorOptions` and `ThinkTagSplitterOptions` types.
 - The new `'ai-sdk'` connector is reachable by name only — `getConnector('ai-sdk')` or `connector="ai-sdk"`. The public connector accessors remain `getConnector` and `createOpenAIConnector`; the provider singletons (`openaiConnector`/`anthropicConnector`/`geminiConnector`/`aiSdkConnector`) and `autoConnector` stay `@internal` and are not exported from `react-chorus` / `react-chorus/headless`.
 
+#### Developer experience
+- `<ChatInput>` now emits a one-time `console.warn` in development when a host passes `onKeyDown`. As documented on `ChatInputProps`, an `onKeyDown` spread via `...rest` attaches to the composer container `<div>`, not the inner `<textarea>`, so it never observes Enter (the composer `preventDefault()`s it) or other textarea-consumed keys — a host wiring slash-command or up-arrow-to-edit shortcuts would otherwise get silent partial behavior with no diagnostic.
+
 ### Changed
 
 #### Markdown
