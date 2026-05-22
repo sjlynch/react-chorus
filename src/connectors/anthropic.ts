@@ -1,6 +1,7 @@
 import { extractErrorMessage } from './error';
 import { hasOwn } from './objectUtils';
 import type { Connector, ConnectorResult, ConnectorToolDelta } from './types';
+import { extractUsage } from './usage';
 
 export interface AnthropicConnectorState {
   toolIdsByBlockIndex: Map<string, string>;
@@ -30,8 +31,9 @@ function fallbackToolId(index: unknown) {
  * Yields text from content_block_delta events (delta.type === 'text_delta'),
  * reasoning from thinking blocks/deltas, tool-use deltas from tool_use blocks
  * and input_json_delta events, the extended-thinking signature from
- * signature_delta events (as `metadata.thinkingSignature`), and signals done
- * on message_stop.
+ * signature_delta events (as `metadata.thinkingSignature`), token usage as
+ * `metadata.usage` from message_start (input tokens) and message_delta
+ * (output tokens), and signals done on message_stop.
  *
  * Usage example:
  *   const { send } = useChorusStream(transport, { connector: 'anthropic' });
@@ -53,14 +55,33 @@ export const anthropicConnector: Connector<AnthropicConnectorState> = {
         return { done: true };
       }
 
+      if (obj.type === 'message_start') {
+        // `message_start` carries `message.usage.input_tokens` (the prompt
+        // token count); the matching output count arrives on `message_delta`.
+        // Surface it so cost telemetry is not silently dropped.
+        const message = obj.message && typeof obj.message === 'object'
+          ? obj.message as Record<string, unknown>
+          : null;
+        const usage = extractUsage(message?.usage);
+        return usage ? { metadata: { usage } } : null;
+      }
+
       if (obj.type === 'message_delta') {
         const delta = obj.delta && typeof obj.delta === 'object' ? obj.delta as Record<string, unknown> : null;
         const stopReason = typeof delta?.stop_reason === 'string' ? delta.stop_reason : null;
-        if (!stopReason) return null;
+        // `message_delta` carries the cumulative `usage.output_tokens` count.
+        const usage = extractUsage(obj.usage);
+
+        if (!stopReason) {
+          // A `message_delta` with no stop_reason still updates the running
+          // output-token count; surface usage alone rather than dropping it.
+          return usage ? { metadata: { usage } } : null;
+        }
 
         const stopSequence = typeof delta?.stop_sequence === 'string' ? delta.stop_sequence : null;
         const metadata: Record<string, unknown> = { stopReason };
         if (stopSequence) metadata.stopSequence = stopSequence;
+        if (usage) metadata.usage = usage;
 
         if (stopReason === 'refusal') {
           return {

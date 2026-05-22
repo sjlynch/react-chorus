@@ -13,6 +13,7 @@ import {
 } from './shared';
 import {
   bufferResponseToolArg,
+  drainResponseRefusalText,
   drainResponseToolBuffer,
   extractResponseToolId,
   outputIndexKey,
@@ -23,7 +24,7 @@ import {
 import { applyResponseCompletion, IGNORED_RESPONSE_EVENT_TYPES } from './responseMetadata';
 import { createThinkTagSplitter } from './thinkTagSplitter';
 
-export { drainResponseToolBuffer };
+export { drainResponseToolBuffer, drainResponseRefusalText };
 
 export function extractOpenAIResponseEvent(obj: Record<string, unknown>, state: OpenAIConnectorState): ConnectorResult | null {
   const type = typeof obj.type === 'string' ? obj.type : '';
@@ -40,12 +41,33 @@ export function extractOpenAIResponseEvent(obj: Record<string, unknown>, state: 
     // Replay tool-call deltas whose `output_item.added` was dropped entirely.
     for (const toolDelta of drainResponseToolBuffer(state)) appendToolDelta(result, toolDelta);
     applyResponseCompletion(result, obj);
+    // Surface any refusal buffered across `refusal.added`/`.delta` that never
+    // got its closing `refusal.done`, mirroring the orphan-tool-arg drain above —
+    // otherwise the refusal is silently lost and the turn renders blank.
+    const refusal = drainResponseRefusalText(state);
+    if (refusal) {
+      result.error = refusal;
+      result.errorPayload = obj;
+    }
     result.done = true;
     return result;
   }
 
   if (type === 'response.failed') {
-    const error = extractErrorMessage(obj) || collectTextFragments(obj.response) || 'OpenAI response failed';
+    // The provider's real failure message lives at `response.error.message`;
+    // `extractErrorMessage` only inspects a top-level `error` and
+    // `collectTextFragments` digs for text/summary/content, so without this the
+    // generic fallback always wins.
+    const response = obj.response && typeof obj.response === 'object'
+      ? obj.response as Record<string, unknown>
+      : undefined;
+    const responseError = response?.error && typeof response.error === 'object'
+      ? response.error as Record<string, unknown>
+      : undefined;
+    const error = stringFromUnknown(responseError?.message)
+      || extractErrorMessage(obj)
+      || collectTextFragments(obj.response)
+      || 'OpenAI response failed';
     return { error, errorPayload: obj };
   }
 
@@ -107,7 +129,13 @@ export function extractOpenAIResponseEvent(obj: Record<string, unknown>, state: 
       if (callId) toolDelta.providerId = callId;
       else toolDelta.generated = true;
       if (name) toolDelta.name = name;
-      if (hasOwn(item, 'arguments')) toolDelta.input = item.arguments;
+      // `output_item.done` carries the COMPLETE accumulated `arguments` string,
+      // but the `function_call_arguments.delta` events already streamed every
+      // fragment and the downstream accumulator concatenates string inputs — so
+      // re-emitting it here would double the arguments into invalid JSON. Only
+      // `.added` (whose `arguments` is empty) seeds the input; `.done` just
+      // confirms the call's id/name.
+      if (type === 'response.output_item.added' && hasOwn(item, 'arguments')) toolDelta.input = item.arguments;
       appendToolDelta(result, toolDelta);
 
       // Replay deltas that arrived before this event resolved the call id.

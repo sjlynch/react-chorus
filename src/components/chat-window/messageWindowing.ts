@@ -21,8 +21,21 @@ export function normalizeMaxRenderedMessages(maxRenderedMessages: number | undef
   return Math.max(0, Math.floor(maxRenderedMessages));
 }
 
-export function windowVisibleMessages<TMeta = Record<string, unknown>>(visibleMessages: Message<TMeta>[], normalizedMaxRenderedMessages: number | null) {
+export function windowVisibleMessages<TMeta = Record<string, unknown>>(
+  visibleMessages: Message<TMeta>[],
+  normalizedMaxRenderedMessages: number | null,
+  streamingMessageId?: string | null,
+) {
   if (normalizedMaxRenderedMessages === null) return visibleMessages;
-  if (normalizedMaxRenderedMessages === 0) return [];
-  return visibleMessages.slice(-normalizedMaxRenderedMessages);
+  const windowed = normalizedMaxRenderedMessages === 0 ? [] : visibleMessages.slice(-normalizedMaxRenderedMessages);
+  if (streamingMessageId == null || windowed.some(message => message.id === streamingMessageId)) {
+    return windowed;
+  }
+  // The streaming message fell outside the trailing window — a host appended
+  // rows after it, or maxRenderedMessages is very low. Force-include it (it
+  // precedes the trailing slice, so it stays first) so its partial text keeps
+  // rendering and Markdown stays in streaming-plain-text mode while active.
+  const streamingMessage = visibleMessages.find(message => message.id === streamingMessageId);
+  if (streamingMessage === undefined) return windowed;
+  return [streamingMessage, ...windowed];
 }

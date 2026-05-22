@@ -35,6 +35,14 @@ export interface MessageListProps<TMeta = Record<string, unknown>> {
   markdownProps?: MessageMarkdownProps;
   markdownSanitizer?: MarkdownSanitizer;
   streamingMessageId?: string | null;
+  /**
+   * Ids of the messages in the in-flight streaming turn (every message after
+   * the last user message), computed by `ChatWindow` over the full visible
+   * array before windowing. A tool row shows "Running…" only while its id is
+   * in this set, which stays correct even when `maxRenderedMessages` slices
+   * the last user message (or the streaming message) out of the window.
+   */
+  streamingTurnIds: ReadonlySet<string>;
   renderMessage?: (message: Message<TMeta>, context: RenderMessageContext<TMeta>) => React.ReactNode;
   /** Render each message's `createdAt` time below its bubble. */
   showTimestamps: boolean;
@@ -60,6 +68,7 @@ export function MessageList<TMeta = Record<string, unknown>>({
   markdownProps,
   markdownSanitizer,
   streamingMessageId,
+  streamingTurnIds,
   renderMessage,
   showTimestamps,
   formatTimestamp,
@@ -74,25 +83,17 @@ export function MessageList<TMeta = Record<string, unknown>>({
   onEdit,
   onRegenerate,
 }: MessageListProps<TMeta>) {
-  // Tool messages never carry the `streamingMessageId` themselves (that tracks
-  // the pending assistant message), so derive turn membership from position.
-  // An assistant turn is in flight whenever `sessionStreaming` is true, and the
-  // streaming turn is every message after the last user message. A tool call
-  // only counts as streaming when it sits inside that trailing turn — flagging
-  // *every* tool row instead would flip an older, already-finished empty-bodied
-  // tool call to "Running…" the moment an unrelated later turn streams.
-  const sessionStreaming = streamingMessageId != null;
-  const lastUserIndex = sessionStreaming
-    ? messages.reduce((last, m, i) => (m.role === 'user' ? i : last), -1)
-    : -1;
-
   return (
     <>
-      {messages.map((message, index) => {
+      {messages.map((message) => {
         const isStreaming = message.id === streamingMessageId;
-        // A tool row may show "Running…" only while it belongs to the in-flight
-        // turn — i.e. it trails the last user message during a streaming turn.
-        const toolStreaming = sessionStreaming && index > lastUserIndex;
+        // Tool messages never carry the `streamingMessageId` themselves (that
+        // tracks the pending assistant message), so a tool row shows "Running…"
+        // only while it belongs to the in-flight turn. `ChatWindow` derives
+        // that turn — every message after the last user message — from the full
+        // pre-window array, so this stays correct even when `maxRenderedMessages`
+        // slices the last user message out of the rendered window.
+        const toolStreaming = streamingTurnIds.has(message.id);
         const initialFeedback = getSelectedFeedback(message);
         const feedback = feedbackEnabled ? (variant: MessageFeedback | null) => onMessageFeedback(message, variant) : undefined;
         const defaultRender = buildMessageDefaultRender<TMeta>({
