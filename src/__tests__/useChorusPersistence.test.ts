@@ -840,6 +840,41 @@ describe('useChorusPersistence', () => {
       }
     });
 
+    it('drops persisted messages whose createdAt is present but not a string', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const payload = [
+          { id: 'a', role: 'user', text: 'numeric', createdAt: 12345 },
+          { id: 'b', role: 'assistant', text: 'object', createdAt: {} },
+          { id: 'c', role: 'tool', toolCall: { name: 'lookup' }, createdAt: 99 },
+          MSG,
+        ];
+        const storage = makeSyncStorage(JSON.stringify(payload));
+        const { result } = renderHook(() => useChorusPersistence('key', { storage }));
+
+        // A non-string createdAt would format to `Invalid Date` under
+        // <Chorus showTimestamps>, so the default deserializer rejects it.
+        expect(result.current.value).toEqual([MSG]);
+        expect(result.current.error).toBeNull();
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringContaining('Dropped 3 invalid persisted messages'),
+          expect.arrayContaining([
+            expect.objectContaining({ id: 'a', reason: expect.stringContaining('createdAt') }),
+          ]),
+        );
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('keeps a persisted message whose createdAt is a valid ISO-8601 string', () => {
+      const withTimestamp = { id: 't', role: 'user', text: 'hi', createdAt: '2026-05-22T15:28:55.354Z' };
+      const storage = makeSyncStorage(JSON.stringify([withTimestamp]));
+      const { result } = renderHook(() => useChorusPersistence('key', { storage }));
+
+      expect(result.current.value).toEqual([withTimestamp]);
+    });
+
     it('accepts a valid tool message and preserves its toolCall fields', () => {
       const toolMessage = {
         id: 't-1',
