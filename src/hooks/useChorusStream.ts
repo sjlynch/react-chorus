@@ -27,16 +27,29 @@ export function useChorusStream<TMeta = Record<string, unknown>>(transport: Tran
 
   React.useEffect(() => () => {
     if (isSendingRef.current && !controllerRef.current) {
-      warnInDev('[Chorus] useChorusStream unmounted while a send started with an externalSignal was in flight; the hook cannot cancel it. Abort the externalSignal you passed to send() from your own cleanup to stop the stream.');
+      warnInDev('[Chorus] useChorusStream unmounted while a send started with an externalSignal was in flight; the hook stopped its own SSE reader but cannot abort the transport fetch it does not own. Abort the externalSignal you passed to send() from your own cleanup to stop the transport too.');
     }
     controllerRef.current?.abort();
-    // Aborting a hook-owned controller above already fires `forwardAbort` (a
-    // `{ once: true }` listener that self-removes). With a caller-owned
-    // externalSignal there is no hook controller to abort, so `forwardAbort`
-    // stays attached to that signal — drop it here so a long-lived signal does
-    // not accumulate listeners across repeated mount/unmount cycles. The
-    // in-flight send's own teardown also calls this; it is idempotent.
-    if (sessionRef.current) removeForwardAbort(sessionRef.current);
+    const session = sessionRef.current;
+    if (session) {
+      // The hook always owns `readerController`, which bounds the SSE reader
+      // pump. For a hook-owned controller the abort above already forwards into
+      // `readerController` via `forwardAbort`; with a caller-owned externalSignal
+      // there is no hook controller to abort, so abort `readerController`
+      // directly here. Either way `reader.cancel()` runs and the SSE pump stops
+      // instead of outliving the unmounted component. The caller-owned transport
+      // fetch still cannot be cancelled without the controller — only the
+      // externalSignal can do that. Aborting an already-aborted controller is a
+      // no-op, so this is safe on both paths.
+      session.readerController.abort();
+      // Aborting a hook-owned controller above already fires `forwardAbort` (a
+      // `{ once: true }` listener that self-removes). With a caller-owned
+      // externalSignal there is no hook controller to abort, so `forwardAbort`
+      // stays attached to that signal — drop it here so a long-lived signal does
+      // not accumulate listeners across repeated mount/unmount cycles. The
+      // in-flight send's own teardown also calls this; it is idempotent.
+      removeForwardAbort(session);
+    }
   }, []);
 
   /**

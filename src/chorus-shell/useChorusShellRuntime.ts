@@ -132,6 +132,7 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
     connectorOptions,
     transport,
     onSend,
+    onStreamDone,
     sending: sendingProp,
     autoContinueTools,
     maxToolIterations,

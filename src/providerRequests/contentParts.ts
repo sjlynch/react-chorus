@@ -46,8 +46,12 @@ export function messageTextParts<TMeta, TPart>(
   createTextPart: (text: string) => TPart,
 ): TPart[] {
   const parts: TPart[] = [];
-  const text = messageText(message);
-  if (text.trim()) parts.push(createTextPart(text));
+  // Trim the emitted text — not just the emptiness check. All four provider
+  // mappers (OpenAI Chat/Responses, Anthropic, Gemini) route system/user/
+  // assistant text through here, so trimming keeps them consistent and matches
+  // the explicit `.trim()` in `toOpenAIChatCompletionsMessage`.
+  const text = messageText(message).trim();
+  if (text) parts.push(createTextPart(text));
   return parts;
 }
 

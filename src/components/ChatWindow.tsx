@@ -20,6 +20,10 @@ export type { GetMessageFeedback, MessageBubbleProps, MessageBubbleSlots, Messag
 
 let didWarnShowSystemMessages = false;
 
+// Stable empty set so a non-streaming render keeps the same `streamingTurnIds`
+// reference and does not re-render MessageList rows for an identity change.
+const EMPTY_STREAMING_TURN_IDS: ReadonlySet<string> = new Set();
+
 // Keep this local so hook-only chunks do not share a dev-mode module with ChatWindow.
 function isChorusDevMode() {
   try {
@@ -78,7 +82,20 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
   const hiddenRoleSet = React.useMemo(() => createHiddenRoleSet(effectiveHiddenRoles), [effectiveHiddenRoles]);
   const visible = React.useMemo(() => filterVisibleMessages(messages, hiddenRoleSet), [messages, hiddenRoleSet]);
   const normalizedMaxRenderedMessages = React.useMemo(() => normalizeMaxRenderedMessages(maxRenderedMessages), [maxRenderedMessages]);
-  const renderedVisible = React.useMemo(() => windowVisibleMessages(visible, normalizedMaxRenderedMessages), [normalizedMaxRenderedMessages, visible]);
+  const renderedVisible = React.useMemo(
+    () => windowVisibleMessages(visible, normalizedMaxRenderedMessages, streamingMessageId),
+    [normalizedMaxRenderedMessages, visible, streamingMessageId],
+  );
+  // Derive the in-flight turn (every message after the last user message) from
+  // the FULL visible array, before windowing. MessageList used to reduce over
+  // the already-windowed array; when `maxRenderedMessages` sliced the last user
+  // message out, that reduce found no user message and flagged every rendered
+  // tool row as in-flight — flipping older finished tool calls to "Running…".
+  const streamingTurnIds = React.useMemo(() => {
+    if (streamingMessageId == null) return EMPTY_STREAMING_TURN_IDS;
+    const lastUserIndex = visible.reduce((last, message, i) => (message.role === 'user' ? i : last), -1);
+    return new Set(visible.slice(lastUserIndex + 1).map(message => message.id));
+  }, [visible, streamingMessageId]);
   // Defer the navigator.clipboard feature-detect to a mount effect so the
   // server-rendered tree and the initial client render agree (no hydration
   // mismatch from clipboard-only browser APIs being absent on the server).
@@ -117,6 +134,7 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
         markdownProps={markdownProps}
         markdownSanitizer={markdownSanitizer}
         streamingMessageId={streamingMessageId}
+        streamingTurnIds={streamingTurnIds}
         renderMessage={renderMessage}
         showTimestamps={showTimestamps}
         formatTimestamp={formatTimestamp}

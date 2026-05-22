@@ -265,7 +265,7 @@ describe('Chorus imperative ref', () => {
   it.each([
     ['disabled', { disabled: true }],
     ['read-only', { readOnly: true }],
-  ] as const)('blocks imperative retry/regenerate/dismissError while %s', (_label, modeProps) => {
+  ] as const)('blocks imperative retry/regenerate while %s', (_label, modeProps) => {
     const ref = React.createRef<ChorusRef>();
 
     render(
@@ -282,14 +282,45 @@ describe('Chorus imperative ref', () => {
 
     let retryResult: boolean | undefined;
     let regenResult: boolean | undefined;
-    let dismissResult: boolean | undefined;
     act(() => { retryResult = ref.current?.retry(); });
     act(() => { regenResult = ref.current?.regenerate('a1'); });
-    act(() => { dismissResult = ref.current?.dismissError(); });
 
     expect(retryResult).toBe(false);
     expect(regenResult).toBe(false);
-    expect(dismissResult).toBe(false);
+  });
+
+  it.each([
+    ['disabled', { disabled: true }],
+    ['read-only', { readOnly: true }],
+  ] as const)('still allows imperative dismissError() while %s, matching the built-in banner', async (_label, modeProps) => {
+    const ref = React.createRef<ChorusRef>();
+    const onSend = vi.fn<OnSend>(async () => { throw new Error('upstream boom'); });
+
+    // The Chorus accepts writes long enough to produce a stream error, then the
+    // host gates it (`disabled`/`readOnly`). Dismissing the error is not a
+    // transcript write, so it must still succeed — exactly like the built-in
+    // error banner's dismiss button.
+    function Host() {
+      const [gated, setGated] = React.useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setGated(true)}>gate</button>
+          <Chorus ref={ref} {...(gated ? modeProps : {})} onSend={onSend} minAssistantDelayMs={0} />
+        </>
+      );
+    }
+
+    render(<Host />);
+
+    act(() => { ref.current?.send('hello'); });
+    expect(await screen.findByText('Something went wrong. Please try again.')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'gate' }));
+
+    let dismissed: boolean | undefined;
+    act(() => { dismissed = ref.current?.dismissError(); });
+    expect(dismissed).toBe(true);
+    expect(screen.queryByText('Something went wrong. Please try again.')).not.toBeInTheDocument();
   });
 
   it('rejects imperative retry/regenerate/dismissError in controlled mode without onChange', () => {

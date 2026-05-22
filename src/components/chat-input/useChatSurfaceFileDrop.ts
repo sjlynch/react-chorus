@@ -1,6 +1,7 @@
 import React from 'react';
 import type { AttachmentSource } from '../../types';
 import { filesFromTransfer, transferHasFiles } from './attachmentUtils';
+import type { DragScopeHandlers } from './useAttachmentDragState';
 
 type HandleFiles = (files: FileList | File[] | null, source: AttachmentSource) => void | Promise<void>;
 
@@ -11,9 +12,9 @@ interface UseChatSurfaceFileDropOptions {
   canIngestFiles: boolean;
   handleFiles: HandleFiles;
   clearDragState: () => void;
-  markDragEnter: () => void;
-  markDragLeave: () => void;
-  markDragOver: () => void;
+  /** Surface-only drag bookkeeping, kept independent from the composer's so the
+   *  two listener sets never decrement a depth the other side incremented. */
+  surfaceDrag: DragScopeHandlers;
 }
 
 export function claimSurfaceFileTransfer(e: DragEvent, root: HTMLElement): DataTransfer | null {
@@ -32,9 +33,7 @@ export function useChatSurfaceFileDrop({
   canIngestFiles,
   handleFiles,
   clearDragState,
-  markDragEnter,
-  markDragLeave,
-  markDragOver,
+  surfaceDrag,
 }: UseChatSurfaceFileDropOptions) {
   // Drag-and-drop is wired to the ChatInput root via React handlers, but users
   // naturally drag files onto the transcript too. Listen on the surrounding chat
@@ -49,19 +48,19 @@ export function useChatSurfaceFileDrop({
     if (!surface || surface === root || !surface.contains(root)) return;
 
     const onSurfaceDragEnter = (e: DragEvent) => {
-      if (claimSurfaceFileTransfer(e, root) && canIngestFiles) markDragEnter();
+      if (claimSurfaceFileTransfer(e, root) && canIngestFiles) surfaceDrag.markDragEnter();
     };
 
     const onSurfaceDragOver = (e: DragEvent) => {
       const transfer = claimSurfaceFileTransfer(e, root);
       if (transfer && canIngestFiles) {
         transfer.dropEffect = 'copy';
-        markDragOver();
+        surfaceDrag.markDragOver();
       }
     };
 
     const onSurfaceDragLeave = (e: DragEvent) => {
-      if (claimSurfaceFileTransfer(e, root) && canIngestFiles) markDragLeave();
+      if (claimSurfaceFileTransfer(e, root) && canIngestFiles) surfaceDrag.markDragLeave();
     };
 
     const onSurfaceDrop = (e: DragEvent) => {
@@ -82,5 +81,5 @@ export function useChatSurfaceFileDrop({
       surface.removeEventListener('dragleave', onSurfaceDragLeave);
       surface.removeEventListener('drop', onSurfaceDrop);
     };
-  }, [rootRef, canIngestFiles, handleFiles, clearDragState, markDragEnter, markDragLeave, markDragOver]);
+  }, [rootRef, canIngestFiles, handleFiles, clearDragState, surfaceDrag]);
 }

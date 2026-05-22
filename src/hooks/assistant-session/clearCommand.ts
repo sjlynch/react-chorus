@@ -88,6 +88,17 @@ export function useClearCommand<TMeta>({
       label: 'confirmClearConversation',
       requestConfirmation: () => confirm(context),
       onConfirmed: () => commitClear(source),
+      // Deliberately NO `shouldCommit` busy recheck — this is an intentional
+      // asymmetry with `useDeleteCommand`. Delete vetoes an async confirmation
+      // that resolves mid-send because removing the active streaming message
+      // (or its context) would orphan pending state. Clear is a whole-
+      // conversation reset: `commitClear` is built to run during a send and
+      // aborts any active assistant via `abortActiveAssistant('clear', …)`.
+      // The no-confirm and synchronous-confirm clear paths already commit
+      // while busy, so a busy recheck here would only veto the async-confirm
+      // path — an inconsistency, not a fix. A confirmed clear therefore always
+      // commits (and aborts whatever is in flight), regardless of when the
+      // confirmation resolves.
       onPendingChange: pending => {
         clearConfirmationActiveRef.current = pending;
         setClearConfirmationPending(pending);

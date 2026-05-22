@@ -24,7 +24,7 @@ export function isConversationSummary(value: unknown): value is ConversationSumm
     // then collapses to the bare `messageKeyPrefix` — two such entries share
     // one transcript key and the bare prefix can collide with unrelated app
     // storage. Drop the entry like a malformed message (see messageCodec's
-    // `validateStoredMessage`, which rejects an empty message `id`).
+    // `validateStoredMessage`, which trims before rejecting a blank message `id`).
     && typeof (value as ConversationSummaryCandidate).id === 'string'
     && (value as ConversationSummaryCandidate).id.trim().length > 0
     && typeof (value as ConversationSummaryCandidate).title === 'string';
