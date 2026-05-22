@@ -143,27 +143,89 @@ describe('Chorus imperative ref', () => {
     const ref = React.createRef<ChorusRef>();
     const scrollIntoView = vi.fn();
     window.HTMLElement.prototype.scrollIntoView = scrollIntoView;
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    render(
-      <Chorus
-        ref={ref}
-        messages={[
-          { id: 's1', role: 'system', text: 'Hidden system prompt' },
-          { id: 'u1', role: 'user', text: 'Visible user message' },
-        ]}
-      />
-    );
+    try {
+      render(
+        <Chorus
+          ref={ref}
+          messages={[
+            { id: 's1', role: 'system', text: 'Hidden system prompt' },
+            { id: 'u1', role: 'user', text: 'Visible user message' },
+          ]}
+        />
+      );
 
-    expect(screen.queryByText('Hidden system prompt')).not.toBeInTheDocument();
+      expect(screen.queryByText('Hidden system prompt')).not.toBeInTheDocument();
 
-    let hiddenResult: boolean | undefined;
-    act(() => { hiddenResult = ref.current?.scrollToMessage('s1'); });
-    let missingResult: boolean | undefined;
-    act(() => { missingResult = ref.current?.scrollToMessage('missing-id'); });
+      // `s1` is a known message (hidden by `hiddenRoles`) so it has no DOM row:
+      // the `false` is reported with a one-time dev warning to disambiguate it.
+      let hiddenResult: boolean | undefined;
+      act(() => { hiddenResult = ref.current?.scrollToMessage('s1'); });
+      expect(hiddenResult).toBe(false);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]?.[0]).toContain('scrollToMessage');
+      expect(warn.mock.calls[0]?.[0]).toContain('"s1"');
 
-    expect(hiddenResult).toBe(false);
-    expect(missingResult).toBe(false);
-    expect(scrollIntoView).not.toHaveBeenCalled();
+      // An id that matches no message stays a silent `false` — no extra warning.
+      let missingResult: boolean | undefined;
+      act(() => { missingResult = ref.current?.scrollToMessage('missing-id'); });
+      expect(missingResult).toBe(false);
+      expect(warn).toHaveBeenCalledTimes(1);
+
+      // The known-but-unrendered warning is one-time, not per call.
+      act(() => { ref.current?.scrollToMessage('s1'); });
+      expect(warn).toHaveBeenCalledTimes(1);
+
+      expect(scrollIntoView).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('scrollToMessage flags a valid message windowed out by maxRenderedMessages', () => {
+    const ref = React.createRef<ChorusRef>();
+    const scrollIntoView = vi.fn();
+    window.HTMLElement.prototype.scrollIntoView = scrollIntoView;
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      render(
+        <Chorus
+          ref={ref}
+          maxRenderedMessages={1}
+          messages={[
+            { id: 'u1', role: 'user', text: 'First question' },
+            { id: 'a1', role: 'assistant', text: 'First answer' },
+            { id: 'u2', role: 'user', text: 'Second question' },
+            { id: 'a2', role: 'assistant', text: 'Second answer' },
+          ]}
+        />
+      );
+
+      // Only the trailing message renders under maxRenderedMessages={1}.
+      expect(screen.queryByText('First question')).not.toBeInTheDocument();
+      expect(screen.getByText('Second answer')).toBeInTheDocument();
+
+      // The rendered tail message scrolls and returns true.
+      let tailResult: boolean | undefined;
+      act(() => { tailResult = ref.current?.scrollToMessage('a2'); });
+      expect(tailResult).toBe(true);
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+
+      // A valid id windowed out above the render window returns false, but the
+      // caller can tell it apart from an unknown id: it is in getMessages()...
+      expect(ref.current?.getMessages().some(message => message.id === 'u1')).toBe(true);
+      let windowedResult: boolean | undefined;
+      act(() => { windowedResult = ref.current?.scrollToMessage('u1'); });
+      expect(windowedResult).toBe(false);
+      // ...and a one-time dev warning fired for it.
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]?.[0]).toContain('maxRenderedMessages');
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('exposes ref.retry() to re-run the last turn after a stream error', async () => {

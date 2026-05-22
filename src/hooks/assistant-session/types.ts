@@ -46,6 +46,9 @@ export interface ChorusSendHelpers {
  * a `Message`. An `onSend` that resolves without appending or returning a
  * message closes the turn silently — `sending` flips back off but no
  * `onFinish`/`onAbort`/`onError` observer fires (Chorus warns once in dev).
+ * An `onSend` that does *both* — streams via the helpers AND returns a
+ * `Message` — keeps the streamed output; the returned `Message` is ignored
+ * (Chorus warns once in dev).
  *
  * The `messages` argument is a snapshot of the transcript captured when the
  * turn started. A `Message` returned from `onSend` is appended to the *live*

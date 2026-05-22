@@ -40,6 +40,14 @@ export interface OnSendLifecycleDeps<TMeta> {
    * `useSessionOrchestrator` alongside the other once-warnings.
    */
   warnEmptyOnSend: () => void;
+  /**
+   * Dev-mode warning fired (once per hook instance) when `onSend` both streams
+   * via the helpers AND returns a `Message`. The returned-message branch only
+   * runs for a turn that produced no streamed output, so the returned value is
+   * silently dropped otherwise — this warning surfaces that misuse. Owned by
+   * `useSessionOrchestrator` alongside the other once-warnings.
+   */
+  warnReturnedMessageIgnored: () => void;
 }
 
 export interface StartOnSendLifecycleArgs<TMeta> extends OnSendLifecycleDeps<TMeta> {
@@ -74,6 +82,7 @@ export function startOnSendLifecycle<TMeta>({
   observers,
   showStreamError,
   warnEmptyOnSend,
+  warnReturnedMessageIgnored,
   sessionId,
   text,
   history,
@@ -123,23 +132,43 @@ export function startOnSendLifecycle<TMeta>({
   void (async () => {
     try {
       const res = await onSend(text, history, sessionHelpers.helpers);
-      if (!isAssistantSessionActive(sessionId)) return;
+      const returnedMessageObject = !!res && typeof res === 'object';
 
-      if (res && typeof res === 'object' && !hasStartedAssistantRef.current && !sessionHelpers.hasPendingAssistant()) {
-        const wait = Math.max(0, minAssistantDelayMsRef.current - (Date.now() - startedAt));
-        if (wait) await new Promise(r => setTimeout(r, wait));
-        if (!isAssistantSessionActive(sessionId)) return;
+      if (!isAssistantSessionActive(sessionId)) {
+        // The turn already closed while `onSend` was in flight. If `onSend`
+        // closed it itself by calling `helpers.finalizeAssistant()` and ALSO
+        // returned a `Message`, that `Message` is dropped — warn (see below).
+        // An abort/supersede also lands here, but it leaves
+        // `wasFinalizeRequested()` false so a cancelled turn stays quiet.
+        if (returnedMessageObject && sessionHelpers.wasFinalizeRequested()) warnReturnedMessageIgnored();
+        return;
+      }
 
-        const returnedMessage = res as Partial<Message<TMeta>>;
-        const normalizedMessage = normalizeReturnedMessage(returnedMessage);
-        // Append to the LIVE transcript (`prev` is `messagesRef.current`), not
-        // the `history` snapshot passed to `onSend`. The `isAssistantSessionActive`
-        // guard above only catches aborts/supersedes — an in-place edit/delete
-        // within the same session is NOT detected here, so the documented
-        // contract (see `ChorusOnSend`) is that the transcript must not be
-        // mutated while an `onSend` is in flight.
-        updateSessionMessages(prev => prev.concat(normalizedMessage), { reason: 'assistant' });
-        completeActiveSession(sessionId, { reason: 'returned-message', message: normalizedMessage });
+      if (returnedMessageObject) {
+        if (!hasStartedAssistantRef.current && !sessionHelpers.hasPendingAssistant()) {
+          const wait = Math.max(0, minAssistantDelayMsRef.current - (Date.now() - startedAt));
+          if (wait) await new Promise(r => setTimeout(r, wait));
+          if (!isAssistantSessionActive(sessionId)) return;
+
+          const returnedMessage = res as Partial<Message<TMeta>>;
+          const normalizedMessage = normalizeReturnedMessage(returnedMessage);
+          // Append to the LIVE transcript (`prev` is `messagesRef.current`), not
+          // the `history` snapshot passed to `onSend`. The `isAssistantSessionActive`
+          // guard above only catches aborts/supersedes — an in-place edit/delete
+          // within the same session is NOT detected here, so the documented
+          // contract (see `ChorusOnSend`) is that the transcript must not be
+          // mutated while an `onSend` is in flight.
+          updateSessionMessages(prev => prev.concat(normalizedMessage), { reason: 'assistant' });
+          completeActiveSession(sessionId, { reason: 'returned-message', message: normalizedMessage });
+        } else {
+          // `onSend` returned a `Message` but also already drove the turn
+          // through the helpers (streamed output or buffered events), so the
+          // returned-message branch above is skipped and the returned value is
+          // dropped (the streamed output is auto-finalized just below). Unlike
+          // the empty-`onSend` and auto-finalize cases this misuse was
+          // previously silent — warn once. See `ChorusOnSend` ("do exactly one").
+          warnReturnedMessageIgnored();
+        }
       }
 
       if (isAssistantSessionActive(sessionId) && sessionHelpers.hasAssistantOutput() && !sessionHelpers.wasFinalizeRequested()) {
