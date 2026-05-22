@@ -77,4 +77,22 @@ describe('getConnector', () => {
 
     warn.mockRestore();
   });
+
+  it('emits only the unknown-connector warning for an unknown name passed with options', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    // A typo'd connector name with options must NOT also get the generic
+    // "the `opena` connector does not accept them" warning — that wording
+    // implies a real connector named after the typo. Exactly one coherent
+    // warning fires, and it names `auto` as the connector actually returned.
+    // @ts-expect-error intentional unknown string
+    expect(getConnector('opena', { thinkTag: { start: '<r>', end: '</r>' } })).toBe(autoConnector);
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Unknown connector `opena`'));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('falling back to `auto`'));
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('does not accept them'));
+
+    warn.mockRestore();
+  });
 });

@@ -1,13 +1,22 @@
-// Gemini multimodal / image-generation models stream `inlineData` (base64 bytes
-// with a mimeType) and `fileData` (a file URI) content parts. The connector has
-// no text/reasoning/tool channel for binary payloads, so they cannot be rendered
-// as assistant content today; snake_case spellings are accepted because some
-// proxies/SDKs reshape the wire JSON.
+// Gemini content parts the connector has no channel to render as assistant
+// content:
+//   - `inlineData` (base64 bytes with a mimeType) and `fileData` (a file URI)
+//     from multimodal / image-generation models — binary payloads.
+//   - `executableCode` (generated code) and `codeExecutionResult` (its output)
+//     from the code-execution tool.
+// Snake_case spellings are accepted because some proxies/SDKs reshape the wire
+// JSON. Without these entries a candidate whose only parts are code-execution
+// parts would return `null` and surface as a blank assistant turn with no
+// diagnostic.
 const UNSUPPORTED_PART_KEYS: Array<{ key: string; label: string }> = [
   { key: 'inlineData', label: 'inlineData' },
   { key: 'inline_data', label: 'inlineData' },
   { key: 'fileData', label: 'fileData' },
   { key: 'file_data', label: 'fileData' },
+  { key: 'executableCode', label: 'executableCode' },
+  { key: 'executable_code', label: 'executableCode' },
+  { key: 'codeExecutionResult', label: 'codeExecutionResult' },
+  { key: 'code_execution_result', label: 'codeExecutionResult' },
 ];
 
 /**
