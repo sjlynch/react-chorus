@@ -681,6 +681,55 @@ describe('useConversations', () => {
       }
     });
 
+    it('keeps an armed debounced index write intact when a corrupt cross-tab event is rejected', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      vi.useFakeTimers();
+      const indexKey = 'chorus-cross-tab-index-corrupt';
+      const transcriptKey = 'chorus-conversation:local';
+      let unmount: (() => void) | undefined;
+      try {
+        let currentNow = '2026-05-21T00:00:00.000Z';
+        const ids = ['local'];
+        const hook = renderHook(() => useConversations({
+          indexKey,
+          createId: () => ids.shift() ?? 'fallback',
+          now: () => currentNow,
+        }));
+        unmount = hook.unmount;
+        const { result } = hook;
+
+        // Create a conversation (immediate index write), then bump the clock and
+        // touch it with a transcript write — touchConversation commits in
+        // 'debounced' mode, arming the index write's debounce timer with the new
+        // updatedAt without starting it.
+        act(() => { result.current.createConversation('Local chat'); });
+        currentNow = '2026-05-21T05:00:00.000Z';
+        act(() => { result.current.storage?.setItem(transcriptKey, '[{"id":"m","role":"user","text":"hi"}]'); });
+
+        // A corrupt index payload arrives from another tab. It fails JSON.parse,
+        // so applyExternalValue rejects it before applying.
+        act(() => dispatchStorageEvent(indexKey, '{ corrupt index, not json'));
+        // The rejected event must not desync in-memory state.
+        expect(result.current.conversations.map(c => c.id)).toEqual(['local']);
+
+        // The armed debounced index write was NOT dropped by the rejected event:
+        // its timer still fires and persists the updatedAt recency bump that
+        // would otherwise be lost on reload.
+        act(() => { vi.advanceTimersByTime(5000); });
+        const stored = JSON.parse(window.localStorage.getItem(indexKey) ?? '{}');
+        expect(stored.conversations.map((c: { id: string }) => c.id)).toEqual(['local']);
+        expect(stored.conversations[0].updatedAt).toBe('2026-05-21T05:00:00.000Z');
+      } finally {
+        unmount?.();
+        vi.useRealTimers();
+        window.localStorage.removeItem(indexKey);
+        window.localStorage.removeItem(transcriptKey);
+        errorSpy.mockRestore();
+        warn.mockRestore();
+      }
+    });
+
     it('defers a cross-tab index event behind an in-flight index write (no lost update)', async () => {
       const indexKey = 'chorus-cross-tab-index-inflight';
       const setItemGate = deferred<void>();

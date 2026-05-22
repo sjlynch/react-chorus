@@ -2,6 +2,7 @@ import { extractErrorMessage } from '../error';
 import type { ConnectorResult } from '../types';
 import {
   type AiSdkConnectorState,
+  aiSdkFinishResult,
   hasOwn,
   resetAiSdkState,
   toolDeltaFromToolCall,
@@ -108,8 +109,12 @@ export function uiMessageStreamResult(state: AiSdkConnectorState, obj: Record<st
   }
 
   if (type === 'finish' || type === 'finish-message') {
+    // The v5 `finish` / `finish-message` frame carries the run's token usage
+    // and finish reason; surface both as metadata so a cost/usage telemetry
+    // consumer sees the AI SDK path behave like every other connector.
+    const result = aiSdkFinishResult(obj.usage, obj.finishReason);
     resetAiSdkState(state);
-    return { done: true };
+    return result;
   }
 
   // Frames we deliberately ignore: start, start-step, finish-step, text-start, text-end,

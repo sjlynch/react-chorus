@@ -1,5 +1,6 @@
 import React from 'react';
 import { isChorusDevMode } from '../utils/devMode';
+import { isTransportPresent } from './assistant-session/transportResolver';
 import type { ChorusProps } from '../Chorus.types';
 import type { Message } from '../types';
 
@@ -82,15 +83,15 @@ export function useChorusPropWarnings<TMeta>({
       console.warn('[Chorus] `value` makes Chorus controlled, but no `onChange` prop was provided. `onChange` is required for the built-in send/edit/delete/clear UI to update controlled messages.');
     }
 
-    if (connector !== undefined && transport === undefined && onSend) {
+    if (connector !== undefined && !isTransportPresent(transport) && onSend) {
       console.warn('[Chorus] `connector` only applies to the `transport` send path. With `onSend` you parse the response yourself — pass `connector` into the `useChorusStream` call inside your `onSend` if you need it.');
     }
 
-    if (connectorOptions !== undefined && transport === undefined && onSend) {
+    if (connectorOptions !== undefined && !isTransportPresent(transport) && onSend) {
       console.warn('[Chorus] `connectorOptions` only applies to the `transport` send path. With `onSend` you parse the response yourself — pass `connectorOptions` into the `useChorusStream` call inside your `onSend` if you need it.');
     }
 
-    if (onStreamDone !== undefined && transport === undefined && onSend) {
+    if (onStreamDone !== undefined && !isTransportPresent(transport) && onSend) {
       console.warn('[Chorus] `onStreamDone` only fires on the `transport` send path. With `onSend` it never fires — use `onFinish` for per-message completion, or surface stream-done telemetry from your `onSend` client.');
     }
 
@@ -101,13 +102,13 @@ export function useChorusPropWarnings<TMeta>({
       continueOnToolError !== undefined && 'continueOnToolError',
     ].filter((name): name is string => typeof name === 'string');
 
-    if (toolExecutionProps.length > 0 && transport === undefined && onSend) {
+    if (toolExecutionProps.length > 0 && !isTransportPresent(transport) && onSend) {
       const propList = toolExecutionProps.map(name => `\`${name}\``).join('/');
       const verb = toolExecutionProps.length > 1 ? 'only run' : 'only runs';
       console.warn(`[Chorus] ${propList} ${verb} on the \`transport\` send path. With \`onSend\` you execute tools yourself — registered tool handlers never run and tool callbacks never fire. Run tools inside your \`onSend\` client, or pass \`transport\`.`);
     }
 
-    if (sending !== undefined && transport) {
+    if (sending !== undefined && isTransportPresent(transport)) {
       console.warn('[Chorus] `sending` was provided alongside `transport`. Chorus owns the transport send state; `sending` is primarily for fully custom `onSend`/`useChorusStream` integrations.');
     }
 
@@ -124,7 +125,7 @@ export function useChorusPropWarnings<TMeta>({
         console.warn(`[Chorus] ${propList} ${verb} ignored unless \`autoContinueTools\` is enabled. The automatic tool loop only runs when \`autoContinueTools\` is truthy on the \`transport\` send path, so \`shouldContinueToolLoop\` is never invoked and \`maxToolIterations\` is never consulted. Set \`autoContinueTools\`, or remove ${propList}.`);
       }
 
-      if (transport === undefined) {
+      if (!isTransportPresent(transport)) {
         console.warn(`[Chorus] ${propList} ${verb} ignored without \`transport\`. The automatic tool loop runs only on the \`transport\` send path; with \`onSend\` you drive tool continuations yourself. Pass \`transport\`, or gate continuations inside your \`onSend\` client.`);
       }
     }

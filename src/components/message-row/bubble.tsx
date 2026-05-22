@@ -48,6 +48,10 @@ export interface MessageReasoningProps {
    * visible as it arrives instead of looking frozen behind a collapsed summary
    * with an empty bubble. This is only a starting suggestion: once the reader
    * toggles the disclosure their choice sticks, even as further chunks stream.
+   * The hint is also *latched* — once it has been `true` the disclosure stays
+   * open after the hint clears (which happens the instant answer text arrives),
+   * so the chain-of-thought a reader is following does not collapse out from
+   * under them; only an explicit reader collapse closes it again.
    */
   open?: boolean;
 }
@@ -61,9 +65,18 @@ export function MessageReasoning({ reasoning, codeTheme, headless, streaming = f
   // their choice wins over `openHint` until the component unmounts.
   const [readerOpen, setReaderOpen] = React.useState<boolean | null>(null);
 
+  // Latch the open hint. `openHint` is only `true` while reasoning is the sole
+  // thing streaming; it flips to `undefined` the instant the first answer
+  // token arrives. Reading off `openHint` directly would collapse the panel
+  // out from under a reader still following the chain-of-thought. So once the
+  // hint has been `true` we keep the disclosure open until the reader collapses
+  // it themselves (which records `readerOpen` and overrides the latch).
+  const hintLatchedOpen = React.useRef(false);
+  if (openHint) hintLatchedOpen.current = true;
+
   if (!reasoning) return null;
 
-  const open = readerOpen ?? Boolean(openHint);
+  const open = readerOpen ?? hintLatchedOpen.current;
 
   return (
     <details
@@ -140,8 +153,9 @@ export function MessageBubbleLayout<TMeta = Record<string, unknown>>({ message, 
             // Reveal the reasoning while it is the only thing streaming: a
             // reasoning-first model emits chain-of-thought before any answer
             // text, so a collapsed summary over an empty bubble looks frozen.
-            // Once answer text arrives the disclosure returns to uncontrolled
-            // (collapsed-by-default) state.
+            // This hint clears once answer text arrives, but `MessageReasoning`
+            // latches it — an auto-opened panel stays open through the answer
+            // so a reader mid-thought is not collapsed out from under them.
             open={streaming && !hasBubbleText ? true : undefined}
           />
         )}

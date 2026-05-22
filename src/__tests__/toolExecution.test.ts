@@ -44,3 +44,41 @@ describe('buildToolMessageFromDelta tool-name fallback', () => {
     expect(context?.name).toBe('call_1');
   });
 });
+
+describe('buildToolMessageFromDelta provider-id metadata', () => {
+  it('writes the OpenAI provider tool-call id into metadata.openai', () => {
+    const delta: ConnectorToolDelta = { id: 'call_1', providerId: 'call_abc', provider: 'openai' };
+    const message = buildToolMessageFromDelta('m1', delta);
+    expect(message.metadata).toEqual({ openai: { toolCallId: 'call_abc', callId: 'call_abc' } });
+  });
+
+  it('writes the Anthropic provider tool-use id into metadata.anthropic', () => {
+    const delta: ConnectorToolDelta = { id: 'call_1', providerId: 'toolu_xyz', provider: 'anthropic' };
+    const message = buildToolMessageFromDelta('m1', delta);
+    expect(message.metadata).toEqual({ anthropic: { toolUseId: 'toolu_xyz' } });
+  });
+
+  it('persists the AI SDK tool-call id into a provider-neutral metadata.aiSdk slot', () => {
+    // The AI SDK connector cannot know the underlying provider family, so it
+    // tags deltas `provider: 'ai-sdk'`. Without this branch the captured
+    // `providerId` is silently dropped and a replayed tool result has no
+    // tool-call id to re-attach.
+    const delta: ConnectorToolDelta = { id: 'call_1', providerId: 'call_1', provider: 'ai-sdk' };
+    const message = buildToolMessageFromDelta('m1', delta);
+    expect(message.metadata).toEqual({ aiSdk: { toolCallId: 'call_1' } });
+  });
+
+  it('merges the AI SDK tool-call id without clobbering unrelated existing metadata', () => {
+    const existing = buildToolMessageFromDelta('m1', { id: 'call_1', name: 'search' });
+    existing.metadata = { custom: true } as typeof existing.metadata;
+    const delta: ConnectorToolDelta = { id: 'call_1', providerId: 'call_1', provider: 'ai-sdk' };
+    const next = buildToolMessageFromDelta('m1', delta, existing);
+    expect(next.metadata).toEqual({ custom: true, aiSdk: { toolCallId: 'call_1' } });
+  });
+
+  it('leaves metadata untouched when an AI SDK delta carries no providerId', () => {
+    const delta: ConnectorToolDelta = { id: 'call_1', provider: 'ai-sdk' };
+    const message = buildToolMessageFromDelta('m1', delta);
+    expect(message.metadata).toBeUndefined();
+  });
+});

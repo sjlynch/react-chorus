@@ -67,6 +67,6 @@ The composer accepts images (`accept="image/*"`) and caps each attachment at **2
 
 ## Where to look next
 
-- [`src/App.tsx`](./src/App.tsx) — the frontend wiring (transport + `useChorusStream`).
+- [`src/App.tsx`](./src/App.tsx) — the frontend wiring (the `transport` + `connector` one-liner).
 - [`server/index.js`](./server/index.js) — the Express SSE handler, including `toOpenAIChatCompletionsBody` from `react-chorus/provider-requests`.
 - [Root README](../../README.md) — full API reference and recipes.

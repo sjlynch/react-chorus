@@ -5,6 +5,8 @@
  *  - OpenAI Chat Completions — `prompt_tokens` / `completion_tokens` / `total_tokens`
  *  - OpenAI Responses + Anthropic — `input_tokens` / `output_tokens` (+ `total_tokens` on Responses)
  *  - Gemini `usageMetadata` — `promptTokenCount` / `candidatesTokenCount` / `totalTokenCount`
+ *  - Vercel AI SDK — `promptTokens` / `completionTokens` (v4) or `inputTokens` / `outputTokens` (v5),
+ *    both with `totalTokens`; carried on the AI SDK `d:` / `finish` terminal frames
  *
  * `extractUsage` collapses all of them into the consistent
  * `{ promptTokens, completionTokens, totalTokens }` shape that
@@ -26,9 +28,13 @@ export function extractUsage(usage: unknown): Record<string, number> | undefined
   if (!usage || typeof usage !== 'object') return undefined;
   const u = usage as Record<string, unknown>;
   const out: Record<string, number> = {};
-  const promptTokens = finiteNumber(u.input_tokens ?? u.prompt_tokens ?? u.promptTokenCount);
-  const completionTokens = finiteNumber(u.output_tokens ?? u.completion_tokens ?? u.candidatesTokenCount);
-  const totalTokens = finiteNumber(u.total_tokens ?? u.totalTokenCount);
+  const promptTokens = finiteNumber(
+    u.input_tokens ?? u.prompt_tokens ?? u.promptTokenCount ?? u.inputTokens ?? u.promptTokens,
+  );
+  const completionTokens = finiteNumber(
+    u.output_tokens ?? u.completion_tokens ?? u.candidatesTokenCount ?? u.outputTokens ?? u.completionTokens,
+  );
+  const totalTokens = finiteNumber(u.total_tokens ?? u.totalTokenCount ?? u.totalTokens);
   if (promptTokens !== undefined) out.promptTokens = promptTokens;
   if (completionTokens !== undefined) out.completionTokens = completionTokens;
   if (totalTokens !== undefined) out.totalTokens = totalTokens;
