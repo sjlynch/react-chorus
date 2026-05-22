@@ -60,7 +60,9 @@ Rules to preserve when touching theming:
 
 ## `MessageBubble`
 
-Exported from `ChatWindow.tsx` for use in `renderMessage` render-props and implemented in `message-row/bubble.tsx`. It wraps the default role class and bubble, renders `message.reasoning` as a details block (collapsed by default, but auto-opened while a reasoning-only turn is still streaming so chain-of-thought is visible), renders `message.attachments` (image previews or file names), and passes text through `Markdown`. The built-in `MessageRow` uses the same attachment/reasoning renderer and adds edit/regenerate/delete/copy/feedback actions.
+Exported from `ChatWindow.tsx` for use in `renderMessage` render-props and implemented in `message-row/bubble.tsx`. It wraps the default role class and bubble, renders `message.reasoning` as a details block, renders `message.attachments` (image previews or file names), passes text through `Markdown`, and renders a `ToolCallBlock` for `role: 'tool'` messages (with `message.text`, when present, shown above as a host summary). The built-in `MessageRow` uses the same renderer and adds edit/regenerate/delete/copy/feedback actions. So a host composing a custom shell can pass a `role: 'tool'` message to either exported component and still get its tool call — `ChatWindow`'s `messageRenderBuilders` tool branch is no longer the only path that renders one.
+
+The reasoning details block starts collapsed, but is auto-opened while a reasoning-only turn is still streaming so chain-of-thought is visible as it arrives. That auto-open is only a starting suggestion: `MessageReasoning` tracks the reader's own toggle in state, so a reader who collapses the chain-of-thought mid-stream keeps it collapsed as further chunks arrive (a controlled `open={true}` would re-force it open each chunk).
 
 ## `ToolCallBlock`
 

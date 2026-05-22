@@ -1,5 +1,5 @@
 import type { Message, MessageFeedback } from '../types';
-import type { ChorusAttachmentLabels, ChorusCodeCopyLabels, ChorusMessageActionLabels, ChorusSpeakerLabels } from '../labels/types';
+import type { ChorusAttachmentLabels, ChorusCodeCopyLabels, ChorusMessageActionLabels, ChorusSpeakerLabels, ChorusToolCallLabels } from '../labels/types';
 import { useCanWriteTextToClipboard, writeTextToClipboard } from '../utils/messageCopy';
 import type { MarkdownSanitizer } from './Markdown';
 import { MessageActions, createCopyAction } from './message-row/actions';
@@ -56,13 +56,15 @@ export interface MessageRowProps<TMeta = Record<string, unknown>> extends Messag
   reasoningLabel?: string;
   codeCopyLabels?: ChorusCodeCopyLabels;
   attachmentLabels?: ChorusAttachmentLabels;
+  /** Label overrides for the tool-call block rendered for `role: 'tool'` messages. */
+  toolCallLabels?: Partial<ChorusToolCallLabels>;
   /** Render the message's `createdAt` time below the bubble. Off by default. */
   showTimestamp?: boolean;
   /** Override the locale-aware default timestamp formatting. Only used when `showTimestamp` is true. */
   formatTimestamp?: MessageTimestampFormatter<TMeta>;
 }
 
-export function MessageRow<TMeta = Record<string, unknown>>({ m, codeTheme, headless, onEdit, onRegenerate, onDelete, onCopy, onFeedback, initialFeedback, feedbackReadOnly, streaming = false, markdownProps, markdownSanitizer, messageActionLabels, speakerLabels, reasoningLabel, codeCopyLabels, attachmentLabels, showTimestamp, formatTimestamp, before, headerSlot, footerSlot, after }: MessageRowProps<TMeta>) {
+export function MessageRow<TMeta = Record<string, unknown>>({ m, codeTheme, headless, onEdit, onRegenerate, onDelete, onCopy, onFeedback, initialFeedback, feedbackReadOnly, streaming = false, markdownProps, markdownSanitizer, messageActionLabels, speakerLabels, reasoningLabel, codeCopyLabels, attachmentLabels, toolCallLabels, showTimestamp, formatTimestamp, before, headerSlot, footerSlot, after }: MessageRowProps<TMeta>) {
   // Drive editing state through MessageRenderStateContext when a provider is present
   // (the default ChatWindow path wraps every row in one) so a custom renderer's
   // `ctx.isEditing` reflects the row's inline editor. Falls back to local state when
@@ -117,6 +119,7 @@ export function MessageRow<TMeta = Record<string, unknown>>({ m, codeTheme, head
           reasoningLabel={reasoningLabel}
           codeCopyLabels={codeCopyLabels}
           attachmentLabels={attachmentLabels}
+          toolCallLabels={toolCallLabels}
           showTimestamp={showTimestamp}
           formatTimestamp={formatTimestamp}
           before={before}
