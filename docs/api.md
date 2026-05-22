@@ -1177,13 +1177,79 @@ For fully custom DOM rows, spread `ctx.messageProps` on the outer element you wa
 />
 ```
 
-Or use the exported `<ToolCallBlock>` component directly in your own layout:
+Or use the exported `<ToolCallBlock>` component directly in your own layout — see the [`<ToolCallBlock>` reference](#toolcallblock-component) below.
+
+### `ToolCallBlock` component
+
+`ToolCallBlock` renders a single tool call as a collapsible block (header with the tool name, expanded input/output sections, status row for empty calls). It is re-exported from the package barrel so a custom shell can drop it into any layout — a sidebar panel, a custom `renderMessage` row, or a hand-rolled transcript built around `useChorusStream` — without rebuilding the running/empty/expand affordances.
 
 ```tsx
 import { ToolCallBlock } from 'react-chorus';
 
-<ToolCallBlock toolCall={{ name: 'read_file', input: { path: '/etc/hosts' }, output: '127.0.0.1 localhost' }} />
+interface ToolCallBlockProps {
+  toolCall: ToolCall;
+  labels?: Partial<ChorusToolCallLabels>; // localizes 'Input' / 'Output' / 'Running…' / 'No output'
+  streaming?: boolean;                    // shows 'Running…' instead of 'No output' while an empty call is in flight
+  className?: string;                     // appended after 'chorus-tool-call' on the root via joinClasses
+  style?: React.CSSProperties;            // merged onto the root .chorus-tool-call element
+}
+
+<ToolCallBlock
+  toolCall={{ name: 'read_file', input: { path: '/etc/hosts' }, output: '127.0.0.1 localhost' }}
+/>
 ```
+
+`className` is merged with the built-in `'chorus-tool-call'` hook so the host class stacks after the default; pass it to add a Tailwind/Emotion class, a test-id-style hook, or any other custom selector without losing default styling or palette wiring. `style` is forwarded to the same root element. Use these when a custom shell composes `MessageBubble` / `MessageRow` (which already accept `toolCallClassName` / `toolCallStyle` and forward them here) or renders `<ToolCallBlock>` directly:
+
+```tsx
+<ToolCallBlock
+  toolCall={toolCall}
+  className="my-tool-row"
+  data-testid="tool-call" /* not currently forwarded — wrap in a div for arbitrary data-* */
+/>
+```
+
+The built-in palette knobs (`toolBorder`, `toolHeaderBg`, …) and the underlying `--chorus-tool-*` CSS variables remain the recommended way to recolor the block; reach for `className`/`style` when you need class-based theming (Tailwind, Emotion) or layout overrides that CSS variables cannot express.
+
+### `Markdown` component
+
+`Markdown` renders a CommonMark + GFM string with optional syntax-highlighted code blocks and per-block copy chrome. It is the same renderer `<Chorus>` uses for assistant text, exported so a custom shell can render Markdown outside a transcript — a release-notes panel, a Markdown preview of a user draft, or a tool-result viewer — without re-wiring sanitization and highlighting.
+
+```tsx
+import { Markdown } from 'react-chorus';
+
+interface MarkdownProps {
+  text: string;
+  codeTheme?: 'dark' | 'light';
+  headless?: boolean;        // skip default styles + highlight.js theme injection
+  streaming?: boolean;       // render escaped plain text instead of reparsing for each chunk
+  sanitizer?: MarkdownSanitizer;       // custom DOMPurify-compatible sanitizer (SSR/CSP)
+  markedOptions?: MarkedOptions;       // per-instance Marked config
+  markedExtensions?: MarkedExtension[]; // per-instance Marked extensions
+  codeCopyLabels?: ChorusCodeCopyLabels; // localize the per-code-block copy button
+  onCopyError?: (error: Error) => void;  // clipboard failure observer
+  codeBlockCopy?: CodeBlockCopy;       // 'default' | true | false | (ctx) => htmlString
+}
+
+<Markdown text="**Hello** _world_" codeTheme="dark" />
+```
+
+In production builds Chorus uses a built-in **safe-mode** renderer that drops raw HTML; pass a `sanitizer` (for example a DOMPurify wrapper) when you specifically need sanitized HTML (server-rendered output, or content you trust enough to allow inline markup). `streaming` is for when you drive the renderer yourself with a partial document: instead of reparsing the half-written Markdown on every chunk, it renders React-escaped pre-wrap plain text until you finalize. Switch it off (the default) for finalized text.
+
+Customize the per-code-block copy chrome with `codeBlockCopy`:
+
+```tsx
+import type { CodeBlockCopyContext } from 'react-chorus';
+
+const codeBlockCopy = (ctx: CodeBlockCopyContext) =>
+  `<div class="my-toolbar"><span>${ctx.language ?? 'code'}</span><button class="chorus-copy-btn">copy</button></div>`;
+
+<Markdown text={text} codeBlockCopy={codeBlockCopy} />;
+```
+
+Return any HTML string from the renderer; include a `chorus-copy-btn` element to keep the built-in clipboard wiring. Pass `codeBlockCopy={false}` to drop the chrome entirely while keeping the styled code-block wrapper, or `codeBlockCopy={'default'}` (the default) for the bundled accessible copy button. `headless` mode never injects this chrome regardless of the prop.
+
+For headless-by-default Markdown without `<style>` injection or the highlight.js theme, import from the headless subpath instead: `import { Markdown } from 'react-chorus/headless'` — see [Headless subpath](#headless-subpath).
 
 ### `MessageBubble` component
 
@@ -1202,6 +1268,8 @@ interface MessageBubbleProps<TMeta = Record<string, unknown>> {
   streaming?: boolean;         // forwards Markdown's escaped plain-text streaming mode
   markdownProps?: MessageMarkdownProps;
   markdownSanitizer?: MarkdownSanitizer;
+  toolCallClassName?: string;       // forwarded to the embedded <ToolCallBlock> for role: 'tool' messages
+  toolCallStyle?: React.CSSProperties; // forwarded to the embedded <ToolCallBlock> for role: 'tool' messages
   before?: React.ReactNode;      // rendered before .chorus-msg-content (for avatars)
   headerSlot?: React.ReactNode;  // rendered above .chorus-bubble inside .chorus-msg-content
   footerSlot?: React.ReactNode;  // rendered below .chorus-bubble inside .chorus-msg-content

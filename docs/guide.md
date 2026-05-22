@@ -8,6 +8,7 @@ How to send messages, stream responses, and parse provider formats with react-ch
 - [Connectors](#connectors)
 - [Named SSE events](#named-sse-events)
 - Streaming formats — [OpenAI](#openai-sse-format) · [Anthropic](#anthropic-sse-format) · [Gemini](#gemini-sse-format) · [Vercel AI SDK](#vercel-ai-sdk-stream-format)
+- [Standalone components](#standalone-components) — using `<Markdown>` and `<ToolCallBlock>` outside `<Chorus>`
 
 See also the [API reference](api.md), [deployment notes](deployment.md), and the [`/examples`](../examples) directory.
 
@@ -755,3 +756,107 @@ export async function POST(request: Request) {
 With either route the client just needs `<Chorus transport="/api/chat" connector="ai-sdk" />`. The connector returns the same `text` / `reasoning` / `toolDelta` / `done` / `error` shape as the other built-in connectors, so retry/stop/edit/regenerate, `<ToolCallBlock>`, and `onError` all work unchanged.
 
 > **Runnable example:** [`examples/with-vercel-ai-sdk`](../examples/with-vercel-ai-sdk) drives the `ai-sdk` connector from a built-in mock that streams UI-message-stream frames, so it runs with no API key; its README documents the matching Next.js App Router route shown above.
+
+## Standalone components
+
+`<Markdown>` and `<ToolCallBlock>` are exported from the package barrel so you can use the same renderers Chorus uses internally outside a `<Chorus>` widget — for a release-notes panel, a Markdown preview of a draft, a sidebar tool-result viewer, or a custom transcript built around `useChorusStream`. Both also ship from the headless subpath (`react-chorus/headless`); the `<Markdown>` export there defaults `headless={true}` so it skips `<style>` tag injection and the highlight.js theme, which is the right default when you bring your own stylesheet.
+
+### `<Markdown>` — rendering Markdown outside a transcript
+
+The simplest case: render a static document with the bundled styles, code-block chrome, and lazy syntax highlighting.
+
+```tsx
+import { Markdown } from 'react-chorus';
+
+<Markdown
+  codeTheme="dark"
+  text={`# Release notes
+
+- adds **streaming** support
+- fixes a code-block copy bug
+
+\`\`\`ts
+console.log('hello');
+\`\`\``}
+/>
+```
+
+Pass `codeTheme="light"` for the light highlight.js theme, or `headless` to skip the bundled styles entirely (use this when your own stylesheet already targets the `.chorus-md` / `.chorus-codeblock` / `.chorus-copy-btn` classes).
+
+For sanitized raw HTML — a server-rendered post you trust enough to allow inline markup, or a CSP setup that needs a specific DOMPurify instance — pass a `sanitizer`:
+
+```tsx
+import DOMPurify from 'isomorphic-dompurify';
+import { Markdown } from 'react-chorus';
+
+<Markdown text={postBody} sanitizer={(html) => DOMPurify.sanitize(html)} />
+```
+
+Without a `sanitizer`, Chorus uses a safe-mode renderer that drops raw HTML — the right default for chat where Markdown comes from a model. With one, the renderer parses Markdown into HTML, then hands it to your sanitizer before mounting. The accepted shape is `(html: string) => string` or `{ sanitize: (html: string) => string }`, which matches DOMPurify's API.
+
+Customize the per-code-block copy chrome with `codeBlockCopy`. Pass `false` to drop the button entirely, `'default'` (or omit) for the bundled accessible copy button, or a renderer function that returns HTML inserted ahead of each `<pre>`:
+
+```tsx
+import type { CodeBlockCopyContext } from 'react-chorus';
+
+function copyChrome(ctx: CodeBlockCopyContext) {
+  // Include the chorus-copy-btn class to keep the built-in clipboard wiring.
+  return `<div class="my-codeblock-bar">
+    <span class="my-codeblock-lang">${ctx.language ?? 'code'}</span>
+    <button class="chorus-copy-btn" type="button">Copy</button>
+  </div>`;
+}
+
+<Markdown text={text} codeBlockCopy={copyChrome} />
+```
+
+Pass a stable function reference (define it outside the render or memoize it) so Chorus does not re-render code blocks on every parent render. The renderer fires for each fenced code block; the returned HTML is inserted before the `<pre>`. `headless` mode never injects code-block chrome regardless of the prop.
+
+### `<ToolCallBlock>` — rendering a single tool call from arbitrary state
+
+Use `<ToolCallBlock>` when you have a tool call payload sitting outside the Chorus transcript — a server-rendered audit log, a tool-result preview pane, or a custom row in a hand-built transcript. The component is self-contained: it owns the expand/collapse state, renders the localized status row for empty calls, and applies the same `--chorus-tool-*` variables Chorus uses internally.
+
+```tsx
+import { ToolCallBlock } from 'react-chorus';
+
+<ToolCallBlock
+  toolCall={{
+    name: 'search_docs',
+    input: { query: 'how do I add auth headers?' },
+    output: { hits: ['guide.md#adding-auth-headers'] },
+  }}
+/>
+```
+
+Use the `streaming` flag when the call's arguments have not arrived yet, so the empty placeholder shows `Running…` instead of `No output`:
+
+```tsx
+<ToolCallBlock toolCall={{ name: 'search_docs' }} streaming />
+```
+
+Localize the labels with the same shape `<Chorus labels.toolCall>` uses:
+
+```tsx
+<ToolCallBlock
+  toolCall={toolCall}
+  labels={{ input: 'Entrée', output: 'Sortie', running: 'En cours…', empty: 'Aucune sortie' }}
+/>
+```
+
+Add a custom class or inline style for class-based theming or test-id selectors — both are merged onto the outer `.chorus-tool-call` root, with the host class stacking after the built-in one:
+
+```tsx
+<ToolCallBlock toolCall={toolCall} className="my-tool" style={{ marginBlock: 0 }} />
+```
+
+If you compose your row from the exported `<MessageBubble>` instead of `<ToolCallBlock>` directly, pass `toolCallClassName` and `toolCallStyle` on `MessageBubble` — they are forwarded through `MessageBubbleLayout` to the embedded block.
+
+For full theming, drive the palette CSS variables through `<ChorusTheme>` (or any ancestor that sets them) so the tool call block picks up the same `--chorus-tool-*` colors as the rest of your shell:
+
+```tsx
+import { ChorusTheme, ToolCallBlock } from 'react-chorus';
+
+<ChorusTheme palette={{ toolBorder: '#333', toolHeaderBg: '#1a1a1a' }}>
+  <ToolCallBlock toolCall={toolCall} />
+</ChorusTheme>
+```

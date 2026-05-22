@@ -2,6 +2,7 @@ import React from 'react';
 import type { ToolCall } from '../types';
 import { DEFAULT_TOOL_CALL_LABELS } from '../labels/toolCall';
 import type { ChorusToolCallLabels } from '../labels/types';
+import { joinClasses } from '../utils/className';
 
 function fallbackString(value: unknown): string {
   try {
@@ -58,9 +59,17 @@ export interface ToolCallBlockProps {
    * for a finished one with empty results.
    */
   streaming?: boolean;
+  /**
+   * Extra class names merged onto the outer `.chorus-tool-call` root, after
+   * the built-in class. Lets a custom shell add its own styling hook (Tailwind,
+   * Emotion class, test-id targets, etc.) without replacing the default look.
+   */
+  className?: string;
+  /** Inline style merged onto the outer `.chorus-tool-call` root. */
+  style?: React.CSSProperties;
 }
 
-export function ToolCallBlock({ toolCall, labels, streaming = false }: ToolCallBlockProps) {
+export function ToolCallBlock({ toolCall, labels, streaming = false, className, style }: ToolCallBlockProps) {
   const [open, setOpen] = React.useState(false);
   const bodyId = React.useId();
   const resolvedLabels: ChorusToolCallLabels = { ...DEFAULT_TOOL_CALL_LABELS, ...labels };
@@ -71,6 +80,7 @@ export function ToolCallBlock({ toolCall, labels, streaming = false }: ToolCallB
   const hasInput = hasOwn(safeToolCall, 'input');
   const hasOutput = hasOwn(safeToolCall, 'output');
   const hasBody = hasInput || hasOutput;
+  const rootClass = joinClasses('chorus-tool-call', className);
 
   // A call with neither input nor output has nothing to expand. Rather than a
   // dead, disabled-looking button, show an explicit status: "running" while the
@@ -78,7 +88,7 @@ export function ToolCallBlock({ toolCall, labels, streaming = false }: ToolCallB
   // has settled with genuinely empty results. Either way it reads as intentional.
   if (!hasBody) {
     return (
-      <div className="chorus-tool-call">
+      <div className={rootClass} style={style}>
         <div className="chorus-tool-call-header chorus-tool-call-header--static">
           <span className="chorus-tool-call-name">{safeToolCall.name}</span>
           <span
@@ -93,7 +103,7 @@ export function ToolCallBlock({ toolCall, labels, streaming = false }: ToolCallB
   }
 
   return (
-    <div className="chorus-tool-call">
+    <div className={rootClass} style={style}>
       <button
         type="button"
         className="chorus-tool-call-header"

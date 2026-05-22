@@ -172,4 +172,30 @@ describe('ToolCallBlock', () => {
     expect(screen.queryByText('Input')).not.toBeInTheDocument();
     expect(screen.getByText('Output')).toBeInTheDocument();
   });
+
+  it('merges a custom className after the built-in class on the root', () => {
+    const { container } = render(
+      <ToolCallBlock toolCall={CALL_WITH_IO} className="my-tool extra" />,
+    );
+    const root = container.firstElementChild as HTMLElement;
+    // The built-in hook must remain so default styling/palette wiring still applies,
+    // and the host class must follow it so its rules win cascade ties when needed.
+    expect(root.className).toBe('chorus-tool-call my-tool extra');
+  });
+
+  it('merges className on the static "no output" root the same way', () => {
+    const { container } = render(
+      <ToolCallBlock toolCall={CALL_NAME_ONLY} className="my-tool" />,
+    );
+    const root = container.firstElementChild as HTMLElement;
+    expect(root.className).toBe('chorus-tool-call my-tool');
+  });
+
+  it('forwards inline style onto the root element', () => {
+    const { container } = render(
+      <ToolCallBlock toolCall={CALL_WITH_IO} style={{ paddingBlock: '2px' }} />,
+    );
+    const root = container.firstElementChild as HTMLElement;
+    expect(root.style.paddingBlock).toBe('2px');
+  });
 });
