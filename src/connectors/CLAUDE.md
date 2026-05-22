@@ -71,6 +71,18 @@ OpenAI, Anthropic, and Gemini JSON connectors call `extractErrorMessage()` befor
 
 Do not loosen the AI SDK data-stream guard: `connector="auto"` must render prose like `a: see below`, `d:0`, or `e:"note"` as visible plain text rather than dropping it or terminating the stream.
 
+## Unknown-event policy
+
+Each connector handles a closed set of provider events; an event outside that set is normally dropped. To stop silent regressions when an upstream rolls out a new event, the connectors apply different forward-compat policies depending on how their dispatch is structured:
+
+- **OpenAI Responses** (`openai/responses.ts`) — fires `warnOnceInDev('openai-responses-unknown-event:<type>', ...)` and surfaces a non-fatal `ConnectorWarning` (`code: 'unknown-event'`) when `type` is non-empty, not in `IGNORED_RESPONSE_EVENT_TYPES`, and not in `RESPONSE_EVENT_HANDLERS`. The Responses API still adds new `response.*` event groups (e.g. `response.web_search_call.*`, `response.code_interpreter_call.*`), so an exhaustive dispatch table needs an explicit signal when reality outgrows it.
+- **OpenAI Chat Completions** — dispatches on shape (`choices[].delta`), not `type`, so there is no closed event-name set to validate against. Forward-compat hygiene lives in the field-level extractors (e.g. reasoning-field priority, tool-call index fallback).
+- **Anthropic Messages** (`anthropic.ts`) — uses an explicit if/else chain on `obj.type`. New Anthropic event types are rare and the connector is not the dispatch hot-spot, so unknown types still return `null` silently; revisit if the Messages API begins to add events at the cadence of Responses.
+- **AI SDK** (`aiSdk/uiMessageStream.ts`) — `AI_SDK_FRAME_TYPES` already enumerates every UI-message-stream frame the connector parses or intentionally ignores; `autoConnector` only delegates frames matching `isAiSdkFrameType()` to this path, so an unrecognised `type` reaching `uiMessageStreamResult` would only come from direct (non-auto) usage with a malformed frame. Returning `null` is correct rather than warning, because the same set is shared with `autoConnector`'s claim guard and a warning here would fire for every legitimate non-AI-SDK frame routed through `connector="auto"`.
+- **Gemini** (`gemini/connector.ts`) — dispatches on `candidates`/`promptFeedback` shape, not on a `type` field, so it has no closed event-name set to compare against. Unknown `parts[]` kinds are already warned through `unsupportedParts.ts`, which is the field-level analogue of the Responses warning.
+
+When adding a new event type to the OpenAI Responses connector, either register a handler in `RESPONSE_EVENT_HANDLERS` or add it to `IGNORED_RESPONSE_EVENT_TYPES` — the dev warning is the prompt to choose one explicitly.
+
 ## Adding a provider
 
 1. Implement `Connector` in a new file. If it needs parser memory, expose `createState()` and thread the state through helper functions.
