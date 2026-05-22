@@ -132,6 +132,11 @@ export type {
 } from './providerRequests';
 export { defineTool } from './tools';
 export type { ChorusToolDefinition } from './tools';
+// Reserved id of the synthetic `role: 'system'` message Chorus injects into
+// transport request history from the `<Chorus systemPrompt>` prop. Also exported
+// from `react-chorus/server` and `react-chorus/provider-requests` for proxy/
+// mapper code; see its JSDoc.
+export { RESERVED_SYSTEM_PROMPT_ID } from './reservedIds';
 export { Markdown } from './components/Markdown';
 export type { MarkdownProps, MarkdownSanitizer, CodeBlockCopy, CodeBlockCopyContext, CodeBlockCopyRenderer } from './components/Markdown';
 export { setChorusStyleNonce } from './utils/cspNonce';

@@ -40,6 +40,19 @@ export interface FetchSSETransportOptions<TMeta = Record<string, unknown>> exten
    * The duplicated field is kept for backwards compatibility and may be removed
    * in a future major; new backends should rely on `history` only.
    *
+   * SYSTEM PROMPT: when the `<Chorus systemPrompt>` prop is set, `history`
+   * already begins with a synthetic `{ role: 'system' }` message carrying that
+   * prompt — its id is the public `RESERVED_SYSTEM_PROMPT_ID` constant
+   * (`'chorus-system-prompt'`, exported from `react-chorus`,
+   * `react-chorus/server`, and `react-chorus/provider-requests`). A `formatBody`
+   * that ignores `system`-role messages silently drops `systemPrompt`; the
+   * provider mappers (`formatOpenAIChatCompletionsBody`,
+   * `formatAnthropicMessagesBody`, `formatGeminiGenerateContentBody`) already
+   * map it for you. Do NOT also pass a provider-level `system` /
+   * `systemInstruction` option: that double-specifies the system prompt and
+   * trips a one-time dev-mode precedence warning, with the history-derived text
+   * dropped in favour of the option.
+   *
    * When omitted, the transport adds `Content-Type: application/json` unless the
    * caller supplied an explicit Content-Type header. When provided, set headers
    * yourself for JSON bodies; FormData/Blob/URLSearchParams are not forced to JSON.

@@ -59,6 +59,11 @@ function libraryManualChunks(id: string) {
   // provider-requests subpath (defineTool, tool-definition serialization).
   // Park it in its own micro-chunk so importing one side does not drag in the other.
   if (normalizedId.endsWith('/src/tools.ts')) return 'tools';
+  // reservedIds.ts holds RESERVED_SYSTEM_PROMPT_ID, shared by the chorus-session
+  // graph (system-prompt history injection) and the server/provider-requests
+  // subpaths (mapper/proxy code). Park it in its own micro-chunk so the
+  // server-safe subpaths get only the constant, not the chorus-session chunk.
+  if (normalizedId.endsWith('/src/reservedIds.ts')) return 'reserved-ids';
 
   return undefined;
 }
