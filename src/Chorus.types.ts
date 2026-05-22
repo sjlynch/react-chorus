@@ -98,6 +98,23 @@ export interface ChorusRef<TMeta = Record<string, unknown>> {
   dismissError(): boolean;
   focus(): void;
   getMessages(): Message<TMeta>[];
+  /**
+   * Scroll the transcript to a message's row. Returns `true` when a rendered
+   * row for `id` was found and scrolled into view, and `false` otherwise.
+   *
+   * A `false` result covers two distinct cases:
+   * - `id` matches no message in the transcript; or
+   * - `id` is a valid message (one `getMessages()` returns) whose row is not
+   *   currently in the DOM — windowed out by `maxRenderedMessages`, hidden by
+   *   `hiddenRoles`, or drawn by a custom `renderMessage` that did not spread
+   *   `ctx.messageProps`.
+   *
+   * To tell the two apart, cross-check `id` against `getMessages()`: a `false`
+   * for an id `getMessages()` includes is the valid-but-unrendered case. In
+   * development that case also logs a one-time warning. In particular a
+   * "jump to message"/citation target older than the `maxRenderedMessages`
+   * window cannot be scrolled to until enough older rows render.
+   */
   scrollToMessage(id: string): boolean;
 }
 
