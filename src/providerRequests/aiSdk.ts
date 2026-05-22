@@ -3,6 +3,7 @@ import { dataUrlFromAttachment, resolveDataUrlMimeType } from './attachments';
 import { messageContentParts } from './contentParts';
 import { hasOwn, metadataBoolean, metadataString, nonEmptyString } from './metadata';
 import { warnOnceInDev } from './devWarn';
+import { resolveProviderSystem, stripAiSdkOptions, systemTextFromHistory } from './options';
 import { safeStringify, toolContextText, toolOutputValue } from './toolOutput';
 import { mapHistoryWithToolRuns } from './toolRunMapper';
 import type { ProviderMappingOptions } from './types/common';
@@ -255,21 +256,35 @@ export function toAiSdkModelMessages<TMeta = Record<string, unknown>>(
   });
 }
 
-function stripAiSdkOptions<TMeta>(options: AiSdkModelMessagesBodyOptions<TMeta>) {
-  const { unsupportedAttachmentText: _unsupportedAttachmentText, ...bodyOptions } = options;
-  void _unsupportedAttachmentText;
-  return bodyOptions;
-}
-
-/** Build a JSON-serializable body containing AI SDK `messages`. */
+/** Build a JSON-serializable body containing AI SDK `messages`. Defaults `stream` to true. */
 export function toAiSdkModelMessagesBody<
   TMeta = Record<string, unknown>,
   TOptions extends AiSdkModelMessagesBodyOptions<TMeta> = AiSdkModelMessagesBodyOptions<TMeta>,
 >(history: Message<TMeta>[], options?: TOptions): AiSdkModelMessagesBody<TOptions> {
   const opts = (options ?? {}) as TOptions;
+  const { bodyOptions, stream, system: callerSystem } = stripAiSdkOptions(opts);
+  // The AI SDK convention is `{ role: 'system' }` rows inside `messages`, not a
+  // top-level `system` body field — so history-derived system text continues to
+  // emit `{ role: 'system' }` model messages via `toAiSdkModelMessages`. A
+  // caller-provided `system` option is set on the body verbatim; when the
+  // history *also* carries system rows, `resolveProviderSystem` fires a
+  // dev-mode warn-once so the duplication is observable. We only forward to
+  // `resolveProviderSystem` when the caller actually passed a value so the
+  // helper's "history wins when caller is absent" branch never accidentally
+  // re-emits the same system text under a top-level field.
+  const system = callerSystem !== undefined
+    ? resolveProviderSystem(
+      'AI SDK',
+      'system',
+      callerSystem,
+      systemTextFromHistory(history as Message<unknown>[]),
+    )
+    : undefined;
   const body = {
-    ...stripAiSdkOptions(opts),
+    ...bodyOptions,
+    ...(system !== undefined ? { system } : {}),
     messages: toAiSdkModelMessages(history, opts),
+    stream,
   };
   return body as AiSdkModelMessagesBody<TOptions>;
 }
