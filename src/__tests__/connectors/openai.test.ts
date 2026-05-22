@@ -230,6 +230,36 @@ describe('openaiConnector', () => {
     expect(result?.done).toBe(true);
   });
 
+  it('surfaces token usage from a trailing Chat Completions { choices: [], usage } chunk', () => {
+    // OpenAI Chat Completions with `stream_options: { include_usage: true }`
+    // emits a final chunk with an empty `choices` array and a top-level `usage`.
+    const data = JSON.stringify({
+      choices: [],
+      usage: { prompt_tokens: 11, completion_tokens: 6, total_tokens: 17 },
+    });
+    expect(openaiConnector.extract(data)).toEqual({
+      metadata: { usage: { promptTokens: 11, completionTokens: 6, totalTokens: 17 } },
+    });
+  });
+
+  it('returns null for an empty Chat Completions choices array with no usage', () => {
+    expect(openaiConnector.extract(JSON.stringify({ choices: [] }))).toBeNull();
+  });
+
+  it('surfaces usage attached to the final content chunk alongside finish_reason', () => {
+    // Some OpenAI-compatible proxies attach `usage` to the last content chunk
+    // rather than a separate trailing chunk.
+    const data = JSON.stringify({
+      choices: [{ delta: { content: 'done' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 4, completion_tokens: 2, total_tokens: 6 },
+    });
+    expect(openaiConnector.extract(data)).toEqual({
+      text: 'done',
+      done: true,
+      metadata: { finishReason: 'stop', usage: { promptTokens: 4, completionTokens: 2, totalTokens: 6 } },
+    });
+  });
+
   it('flushes a buffered partial think tag when finish_reason ends the stream', () => {
     const state = openaiConnector.createState?.();
     expect(openaiConnector.extract(JSON.stringify({ choices: [{ index: 0, delta: { content: 'hi <' } }] }), state)).toEqual({ text: 'hi ' });
@@ -428,5 +458,73 @@ describe('openaiConnector (Responses API)', () => {
     expect(result?.done).toBe(true);
     expect(result?.warning).toBeUndefined();
     expect(result?.metadata?.usage).toEqual({ promptTokens: 3, completionTokens: 4 });
+  });
+
+  it('does not double the arguments when output_item.done repeats the accumulated string', () => {
+    const state = openaiConnector.createState?.();
+    const fnItem = { type: 'function_call', id: 'fc_1', call_id: 'call_1', name: 'search' };
+    const events = [
+      { type: 'response.output_item.added', output_index: 0, item: { ...fnItem, arguments: '' } },
+      { type: 'response.function_call_arguments.delta', item_id: 'fc_1', output_index: 0, delta: '{"q":' },
+      { type: 'response.function_call_arguments.delta', item_id: 'fc_1', output_index: 0, delta: '"x"}' },
+      { type: 'response.output_item.done', output_index: 0, item: { ...fnItem, arguments: '{"q":"x"}' } },
+    ];
+
+    const inputs: string[] = [];
+    let doneResult;
+    for (const event of events) {
+      const result = openaiConnector.extract(JSON.stringify(event), state);
+      const deltas = result?.toolDeltas ?? (result?.toolDelta ? [result.toolDelta] : []);
+      for (const d of deltas) {
+        expect(d.id).toBe('call_1');
+        if (typeof d.input === 'string') inputs.push(d.input);
+      }
+      if (event.type === 'response.output_item.done') doneResult = result;
+    }
+
+    // The arguments appear exactly once across the whole stream.
+    expect(inputs.join('')).toBe('{"q":"x"}');
+    // output_item.done still confirms the call id/name without re-emitting input.
+    const doneDeltas = doneResult?.toolDeltas ?? (doneResult?.toolDelta ? [doneResult.toolDelta] : []);
+    expect(doneDeltas).toEqual([{ id: 'call_1', provider: 'openai', providerId: 'call_1', name: 'search' }]);
+  });
+
+  it('reads the provider error message from response.failed', () => {
+    const payload = { type: 'response.failed', response: { error: { message: 'model overloaded' } } };
+    expect(openaiConnector.extract(JSON.stringify(payload))).toEqual({
+      error: 'model overloaded',
+      errorPayload: payload,
+    });
+  });
+
+  it('falls back to a generic message when response.failed carries no error detail', () => {
+    const payload = { type: 'response.failed', response: {} };
+    expect(openaiConnector.extract(JSON.stringify(payload))).toEqual({
+      error: 'OpenAI response failed',
+      errorPayload: payload,
+    });
+  });
+
+  it('drains a buffered refusal as an error on response.completed when refusal.done never arrives', () => {
+    const state = openaiConnector.createState?.();
+    openaiConnector.extract(JSON.stringify({ type: 'response.refusal.added', item_id: 'msg_1' }), state);
+    openaiConnector.extract(JSON.stringify({ type: 'response.refusal.delta', item_id: 'msg_1', delta: 'I cannot help with that.' }), state);
+    const completed = openaiConnector.extract(JSON.stringify({ type: 'response.completed', response: {} }), state);
+    expect(completed?.done).toBe(true);
+    expect(completed?.error).toBe('I cannot help with that.');
+  });
+
+  it('drains a buffered refusal as an error when the body closes without a done sentinel', () => {
+    const state = openaiConnector.createState?.();
+    openaiConnector.extract(JSON.stringify({ type: 'response.refusal.added', item_id: 'msg_1' }), state);
+    openaiConnector.extract(JSON.stringify({ type: 'response.refusal.delta', item_id: 'msg_1', delta: 'refused' }), state);
+    expect(openaiConnector.flush?.(state)).toEqual({ error: 'refused' });
+  });
+
+  it('drains a buffered refusal as an error on the [DONE] sentinel', () => {
+    const state = openaiConnector.createState?.();
+    openaiConnector.extract(JSON.stringify({ type: 'response.refusal.added', item_id: 'msg_1' }), state);
+    openaiConnector.extract(JSON.stringify({ type: 'response.refusal.delta', item_id: 'msg_1', delta: 'refused' }), state);
+    expect(openaiConnector.extract('[DONE]', state)).toEqual({ error: 'refused', done: true });
   });
 });

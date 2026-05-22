@@ -72,3 +72,20 @@ export function drainResponseToolBuffer(state: OpenAIConnectorState): ConnectorT
   state.responseToolArgBuffer.clear();
   return toolDeltas;
 }
+
+/**
+ * Drain any refusal text accumulated across `response.refusal.added`/`.delta`
+ * that was never closed by a `response.refusal.done` — used when the stream
+ * ends via `response.completed`/`response.incomplete` or the body just closes,
+ * so a buffered refusal surfaces as an error instead of a blank assistant turn.
+ * Mirrors `drainResponseToolBuffer` for the orphan-tool-arg case. Empty entries
+ * (a bare `.added` with no `.delta`) are skipped; the buffer is always cleared.
+ */
+export function drainResponseRefusalText(state: OpenAIConnectorState): string {
+  let refusal = '';
+  for (const text of state.responseRefusalText.values()) {
+    if (text) refusal = refusal ? `${refusal}\n${text}` : text;
+  }
+  state.responseRefusalText.clear();
+  return refusal;
+}
