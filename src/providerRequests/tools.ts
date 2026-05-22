@@ -77,6 +77,16 @@ export interface GeminiToolGroup extends Record<string, unknown> {
   functionDeclarations: GeminiFunctionDeclaration[];
 }
 
+/** Vercel AI SDK `Tool` shape used as the value type of an `AiSdkToolSet`. */
+export interface AiSdkTool extends Record<string, unknown> {
+  type: 'function';
+  description?: string;
+  inputSchema: Record<string, unknown>;
+}
+
+/** Vercel AI SDK `ToolSet` — record keyed by tool name. */
+export type AiSdkToolSet = Record<string, AiSdkTool>;
+
 /** Serialize Chorus tool definitions into OpenAI Chat Completions `tools` entries. */
 export function toOpenAIChatCompletionsTools<TMeta = Record<string, unknown>>(
   source: ProviderToolsSource<TMeta>,
@@ -132,6 +142,32 @@ export function toAnthropicTools<TMeta = Record<string, unknown>>(
       { name, input_schema },
     );
   });
+}
+
+/** Serialize Chorus tool definitions into an AI SDK `ToolSet` (record keyed by tool name). */
+export function toAiSdkTools<TMeta = Record<string, unknown>>(
+  source: ProviderToolsSource<TMeta>,
+): AiSdkToolSet {
+  const result: AiSdkToolSet = {};
+  for (const definition of toToolDefinitionList(source)) {
+    const { aiSdk = {} } = definition;
+    const description = definition.description;
+    const name = definition.name;
+    const inputSchema = defaultObjectSchema(definition as ChorusToolDefinition<unknown>);
+    // The AI SDK `ToolSet` is a record keyed by tool name, so `name` is encoded
+    // in the key rather than as a value field. `withToolOverride` still treats
+    // `name` as an identity field — protecting against an override silently
+    // renaming the tool — and we strip it back out of the value once merged.
+    const merged = withToolOverride<AiSdkTool & { name?: string }>(
+      'AI SDK',
+      { type: 'function', name, ...(description ? { description } : {}), inputSchema },
+      aiSdk,
+      { name, inputSchema },
+    );
+    delete merged.name;
+    result[name] = merged;
+  }
+  return result;
 }
 
 /** Serialize Chorus tool definitions into a single Gemini tool group with `functionDeclarations`. */
