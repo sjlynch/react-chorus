@@ -5,6 +5,7 @@ import { isChorusDevMode } from '../../utils/devMode';
 // so the wording is request-agnostic rather than naming `send` specifically.
 const MISSING_RESPONSE_HANDLER_WARNING = '[Chorus] An assistant turn was requested but neither `transport` nor `onSend` was provided. Pass one of these props to produce an assistant response.';
 const EMPTY_ON_SEND_WARNING = '[Chorus] `onSend` resolved without appending assistant chunks or returning a message; no `onFinish`/`onAbort` observer fires for this turn. Call `helpers.finalizeAssistant()` or return a `Message` from `onSend`.';
+const RETURNED_MESSAGE_IGNORED_WARNING = '[Chorus] `onSend` returned a `Message` after already streaming assistant output via the `helpers` (`appendAssistant`/`appendReasoning`/`appendToolDelta`); the returned `Message` was ignored. `onSend` must do exactly one: stream via the `helpers`, or return a `Message`.';
 const TRANSPORT_ON_SEND_WARNING = '[Chorus] Both `transport` and `onSend` props were provided. `transport` takes precedence and `onSend` will be ignored. Remove one of the two props to silence this warning.';
 
 function warnOnce(ref: React.MutableRefObject<boolean>, message: string): void {
@@ -16,12 +17,14 @@ function warnOnce(ref: React.MutableRefObject<boolean>, message: string): void {
 export interface SessionWarnings {
   warnMissingResponseHandler: () => void;
   warnEmptyOnSend: () => void;
+  warnReturnedMessageIgnored: () => void;
   warnTransportOnSend: () => void;
 }
 
 export function useSessionWarnings(): SessionWarnings {
   const warnedMissingHandlerRef = React.useRef(false);
   const warnedEmptyOnSendRef = React.useRef(false);
+  const warnedReturnedMessageIgnoredRef = React.useRef(false);
   const warnedTransportOnSendRef = React.useRef(false);
 
   const warnMissingResponseHandler = React.useCallback(() => {
@@ -32,6 +35,10 @@ export function useSessionWarnings(): SessionWarnings {
     warnOnce(warnedEmptyOnSendRef, EMPTY_ON_SEND_WARNING);
   }, []);
 
+  const warnReturnedMessageIgnored = React.useCallback(() => {
+    warnOnce(warnedReturnedMessageIgnoredRef, RETURNED_MESSAGE_IGNORED_WARNING);
+  }, []);
+
   const warnTransportOnSend = React.useCallback(() => {
     warnOnce(warnedTransportOnSendRef, TRANSPORT_ON_SEND_WARNING);
   }, []);
@@ -39,6 +46,7 @@ export function useSessionWarnings(): SessionWarnings {
   return {
     warnMissingResponseHandler,
     warnEmptyOnSend,
+    warnReturnedMessageIgnored,
     warnTransportOnSend,
   };
 }

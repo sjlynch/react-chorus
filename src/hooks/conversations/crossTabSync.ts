@@ -63,9 +63,20 @@ export function useLocalStorageConversationIndexSync({
 
       const parsed = stateFromRaw(newValue, stateRef.current.activeId, indexKey, defaultTitleRef.current, nowRef.current);
       if (parsed.error) {
+        // The external payload is corrupt and will not be applied. Leave any
+        // armed debounced index write intact — its timer must still fire so the
+        // un-persisted `updatedAt` recency bump is not lost, and in-memory state
+        // must not desync from storage on the strength of a rejected event.
         reportError(parsed.error, 'read', indexKey);
         return;
       }
+      // The external value is confirmed applicable, so it supersedes a local
+      // index write that has not started yet: drop the armed debounced write
+      // now, before setState, so its stale snapshot cannot fire later and
+      // clobber the other tab's conversation. Dropping is deferred until here
+      // (rather than in processExternalValue) precisely so the corrupt-payload
+      // early-return above never discards a pending write.
+      if (writeCoordination.hasPendingWrite()) writeCoordination.dropPendingWrite();
       versionRef.current += 1;
       stateRef.current = parsed.state;
       setState(parsed.state);
@@ -82,10 +93,11 @@ export function useLocalStorageConversationIndexSync({
     // A *debounced* index write that has been scheduled but whose timer has not
     // yet fired is a second lost-update window — every `touchConversation` arms
     // one. `isWritePending()` is false for it, so applying the external value
-    // now would let that armed timer fire later and persist its stale index
-    // snapshot over the other tab's conversation. The external event supersedes
-    // a local write that has not started, so drop the armed write before
-    // applying.
+    // would let that armed timer fire later and persist its stale index
+    // snapshot over the other tab's conversation. `applyExternalValue` drops
+    // that armed write — but only once the external value is confirmed
+    // applicable, so a corrupt external payload (rejected by `stateFromRaw`)
+    // leaves the armed write intact instead of discarding an un-persisted bump.
     const processExternalValue = (newValue: string | null) => {
       if (cancelled) return;
       if (writeCoordination.isWritePending()) {
@@ -93,7 +105,6 @@ export function useLocalStorageConversationIndexSync({
         writeCoordination.whenWriteSettles().then(reprocess, reprocess);
         return;
       }
-      if (writeCoordination.hasPendingWrite()) writeCoordination.dropPendingWrite();
       applyExternalValue(newValue);
     };
 

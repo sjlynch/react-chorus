@@ -673,6 +673,45 @@ describe('useChorusPersistence', () => {
       }
     });
 
+    it('keeps an armed debounced write intact when a corrupt cross-tab event is rejected', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      vi.useFakeTimers();
+      const key = 'chorus-cross-tab-corrupt';
+      let unmount: (() => void) | undefined;
+      try {
+        const hook = renderHook(() => useChorusPersistence(key, { writeDebounceMs: 1000 }));
+        unmount = hook.unmount;
+        const { result } = hook;
+
+        // Arm a debounced local write: its setTimeout is scheduled but unfired,
+        // so nothing has reached storage yet.
+        const localMsgs: Message[] = [{ id: 'local', role: 'user', text: 'local edit' }];
+        act(() => result.current.onChange(localMsgs));
+        expect(result.current.value).toEqual(localMsgs);
+
+        // A corrupt payload (another tab, a browser extension, an older library
+        // version, or a partial QuotaExceededError write) arrives. It fails
+        // JSON.parse, so applyExternalValue rejects it before applying.
+        act(() => dispatchStorageEvent(key, '{ corrupt payload, not json'));
+
+        // The rejected event must not desync in-memory state from storage.
+        expect(result.current.value).toEqual(localMsgs);
+
+        // The armed debounced write was NOT dropped by the rejected event: its
+        // timer still fires and persists the local message that would otherwise
+        // be lost on reload.
+        act(() => { vi.advanceTimersByTime(2000); });
+        expect(JSON.parse(window.localStorage.getItem(key) ?? 'null')).toEqual(localMsgs);
+      } finally {
+        unmount?.();
+        vi.useRealTimers();
+        window.localStorage.removeItem(key);
+        errorSpy.mockRestore();
+        warn.mockRestore();
+      }
+    });
+
     it('does not subscribe when a custom StorageAdapter is supplied', () => {
       const storage = makeSyncStorage(JSON.stringify(MSGS));
       const { result } = renderHook(() => useChorusPersistence('key', { storage }));

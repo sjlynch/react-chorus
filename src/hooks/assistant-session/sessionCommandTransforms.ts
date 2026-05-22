@@ -1,6 +1,6 @@
 import type { Attachment, Message } from '../../types';
-import type { UpdateMessagesOptions } from './types';
-import { cloneHistoryForRetry, createMessageId, dropTrailingAssistant } from './messageUtils';
+import type { SubmittedUserTurn, UpdateMessagesOptions } from './types';
+import { cloneHistoryForRetry, createMessageId, dropTrailingAssistant, findLastUserMessage } from './messageUtils';
 
 export function appendUserTurn<TMeta>(history: Message<TMeta>[], text: string, attachments: Attachment[] = []): Message<TMeta>[] {
   return history.concat({
@@ -92,6 +92,22 @@ export function createRegenerateHistory<TMeta>(
 
 export function deleteMessageById<TMeta>(history: Message<TMeta>[], id: string): Message<TMeta>[] {
   return history.filter(m => m.id !== id);
+}
+
+/**
+ * True when deleting `id` invalidates the last submitted turn — either it is
+ * the current last user turn, or it is one of the messages the still-armed
+ * Retry would replay from `lastSubmittedTurnRef`'s history. Callers use this to
+ * drop the stream-error banner and submitted-turn ref so a stale Retry cannot
+ * resurrect a just-deleted message.
+ */
+export function deletionInvalidatesSubmittedTurn<TMeta>(
+  currentMessages: Message<TMeta>[],
+  submittedTurn: SubmittedUserTurn<TMeta> | null,
+  id: string,
+): boolean {
+  if (findLastUserMessage(currentMessages)?.id === id) return true;
+  return submittedTurn?.history.some(m => m.id === id) ?? false;
 }
 
 export function messagesAfterClear<TMeta>(seedMessages: Message<TMeta>[], resetToInitialMessages: boolean): Message<TMeta>[] {

@@ -83,13 +83,42 @@ describe('MessageBubble — streaming reasoning disclosure', () => {
     expect(container.querySelector('details.chorus-reasoning')).not.toHaveAttribute('open');
   });
 
-  it('collapses the reasoning disclosure once streamed answer text arrives', () => {
+  it('keeps an auto-opened reasoning disclosure open once streamed answer text arrives', () => {
     const { container, rerender } = render(<MessageBubble message={reasoningMsg('thinking')} streaming />);
     expect(container.querySelector('details.chorus-reasoning')).toHaveAttribute('open');
 
+    // The first answer token arrives, so the auto-open hint clears. The reader
+    // never toggled the disclosure, so it must stay open (the latch) rather
+    // than snap shut while they are still following the chain-of-thought.
     rerender(
       <MessageBubble
         message={{ id: 'r1', role: 'assistant', text: 'Here is the answer', reasoning: 'thinking' }}
+        streaming
+      />,
+    );
+
+    expect(container.querySelector('details.chorus-reasoning')).toHaveAttribute('open');
+  });
+
+  it('lets the reader collapse the reasoning disclosure after answer text arrives', () => {
+    const { container, rerender } = render(<MessageBubble message={reasoningMsg('thinking')} streaming />);
+
+    // Answer text arrives; the latched-open disclosure stays open.
+    rerender(
+      <MessageBubble
+        message={{ id: 'r1', role: 'assistant', text: 'Here is the answer', reasoning: 'thinking' }}
+        streaming
+      />,
+    );
+    const details = container.querySelector('details.chorus-reasoning') as HTMLDetailsElement;
+    expect(details).toHaveAttribute('open');
+
+    // The reader explicitly collapses it — their choice overrides the latch.
+    details.open = false;
+    fireEvent(details, new Event('toggle', { bubbles: false, cancelable: false }));
+    rerender(
+      <MessageBubble
+        message={{ id: 'r1', role: 'assistant', text: 'Here is the answer, expanded', reasoning: 'thinking' }}
         streaming
       />,
     );

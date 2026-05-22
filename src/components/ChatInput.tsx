@@ -14,6 +14,21 @@ import { styleVarsFromPalette } from '../utils/paletteVars';
 
 export type { ChatInputFocusOptions, ChatInputHandle, ChatInputProps, RenderAttachmentErrorContext } from './chat-input/types';
 
+// Inlined dev-mode gate + once-guard for the host-`onKeyDown` warning below.
+// Importing the shared `utils/devMode`/`utils/warnings` helper here would drag
+// the `dev-mode` chunk into the `chat-input` bundle graph; `ChatWindow.tsx` and
+// `chat-window/rendering.tsx` inline the same gate for the same reason — see
+// `src/utils/CLAUDE.md`.
+function isChorusDevMode() {
+  try {
+    return typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production';
+  } catch {
+    return false;
+  }
+}
+
+let didWarnHostOnKeyDown = false;
+
 export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput({
   value,
   onChange,
@@ -175,6 +190,25 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(funct
 
   const paletteVars = React.useMemo(() => styleVarsFromPalette(palette), [palette]);
 
+  // A host `onKeyDown` lands in `...rest` and is spread onto the root container
+  // below, not the textarea — so it never sees the keys the composer's own
+  // textarea handler consumes (notably Enter, which is `preventDefault()`d).
+  // That is a documented but easily-missed footgun for hosts wiring keyboard
+  // shortcuts, so flag it once in dev (mirrors the `showSystemMessages` and
+  // non-host-message-root warnings elsewhere in this codebase).
+  const hasHostOnKeyDown = 'onKeyDown' in rest;
+  React.useEffect(() => {
+    if (!hasHostOnKeyDown || didWarnHostOnKeyDown || !isChorusDevMode()) return;
+    didWarnHostOnKeyDown = true;
+    console.warn(
+      '[Chorus] `onKeyDown` passed to `<ChatInput>` is attached to the composer container `<div>`, '
+        + 'not the inner `<textarea>`. The textarea has its own Enter-to-send handler that calls '
+        + '`preventDefault()`, so this handler will not observe Enter — nor other keys the composer '
+        + 'consumes. To handle textarea keystrokes such as slash-commands or up-arrow-to-edit, compose '
+        + 'a custom shell from the headless pieces or attach a capture-phase listener to the textarea.',
+    );
+  }, [hasHostOnKeyDown]);
+
   return (
     <div
       // Any unrecognised props (`...rest`) — including event handlers such as
@@ -182,6 +216,8 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(funct
       // The composer's own Enter-to-send `onKeyDown` lives on the textarea and
       // calls preventDefault(), so a host `onKeyDown` passed via `rest` will not
       // observe the textarea key events the composer consumes (notably Enter).
+      // A one-time dev-mode `console.warn` (above) flags this when a host wires
+      // `onKeyDown`.
       {...rest}
       ref={rootRef}
       className={rootClassName}
