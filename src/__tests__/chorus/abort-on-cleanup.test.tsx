@@ -100,6 +100,54 @@ describe('Chorus abort-on-cleanup', () => {
     expect(screen.queryByText('late stale token')).not.toBeInTheDocument();
   });
 
+  it('emits no error-cleanup change or persistence write for the newly opened conversation', async () => {
+    const user = userEvent.setup();
+    const storage = makeSyncStorage();
+    const setItemSpy = vi.spyOn(storage, 'setItem');
+    const onMessagesChange = vi.fn();
+    let helpers!: OnSendHelpers;
+    const onSend = vi.fn<OnSend>((_text, _messages, h) => {
+      helpers = h;
+      // Stays open so the turn is still streaming when the conversation switches.
+      return new Promise<void>(() => undefined);
+    });
+
+    const { rerender } = render(
+      <Chorus
+        persistenceKey="conv-a"
+        persistenceStorage={storage}
+        onSend={onSend}
+        minAssistantDelayMs={0}
+        onMessagesChange={onMessagesChange}
+      />,
+    );
+
+    await sendMessage(user, 'hello A');
+    await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
+    act(() => helpers.appendAssistant('A-only assistant token'));
+    expect(await screen.findByText('A-only assistant token')).toBeInTheDocument();
+
+    // Switch to a fresh conversation while conv-a is still streaming.
+    rerender(
+      <Chorus
+        persistenceKey="conv-b"
+        persistenceStorage={storage}
+        onSend={onSend}
+        minAssistantDelayMs={0}
+        onMessagesChange={onMessagesChange}
+      />,
+    );
+
+    await waitFor(() => expect(helpers.signal.aborted).toBe(true));
+
+    // Superseding conv-a's half-streamed partial cannot meaningfully clean the
+    // old transcript once conv-b is mounted — so the cleanup must NOT report an
+    // `error-cleanup` change against conv-b nor flush conv-b's transcript.
+    const reasons = onMessagesChange.mock.calls.map(([, context]) => context.reason);
+    expect(reasons).not.toContain('error-cleanup');
+    expect(setItemSpy.mock.calls.some(([key]) => key === 'conv-b')).toBe(false);
+  });
+
   it('warns once in development when onSend resolves without appending or returning a message', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const onFinish = vi.fn();
