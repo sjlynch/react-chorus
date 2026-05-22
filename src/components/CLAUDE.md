@@ -9,6 +9,7 @@ Helper map:
 - `chat-window/types.ts` — public `ChatWindowProps`, `RenderErrorContext`, `RenderMessageRootProps`, and `RenderMessageContext` contracts re-exported by `ChatWindow.tsx`.
 - `chat-window/activityKey.ts` — `stringActivityKey` plus attachment/message/visible activity fingerprints for auto-scroll and unread detection.
 - `chat-window/messageWindowing.ts` — deprecated `showSystemMessages`/`hiddenRoles` resolution, visible-message filtering, and `maxRenderedMessages` normalization/windowing.
+- `chat-window/useVisibleMessages.ts` — `useVisibleMessages` hook chaining the `messageWindowing` helpers into `{ visible, renderedVisible, streamingTurnIds }`; derives `streamingTurnIds` from the full visible array before windowing and keeps the stable empty-set reference.
 - `chat-window/MessageList.tsx` — visible message mapping, `renderMessage` context/slot handling, default tool/message rows, and action/copy/feedback wiring.
 - `chat-window/messageRenderBuilders.tsx` — `buildMessageDefaultRender` (tool vs `MessageRow` default slot) and `buildMessageRenderActions` (the `MessageRenderActions` object) for one message.
 - `chat-window/TranscriptStatusRows.tsx` — custom/default empty state, typing indicator, error row, and jump-to-bottom button.
