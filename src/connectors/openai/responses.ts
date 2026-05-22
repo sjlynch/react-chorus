@@ -1,159 +1,61 @@
-import { extractErrorMessage } from '../error';
-import type { ConnectorResult, ConnectorToolDelta } from '../types';
+import type { ConnectorResult } from '../types';
 import type { OpenAIConnectorState } from '../openai';
-import {
-  appendField,
-  appendToolDelta,
-  collectTextFragments,
-  hasOwn,
-  hasToolDelta,
-  mergeResult,
-  stringFromUnknown,
-  type ResponseToolRef,
-} from './shared';
-import {
-  bufferResponseToolArg,
-  drainResponseRefusalText,
-  drainResponseToolBuffer,
-  extractResponseToolId,
-  outputIndexKey,
-  refusalKey,
-  replayBufferedToolArgs,
-  toolDeltaFromRef,
-} from './responseToolCalls';
-import { applyResponseCompletion, IGNORED_RESPONSE_EVENT_TYPES } from './responseMetadata';
-import { createThinkTagSplitter } from './thinkTagSplitter';
+import { drainResponseRefusalText, drainResponseToolBuffer } from './responseToolCalls';
+import { IGNORED_RESPONSE_EVENT_TYPES } from './responseMetadata';
+import { handleResponseTerminalEvent } from './responseTerminalEvents';
+import { handleResponseErrorEvent } from './responseErrorEvents';
+import { handleResponseRefusalEvent } from './responseRefusalEvents';
+import { handleResponseTextEvent } from './responseTextEvents';
+import { handleResponseToolEvent } from './responseToolEvents';
 
+// Re-exported so `openai.ts` (and the public `Connector` flush path) can drain
+// orphan tool-call / refusal buffers without importing `responseToolCalls.ts`.
 export { drainResponseToolBuffer, drainResponseRefusalText };
 
+/** A focused handler for one Responses API event group: `(obj, state) => result | null`. */
+type ResponseEventHandler = (obj: Record<string, unknown>, state: OpenAIConnectorState) => ConnectorResult | null;
+
+/**
+ * Dispatch table for the OpenAI Responses API (`response.*`) streaming
+ * protocol — the file's at-a-glance map of every handled event type. Several
+ * types share one handler because they form a single lifecycle (refusal
+ * added/delta/done, the reasoning-delta variants, the tool-call
+ * added/done/arguments events). Each handler lives in a sibling `response*Events.ts`
+ * file and is a pure function of `(obj, state)`.
+ *
+ * Types absent here yield `null`; `IGNORED_RESPONSE_EVENT_TYPES` lifecycle
+ * signals are filtered out by the dispatcher before this table is consulted.
+ */
+const RESPONSE_EVENT_HANDLERS: Record<string, ResponseEventHandler> = {
+  // terminal / completion — see responseTerminalEvents.ts
+  'response.completed': handleResponseTerminalEvent,
+  'response.incomplete': handleResponseTerminalEvent,
+  // failure / error — see responseErrorEvents.ts
+  'response.failed': handleResponseErrorEvent,
+  'response.error': handleResponseErrorEvent,
+  // refusal lifecycle — see responseRefusalEvents.ts
+  'response.refusal.added': handleResponseRefusalEvent,
+  'response.refusal.delta': handleResponseRefusalEvent,
+  'response.refusal.done': handleResponseRefusalEvent,
+  // text / reasoning deltas — see responseTextEvents.ts
+  'response.output_text.delta': handleResponseTextEvent,
+  'response.reasoning_summary_text.delta': handleResponseTextEvent,
+  'response.reasoning_text.delta': handleResponseTextEvent,
+  'response.reasoning_summary.delta': handleResponseTextEvent,
+  // tool-call lifecycle — see responseToolEvents.ts
+  'response.output_item.added': handleResponseToolEvent,
+  'response.output_item.done': handleResponseToolEvent,
+  'response.function_call_arguments.delta': handleResponseToolEvent,
+};
+
+/**
+ * Thin dispatcher for the OpenAI Responses API (`response.*`) streaming
+ * protocol. Filters out explicitly-ignored lifecycle events, then routes the
+ * typed event to its focused handler via `RESPONSE_EVENT_HANDLERS`. Unhandled
+ * event types return `null`.
+ */
 export function extractOpenAIResponseEvent(obj: Record<string, unknown>, state: OpenAIConnectorState): ConnectorResult | null {
   const type = typeof obj.type === 'string' ? obj.type : '';
-  const result: ConnectorResult = {};
-
   if (IGNORED_RESPONSE_EVENT_TYPES.has(type)) return null;
-
-  // `response.incomplete` is a separate terminal event the API emits when a
-  // response stops early (e.g. `max_output_tokens`); treat it exactly like
-  // `response.completed` so the stream ends and `applyResponseCompletion`
-  // still surfaces token usage plus the truncation finish reason / warning.
-  if (type === 'response.completed' || type === 'response.incomplete') {
-    mergeResult(result, createThinkTagSplitter(state.thinkState, state.thinkTags).flush());
-    // Replay tool-call deltas whose `output_item.added` was dropped entirely.
-    for (const toolDelta of drainResponseToolBuffer(state)) appendToolDelta(result, toolDelta);
-    applyResponseCompletion(result, obj);
-    // Surface any refusal buffered across `refusal.added`/`.delta` that never
-    // got its closing `refusal.done`, mirroring the orphan-tool-arg drain above —
-    // otherwise the refusal is silently lost and the turn renders blank.
-    const refusal = drainResponseRefusalText(state);
-    if (refusal) {
-      result.error = refusal;
-      result.errorPayload = obj;
-    }
-    result.done = true;
-    return result;
-  }
-
-  if (type === 'response.failed') {
-    // The provider's real failure message lives at `response.error.message`;
-    // `extractErrorMessage` only inspects a top-level `error` and
-    // `collectTextFragments` digs for text/summary/content, so without this the
-    // generic fallback always wins.
-    const response = obj.response && typeof obj.response === 'object'
-      ? obj.response as Record<string, unknown>
-      : undefined;
-    const responseError = response?.error && typeof response.error === 'object'
-      ? response.error as Record<string, unknown>
-      : undefined;
-    const error = stringFromUnknown(responseError?.message)
-      || extractErrorMessage(obj)
-      || collectTextFragments(obj.response)
-      || 'OpenAI response failed';
-    return { error, errorPayload: obj };
-  }
-
-  // Inline (non-terminal in the protocol, but terminal for our UI) error event.
-  if (type === 'response.error') {
-    const error = extractErrorMessage(obj) || stringFromUnknown(obj.message) || stringFromUnknown(obj.code) || 'OpenAI response error';
-    return { error, errorPayload: obj };
-  }
-
-  if (type === 'response.refusal.added') {
-    state.responseRefusalText.set(refusalKey(obj), '');
-    return null;
-  }
-
-  if (type === 'response.refusal.delta') {
-    const key = refusalKey(obj);
-    const delta = stringFromUnknown(obj.delta);
-    if (delta) state.responseRefusalText.set(key, (state.responseRefusalText.get(key) ?? '') + delta);
-    return null;
-  }
-
-  if (type === 'response.refusal.done') {
-    const key = refusalKey(obj);
-    const finalText = stringFromUnknown(obj.refusal) || state.responseRefusalText.get(key) || 'OpenAI model refused to respond';
-    state.responseRefusalText.delete(key);
-    return { error: finalText, errorPayload: obj };
-  }
-
-  if (type === 'response.output_text.delta') {
-    const text = stringFromUnknown(obj.delta);
-    if (text) mergeResult(result, createThinkTagSplitter(state.thinkState, state.thinkTags).feed(text));
-  }
-
-  if (
-    type === 'response.reasoning_summary_text.delta' ||
-    type === 'response.reasoning_text.delta' ||
-    type === 'response.reasoning_summary.delta'
-  ) {
-    const reasoning = collectTextFragments(obj.delta) || collectTextFragments(obj.text);
-    if (reasoning) appendField(result, 'reasoning', reasoning);
-  }
-
-  if (type === 'response.output_item.added' || type === 'response.output_item.done') {
-    const item = obj.item && typeof obj.item === 'object' ? obj.item as Record<string, unknown> : undefined;
-    if (item?.type === 'function_call') {
-      const callId = stringFromUnknown(item.call_id);
-      const itemId = stringFromUnknown(item.id);
-      const indexKey = outputIndexKey(obj);
-      const id = callId || itemId || indexKey || 'openai-response-output-0';
-      const name = stringFromUnknown(item.name);
-      const ref: ResponseToolRef = callId ? { id, providerId: callId } : { id };
-
-      // Register the resolved identity under every key a delta might use so
-      // earlier and later deltas collapse onto this single tool block.
-      if (itemId) state.responseToolAliases.set(itemId, ref);
-      if (indexKey) state.responseToolAliases.set(indexKey, ref);
-
-      const toolDelta: ConnectorToolDelta = { id, provider: 'openai' };
-      if (callId) toolDelta.providerId = callId;
-      else toolDelta.generated = true;
-      if (name) toolDelta.name = name;
-      // `output_item.done` carries the COMPLETE accumulated `arguments` string,
-      // but the `function_call_arguments.delta` events already streamed every
-      // fragment and the downstream accumulator concatenates string inputs — so
-      // re-emitting it here would double the arguments into invalid JSON. Only
-      // `.added` (whose `arguments` is empty) seeds the input; `.done` just
-      // confirms the call's id/name.
-      if (type === 'response.output_item.added' && hasOwn(item, 'arguments')) toolDelta.input = item.arguments;
-      appendToolDelta(result, toolDelta);
-
-      // Replay deltas that arrived before this event resolved the call id.
-      replayBufferedToolArgs(state, itemId, ref, result);
-      replayBufferedToolArgs(state, indexKey, ref, result);
-    }
-  }
-
-  if (type === 'response.function_call_arguments.delta') {
-    const rawId = extractResponseToolId(obj);
-    if (rawId) {
-      const ref = state.responseToolAliases.get(rawId);
-      // Buffer until `output_item.added` resolves the call id; otherwise a late
-      // `output_item.added` would split this call across two tool blocks.
-      if (ref) appendToolDelta(result, toolDeltaFromRef(ref, obj.delta));
-      else bufferResponseToolArg(state, rawId, obj.delta);
-    }
-  }
-
-  return result.text || result.reasoning || hasToolDelta(result) || result.done || result.error ? result : null;
+  return RESPONSE_EVENT_HANDLERS[type]?.(obj, state) ?? null;
 }
