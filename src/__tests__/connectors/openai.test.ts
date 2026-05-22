@@ -230,6 +230,36 @@ describe('openaiConnector', () => {
     expect(result?.done).toBe(true);
   });
 
+  it('surfaces token usage from a trailing Chat Completions { choices: [], usage } chunk', () => {
+    // OpenAI Chat Completions with `stream_options: { include_usage: true }`
+    // emits a final chunk with an empty `choices` array and a top-level `usage`.
+    const data = JSON.stringify({
+      choices: [],
+      usage: { prompt_tokens: 11, completion_tokens: 6, total_tokens: 17 },
+    });
+    expect(openaiConnector.extract(data)).toEqual({
+      metadata: { usage: { promptTokens: 11, completionTokens: 6, totalTokens: 17 } },
+    });
+  });
+
+  it('returns null for an empty Chat Completions choices array with no usage', () => {
+    expect(openaiConnector.extract(JSON.stringify({ choices: [] }))).toBeNull();
+  });
+
+  it('surfaces usage attached to the final content chunk alongside finish_reason', () => {
+    // Some OpenAI-compatible proxies attach `usage` to the last content chunk
+    // rather than a separate trailing chunk.
+    const data = JSON.stringify({
+      choices: [{ delta: { content: 'done' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 4, completion_tokens: 2, total_tokens: 6 },
+    });
+    expect(openaiConnector.extract(data)).toEqual({
+      text: 'done',
+      done: true,
+      metadata: { finishReason: 'stop', usage: { promptTokens: 4, completionTokens: 2, totalTokens: 6 } },
+    });
+  });
+
   it('flushes a buffered partial think tag when finish_reason ends the stream', () => {
     const state = openaiConnector.createState?.();
     expect(openaiConnector.extract(JSON.stringify({ choices: [{ index: 0, delta: { content: 'hi <' } }] }), state)).toEqual({ text: 'hi ' });

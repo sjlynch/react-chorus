@@ -1,5 +1,6 @@
 import type { ConnectorResult } from '../types';
-import { numberFromUnknown, stringFromUnknown } from './shared';
+import { extractUsage } from '../usage';
+import { stringFromUnknown } from './shared';
 
 /**
  * Response events we deliberately ignore (lifecycle signals with no useful UI payload).
@@ -11,19 +12,6 @@ export const IGNORED_RESPONSE_EVENT_TYPES = new Set([
   'response.created',
   'response.output_item.started',
 ]);
-
-export function extractResponseUsage(usage: unknown): Record<string, number> | undefined {
-  if (!usage || typeof usage !== 'object') return undefined;
-  const u = usage as Record<string, unknown>;
-  const out: Record<string, number> = {};
-  const promptTokens = numberFromUnknown(u.input_tokens ?? u.prompt_tokens);
-  const completionTokens = numberFromUnknown(u.output_tokens ?? u.completion_tokens);
-  const totalTokens = numberFromUnknown(u.total_tokens);
-  if (promptTokens !== undefined) out.promptTokens = promptTokens;
-  if (completionTokens !== undefined) out.completionTokens = completionTokens;
-  if (totalTokens !== undefined) out.totalTokens = totalTokens;
-  return Object.keys(out).length > 0 ? out : undefined;
-}
 
 // `incomplete_details.reason` values (carried on `response.completed` and the
 // terminal `response.incomplete` event) that mean the response was cut short —
@@ -47,7 +35,7 @@ export function applyResponseCompletion(result: ConnectorResult, obj: Record<str
     : undefined;
   if (!response) return;
 
-  const usage = extractResponseUsage(response.usage);
+  const usage = extractUsage(response.usage);
   if (usage) result.metadata = { ...(result.metadata ?? {}), usage };
 
   const incompleteDetails = response.incomplete_details && typeof response.incomplete_details === 'object'
