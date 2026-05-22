@@ -101,6 +101,42 @@ describe('Chorus error bridging', () => {
     expect(await screen.findByText('Something went wrong. Please try again.')).toBeInTheDocument();
   });
 
+  it('surfaces a bridged streamCallbacks() error even when onSend does not return the send() promise', async () => {
+    const user = userEvent.setup();
+    const bridgeTransport = vi.fn<Transport>(async () => new Response('bad gateway', { status: 502, statusText: 'Bad Gateway' }));
+    const onError = vi.fn();
+
+    function Bridge() {
+      const { send } = useChorusStream(bridgeTransport);
+      return (
+        <Chorus
+          minAssistantDelayMs={0}
+          onError={onError}
+          onSend={(text, messages, helpers) => {
+            // Fire-and-forget: the send() promise is intentionally neither
+            // returned nor awaited, so onSend resolves void before the stream
+            // errors. The bundled streamCallbacks().onError is the only path
+            // left to surface the failure. `.catch` only swallows the
+            // already-reported rejection so the test sees no unhandled reject.
+            send(text, messages, helpers.streamCallbacks?.() ?? {
+              onChunk: helpers.appendAssistant,
+              onDone: helpers.finalizeAssistant,
+            }, helpers.signal).catch(() => {});
+          }}
+        />
+      );
+    }
+
+    render(<Bridge />);
+
+    await sendMessage(user, 'boom');
+
+    await waitFor(() => expect(onError).toHaveBeenCalledOnce());
+    expect(onError.mock.calls[0][0]).toBeInstanceOf(Error);
+    expect(onError.mock.calls[0][0].message).toContain('HTTP 502 Bad Gateway: bad gateway');
+    expect(await screen.findByText('Something went wrong. Please try again.')).toBeInTheDocument();
+  });
+
   it('onSend non-abort error invokes onError with the Error object', async () => {
     const user = userEvent.setup();
     const onError = vi.fn();
