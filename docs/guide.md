@@ -3,6 +3,7 @@
 How to send messages, stream responses, and parse provider formats with react-chorus.
 
 - [Two usage paths](#two-usage-paths) — the `transport` prop, the `onSend` callback, and auth headers
+- [Changing the system prompt at runtime](#changing-the-system-prompt-at-runtime) — multi-persona toggles, per-conversation prompts, regenerate semantics
 - [Using the WebSocket transport](#using-the-websocket-transport)
 - [Provider request/body helpers](#provider-requestbody-helpers)
 - [Connectors](#connectors)
@@ -75,7 +76,7 @@ Seed an uncontrolled chat with a welcome message and include a hidden system pro
 />
 ```
 
-`systemPrompt` is prepended to the request `history` sent through the `transport` prop but is not rendered in the transcript. On the advanced `onSend` path, Chorus does not mutate the `messages` array; read the same value from `helpers.systemPrompt` when building your custom request.
+`systemPrompt` is prepended to the request `history` sent through the `transport` prop but is not rendered in the transcript. On the advanced `onSend` path, Chorus does not mutate the `messages` array; read the same value from `helpers.systemPrompt` when building your custom request. To swap the prompt at runtime — multi-persona toggles, per-conversation prompts, localized system text — see [Changing the system prompt at runtime](#changing-the-system-prompt-at-runtime).
 
 ### Advanced path — `onSend` callback
 
@@ -250,6 +251,107 @@ app.post('/api/chat', async (req, res) => {
 
 app.listen(3001);
 ```
+
+## Changing the system prompt at runtime
+
+`systemPrompt` is a regular React prop, so swapping its value on a re-render is supported. Common drivers are a user-toggleable persona (Support vs. Sales), a per-conversation prompt loaded with `persistenceKey`, or a localized prompt that follows the UI language. This section spells out exactly when a new value takes effect, how Regenerate interacts with a swap, and how the synthetic system message coexists with a host-supplied `role: 'system'` row in `value` / `initialMessages`.
+
+### Synthetic system message contract
+
+When `systemPrompt` is set, Chorus injects a single synthetic message into outbound request `history`:
+
+```ts
+{ id: RESERVED_SYSTEM_PROMPT_ID, role: 'system', text: systemPrompt }
+```
+
+- The id is exported from `react-chorus`, `react-chorus/server`, and `react-chorus/provider-requests` so request mappers, proxies, and tests can recognise the Chorus-injected row without hard-coding the literal. Host-authored messages must not reuse this id.
+- The synthetic message is **never stored on the transcript.** It is built fresh from `systemPrompt` at the moment a turn is dispatched and prepended to the `history` argument that `transport`'s `formatBody` / `createFetchSSETransport` sees. It does not flow through `value` / `onChange` / `onMessagesChange` and it is not persisted by `persistenceKey`.
+- Only the simple `transport` path mutates `history`. On the `onSend` path Chorus leaves `messages` alone — read the current prompt from `helpers.systemPrompt` and decide how to merge it yourself (the `onSend` snippet above shows the canonical "skip if a host system message already exists" guard).
+
+### When a swapped value takes effect
+
+`systemPrompt` is read at send time, not render time, through a latest-ref. Concretely:
+
+- Changing `systemPrompt` and re-rendering does **not** retroactively rewrite past turns. The transcript is unchanged and no extra request goes out.
+- The very next turn dispatched after the swap — whether triggered by Send, retry after an error, or Regenerate — uses the new value. Earlier assistant messages stay rendered exactly as the server originally produced them.
+- This applies on both paths. Built-in `transport` reads the latest `systemPrompt` when building request `history`; `onSend` reads it from `helpers.systemPrompt` on every invocation.
+
+In other words: think of `systemPrompt` as configuration for the *next* outbound request, not as a piece of conversation state. If you need a system instruction that is itself a permanent part of the transcript (visible to the user, included in copy-conversation export, restored from persistence), put a `role: 'system'` row into `value` / `initialMessages` instead — see the precedence rules below.
+
+### Regenerate after a swap
+
+Regenerate (and Retry-on-error) truncate the transcript back to the last user turn and dispatch a fresh request. Because the request is built at dispatch time, **a Regenerate after the prompt swapped uses the new prompt, not the original one.** This is the intended behaviour for the multi-persona / model-switch use case: after the user picks a different persona, the next attempt should reflect that choice. Edit-and-resubmit on an earlier user message behaves the same way.
+
+If you need to preserve the prompt that was actually used for a given assistant response — for audit logs, "Why did the assistant say this?" debugging, evals — record it in `onFinish` / `onStreamDone` (which receive the assistant message) or stamp it into `Message.metadata` inside `onSend` so it travels with the row. The synthetic system message does not carry that history on its own.
+
+### Precedence vs. a host-supplied `role: 'system'` row
+
+Chorus does **not** merge, dedupe, or replace host system rows. If you set `systemPrompt` *and* include a `{ role: 'system', text: ... }` entry in `value` / `initialMessages`, both reach the request `history`: the synthetic message is prepended at index 0, and the host-authored row stays at its original position. What the provider then sees depends on the request mapper:
+
+- `toAnthropicMessagesBody` and `toGeminiGenerateContentBody` join every `role: 'system'` text in history with `\n\n` and emit a single `system` / `systemInstruction`. Both prompts are concatenated, synthetic first.
+- `toOpenAIChatCompletionsBody`, `toOpenAIResponsesBody`, and `toAiSdkModelMessages` keep each system row as its own input message, in order. The provider receives two system messages.
+- If a caller also passes an explicit `system` (Anthropic) or `systemInstruction` (Gemini) option to the helper, that caller value wins over both history sources and a dev-mode warn-once fires so the dropped history text is observable.
+
+For most apps the merged behaviour is fine — the runtime `systemPrompt` acts as a global preamble while a host-authored `system` row supplies conversation-specific instructions. If you instead need the host row to *replace* the synthetic one (e.g. a per-conversation persona stored alongside messages), drop `systemPrompt` once a host row is present, or filter by `RESERVED_SYSTEM_PROMPT_ID` in a custom `formatBody` / proxy:
+
+```ts
+import { createFetchSSETransport, RESERVED_SYSTEM_PROMPT_ID } from 'react-chorus';
+
+const transport = createFetchSSETransport('/api/chat', {
+  formatBody: (prompt, history) => {
+    const hasHostSystem = history.some(
+      (m) => m.role === 'system' && m.id !== RESERVED_SYSTEM_PROMPT_ID,
+    );
+    const filtered = hasHostSystem
+      ? history.filter((m) => m.id !== RESERVED_SYSTEM_PROMPT_ID)
+      : history;
+    return JSON.stringify({ prompt, history: filtered });
+  },
+});
+```
+
+### Recipe: multi-persona toggle
+
+A minimal persona switcher that compiles against the current public API. The transcript stays intact across persona changes; only the next turn uses the new system prompt.
+
+```tsx
+import 'react-chorus/styles.css';
+import React from 'react';
+import { Chorus } from 'react-chorus';
+import type { Message } from 'react-chorus';
+
+const PERSONAS = {
+  support: 'You are a calm, concise customer-support assistant. Cite docs when relevant.',
+  sales: 'You are an upbeat sales assistant. Highlight value and offer to book a demo.',
+} as const;
+
+type PersonaId = keyof typeof PERSONAS;
+
+export default function App() {
+  const [persona, setPersona] = React.useState<PersonaId>('support');
+  const [messages, setMessages] = React.useState<Message[]>([]);
+
+  return (
+    <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column' }}>
+      <label style={{ padding: 8 }}>
+        Persona:{' '}
+        <select value={persona} onChange={(e) => setPersona(e.target.value as PersonaId)}>
+          <option value="support">Support</option>
+          <option value="sales">Sales</option>
+        </select>
+      </label>
+      <Chorus
+        value={messages}
+        onChange={setMessages}
+        transport="/api/chat"
+        systemPrompt={PERSONAS[persona]}
+      />
+    </div>
+  );
+}
+```
+
+Swapping the dropdown re-renders `<Chorus>` with a new `systemPrompt`. Existing rendered messages keep their text. The next Send — and any Regenerate on the most recent user turn — goes out under the newly selected persona.
 
 ## Using the WebSocket transport
 
