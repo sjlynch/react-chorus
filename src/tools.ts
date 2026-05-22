@@ -75,9 +75,11 @@ export type ChorusToolRegistry<TMeta = Record<string, unknown>> =
 
 /**
  * Flatten any accepted registry shape into a deduplicated array of definitions
- * for serialization. Bare handlers are skipped — they have no schema to
- * advertise. Record keys override `definition.name` so the public tool name
- * always matches the dispatch key.
+ * for serialization. Bare function handlers are skipped — they have no schema
+ * to advertise — but a handler-less definition object is kept (the documented
+ * server-side-execution escape hatch), mirroring the array-path filter. Record
+ * keys override `definition.name` so the public tool name always matches the
+ * dispatch key.
  */
 export function toToolDefinitionList<TMeta>(
   registry: ChorusToolRegistry<TMeta> | ChorusToolDefinition<TMeta>[] | undefined,
@@ -88,8 +90,11 @@ export function toToolDefinitionList<TMeta>(
   const out: ChorusToolDefinition<TMeta>[] = [];
   for (const [name, entry] of Object.entries(registry)) {
     if (!name) continue;
+    // Skip only bare function handlers: they carry no schema to advertise. Any
+    // other value is a definition object — possibly handler-less — and is kept,
+    // with the record key supplying `name`. Requiring a `handler` here dropped
+    // pure-definition records, silently omitting the `tools` array.
     if (!entry || typeof entry === 'function') continue;
-    if (typeof entry.handler !== 'function') continue;
     out.push({ ...entry, name });
   }
   return out;

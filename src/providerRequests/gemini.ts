@@ -123,10 +123,13 @@ export function toGeminiContents<TMeta = Record<string, unknown>>(
     mapMessage: message => toGeminiContent(message, options),
     // `toolCall` is required on `ToolMessage` at the type level, but the
     // request mappers tolerate loose runtime history (raw JSON, hand-built
-    // entries, connector bugs). Guard it like the other three mappers so a
-    // `{ role: 'tool' }` entry missing `toolCall` delegates to the guarded
-    // text fallback instead of throwing deep inside `toGeminiContents`.
-    extractToolBlock: message => message.toolCall?.name || null,
+    // entries, connector bugs). Guard it like the other three mappers: a
+    // `{ role: 'tool' }` entry missing `toolCall` delegates to the text
+    // fallback, while a present `toolCall` keeps the structured call — falling
+    // back to the `'tool'` name when `name` is empty, matching OpenAI Chat,
+    // OpenAI Responses, and Anthropic. Keying off `name` alone routed an
+    // empty-string name to the prose fallback only on Gemini.
+    extractToolBlock: message => (message.toolCall ? message.toolCall.name || 'tool' : null),
     emitToolGroup: (target, pairs) => {
       appendGeminiFunctionCalls(target, pairs.map(entry => geminiFunctionCallPart(entry.message, entry.block)));
       target.push({ role: 'user', parts: pairs.map(entry => geminiFunctionResponsePart(entry.message, entry.block)) });

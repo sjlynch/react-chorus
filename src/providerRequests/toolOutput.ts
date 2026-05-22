@@ -24,8 +24,13 @@ export function toolOutputValue<TMeta>(message: Message<TMeta>) {
 
 export function toolOutputText<TMeta>(message: Message<TMeta>) {
   const text = messageText(message).trim();
-  const rendered = safeStringify(toolOutputValue(message));
-  return rendered || text;
+  // Resolve via `toolOutputValue` (keyed off `hasOwn`, not `||`) so an explicit
+  // empty-string `toolCall.output` is honored: `safeStringify('') || text`
+  // would otherwise fall through to the streamed message text, leaking partial
+  // text into OpenAI Chat/Responses and Anthropic tool results — a divergence
+  // from Gemini, which already resolves the output through `toolOutputValue`.
+  const value = toolOutputValue(message);
+  return value === undefined ? text : safeStringify(value);
 }
 
 export function compactJSONString(value: unknown) {

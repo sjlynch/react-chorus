@@ -148,7 +148,11 @@ describe('Gemini provider request mapping', () => {
     ]);
   });
 
-  it('falls back to safe Gemini text context for malformed tool messages without a name', () => {
+  it('keeps a structured tool call (named `tool`) for a tool message with an empty `name`', () => {
+    // An empty-string `toolCall.name` no longer routes the Gemini tool message
+    // to the prose fallback — it keeps the structured functionCall /
+    // functionResponse named `tool`, matching OpenAI Chat, OpenAI Responses,
+    // and Anthropic.
     expect(toGeminiGenerateContentBody([
       {
         id: 'tool',
@@ -158,8 +162,12 @@ describe('Gemini provider request mapping', () => {
       },
     ]).contents).toEqual([
       {
+        role: 'model',
+        parts: [{ functionCall: { name: 'tool', args: { q: 'x' } } }],
+      },
+      {
         role: 'user',
-        parts: [{ text: 'Tool call tool\nInput:\n{\n  "q": "x"\n}\nOutput:\n{\n  "error": "missing name"\n}' }],
+        parts: [{ functionResponse: { name: 'tool', response: { error: 'missing name' } } }],
       },
     ]);
   });

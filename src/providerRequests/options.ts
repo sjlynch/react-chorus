@@ -1,4 +1,4 @@
-import type { Message } from '../types';
+import type { Message, SystemMessage } from '../types';
 import { toToolDefinitionList } from '../tools';
 import { warnOnceInDev } from './devWarn';
 import { isRecord } from './metadata';
@@ -36,18 +36,25 @@ function isChorusToolDefinitionItem(item: unknown): boolean {
 
 /**
  * Tools is Chorus-shaped when it's an array of `ChorusToolDefinition`-shaped
- * items (with or without a `handler`) or a record whose values are functions /
- * objects with `handler`. Plain provider tool arrays (OpenAI/Anthropic/Gemini
- * shapes) fall through as the escape hatch.
+ * items (with or without a `handler`) or a record whose values are handler
+ * functions or definition objects (again, with or without a `handler`). Plain
+ * provider tool arrays (OpenAI/Anthropic/Gemini shapes) fall through as the
+ * escape hatch — a record is always a Chorus registry, never a raw escape hatch.
  */
 function isChorusToolsSource(tools: unknown): tools is ProviderToolsOption<unknown> {
   if (Array.isArray(tools)) {
     return tools.some(isChorusToolDefinitionItem);
   }
   if (tools && typeof tools === 'object') {
+    // A record registry's values are handler functions or definition objects;
+    // a definition may be handler-less (the server-side-execution escape
+    // hatch), so recognizing only `handler` functions here misrouted a
+    // pure-definition record to the raw branch, forwarding a bare object on
+    // `tools`. Stays consistent with `toToolDefinitionList`, which keeps every
+    // non-function object record entry.
     for (const value of Object.values(tools as Record<string, unknown>)) {
       if (typeof value === 'function') return true;
-      if (value && typeof value === 'object' && typeof (value as { handler?: unknown }).handler === 'function') return true;
+      if (value && typeof value === 'object') return true;
     }
   }
   return false;
@@ -73,9 +80,13 @@ function warnEmptyGeminiToolGroups(tools: unknown[]): void {
 type ToolSerializer<T> = (source: ProviderToolsOption<unknown>) => T[];
 
 export function systemTextFromHistory(history: Message<unknown>[]) {
+  // Emit the *trimmed* system text: the emptiness filter already trims, but the
+  // mapped value must trim too so leading/trailing whitespace never survives
+  // into the Anthropic `system` string or the Gemini `systemInstruction` —
+  // matching `chatCompletions.ts` and `messageTextParts`, which both trim.
   const system = history
-    .filter(message => message.role === 'system' && message.text.trim())
-    .map(message => message.text)
+    .filter((message): message is SystemMessage<unknown> => message.role === 'system' && Boolean(message.text.trim()))
+    .map(message => message.text.trim())
     .join('\n\n');
   return system || undefined;
 }
