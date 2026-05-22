@@ -1,32 +1,16 @@
 import 'react-chorus/styles.css';
-import { Chorus, createFetchSSETransport, useChorusStream } from 'react-chorus';
-import type { ChorusOnSend, Message } from 'react-chorus';
-import React from 'react';
+import { Chorus, createFetchSSETransport } from 'react-chorus';
 
 // Transport posts { prompt, history } to /api/chat and reads back an SSE stream.
 // Vite proxies /api → http://localhost:3001 in dev (see vite.config.ts).
 const transport = createFetchSSETransport('/api/chat');
 
 export default function App() {
-  const [messages, setMessages] = React.useState<Message[]>([]);
-  const { send, sending } = useChorusStream(transport, { connector: 'openai' });
-
-  const handleSend: ChorusOnSend = async (text, msgs, helpers) => {
-    await send(
-      text,
-      msgs,
-      helpers.streamCallbacks?.() ?? { onChunk: helpers.appendAssistant, onDone: helpers.finalizeAssistant },
-      helpers.signal
-    );
-  };
-
   return (
     <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column' }}>
       <Chorus
-        value={messages}
-        onChange={setMessages}
-        onSend={handleSend}
-        sending={sending}
+        transport={transport}
+        connector="openai"
         placeholder="Type a message and press Enter…"
         accept="image/*"
         maxAttachmentBytes={2 * 1024 * 1024}
