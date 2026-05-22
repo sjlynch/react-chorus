@@ -55,6 +55,14 @@ function libraryManualChunks(id: string) {
   // it the icon chunk — into a standalone `ConversationList` import.
   if (normalizedId.endsWith('/src/components/ChorusTheme.tsx')) return 'chat-input';
   if (normalizedId.endsWith('/src/hooks/useAssistantSession.ts') || normalizedId.includes('/src/hooks/assistant-session/') || normalizedId.endsWith('/src/hooks/useChorusMessages.ts') || normalizedId.endsWith('/src/hooks/useRAFQueue.ts')) return 'chorus-session';
+  // transcriptFormatters.ts (per-message Copy + transcript export) and
+  // sourceDisplayLabel.ts (source-label rendering) are pure, leaf-level helpers
+  // shared by the ChatWindow graph and useChorusTranscriptActions. Park them in
+  // their own micro-chunk: ChatWindow imports both, so without this they get
+  // grouped into — and make ChatWindow statically pull in — the chorus-session
+  // chunk. (appendMessageSource stays in messageSources.ts, which only the
+  // assistant-session buffer imports, so it rides with chorus-session.)
+  if (normalizedId.endsWith('/src/hooks/transcriptFormatters.ts') || normalizedId.endsWith('/src/utils/sourceDisplayLabel.ts')) return 'transcript-helpers';
   // tools.ts is shared by the chorus-session graph (handler lookup) and the
   // provider-requests subpath (defineTool, tool-definition serialization).
   // Park it in its own micro-chunk so importing one side does not drag in the other.

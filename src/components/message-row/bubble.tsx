@@ -6,7 +6,7 @@ import { DEFAULT_SOURCE_LABELS } from '../../labels/sources';
 import type { ChorusAttachmentLabels, ChorusCodeCopyLabels, ChorusSourceLabels, ChorusSpeakerLabels, ChorusToolCallLabels } from '../../labels/types';
 import { getAttachmentPreviewSource } from '../../utils/attachmentPreview';
 import { joinClasses } from '../../utils/className';
-import { sourceDisplayLabel } from '../../utils/messageSources';
+import { sourceDisplayLabel } from '../../utils/sourceDisplayLabel';
 import { Markdown, type MarkdownSanitizer } from '../Markdown';
 import { ToolCallBlock } from '../ToolCallBlock';
 import { defaultFormatMessageTimestamp } from './formatTimestamp';
@@ -158,14 +158,6 @@ export interface MessageBubbleLayoutProps<TMeta = Record<string, unknown>> exten
   sourceLabels?: ChorusSourceLabels;
   /** Label overrides for the tool-call block rendered for `role: 'tool'` messages. */
   toolCallLabels?: Partial<ChorusToolCallLabels>;
-  /**
-   * Extra class names forwarded to the embedded `<ToolCallBlock>` root for
-   * `role: 'tool'` messages. Lets a custom shell hang its own styling hook on
-   * the tool-call wrapper without replacing the renderer.
-   */
-  toolCallClassName?: string;
-  /** Inline style forwarded to the embedded `<ToolCallBlock>` root for `role: 'tool'` messages. */
-  toolCallStyle?: React.CSSProperties;
   /** Render the message's `createdAt` time below the bubble. Off by default. */
   showTimestamp?: boolean;
   /** Override the locale-aware default timestamp formatting. Only used when `showTimestamp` is true. */
@@ -173,7 +165,7 @@ export interface MessageBubbleLayoutProps<TMeta = Record<string, unknown>> exten
   children?: React.ReactNode;
 }
 
-export function MessageBubbleLayout<TMeta = Record<string, unknown>>({ message, codeTheme, headless, streaming = false, markdownProps, markdownSanitizer, reasoningLabel, codeCopyLabels, attachmentLabels, sourceLabels, toolCallLabels, toolCallClassName, toolCallStyle, showTimestamp = false, formatTimestamp, before, headerSlot, footerSlot, after, children }: MessageBubbleLayoutProps<TMeta>) {
+export function MessageBubbleLayout<TMeta = Record<string, unknown>>({ message, codeTheme, headless, streaming = false, markdownProps, markdownSanitizer, reasoningLabel, codeCopyLabels, attachmentLabels, sourceLabels, toolCallLabels, showTimestamp = false, formatTimestamp, before, headerSlot, footerSlot, after, children }: MessageBubbleLayoutProps<TMeta>) {
   const text = message.text ?? '';
   const hasAttachments = Boolean(message.attachments?.length);
   const hasBubbleText = text.trim().length > 0;
@@ -216,7 +208,7 @@ export function MessageBubbleLayout<TMeta = Record<string, unknown>>({ message, 
           // (or nothing, since `shouldRenderBubble` is false for an empty-text
           // tool message). `message.text`, when present, renders above as a
           // host-authored summary.
-          <ToolCallBlock toolCall={message.toolCall} labels={toolCallLabels} streaming={streaming} className={toolCallClassName} style={toolCallStyle} />
+          <ToolCallBlock toolCall={message.toolCall} labels={toolCallLabels} streaming={streaming} />
         )}
         <MessageSources sources={message.sources} labels={sourceLabels} />
         {showTimestamp && <MessageTimestamp message={message} formatTimestamp={formatTimestamp} />}
@@ -245,21 +237,13 @@ export interface MessageBubbleProps<TMeta = Record<string, unknown>> extends Mes
   sourceLabels?: ChorusSourceLabels;
   /** Label overrides for the tool-call block rendered for `role: 'tool'` messages. */
   toolCallLabels?: Partial<ChorusToolCallLabels>;
-  /**
-   * Extra class names forwarded to the embedded `<ToolCallBlock>` root for
-   * `role: 'tool'` messages. Lets a custom shell hang its own styling hook on
-   * the tool-call wrapper without replacing the renderer.
-   */
-  toolCallClassName?: string;
-  /** Inline style forwarded to the embedded `<ToolCallBlock>` root for `role: 'tool'` messages. */
-  toolCallStyle?: React.CSSProperties;
   /** Render the message's `createdAt` time below the bubble. Off by default. */
   showTimestamp?: boolean;
   /** Override the locale-aware default timestamp formatting. Only used when `showTimestamp` is true. */
   formatTimestamp?: MessageTimestampFormatter<TMeta>;
 }
 
-export function MessageBubble<TMeta = Record<string, unknown>>({ message, className, style, codeTheme = 'dark', headless, streaming = false, markdownProps, markdownSanitizer, reasoningLabel, codeCopyLabels, speakerLabels, attachmentLabels, sourceLabels, toolCallLabels, toolCallClassName, toolCallStyle, showTimestamp, formatTimestamp, before, headerSlot, footerSlot, after }: MessageBubbleProps<TMeta>) {
+export function MessageBubble<TMeta = Record<string, unknown>>({ message, className, style, codeTheme = 'dark', headless, streaming = false, markdownProps, markdownSanitizer, reasoningLabel, codeCopyLabels, speakerLabels, attachmentLabels, sourceLabels, toolCallLabels, showTimestamp, formatTimestamp, before, headerSlot, footerSlot, after }: MessageBubbleProps<TMeta>) {
   const renderState = React.useContext(MessageRenderStateContext);
   if (renderState?.messageId === message.id && renderState.isEditing) return null;
 
@@ -279,8 +263,6 @@ export function MessageBubble<TMeta = Record<string, unknown>>({ message, classN
         attachmentLabels={attachmentLabels}
         sourceLabels={sourceLabels}
         toolCallLabels={toolCallLabels}
-        toolCallClassName={toolCallClassName}
-        toolCallStyle={toolCallStyle}
         showTimestamp={showTimestamp}
         formatTimestamp={formatTimestamp}
         before={before}

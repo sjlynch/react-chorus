@@ -168,7 +168,7 @@ export { RESERVED_SYSTEM_PROMPT_ID } from './reservedIds';
 // `sourceDisplayLabel` mirrors the priority order the default MessageSources UI
 // uses (`title || url || id || fallback`). Re-exported so custom shells that
 // render their own source list can match the built-in label exactly.
-export { sourceDisplayLabel } from './utils/messageSources';
+export { sourceDisplayLabel } from './utils/sourceDisplayLabel';
 export { Markdown } from './components/Markdown';
 export type { MarkdownProps, MarkdownSanitizer, CodeBlockCopy, CodeBlockCopyContext, CodeBlockCopyRenderer } from './components/Markdown';
 export { setChorusStyleNonce } from './utils/cspNonce';

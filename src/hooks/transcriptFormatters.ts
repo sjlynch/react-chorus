@@ -1,5 +1,5 @@
 import type { Message, MessageSource, Role } from '../types';
-import { sourceDisplayLabel } from '../utils/messageSources';
+import { sourceDisplayLabel } from '../utils/sourceDisplayLabel';
 
 export type TranscriptExportFormat = 'markdown' | 'json';
 

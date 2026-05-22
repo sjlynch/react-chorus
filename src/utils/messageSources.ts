@@ -44,7 +44,3 @@ export function appendMessageSource(existing: MessageSource[] | undefined, sourc
   next[index] = mergeSource(existingSource, source);
   return next;
 }
-
-export function sourceDisplayLabel(source: MessageSource, fallback: string): string {
-  return source.title || source.url || source.id || fallback;
-}
