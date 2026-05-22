@@ -3,7 +3,7 @@ import { act, renderHook } from '@testing-library/react';
 import { useChorusStream, type Transport } from '../../hooks/useChorusStream';
 import { ChorusStreamError } from '../../streaming/errors';
 import type { Message } from '../../types';
-import { deferred, makeAbortError, makeResponse, makeSseResponse, resetUseChorusStreamTestEnv } from './fixtures';
+import { deferred, makeAbortError, makeOpenSseResponse, makeResponse, makeSseResponse, resetUseChorusStreamTestEnv } from './fixtures';
 
 // ---------------------------------------------------------------------------
 
@@ -254,6 +254,44 @@ describe('useChorusStream lifecycle', () => {
       expect(warn).toHaveBeenCalledTimes(1);
       expect(warn.mock.calls[0][0]).toMatch(/unmounted/);
       expect(warn.mock.calls[0][0]).toMatch(/externalSignal/);
+    } finally {
+      warn.mockRestore();
+      externalController.abort();
+    }
+  });
+
+  it('cancels the SSE reader on unmount even when the send used an externalSignal', async () => {
+    let cancelled = false;
+    const transport = vi.fn<Transport>(() => Promise.resolve(
+      makeOpenSseResponse(['hello'], () => { cancelled = true; }),
+    ));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const externalController = new AbortController();
+    const { result, unmount } = renderHook(() => useChorusStream(transport));
+
+    let sendPromise!: Promise<void>;
+    try {
+      await act(async () => {
+        sendPromise = result.current.send('hello', [], { onChunk: vi.fn() }, externalController.signal);
+        // Let the transport resolve and the SSE reader pump start.
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(result.current.sending).toBe(true);
+      expect(cancelled).toBe(false);
+
+      await act(async () => {
+        unmount();
+        await sendPromise;
+      });
+
+      // The hook owns `readerController` even on the externalSignal path, so
+      // unmount aborts it and `readSSEStream` cancels the reader — the SSE pump
+      // does not outlive the unmounted component. The caller's externalSignal
+      // is left untouched; only the caller can abort the transport fetch.
+      expect(cancelled).toBe(true);
+      expect(externalController.signal.aborted).toBe(false);
     } finally {
       warn.mockRestore();
       externalController.abort();

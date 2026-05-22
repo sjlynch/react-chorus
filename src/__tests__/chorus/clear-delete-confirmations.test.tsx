@@ -192,6 +192,61 @@ describe('Chorus clear and delete confirmations', () => {
     await waitFor(() => expect(storage.store.chat).toBe(JSON.stringify([])));
   });
 
+  it('commits an async confirmClearConversation that resolves after a send has started, aborting the in-flight turn', async () => {
+    const user = userEvent.setup();
+    const initial: Message[] = [
+      { id: 'u1', role: 'user', text: 'old message' },
+      { id: 'a1', role: 'assistant', text: 'old reply' },
+    ];
+    const confirmation = deferred<boolean>();
+    const confirmClearConversation = vi.fn(() => confirmation.promise);
+    const sendPending = deferred<void>();
+    let sendSignal: AbortSignal | undefined;
+    const onSend = vi.fn<OnSend>((_text, _messages, helpers) => {
+      sendSignal = helpers.signal;
+      helpers.appendAssistant('streaming…');
+      return sendPending.promise;
+    });
+    const onClear = vi.fn();
+
+    render(
+      <Chorus
+        messages={initial}
+        confirmClearConversation={confirmClearConversation}
+        onSend={onSend}
+        onClear={onClear}
+        minAssistantDelayMs={0}
+        showClearButton
+      />
+    );
+
+    // Open the async clear confirmation while still idle.
+    await user.click(screen.getByRole('button', { name: /clear conversation/i }));
+    await waitFor(() => expect(confirmClearConversation).toHaveBeenCalledOnce());
+
+    // Start a send while the clear confirmation is still pending.
+    await sendMessage(user, 'fresh turn');
+    expect(await screen.findByText('streaming…')).toBeInTheDocument();
+
+    // Confirmation resolves true. Unlike delete, clear is a whole-conversation
+    // reset and deliberately commits even mid-send (see clearCommand.ts —
+    // intentional asymmetry with deleteCommand): the in-flight turn is aborted
+    // and the transcript is wiped. This is deterministic regardless of when the
+    // confirmation resolves.
+    await act(async () => {
+      confirmation.resolve(true);
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(screen.queryByText('streaming…')).not.toBeInTheDocument());
+    expect(screen.queryByText('old message')).not.toBeInTheDocument();
+    expect(screen.queryByText('fresh turn')).not.toBeInTheDocument();
+    expect(onClear).toHaveBeenCalledWith([]);
+    expect(sendSignal?.aborted).toBe(true);
+
+    sendPending.resolve();
+  });
+
   it('can reset to the initialMessages seed when requested', async () => {
     const user = userEvent.setup();
     const onSend = vi.fn<OnSend>(async () => ({ id: 'a1', role: 'assistant', text: 'reply' }));
