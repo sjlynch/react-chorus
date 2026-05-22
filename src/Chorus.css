@@ -196,7 +196,8 @@
 .chorus-tool-call-body { background: var(--chorus-tool-body-bg, #111111); }
 .chorus-tool-call-section { border-top: 1px solid var(--chorus-tool-border, #2a2a2a); padding: 8px 12px; }
 .chorus-tool-call-label { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--chorus-tool-label-text, #666666); margin-bottom: 6px; }
-.chorus-tool-call-pre { margin: 0; font-family: monospace; font-size: 12px; color: var(--chorus-tool-code-text, #e6edf3); white-space: pre-wrap; word-break: break-all; max-height: 240px; overflow: auto; }
+/* Long JSON tool input/output: prefer horizontal scroll over mid-token wrapping (matches Markdown code-block affordance). */
+.chorus-tool-call-pre { margin: 0; font-family: monospace; font-size: 12px; color: var(--chorus-tool-code-text, #e6edf3); white-space: pre; max-height: 240px; overflow-x: auto; overflow-y: auto; }
 
 /* Typing indicator (assistant replying) */
 .chorus-typing .chorus-bubble { display: inline-flex; align-items: center; gap: 4px; }
