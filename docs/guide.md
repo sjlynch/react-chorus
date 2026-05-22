@@ -5,6 +5,7 @@ How to send messages, stream responses, and parse provider formats with react-ch
 - [Two usage paths](#two-usage-paths) — the `transport` prop, the `onSend` callback, and auth headers
 - [Changing the system prompt at runtime](#changing-the-system-prompt-at-runtime) — multi-persona toggles, per-conversation prompts, regenerate semantics
 - [Using the WebSocket transport](#using-the-websocket-transport)
+- [Server-side history pre-load](#server-side-history-pre-load) — Next.js / SSR loaders → `initialMessages` + `persistenceKey`
 - [Provider request/body helpers](#provider-requestbody-helpers)
 - [Connectors](#connectors)
 - [Named SSE events](#named-sse-events)
@@ -485,6 +486,124 @@ Like the Express/OpenAI and Next.js App Router examples above, the backend cance
 The front-end pairs this with `connector: 'anthropic'` (see the React snippet above) so it reads `content_block_delta` / `message_stop` events out of each WebSocket frame the same way it would over an SSE stream.
 
 > **Runnable example:** [`examples/with-websocket`](../examples/with-websocket) wires `createWebSocketTransport` to a tiny local `ws` server that streams canned Claude-style frames, so you can see this recipe end-to-end without an API key — and its README shows the one-line swap to the real Anthropic backend above.
+
+## Server-side history pre-load
+
+The README documents two seed mechanisms in isolation — `initialMessages` (a frozen-at-mount seed) and `persistenceKey` (browser-side storage of follow-up turns). The most common production wiring combines them: a server-rendered route (Next.js App Router `page.tsx`, `getServerSideProps`, Remix `loader`, etc.) fetches the user's conversation from your database, the loader passes that array as `initialMessages`, and `persistenceKey` keeps subsequent edits cached in the browser so a reload between server fetches still shows the in-progress turn.
+
+This recipe lives at the intersection of three subtle behaviors — get one wrong and either the server transcript silently clobbers an in-flight draft, or a stale browser copy clobbers the server transcript. Read the precedence rule below before wiring it up.
+
+### The full recipe
+
+```tsx
+// app/c/[id]/page.tsx — server component (no 'use client')
+import { loadConversation } from '@/lib/conversations';
+import { ChatClient } from './ChatClient';
+
+export default async function Page({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  // Server-side fetch. Run inside the request so the transcript is bound to
+  // the authenticated user — never trust an id you cannot authorize.
+  const initial = await loadConversation(id);
+  return <ChatClient conversationId={id} initial={initial} />;
+}
+```
+
+```tsx
+// app/c/[id]/ChatClient.tsx — client component
+'use client';
+import { Chorus, type Message } from 'react-chorus';
+
+export function ChatClient({ conversationId, initial }: { conversationId: string; initial: Message[] }) {
+  return (
+    <Chorus
+      transport="/api/chat"
+      connector="openai"
+      // Server-loaded transcript becomes the seed. Captured once at mount —
+      // later prop reference changes are ignored (frozen-seed contract).
+      initialMessages={initial}
+      // Browser-side cache of follow-up turns, scoped to this conversation
+      // so different chats never clobber each other.
+      persistenceKey={`chorus:c:${conversationId}`}
+    />
+  );
+}
+```
+
+### Precedence rule when both seeds are present
+
+When `persistenceKey` is set without `value`, Chorus resolves the displayed transcript in this order on every mount:
+
+1. **A stored payload for this key wins.** If `persistenceStorage.getItem(persistenceKey)` returns a non-empty value, that value is rendered and `initialMessages` is silently dropped from the visible transcript.
+2. **No stored payload → `initialMessages` is rendered AND written to storage.** The seed is persisted on first mount so a reload before the user types anything still shows it. From then on, rule 1 applies.
+3. **Async adapters block the composer.** While `getItem()` is still resolving the built-in `<Chorus>` shows its loading placeholder ("Loading saved conversation…") and `useChorusPersistence().loaded` is `false`.
+
+The asymmetry in rule 1 is the footgun: once a user has used the app on a given browser, the server-loaded `initialMessages` becomes *only* a fallback for first visits. If the same conversation has new turns from another device, those turns will not appear because the local stored copy is taken to be authoritative. Pick one of the strategies in the next section based on which source you trust.
+
+### Choosing what to trust
+
+| Pattern | When to use | How to wire it |
+|---------|-------------|----------------|
+| **Cache draft only** | The server is the source of truth and follow-up turns are written to the server when they stream in. Use `persistenceKey` only as a per-load draft cache so a reload mid-turn does not lose the in-flight assistant message. | Scope the key per session: `persistenceKey={`chorus:draft:${conversationId}:${sessionId}`}`. Clear it from `localStorage` after `onFinish` fires (or accept that an old draft eventually rolls off as users start new conversations). |
+| **Browser is the source of truth after first load** | Single-device usage; no server writes after the initial load. The fixture-seeded chat in `examples/with-next-resume` is this shape. | The simple recipe above. `initialMessages` seeds, `persistenceKey` takes over from there. |
+| **Server is the source of truth** | Multi-device, server writes after every turn. | Drop `persistenceKey` entirely. Drive Chorus in **controlled** mode (`value` + `onChange`) and POST follow-up turns to your own write API in `onChange` / `onFinish`. The frozen-seed precedence rule does not apply because there is no `useChorusPersistence` reading from storage. |
+| **Reconcile on mount** | You want a browser draft cache *and* a fresh server fetch to win on reload. | Read the stored payload yourself before mounting, compare to `initial`, and if the server timestamp is newer call `localStorage.removeItem(persistenceKey)` (or your custom adapter's `removeItem`) before rendering `<Chorus>`. |
+
+### SSR and hydration considerations
+
+`<Chorus>` is a client component because it touches `window.localStorage`. The server component above only fetches the transcript and renders the client wrapper — it never imports `react-chorus` directly. Two SSR gotchas to know about:
+
+- **The first paint is empty on async adapters.** With the default synchronous `localStorage` adapter, the stored payload is read during initial render so the client renders the persisted transcript immediately and there is no transcript-shaped hydration mismatch. With an async adapter (IndexedDB, a remote draft API, `Promise`-returning `getItem`), the first client paint shows the loading placeholder and the transcript appears after `getItem()` resolves. Either is fine — just do not expect the server-rendered HTML to include the persisted body.
+- **Pass `initialMessages` as a stable prop.** It is captured once at mount; later reference changes are ignored and dev-warned once. In Next.js this means seed it from a server-fetched array that is shaped during the request, not from React state that mutates on the client.
+
+### Pattern: fresh conversations with `useId` / `useEffect`
+
+For a brand-new conversation that has no server-side row yet, the goal is the opposite of the precedence rule above: every fresh mount should start empty, with no risk that a stored payload from an unrelated previous chat is loaded under the same key. Make the persistence key unique to *this* fresh conversation so storage cannot collide:
+
+```tsx
+'use client';
+import * as React from 'react';
+import { Chorus } from 'react-chorus';
+
+export function NewChatClient() {
+  // React.useId() returns a string that matches between server and client
+  // render for the same component, so the persistenceKey is the same on the
+  // initial paint and after hydration. It is unique per `<NewChatClient>`
+  // mount but stable across re-renders.
+  const id = React.useId();
+  return (
+    <Chorus
+      transport="/api/chat"
+      connector="openai"
+      persistenceKey={`chorus:draft:${id}`}
+    />
+  );
+}
+```
+
+`useId` is stable across re-renders, so React's StrictMode double-invoke and prop changes do not generate a new key mid-conversation (which would split the draft across two storage entries). If you instead want a fresh key per *session* — for example, regenerate it once the user has navigated away and come back — combine `useId` with a `useEffect` that calls `localStorage.removeItem` on mount of a "compose new" route, or use the loader-redirect pattern shown in `examples/with-next-resume` where `/c/new` redirects to `/c/<server-generated-uuid>` so the URL is the source of truth for the conversation id.
+
+```tsx
+'use client';
+import * as React from 'react';
+import { Chorus } from 'react-chorus';
+
+export function NewChatClient({ resetKey }: { resetKey: string }) {
+  const id = React.useId();
+  // Clear any stale draft under this id the first time we mount with a new
+  // resetKey. Use this when the parent route signals "start over" — e.g.,
+  // a "New chat" button bumps resetKey, which forces a one-shot wipe.
+  React.useEffect(() => {
+    window.localStorage.removeItem(`chorus:draft:${id}`);
+  }, [id, resetKey]);
+
+  return <Chorus transport="/api/chat" connector="openai" persistenceKey={`chorus:draft:${id}`} />;
+}
+```
+
+Do not call `useId()` and then immediately overwrite the key with `crypto.randomUUID()` inside a `useEffect` — React StrictMode runs effects twice in development, and the second invocation would change the key after Chorus has already loaded its initial value, which `useChorusPersistence` would dev-warn as a key change mid-session.
+
+> **Runnable example:** [`examples/with-next-resume`](../examples/with-next-resume) wires the full recipe end-to-end — a Next.js App Router page with a stub `loadConversation()` server function that seeds `initialMessages`, a `persistenceKey` scoped to the conversation id, and a `/c/new` route that redirects to a fresh server-generated uuid so each new chat starts with no stored payload.
 
 ## Provider request/body helpers
 

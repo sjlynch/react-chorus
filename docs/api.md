@@ -33,7 +33,7 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `onChange` | `(messages: Message<TMeta>[]) => void` | — | Called whenever Chorus wants to change the message list in controlled mode (`value` is provided). Not called for legacy `messages`-only uncontrolled state. |
 | `onMessagesChange` | `(messages, context) => void` | — | Read-only transcript observer for controlled, uncontrolled, and persistence-backed modes. Fires for initial/loaded messages, sends, stream chunks, returned messages, edits, deletes, retry/regenerate truncation, and clear without making Chorus controlled. `context.source` is `'controlled'`, `'uncontrolled'`, or `'persistence'`. |
 | `messages` | `Message<TMeta>[]` | — | Legacy initial-only seed for uncontrolled mode. Read once on mount; later prop changes are ignored (dev warns once on a reference change). Prefer `initialMessages` for seeding or `value` + `onChange` for controlled mode. |
-| `initialMessages` | `Message<TMeta>[]` | — | Initial-only seed for uncontrolled mode, captured once at mount (frozen-seed contract — later reference changes are ignored and dev-warned once). Useful for welcome messages; `system` messages are hidden by default via `hiddenRoles`. Tool calls remain visible by default. |
+| `initialMessages` | `Message<TMeta>[]` | — | Initial-only seed for uncontrolled mode, captured once at mount (frozen-seed contract — later reference changes are ignored and dev-warned once). Useful for welcome messages; `system` messages are hidden by default via `hiddenRoles`. Tool calls remain visible by default. To seed from a server-fetched transcript (Next.js loader / `getServerSideProps`) and keep follow-up turns cached in the browser via `persistenceKey`, see the [Server-side history pre-load](guide.md#server-side-history-pre-load) recipe — it documents the precedence rule when both seeds collide and the `useId` pattern for fresh conversations. |
 | `emptyState` | `ReactNode` | — | Custom content shown in the transcript when the visible message list is empty and the assistant is not typing. |
 | `suggestedPrompts` | `string[]` | — | Default empty-state prompt buttons. Clicking one fills and focuses the composer without sending. Ignored when `emptyState` is provided. |
 | `placeholder` | `string` | `"Send a message"` | Input placeholder text. |
@@ -372,7 +372,7 @@ When the default `localStorage` adapter is used, both `useConversations` and `us
 
 ### Persistence examples
 
-The basic runnable example enables `persistenceKey`, so it saves to `localStorage` by default. You can swap storage adapters without changing the rest of the chat:
+The basic runnable example enables `persistenceKey`, so it saves to `localStorage` by default. To combine `persistenceKey` with a server-loaded transcript (Next.js `page.tsx` / `getServerSideProps` / Remix `loader` seeded into `initialMessages`), see the [Server-side history pre-load](guide.md#server-side-history-pre-load) recipe — it covers the precedence rule when both seeds are present and the `useId` pattern for fresh conversations. You can swap storage adapters without changing the rest of the chat:
 
 ```tsx
 // localStorage (default)

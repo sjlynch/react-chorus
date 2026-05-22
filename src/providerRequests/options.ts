@@ -3,11 +3,13 @@ import { toToolDefinitionList } from '../tools';
 import { warnOnceInDev } from './devWarn';
 import { isRecord } from './metadata';
 import type { ProviderToolsOption } from './types/common';
+import type { AiSdkModelMessagesBodyOptions } from './types/aiSdk';
 import type { AnthropicMessagesBodyOptions } from './types/anthropic';
 import type { GeminiGenerateContentBodyOptions } from './types/gemini';
 import type { OpenAIChatCompletionsBodyOptions } from './types/openaiChat';
 import type { OpenAIResponsesBodyOptions } from './types/openaiResponses';
 import {
+  toAiSdkTools,
   toAnthropicTools,
   toGeminiTools,
   toOpenAIChatCompletionsTools,
@@ -77,7 +79,10 @@ function warnEmptyGeminiToolGroups(tools: unknown[]): void {
   );
 }
 
-type ToolSerializer<T> = (source: ProviderToolsOption<unknown>) => T[];
+// `R` is the serialized provider-tools shape — an array for OpenAI/Anthropic/Gemini
+// and a record for the AI SDK `ToolSet`. `injectTools` only assigns the result
+// to `body.tools`, so the shape itself can be anything the provider accepts.
+type ToolSerializer<R> = (source: ProviderToolsOption<unknown>) => R;
 
 export function systemTextFromHistory(history: Message<unknown>[]) {
   // Emit the *trimmed* system text: the emptiness filter already trims, but the
@@ -91,10 +96,10 @@ export function systemTextFromHistory(history: Message<unknown>[]) {
   return system || undefined;
 }
 
-function injectTools<T>(
+function injectTools<R>(
   body: Record<string, unknown>,
   tools: unknown,
-  serialize: ToolSerializer<T>,
+  serialize: ToolSerializer<R>,
   validateRawTools?: (tools: unknown[]) => void,
 ) {
   if (tools === undefined) return;
@@ -110,6 +115,17 @@ function injectTools<T>(
     validateRawTools?.(tools);
   }
   body.tools = tools;
+}
+
+export function stripAiSdkOptions<TMeta>(options: AiSdkModelMessagesBodyOptions<TMeta>) {
+  // `system` is pulled out of `rest` so the caller-provided value is resolved
+  // explicitly against history system text instead of silently leaking into
+  // `bodyOptions` and being overwritten — see `resolveProviderSystem`.
+  const { unsupportedAttachmentText: _unsupportedAttachmentText, stream = true, tools, system, ...rest } = options;
+  void _unsupportedAttachmentText;
+  const bodyOptions: Record<string, unknown> = { ...rest };
+  injectTools(bodyOptions, tools, toAiSdkTools);
+  return { bodyOptions, stream, system };
 }
 
 export function stripOpenAIChatOptions<TMeta>(options: OpenAIChatCompletionsBodyOptions<TMeta>) {
@@ -160,15 +176,18 @@ export function stripGeminiOptions<TMeta>(options: GeminiGenerateContentBodyOpti
  * is observable. With only one source present, that source is used.
  */
 export function resolveProviderSystem(
-  provider: 'Anthropic' | 'Gemini',
+  provider: 'Anthropic' | 'Gemini' | 'AI SDK',
   field: 'system' | 'systemInstruction',
   callerSystem: unknown,
   historySystem: unknown,
 ): unknown {
   if (callerSystem === undefined) return historySystem;
   if (historySystem !== undefined) {
+    // Slugify the provider name for the warn-once key so 'AI SDK' becomes
+    // 'ai-sdk' rather than 'ai sdk', matching the existing key convention.
+    const providerKey = provider.toLowerCase().replace(/\s+/g, '-');
     warnOnceInDev(
-      `react-chorus:${provider.toLowerCase()}-system-precedence`,
+      `react-chorus:${providerKey}-system-precedence`,
       `[react-chorus] ${provider} request received both a caller-provided \`${field}\` option and ` +
         `system message(s) in the conversation history. The caller-provided \`${field}\` takes ` +
         'precedence; the history system text is ignored.',

@@ -10,12 +10,15 @@ export { formatAiSdkModelMessagesBody, toAiSdkModelMessages, toAiSdkModelMessage
 export { formatAnthropicMessagesBody, toAnthropicMessages, toAnthropicMessagesBody } from './providerRequests/anthropic';
 export { formatGeminiGenerateContentBody, toGeminiContents, toGeminiGenerateContentBody } from './providerRequests/gemini';
 export {
+  toAiSdkTools,
   toAnthropicTools,
   toGeminiTools,
   toOpenAIChatCompletionsTools,
   toOpenAIResponsesTools,
 } from './providerRequests/tools';
 export type {
+  AiSdkTool,
+  AiSdkToolSet,
   AnthropicTool,
   GeminiFunctionDeclaration,
   GeminiToolGroup,
