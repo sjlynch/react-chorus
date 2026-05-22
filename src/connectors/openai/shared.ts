@@ -25,10 +25,6 @@ export function stringFromUnknown(value: unknown): string {
   return '';
 }
 
-export function numberFromUnknown(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
-}
-
 /**
  * Resolved identity of a Responses API function call, recorded once
  * `response.output_item.added`/`.done` reveals the call id. Every

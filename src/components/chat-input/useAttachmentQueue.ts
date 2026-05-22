@@ -52,9 +52,8 @@ export function useAttachmentQueue({
   const {
     draggingFiles,
     clearDragState,
-    markDragEnter,
-    markDragLeave,
-    markDragOver,
+    surfaceDrag,
+    composerDrag,
   } = useAttachmentDragState();
 
   React.useEffect(() => {
@@ -186,9 +185,8 @@ export function useAttachmentQueue({
     clearAttachmentsAndPendingWork,
     clearDragState,
     handleFiles,
-    markDragEnter,
-    markDragLeave,
-    markDragOver,
+    surfaceDrag,
+    composerDrag,
     removeAttachment,
     updateAttachmentAlt,
     retryAttachment,

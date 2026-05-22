@@ -19,7 +19,19 @@ export interface ChorusSendHelpers {
    */
   appendToolDelta?: (delta: ConnectorToolDelta) => void;
   finalizeAssistant: () => void;
-  /** Complete callback set for bridging `useChorusStream(...).send()` through `onSend`. */
+  /**
+   * Complete callback set for bridging `useChorusStream(...).send()` through
+   * `onSend` — `{ onChunk, onReasoning, onToolDelta, onWarning, onMetadata,
+   * onDone, onError }`. The bundled `onError` surfaces a mid-stream failure
+   * (the UI banner + the `onError` prop) and drops the half-streamed partial
+   * even when `onSend` does not return or await the `send()` promise, so a
+   * bridged send that errors cannot vanish silently.
+   *
+   * `minAssistantDelayMs` is applied by Chorus on this path (the first token
+   * is buffered by the helpers). Do not also pass `minDelayMs` to `send()` on
+   * the bridged path — the two delays stack and the first token can be held
+   * up to roughly twice as long.
+   */
   streamCallbacks?: () => SendCallbacks;
   signal: AbortSignal;
   /** The optional `systemPrompt` prop. Use it in custom `onSend` request mapping; it is not prepended to `messages` on the onSend path. */

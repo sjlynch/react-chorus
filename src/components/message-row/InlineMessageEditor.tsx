@@ -13,6 +13,15 @@ import { useTextareaAutosize } from '../chat-input/useTextareaAutosize';
 const MAX_EDIT_TEXTAREA_HEIGHT = 320;
 
 export interface InlineMessageEditorProps {
+  /**
+   * Seeds the editable draft. The draft is *re-synced* to this value whenever it
+   * changes while the editor is open: if the host rewrites the underlying
+   * `message.text` beneath an open editor — an optimistic correction, a
+   * regenerate that rewrites the message, a persistence/cross-tab sync — the
+   * draft resets to the new text so a save can no longer overwrite the newer
+   * text with a stale value. Any unsaved local edits are discarded by that
+   * re-sync; the editor always reflects the current message text as its base.
+   */
   initialText: string;
   onSubmit: (newText: string) => void;
   onCancel: () => void;
@@ -21,6 +30,15 @@ export interface InlineMessageEditorProps {
 
 export function InlineMessageEditor({ initialText, onSubmit, onCancel, labels = DEFAULT_MESSAGE_ACTION_LABELS }: InlineMessageEditorProps) {
   const [editText, setEditText] = React.useState(initialText);
+  // Track the value the draft was last seeded from so we can detect when the
+  // host rewrites `message.text` underneath an open editor. Adjusting state
+  // during render (rather than in an effect) re-syncs synchronously, so the
+  // textarea never paints the stale draft for a frame. See `initialText` above.
+  const [seededText, setSeededText] = React.useState(initialText);
+  if (initialText !== seededText) {
+    setSeededText(initialText);
+    setEditText(initialText);
+  }
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
 
   // Auto-grow to fit the content, matching the composer textarea — the hook
