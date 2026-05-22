@@ -128,9 +128,28 @@ export function useChorusRef<TMeta>(
       if (!root) return false;
       const nodes = root.querySelectorAll<HTMLElement>('[data-chorus-message-id]');
       const target = Array.from(nodes).find(node => node.dataset.chorusMessageId === id);
-      if (!target) return false;
-      target.scrollIntoView({ block: 'nearest' });
-      return true;
+      if (target) {
+        target.scrollIntoView({ block: 'nearest' });
+        return true;
+      }
+      // No rendered row carries this id. A `false` here is ambiguous: the id
+      // may match no message at all, OR it may be a perfectly valid message
+      // (one `getMessages()` returns) whose row simply is not in the DOM right
+      // now — windowed out by `maxRenderedMessages`, hidden by `hiddenRoles`,
+      // or drawn by a custom `renderMessage` that never spread
+      // `ctx.messageProps`. A host wiring "jump to message"/citation
+      // navigation reads the bare `false` as "unknown id" and never learns the
+      // target is real but unrendered. Emit a one-time dev warning for the
+      // known-but-unrendered case so the two are distinguishable (callers can
+      // also cross-check `id` against `getMessages()` at runtime).
+      if (isChorusDevMode() && messagesRef.current.some(message => message.id === id)) {
+        const key = 'scrollToMessage:knownButUnrendered';
+        if (!warnedRejectionsRef.current.has(key)) {
+          warnedRejectionsRef.current.add(key);
+          console.warn(`[Chorus] \`ChorusRef.scrollToMessage()\` returned \`false\` for id "${id}", a known message that is not currently rendered — it is windowed out by \`maxRenderedMessages\`, hidden by \`hiddenRoles\`, or drawn by a custom \`renderMessage\` that did not spread \`ctx.messageProps\`. This is distinct from a \`false\` for an id that matches no message; cross-check ids against \`getMessages()\` to tell the two cases apart.`);
+        }
+      }
+      return false;
     },
     };
   }, [controlledWithoutOnChange, inputRef, messagesRef, resetComposer, rootRef, session, writesDisabled]);

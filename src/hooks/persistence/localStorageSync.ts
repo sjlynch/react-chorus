@@ -55,9 +55,20 @@ export function useLocalStorageSync<TMeta = Record<string, unknown>>(
 
       const parsed = stateFromRaw<TMeta>(key, storage, newValue, deserializeMessagesRef.current);
       if (parsed.error) {
+        // The external payload is corrupt and will not be applied. Leave any
+        // armed debounced local write intact — its timer must still fire so the
+        // un-persisted change is not lost, and in-memory state must not desync
+        // from storage on the strength of an event we just rejected.
         reportPersistenceError(parsed.error, 'deserialize', key);
         return;
       }
+      // The external value is confirmed applicable, so it supersedes a local
+      // write that has not started yet: drop the armed debounced write now,
+      // before setState, so its stale snapshot cannot fire later and clobber
+      // the value. Dropping is deferred until here (rather than in
+      // processExternalValue) precisely so the corrupt-payload early-return
+      // above never discards a pending write.
+      if (writeCoordination.hasPendingWrite()) writeCoordination.dropPendingWrite();
       writeVersionRef.current += 1;
       stateRef.current = parsed.state;
       setState(parsed.state);
@@ -71,10 +82,11 @@ export function useLocalStorageSync<TMeta = Record<string, unknown>>(
     //
     // A *debounced* write that has been scheduled but whose timer has not yet
     // fired is a second lost-update window: `isWritePending()` is false for it,
-    // so applying the external value now would let that armed timer fire later
-    // and persist its stale snapshot over the other tab's value. The external
-    // event supersedes a local write that has not started, so drop the armed
-    // write before applying.
+    // so applying the external value would let that armed timer fire later and
+    // persist its stale snapshot over the other tab's value. `applyExternalValue`
+    // drops that armed write — but only once the external value is confirmed
+    // applicable, so a corrupt external payload (rejected by `stateFromRaw`)
+    // leaves the armed write intact instead of discarding an un-persisted change.
     const processExternalValue = (newValue: string | null) => {
       if (cancelled) return;
       if (writeCoordination.isWritePending()) {
@@ -82,7 +94,6 @@ export function useLocalStorageSync<TMeta = Record<string, unknown>>(
         writeCoordination.whenWriteSettles().then(reprocess, reprocess);
         return;
       }
-      if (writeCoordination.hasPendingWrite()) writeCoordination.dropPendingWrite();
       applyExternalValue(newValue);
     };
 

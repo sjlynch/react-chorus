@@ -112,6 +112,31 @@ describe('Chorus', () => {
     warn.mockRestore();
   });
 
+  it('warns about ignored transport-only props for transport={null} + onSend', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const onSend = vi.fn<NonNullable<ChorusProps['onSend']>>(async () => undefined);
+
+    // `transport={null}` is absent (isTransportPresent === false), so the real
+    // send path is `onSend` and `onStreamDone` is genuinely ignored. Hosts hit
+    // this via a conditionally-computed transport, e.g. `transport={url ?? null}`.
+    const nullTransport = null as unknown as ChorusProps['transport'];
+    render(<Chorus transport={nullTransport} onSend={onSend} onStreamDone={vi.fn()} />);
+
+    await waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining('`onStreamDone` only fires on the `transport` send path')));
+    warn.mockRestore();
+  });
+
+  it('warns when sending is provided with an empty-string transport', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    // `transport=""` is still transport-present (a misconfigured URL), so it
+    // owns the busy state and `sending` is redundant.
+    render(<Chorus transport="" sending={false} />);
+
+    await waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining('`sending` was provided alongside `transport`')));
+    warn.mockRestore();
+  });
+
   it('warns once when the initialMessages reference changes after mount', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
