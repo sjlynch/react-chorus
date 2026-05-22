@@ -10,6 +10,10 @@ const VALID_CONNECTOR_NAMES = ['auto', 'openai', 'anthropic', 'gemini', 'ai-sdk'
 const warnedUnknownConnectorNames = new Set<string>();
 const warnedIgnoredOptionsConnectors = new Set<string>();
 
+function isKnownConnectorName(name: string): name is ConnectorName {
+  return (VALID_CONNECTOR_NAMES as readonly string[]).includes(name);
+}
+
 function isConnectorDevMode() {
   // Local to keep connector-only chunks independent from widget dev helpers.
   try {
@@ -54,7 +58,15 @@ function warnIgnoredConnectorOptions(connector: Connector | ConnectorName | unde
  * ignored — with a dev-mode warning — for every other connector.
  */
 export function getConnector(connector?: Connector | ConnectorName, options?: OpenAIConnectorOptions): Connector {
-  if (options && connector !== 'openai') warnIgnoredConnectorOptions(connector);
+  // For an unknown string name, leave the diagnostics to the dedicated "Unknown
+  // connector" warning below — it already explains the `auto` fallback. Emitting
+  // the generic ignored-options warning too would say "the `opena` connector
+  // does not accept them", implying a real connector named after the typo and
+  // contradicting the fallback message. Known non-openai names, custom connector
+  // objects, and the default `auto` connector still get the ignored-options warning.
+  if (options && connector !== 'openai' && (typeof connector !== 'string' || isKnownConnectorName(connector))) {
+    warnIgnoredConnectorOptions(connector);
+  }
   if (!connector) return autoConnector;
   if (typeof connector === 'string') {
     if (connector === 'auto') return autoConnector;

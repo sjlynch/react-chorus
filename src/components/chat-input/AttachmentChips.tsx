@@ -40,8 +40,11 @@ export function AttachmentChips({ attachments, disabled, onRemove, onRetry, labe
         // alt (e.g. restored from a draft) so the editor isn't hidden behind the button.
         const altEditorOpen = openAltEditor === uid || (allowAltEditor && typeof att.alt === 'string' && att.alt.length > 0);
         const chipImageAlt = att.alt && att.alt.length > 0 ? att.alt : att.name;
-        // Drives `aria-describedby` so a screen-reader user hears the pending/failed
-        // status when they focus the chip's button — without polling the live region.
+        // Static `aria-describedby` target so a screen-reader user hears the
+        // pending/failed status when they focus the chip's button. It is NOT a
+        // live region — the status is announced (without needing focus) through
+        // the always-mounted `chorus-attachment-announcer` span; see
+        // `attachmentPendingWork.ts` for why a per-chip live region is unreliable.
         const statusId = `chorus-attachment-status-${uid}`;
         const hasStatusText = pending || failed;
         return (
@@ -58,11 +61,10 @@ export function AttachmentChips({ attachments, disabled, onRemove, onRetry, labe
               <img src={previewSource} alt={chipImageAlt} className="chorus-attachment-thumb" loading="lazy" decoding="async" />
             )}
             <span className="chorus-attachment-name">{att.name}</span>
-            {pending && (
-              <span id={statusId} className="chorus-sr-only" aria-live="polite">{pendingLabel}</span>
-            )}
-            {failed && (
-              <span id={statusId} className="chorus-sr-only">{labels.failedAnnouncement(att.name)}</span>
+            {hasStatusText && (
+              <span id={statusId} className="chorus-sr-only">
+                {pending ? pendingLabel : labels.failedAnnouncement(att.name)}
+              </span>
             )}
             {allowAltEditor && !altEditorOpen && (
               <button

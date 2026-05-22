@@ -119,8 +119,9 @@ function toOpenAIChatCompletionsMessage<TMeta>(
   options: ProviderMappingOptions<TMeta>,
 ): OpenAIChatCompletionsMessage | null {
   if (message.role === 'system') {
-    // Emit the trimmed text: the Responses mapper routes system messages
-    // through `messageTextParts` (which trims), so Chat Completions matches.
+    // Emit the trimmed text so Chat Completions matches the other mappers:
+    // the Responses, Anthropic, and Gemini mappers route system text through
+    // `messageTextParts`, which trims, so all four serialize identically.
     const trimmed = message.text.trim();
     return trimmed ? { role: 'system', content: trimmed } : null;
   }

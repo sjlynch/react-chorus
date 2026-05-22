@@ -3,14 +3,29 @@ import { isPromiseLike } from '../../utils/async';
 
 /**
  * Lets other effects (notably cross-tab `storage` listeners) coordinate with
- * in-flight local writes so an external update cannot clobber a write that is
- * still settling (lost update).
+ * local writes so an external update cannot clobber a write that is still
+ * settling, nor be clobbered by one that has not started yet (lost update).
  */
 export interface WriteCoordination {
   /** True while a local write is executing or awaiting its async adapter. */
   isWritePending: () => boolean;
+  /**
+   * True while a debounced write has been `schedule()`d — its `setTimeout` is
+   * armed — but has not started executing. Such a write sits serialized in
+   * `pendingWriteRef` with `isWritePending()` still false; if applied over by
+   * an external value its timer would later fire a stale snapshot.
+   */
+  hasPendingWrite: () => boolean;
   /** Resolves once the writes currently on the chain have fully settled. */
   whenWriteSettles: () => Promise<void>;
+  /**
+   * Discard an armed-but-not-started debounced write without persisting it,
+   * cancelling its debounce timer. Cross-tab sync calls this before applying an
+   * external `storage` event: that event supersedes a local write that has not
+   * run, so the stale pending snapshot must not fire afterwards and clobber the
+   * other tab's value. No-op when nothing is pending.
+   */
+  dropPendingWrite: () => void;
 }
 
 /**
@@ -207,11 +222,17 @@ export function useWriteQueueCore<TWrite extends QueuedWrite>({
 
   const peekPending = React.useCallback(() => pendingWriteRef.current, []);
 
+  // Discard an armed debounce timer + its pending write without running it.
+  // `takePendingWrite` clears the timer and detaches the pending write; not
+  // enqueueing the result drops it.
+  const dropPendingWrite = React.useCallback(() => { takePendingWrite(); }, [takePendingWrite]);
+
   const isWritePending = React.useCallback(() => writeInFlightRef.current, []);
+  const hasPendingWrite = React.useCallback(() => pendingWriteRef.current !== null, []);
   const whenWriteSettles = React.useCallback(() => writeChainRef.current, []);
   const writeCoordination = React.useMemo<WriteCoordination>(
-    () => ({ isWritePending, whenWriteSettles }),
-    [isWritePending, whenWriteSettles],
+    () => ({ isWritePending, hasPendingWrite, whenWriteSettles, dropPendingWrite }),
+    [isWritePending, hasPendingWrite, whenWriteSettles, dropPendingWrite],
   );
 
   return { peekPending, schedule, flush, flushForPageLifecycle, writeCoordination };

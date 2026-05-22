@@ -103,3 +103,14 @@ export function formatSSEError(error: unknown): string {
 export function encodeSSEError(error: unknown): Uint8Array {
   return textEncoder.encode(formatSSEError(error));
 }
+
+/**
+ * Reserved id (`'chorus-system-prompt'`) of the synthetic `role: 'system'`
+ * message Chorus prepends to transport request history from the
+ * `<Chorus systemPrompt>` prop.
+ *
+ * A proxy route that needs to tell the Chorus-injected system prompt apart from
+ * a host-authored `system` message should match on this id rather than
+ * hard-coding the literal — see {@link RESERVED_SYSTEM_PROMPT_ID}'s own JSDoc.
+ */
+export { RESERVED_SYSTEM_PROMPT_ID } from './reservedIds';

@@ -24,6 +24,10 @@ export type {
 } from './providerRequests/tools';
 export { defineTool } from './tools';
 export type { ChorusToolDefinition, ChorusToolRegistry } from './tools';
+// Reserved id of the `role: 'system'` message Chorus injects from the
+// `<Chorus systemPrompt>` prop. Request mappers that distinguish it from a
+// host-authored `system` message should match on this constant — see its JSDoc.
+export { RESERVED_SYSTEM_PROMPT_ID } from './reservedIds';
 export type {
   AnthropicContentBlock,
   AnthropicDocumentBlock,

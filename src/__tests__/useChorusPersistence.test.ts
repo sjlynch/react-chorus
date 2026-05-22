@@ -484,6 +484,32 @@ describe('useChorusPersistence', () => {
     warn.mockRestore();
   });
 
+  it('wraps a foreign adapter error that happens to carry key/operation fields', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    // A remote StorageAdapter rejects with its own error shape. It is NOT a
+    // Chorus error even though it duck-types `key`/`operation`, so it must be
+    // wrapped with the real Chorus key/operation rather than passed through.
+    const foreignError = Object.assign(new Error('remote backend unavailable'), {
+      key: 'remote/transcripts/key',
+      operation: 'remote-write',
+    });
+    const onError = vi.fn();
+    const storage: StorageAdapter = {
+      getItem: vi.fn(() => null),
+      setItem: vi.fn(() => Promise.reject(foreignError)),
+    };
+
+    const { result } = renderHook(() => useChorusPersistence('key', { storage, onError }));
+
+    act(() => result.current.onChange([MSG]));
+    await act(async () => { await Promise.resolve(); });
+
+    expect(result.current.error).toEqual(expect.objectContaining({ key: 'key', operation: 'write' }));
+    expect(result.current.error?.cause).toBe(foreignError);
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ key: 'key', operation: 'write' }));
+    warn.mockRestore();
+  });
+
   describe('cross-tab sync', () => {
     function dispatchStorageEvent(key: string, newValue: string | null) {
       window.dispatchEvent(new StorageEvent('storage', {
@@ -611,6 +637,42 @@ describe('useChorusPersistence', () => {
       }
     });
 
+    it('drops an armed debounced write so it cannot clobber a cross-tab storage event', () => {
+      vi.useFakeTimers();
+      const key = 'chorus-cross-tab-armed-debounce';
+      let unmount: (() => void) | undefined;
+      try {
+        const hook = renderHook(() => useChorusPersistence(key, { writeDebounceMs: 1000 }));
+        unmount = hook.unmount;
+        const { result } = hook;
+
+        // Arm a debounced local write: its setTimeout is scheduled but has not
+        // fired, so the write sits in pendingWriteRef with isWritePending()
+        // still false — the lost-update window this test guards.
+        const localMsgs: Message[] = [{ id: 'local', role: 'user', text: 'local edit' }];
+        act(() => result.current.onChange(localMsgs));
+        expect(result.current.value).toEqual(localMsgs);
+
+        // Another tab writes and the storage event arrives while the timer is
+        // still armed.
+        const externalMsgs: Message[] = [{ id: 'ext', role: 'user', text: 'other tab' }];
+        const externalPayload = JSON.stringify(externalMsgs);
+        window.localStorage.setItem(key, externalPayload);
+        act(() => dispatchStorageEvent(key, externalPayload));
+        expect(result.current.value).toEqual(externalMsgs);
+
+        // When the debounce window elapses the armed timer must not fire its
+        // stale snapshot over the other tab's value.
+        act(() => { vi.advanceTimersByTime(5000); });
+        expect(result.current.value).toEqual(externalMsgs);
+        expect(window.localStorage.getItem(key)).toBe(externalPayload);
+      } finally {
+        unmount?.();
+        vi.useRealTimers();
+        window.localStorage.removeItem(key);
+      }
+    });
+
     it('does not subscribe when a custom StorageAdapter is supplied', () => {
       const storage = makeSyncStorage(JSON.stringify(MSGS));
       const { result } = renderHook(() => useChorusPersistence('key', { storage }));
@@ -688,6 +750,27 @@ describe('useChorusPersistence', () => {
         ]);
         expect(warn).toHaveBeenCalledWith(
           expect.stringContaining('Dropped 6 invalid persisted messages'),
+          expect.any(Array),
+        );
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('drops a persisted message whose id is whitespace-only', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const storage = makeSyncStorage(JSON.stringify([
+          { id: '   ', role: 'user', text: 'blank id' },
+          MSG,
+        ]));
+        const { result } = renderHook(() => useChorusPersistence('key', { storage }));
+
+        // A whitespace-only id is not a usable id: left in, it would reach
+        // render and warnDuplicateMessageIds and collide there as a duplicate.
+        expect(result.current.value).toEqual([MSG]);
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringContaining('Dropped 1 invalid persisted message'),
           expect.any(Array),
         );
       } finally {

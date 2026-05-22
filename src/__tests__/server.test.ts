@@ -6,8 +6,12 @@ import {
   formatSSEDone,
   formatSSEError,
   formatSSEEvent,
+  RESERVED_SYSTEM_PROMPT_ID,
   sseHeaders,
 } from '../server';
+import { RESERVED_SYSTEM_PROMPT_ID as RESERVED_FROM_PROVIDER_REQUESTS } from '../providerRequests';
+import { RESERVED_SYSTEM_PROMPT_ID as RESERVED_FROM_ROOT } from '../index';
+import { historyWithSystemPrompt } from '../hooks/assistant-session/transportHistory';
 import { readSSEStream } from '../streaming/readSSEStream';
 
 const decoder = new TextDecoder();
@@ -174,5 +178,21 @@ describe('formatSSEError / encodeSSEError', () => {
     expect(formatSSEError(() => 1)).toMatch(/^data: \{"error":".+"\}\n\n$/);
     expect(formatSSEError(Symbol('boom'))).toBe(`data: ${JSON.stringify({ error: 'Symbol(boom)' })}\n\n`);
     expect(formatSSEError(1n)).toBe(`data: ${JSON.stringify({ error: '1' })}\n\n`);
+  });
+});
+
+describe('RESERVED_SYSTEM_PROMPT_ID', () => {
+  it('is exported with the stable id mapper/proxy code should match on', () => {
+    expect(RESERVED_SYSTEM_PROMPT_ID).toBe('chorus-system-prompt');
+  });
+
+  it('is the same value across the server, provider-requests, and root barrels', () => {
+    expect(RESERVED_FROM_PROVIDER_REQUESTS).toBe(RESERVED_SYSTEM_PROMPT_ID);
+    expect(RESERVED_FROM_ROOT).toBe(RESERVED_SYSTEM_PROMPT_ID);
+  });
+
+  it('matches the id Chorus injects for the systemPrompt prop, so the literal need not be hard-coded', () => {
+    const [injected] = historyWithSystemPrompt([], 'Stay concise.');
+    expect(injected).toEqual({ id: RESERVED_SYSTEM_PROMPT_ID, role: 'system', text: 'Stay concise.' });
   });
 });

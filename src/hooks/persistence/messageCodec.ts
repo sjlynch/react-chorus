@@ -56,7 +56,7 @@ function isValidToolCall(value: unknown): value is ToolCall {
  *
  * Returns the message (typed) when valid, or a string describing why it was rejected.
  * Rejection reasons:
- * - id missing or not a non-empty string
+ * - id missing, not a string, or blank (empty or whitespace-only)
  * - role not one of 'user' | 'assistant' | 'system' | 'tool'
  * - non-tool message has non-string `text`
  * - tool message missing a valid `toolCall` (must be an object with a non-blank `name`)
@@ -65,7 +65,11 @@ function isValidToolCall(value: unknown): value is ToolCall {
  */
 function validateStoredMessage<TMeta>(value: unknown): { ok: true; message: Message<TMeta> } | { ok: false; reason: string } {
   if (!isPlainObject(value)) return { ok: false, reason: 'entry is not an object' };
-  if (typeof value.id !== 'string' || value.id.length === 0) return { ok: false, reason: 'missing or empty id' };
+  // Trim before the emptiness check: a whitespace-only id (e.g. '   ') survives
+  // a bare `.length === 0` test but is useless downstream — it reaches render
+  // and `warnDuplicateMessageIds`, where two such entries collide as duplicates.
+  // `isConversationSummary` in conversations/sanitize.ts trims the same way.
+  if (typeof value.id !== 'string' || value.id.trim().length === 0) return { ok: false, reason: 'missing or empty id' };
   if (typeof value.role !== 'string' || !VALID_ROLES.has(value.role as Role)) {
     return { ok: false, reason: `invalid role: ${String(value.role)}` };
   }
@@ -144,7 +148,7 @@ function validateStoredMessages<TMeta>(parsed: unknown): Message<TMeta>[] {
  * entry against the public `Message` contract and drops invalid entries (with a dev
  * warning listing what was dropped) so a corrupted payload cannot crash rendering.
  *
- * Invalid entries dropped here include: non-object entries, missing or empty `id`,
+ * Invalid entries dropped here include: non-object entries, missing or blank `id`,
  * unknown `role`, non-string `text` on non-tool messages, tool messages without a
  * valid `toolCall` (object with non-blank `name`), and attachments on roles that do
  * not support them. A non-array payload (e.g. a `{"messages":[...]}` object) loads as

@@ -1,17 +1,11 @@
 import type { Message } from '../../types';
+import { RESERVED_SYSTEM_PROMPT_ID } from '../../reservedIds';
 
-/**
- * Reserved message id for the synthetic `system` message that
- * {@link historyWithSystemPrompt} prepends to transport request history from
- * the `systemPrompt` prop.
- *
- * This id is reserved by Chorus: a host-authored message must not use it, or
- * the two will collide. The value is intentionally stable (not per-request) so
- * request mappers and tests can recognize the Chorus-injected system message;
- * connectors/request mappers that need to distinguish it from a host-authored
- * `system` message should match on this id.
- */
-export const RESERVED_SYSTEM_PROMPT_ID = 'chorus-system-prompt';
+// `RESERVED_SYSTEM_PROMPT_ID` itself lives in the dependency-free `src/reservedIds.ts`
+// leaf so the public `react-chorus/server` and `react-chorus/provider-requests`
+// barrels can re-export it without dragging in this `chorus-session` hook chunk.
+// Re-exported here so existing imports of the id from this module keep working.
+export { RESERVED_SYSTEM_PROMPT_ID };
 
 export function historyWithSystemPrompt<TMeta>(
   history: Message<TMeta>[],
