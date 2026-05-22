@@ -10,6 +10,7 @@ import { releaseTransportController, emitFinishForAssistantMessage, finalizeErro
 import { historyWithSystemPrompt } from './transportHistory';
 import { createStreamDoneContext, createTerminalStreamDoneContext } from './transportStreamDone';
 import { decideTransportToolLoopContinuation, type ToolLoopDecision } from './transportToolLoop';
+import { createTransportSendCallbacks } from './transportSendCallbacks';
 import type { ChorusShouldContinueToolLoop } from './types';
 
 export type { ToolLoopDecision } from './transportToolLoop';
@@ -110,45 +111,34 @@ export function useTransportLifecycle<TMeta>(deps: TransportLifecycleDeps<TMeta>
     controller: AbortController,
     iteration: number,
   ) => {
-    void doStream(text, historyForTransport(history), {
-      onChunk: (chunk) => {
-        if (isAssistantSessionActive(sessionId)) appendAssistantNow(chunk);
-      },
-      onReasoning: (chunk) => {
-        if (isAssistantSessionActive(sessionId)) appendAssistantReasoningNow(chunk);
-      },
-      onSource: (source) => {
-        if (isAssistantSessionActive(sessionId)) appendAssistantSourceNow(source);
-      },
-      onToolDelta: (delta) => {
-        if (isAssistantSessionActive(sessionId)) appendToolDeltaNow(delta);
-      },
-      onWarning: (warning) => {
-        if (isAssistantSessionActive(sessionId)) observers.safeOnStreamWarning(warning);
-      },
-      onMetadata: (metadata) => {
-        if (isAssistantSessionActive(sessionId)) observers.safeOnStreamMetadata(metadata);
-      },
+    const finalizeError = (error: Error) => finalizeErroredTransportStream({
+      sessionId,
+      error,
+      controllerRef,
+      controller,
+      isAssistantSessionActive,
+      removePendingAssistant,
+      invalidateAssistantSession,
+      setTransportBusy,
+      observers,
+      showStreamError,
+    });
+    const callbacks = createTransportSendCallbacks<TMeta>({
+      sessionId,
+      isAssistantSessionActive,
+      appendAssistantNow,
+      appendAssistantReasoningNow,
+      appendAssistantSourceNow,
+      appendToolDeltaNow,
+      observers,
       onDone: (response) => {
         if (!isAssistantSessionActive(sessionId)) return;
         void finishTransportStreamRef.current?.(sessionId, response, controller, iteration);
       },
-      onError: (err) => {
-        finalizeErroredTransportStream({
-          sessionId,
-          error: err,
-          controllerRef,
-          controller,
-          isAssistantSessionActive,
-          removePendingAssistant,
-          invalidateAssistantSession,
-          setTransportBusy,
-          observers,
-          showStreamError,
-        });
-      },
+      onError: finalizeError,
       minDelayMs: minAssistantDelayMsRef.current,
-    }, controller.signal).catch((rejection: unknown) => {
+    });
+    void doStream(text, historyForTransport(history), callbacks, controller.signal).catch((rejection: unknown) => {
       if (isUnstartedSendError(rejection)) {
         // doStream rejected before the transport ran — a concurrent-send overlap
         // (this startTransportStream raced another send still in flight) or an
@@ -156,18 +146,7 @@ export function useTransportLifecycle<TMeta>(deps: TransportLifecycleDeps<TMeta>
         // path above never fired. Route the rejection through the standard error
         // finalizer so the turn surfaces an error banner / onError instead of
         // silently releasing busy state and snapping back to the Send button.
-        finalizeErroredTransportStream({
-          sessionId,
-          error: rejection,
-          controllerRef,
-          controller,
-          isAssistantSessionActive,
-          removePendingAssistant,
-          invalidateAssistantSession,
-          setTransportBusy,
-          observers,
-          showStreamError,
-        });
+        finalizeError(rejection);
         return;
       }
       releaseTransportController({ controllerRef, controller, setTransportBusy });
