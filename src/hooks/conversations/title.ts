@@ -24,7 +24,13 @@ export function titleFromFirstMessage(
   if (!normalized) return '';
 
   const limit = Math.max(1, maxLength);
-  if (normalized.length <= limit) return normalized;
+  // Count and slice by code point, not UTF-16 code unit: `String.prototype.slice`
+  // can cut an emoji / ZWJ sequence / CJK pair mid-surrogate-pair and leave a lone
+  // surrogate that serializes to a replacement character (�) in the persisted
+  // index. `Array.from` iterates code points, so a slice boundary never lands
+  // inside a surrogate pair.
+  const codePoints = Array.from(normalized);
+  if (codePoints.length <= limit) return normalized;
   if (limit === 1) return '…';
-  return `${normalized.slice(0, limit - 1).trimEnd()}…`;
+  return `${codePoints.slice(0, limit - 1).join('').trimEnd()}…`;
 }

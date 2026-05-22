@@ -36,7 +36,11 @@ export function buildToolMessageFromDelta<TMeta>(
   const toolCall: ToolMessage<TMeta>['toolCall'] = {
     ...(existing?.toolCall ?? {}),
     id: delta.id,
-    name: delta.name ?? existing?.toolCall?.name ?? delta.id,
+    // `||` (not `??`) so a connector streaming an empty-string `name` falls
+    // through to the id, matching `createToolCallContextFromMessage`'s
+    // `name || id`. Keeping a stored `''` name would make the persisted
+    // `toolCall.name` and the execution-context name disagree.
+    name: delta.name || existing?.toolCall?.name || delta.id,
   };
   if (hasOwn(delta, 'input')) toolCall.input = delta.input;
   if (hasOwn(delta, 'output')) toolCall.output = delta.output;

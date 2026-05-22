@@ -78,6 +78,14 @@ export function useLocalStorageConversationIndexSync({
     // the other tab's conversation. Queue the event behind the current write
     // chain, then re-check on settle in case another local write started while
     // this one was waiting.
+    //
+    // A *debounced* index write that has been scheduled but whose timer has not
+    // yet fired is a second lost-update window — every `touchConversation` arms
+    // one. `isWritePending()` is false for it, so applying the external value
+    // now would let that armed timer fire later and persist its stale index
+    // snapshot over the other tab's conversation. The external event supersedes
+    // a local write that has not started, so drop the armed write before
+    // applying.
     const processExternalValue = (newValue: string | null) => {
       if (cancelled) return;
       if (writeCoordination.isWritePending()) {
@@ -85,6 +93,7 @@ export function useLocalStorageConversationIndexSync({
         writeCoordination.whenWriteSettles().then(reprocess, reprocess);
         return;
       }
+      if (writeCoordination.hasPendingWrite()) writeCoordination.dropPendingWrite();
       applyExternalValue(newValue);
     };
 

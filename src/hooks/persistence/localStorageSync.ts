@@ -68,6 +68,13 @@ export function useLocalStorageSync<TMeta = Record<string, unknown>>(
     // flight — doing so would clobber the pending write's value (lost update).
     // Queue the event behind the current write chain, then re-check on settle
     // in case another local write started while this one was waiting.
+    //
+    // A *debounced* write that has been scheduled but whose timer has not yet
+    // fired is a second lost-update window: `isWritePending()` is false for it,
+    // so applying the external value now would let that armed timer fire later
+    // and persist its stale snapshot over the other tab's value. The external
+    // event supersedes a local write that has not started, so drop the armed
+    // write before applying.
     const processExternalValue = (newValue: string | null) => {
       if (cancelled) return;
       if (writeCoordination.isWritePending()) {
@@ -75,6 +82,7 @@ export function useLocalStorageSync<TMeta = Record<string, unknown>>(
         writeCoordination.whenWriteSettles().then(reprocess, reprocess);
         return;
       }
+      if (writeCoordination.hasPendingWrite()) writeCoordination.dropPendingWrite();
       applyExternalValue(newValue);
     };
 
