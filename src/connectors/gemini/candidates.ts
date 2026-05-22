@@ -42,18 +42,21 @@ export function extractCandidateContent(
     if (unsupported) unsupportedParts.push(unsupported);
   });
   // Surface unsupported parts as a non-fatal warning so a candidate that
-  // contains *only* inlineData/fileData is observable instead of returning a
-  // silent null (a developer using a Gemini image model would otherwise see a
-  // blank assistant turn with no diagnostic). The raw parts stay inspectable
-  // via `warning.payload`. `addWarning` appends rather than overwrites, so a
-  // later `truncated` warning on the same chunk does not clobber this one.
+  // contains *only* unrenderable parts (inlineData/fileData, or
+  // executableCode/codeExecutionResult from the code-execution tool) is
+  // observable instead of returning a silent null (a developer using a Gemini
+  // image or code-execution model would otherwise see a blank assistant turn
+  // with no diagnostic). The raw parts stay inspectable via `warning.payload`.
+  // `addWarning` appends rather than overwrites, so a later `truncated` warning
+  // on the same chunk does not clobber this one.
   if (unsupportedParts.length > 0) {
     addWarning(result, {
       code: 'unsupported-part',
       message:
         `Gemini emitted ${unsupportedParts.length} content part(s) react-chorus cannot render: ` +
-        `${unsupportedParts.join(', ')}. Inline images / file references from Gemini multimodal or ` +
-        `image-generation models are not surfaced as assistant content; inspect warning.payload for the raw chunk.`,
+        `${unsupportedParts.join(', ')}. Inline images / file references and code-execution output ` +
+        `from Gemini multimodal, image-generation, or code-execution models are not surfaced as ` +
+        `assistant content; inspect warning.payload for the raw chunk.`,
       payload,
     });
   }
