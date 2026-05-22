@@ -1,4 +1,5 @@
 import type { ConnectorResult } from '../types';
+import { extractSourcesFromUnknown, sourceFromAiSdkDataStream } from '../sourceMapping';
 import {
   type AiSdkConnectorState,
   aiSdkFinishResult,
@@ -80,6 +81,15 @@ export function dataStreamProtocolResult(state: AiSdkConnectorState, data: strin
       resetAiSdkState(state);
       return result;
     }
+    case 'j': {
+      const source = sourceFromAiSdkDataStream(parsed);
+      return source ? { source } : null;
+    }
+    case '7':
+    case '8': {
+      const sources = extractSourcesFromUnknown(parsed);
+      return sources.length ? { sources } : null;
+    }
     case 'e':
       // `e:` is the finish-*step* part — it ends one step of a multi-step run
       // (e.g. between a tool call and the model's follow-up turn) while the
@@ -88,8 +98,8 @@ export function dataStreamProtocolResult(state: AiSdkConnectorState, data: strin
       // Unlike `d:` it must NOT reset state or signal `done`, or a `streamText`
       // agent with `maxSteps > 1` would be cut off after its first step.
       return null;
-    // Ignored: 1 (data), 2 (data array), 7/8 (annotations), f (start-step),
-    // h (reasoning signature), i (redacted reasoning), j (source).
+    // Ignored: 1 (data), 2 (data array), f (start-step), h (reasoning signature),
+    // i (redacted reasoning), and annotation frames without source-like content.
     default:
       return null;
   }

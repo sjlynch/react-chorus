@@ -1,10 +1,12 @@
-import type { Attachment, Message, ToolMessage } from '../../types';
+import type { Attachment, Message, MessageSource, ToolMessage } from '../../types';
 import type { ConnectorToolDelta } from '../../connectors/connectors';
 import type { SendCallbacks } from '../useChorusStream';
 
 export interface ChorusSendHelpers {
   appendAssistant: (chunk: string) => void;
   appendReasoning?: (chunk: string) => void;
+  /** Attach a source/citation to the active assistant message. */
+  appendSource?: (source: MessageSource) => void;
   /**
    * Render a `role: 'tool'` row in the transcript from an accumulated connector
    * tool delta. This helper is **presentation only**: unlike the `transport`
@@ -21,7 +23,7 @@ export interface ChorusSendHelpers {
   finalizeAssistant: () => void;
   /**
    * Complete callback set for bridging `useChorusStream(...).send()` through
-   * `onSend` — `{ onChunk, onReasoning, onToolDelta, onWarning, onMetadata,
+   * `onSend` — `{ onChunk, onReasoning, onSource, onToolDelta, onWarning, onMetadata,
    * onDone, onError }`. The bundled `onError` surfaces a mid-stream failure
    * (the UI banner + the `onError` prop) and drops the half-streamed partial
    * even when `onSend` does not return or await the `send()` promise, so a

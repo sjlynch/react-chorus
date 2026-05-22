@@ -1,6 +1,7 @@
 import React from 'react';
 import type { Message } from '../types';
 import { resolveChorusLabels } from '../labels/resolve';
+import { formatMessageForClipboard } from '../hooks/transcriptFormatters';
 import { useCanWriteTextToClipboard, writeTextToClipboard } from '../utils/messageCopy';
 import { visibleActivityKey } from './chat-window/activityKey';
 import { useMessageFeedbackState } from './chat-window/feedback';
@@ -89,7 +90,7 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
   const copyMessage = React.useCallback((message: Message<TMeta>): MessageCopyResult => {
     if (onCopy) return onCopy(message);
 
-    return writeTextToClipboard(message.text ?? '');
+    return writeTextToClipboard(formatMessageForClipboard(message));
   }, [onCopy]);
   const { getSelectedFeedback, handleMessageFeedback } = useMessageFeedbackState({ messages, getMessageFeedback, onFeedback });
   // Read-only feedback: historical reactions are available (getMessageFeedback)

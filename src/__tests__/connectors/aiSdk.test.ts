@@ -13,6 +13,22 @@ describe('aiSdkConnector', () => {
       expect(aiSdkConnector.extract(data)).toEqual({ reasoning: 'considering' });
     });
 
+    it('extracts source-url and source-document frames as message sources', () => {
+      expect(aiSdkConnector.extract(JSON.stringify({ type: 'source-url', sourceId: 'src_1', url: 'https://example.com/doc', title: 'Docs' }))).toEqual({
+        source: { id: 'src_1', type: 'url', title: 'Docs', url: 'https://example.com/doc', metadata: { provider: 'ai-sdk' } },
+      });
+      expect(aiSdkConnector.extract(JSON.stringify({ type: 'source-document', sourceId: 'src_2', title: 'Policy PDF', mediaType: 'application/pdf' }))).toEqual({
+        source: { id: 'src_2', type: 'document', title: 'Policy PDF', metadata: { provider: 'ai-sdk', mediaType: 'application/pdf' } },
+      });
+    });
+
+    it('extracts source-like message-metadata without rendering the raw metadata JSON', () => {
+      const frame = JSON.stringify({ type: 'message-metadata', messageMetadata: { sources: [{ id: 's1', title: 'Metadata source', url: 'https://example.com/meta' }] } });
+      expect(aiSdkConnector.extract(frame)).toEqual({
+        sources: [{ id: 's1', type: 'url', title: 'Metadata source', url: 'https://example.com/meta', metadata: { provider: 'ai-sdk' } }],
+      });
+    });
+
     it('ignores lifecycle frames that have no visible payload', () => {
       expect(aiSdkConnector.extract(JSON.stringify({ type: 'start', messageId: 'm_1' }))).toBeNull();
       expect(aiSdkConnector.extract(JSON.stringify({ type: 'start-step' }))).toBeNull();
@@ -202,13 +218,21 @@ describe('aiSdkConnector', () => {
         .toEqual({ error: 'upstream failed', errorPayload: '3:"upstream failed"' });
     });
 
-    it('ignores unknown / annotation-only frames so protocol text never leaks', () => {
+    it('extracts j: source frames and source-like annotation frames', () => {
+      expect(aiSdkConnector.extract('j:{"sourceType":"url","id":"src_1","url":"https://example.com","title":"Example"}')).toEqual({
+        source: { id: 'src_1', type: 'url', title: 'Example', url: 'https://example.com', metadata: { provider: 'ai-sdk' } },
+      });
+      expect(aiSdkConnector.extract('8:[{"sourceType":"document","id":"src_2","title":"Manual","snippet":"Page 4"}]')).toEqual({
+        sources: [{ id: 'src_2', type: 'document', title: 'Manual', snippet: 'Page 4', metadata: { provider: 'ai-sdk' } }],
+      });
+    });
+
+    it('ignores unknown / non-source annotation-only frames so protocol text never leaks', () => {
       expect(aiSdkConnector.extract('f:{"messageId":"m_1"}')).toBeNull();
       expect(aiSdkConnector.extract('2:[{"role":"assistant"}]')).toBeNull();
       expect(aiSdkConnector.extract('8:[{"id":"a"}]')).toBeNull();
       expect(aiSdkConnector.extract('h:"sig"')).toBeNull();
       expect(aiSdkConnector.extract('i:"redacted"')).toBeNull();
-      expect(aiSdkConnector.extract('j:"https://example.com"')).toBeNull();
     });
 
     it('returns null for malformed prefix lines and never leaks them as text', () => {

@@ -19,6 +19,7 @@ OpenAI ships **two completely different streaming protocols**, and this connecto
 - `responseErrorEvents.ts` — `response.failed` / `response.error` handler → `{ error, errorPayload }`.
 - `responseRefusalEvents.ts` — `response.refusal.added` / `.delta` / `.done` lifecycle handler.
 - `responseTextEvents.ts` — `response.output_text.delta` + the `response.reasoning_*` delta handler.
+- `responseSourceEvents.ts` — `response.output_text.annotation.added` / `.done` source/citation extraction.
 - `responseToolEvents.ts` — `response.output_item.added` / `.done` + `response.function_call_arguments.delta` handler.
 - `responseMetadata.ts` — Responses completion/usage/finish-reason handling plus `IGNORED_RESPONSE_EVENT_TYPES`.
 - `responseToolCalls.ts` — Responses tool-call id aliasing and argument buffering/replay primitives used by `responseToolEvents.ts` and `responseTerminalEvents.ts`.

@@ -13,7 +13,7 @@ The type is exported from `src/hooks/useChorusStream.ts` and re-exported from `C
 ## Streaming pipeline modules
 
 - `readSSEStream.ts` exposes the stream-independent `createSSEParser` state machine for line splitting, one-leading-BOM handling, `data:`/`event:` fields, comments/keepalives, EOF flush, and named-event dispatch. `readSSEStream` is the `Response`/`ReadableStream` adapter plus abort handling and the end-of-stream "no Server-Sent Events" guard; `text/event-stream` bodies with any SSE-shaped line (`data:` / `event:` / `:` comment) remain valid, so keepalive/event-only streams resolve cleanly.
-- `delayedStreamEvents.ts` is the thin orchestrator that buffers first text/reasoning/tool events for `minDelayMs`; it exposes only `createDelayedChunkEmitter` and wires together the internal factories below (their layout is a pure split — no behavior change, callback-error semantics preserved):
+- `delayedStreamEvents.ts` is the thin orchestrator that buffers first text/reasoning/source/tool events for `minDelayMs`; it exposes only `createDelayedChunkEmitter` and wires together the internal factories below (their layout is a pure split — no behavior change, callback-error semantics preserved):
   - `internal/delayedReleaseSchedule.ts` — `createReleaseSchedule` (the `minDelayMs` release timer) + `createReleaseState` (released-state tracking).
   - `internal/delayedEventQueue.ts` — the `DelayedStreamEvent` type, `isEmptyChunkEvent`, `createDelayedEventQueue`, and `createAbortCancellation`.
   - `internal/delayedCallbackDelivery.ts` — `createCallbackDelivery` (callback fan-out + error propagation) + `createBufferedDelivery` (release/flush pipeline).

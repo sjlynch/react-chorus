@@ -137,6 +137,7 @@ const fr: ChorusLabels = {
     tool: 'Message outil',
   },
   toolCall: { input: 'Entrée', output: 'Sortie', running: 'En cours…', empty: 'Aucune sortie' },
+  sources: { sources: 'Sources', source: index => `Source ${index + 1}` },
   reasoning: 'Raisonnement',
   codeCopy: { copy: 'Copier', copied: 'Copié !', failed: 'Échec', ariaLabel: 'Copier le code' },
   conversationList: {
@@ -181,14 +182,17 @@ Labels are deep-merged with the defaults, so you only need to override the strin
 
 The `attachments` slice localizes the attachment composer end-to-end: chip remove-button labels, the pending read/upload polite-live status text and `aria-busy` chips, the polite-live completion announcements that confirm "attached" / "failed" after a pending chip resolves, the dismiss-error button, the "describe this image" affordance (visible next to image chips so users can supply alt text before sending), validation/read/upload error messages with `{name, accept, size, limit, max, detail}` interpolation, and the role-hinted image fallback alt rendered in the transcript when `Attachment.alt` is absent. The English defaults for just this slice are exported as `DEFAULT_ATTACHMENT_LABELS` (a `ChorusAttachmentLabels`), handy when you want to extend the attachment strings rather than replace them.
 
+The `sources` slice localizes the built-in source/citation footer (`Sources`) and fallback `Source N` labels used when a source has no title, URL, or id. Streamed provider citations are stored as `message.sources` and rendered from that same footer.
+
 ### `helpers` (passed to `onSend`)
 
 | Helper | Description |
 |--------|-------------|
 | `appendAssistant(chunk)` | Append a text chunk to the current assistant message. Chunks are buffered until `minAssistantDelayMs` has elapsed before the first token is shown. |
 | `appendReasoning(chunk)` | Append a reasoning/thinking chunk to the current assistant message. |
+| `appendSource(source)` | Attach a source/citation to the current assistant message's `sources` array. Use this for custom RAG clients that stream citations outside a built-in connector. |
 | `appendToolDelta(delta)` | Create/update a `role: 'tool'` row from an accumulated connector tool delta. **Presentation only** — it does not execute registered `tools` handlers, fire `onToolCall`/`onToolDelta`, or drive the auto-continue loop, so `toolCall.output` stays unset. On the `onSend` path you run the tool yourself, then call `appendToolDelta` again with the same `delta.id` and an `output` to fill the row and `appendAssistant` for the follow-up turn. |
-| `streamCallbacks()` | Convenience helper returning `{ onChunk, onReasoning, onToolDelta, onWarning, onMetadata, onDone, onError }` for `useChorusStream(...).send()`. `onWarning` forwards non-fatal connector warnings to the `<Chorus onStreamWarning>` prop and `onMetadata` forwards free-form provider metadata to the `<Chorus onStreamMetadata>` prop. `onError` surfaces a mid-stream failure (the error banner + the `onError` prop) and drops the half-streamed partial even if your `onSend` does not return or await the `send()` promise. `minAssistantDelayMs` is applied by Chorus on this path, so do not also pass `minDelayMs` to `send()` — the two first-token delays would stack. It is present at runtime; optional chaining keeps older hand-written helper mocks type-compatible. |
+| `streamCallbacks()` | Convenience helper returning `{ onChunk, onReasoning, onSource, onToolDelta, onWarning, onMetadata, onDone, onError }` for `useChorusStream(...).send()`. `onSource` attaches streamed citations to the assistant message, `onWarning` forwards non-fatal connector warnings to the `<Chorus onStreamWarning>` prop, and `onMetadata` forwards free-form provider metadata to the `<Chorus onStreamMetadata>` prop. `onError` surfaces a mid-stream failure (the error banner + the `onError` prop) and drops the half-streamed partial even if your `onSend` does not return or await the `send()` promise. `minAssistantDelayMs` is applied by Chorus on this path, so do not also pass `minDelayMs` to `send()` — the two first-token delays would stack. It is present at runtime; optional chaining keeps older hand-written helper mocks type-compatible. |
 | `finalizeAssistant()` | Mark the assistant message complete. If first-token chunks are still buffered, completion waits until they flush. |
 | `signal` | `AbortSignal` — aborted when Stop, clear-while-sending, or a superseding session cancels the active send. |
 | `systemPrompt` | The optional `systemPrompt` prop. Use it when serializing custom `onSend` requests; Chorus does not insert it into the `messages` argument on this path. |
@@ -500,9 +504,9 @@ For one-off reads from outside React state, call `chorusRef.current?.getMessages
 
 `useChorusTranscriptActions` is a headless utility hook for building a search box, a "copy conversation" button, or a "download transcript" affordance around `<Chorus>` or a custom headless shell — without writing the indexing, clipboard, and serialization layers yourself. Pass it the same `messages` array you render (from `chorusRef.getMessages()`, `onMessagesChange`, or your own state) and it returns four callbacks with stable identities:
 
-- `searchMessages(query)` — case-insensitive substring search across each message's `text`, each attachment's file `name`, the `reasoning` of assistant messages, and — for tool messages — `toolCall.name` plus its serialized `input` and `output`. These are exactly the values `exportAs('markdown')` renders, so a string visible in the export is findable here and vice versa. Returns the matching `Message[]`; a blank/whitespace-only query returns `[]`. Pair it with `chorusRef.scrollToMessage(id)` to jump to a hit.
+- `searchMessages(query)` — case-insensitive substring search across each message's `text`, each attachment's file `name`, each source/citation's title/url/snippet, the `reasoning` of assistant messages, and — for tool messages — `toolCall.name` plus its serialized `input` and `output`. These are exactly the values `exportAs('markdown')` renders, so a string visible in the export is findable here and vice versa. Returns the matching `Message[]`; a blank/whitespace-only query returns `[]`. Pair it with `chorusRef.scrollToMessage(id)` to jump to a hit.
 - `copyAll(format?)` — copies the whole transcript to the clipboard. Defaults to `'markdown'`; pass `'json'` for the raw structure. Resolves `false` without touching the clipboard when the transcript is empty (a non-error signal — `onCopyError` is not called — so you can disable the button). Also resolves `false`, and calls the optional `onCopyError`, when the Clipboard API is unavailable or the write rejects.
-- `exportAs(format)` — serializes the transcript to a string. `'markdown'` renders a readable transcript with one heading per message (assistant messages include a `**Reasoning:**` block; tool calls include their input/output); `'json'` returns `JSON.stringify(messages, null, 2)`, which round-trips through `JSON.parse`.
+- `exportAs(format)` — serializes the transcript to a string. `'markdown'` renders a readable transcript with one heading per message (assistant messages include `**Reasoning:**` and `**Sources:**` blocks when present; tool calls include their input/output); `'json'` returns `JSON.stringify(messages, null, 2)`, which round-trips through `JSON.parse` including `sources` and metadata.
 - `downloadAs(format, filename?)` — serializes the transcript and saves it to a file by triggering a transient `<a download>`, so you skip the `Blob`/`createObjectURL`/anchor/`revokeObjectURL` dance. `filename` defaults to `transcript.md` / `transcript.json` per format (a name with no extension gets the format's appended); the MIME type is picked for you. Returns `false` without downloading when the transcript is empty or no DOM is available (e.g. SSR), and `true` once the download starts. The `TRANSCRIPT_FORMAT_INFO` record (`{ markdown, json }` → `{ mimeType, extension }`) is exported too if you need those values for your own download or upload code.
 
 ```tsx
@@ -585,6 +589,25 @@ All accepted files first appear as pending attachment chips while they are read 
 **Accessibility:** pending chips set `aria-busy="true"` and expose a polite live-region "Reading/Uploading {name}" status so screen-reader users hear the upload in progress. When a pending attachment completes, the composer emits a separate polite live-region "{name} attached" announcement so success is heard even though the spinner has been removed. A read/upload failure is announced exactly once — by the polite attachment error region (`role="status"`, `aria-live="polite"`) when it is rendered, or, when that region is suppressed with `renderAttachmentError={null}`, by the polite announcer span ("{name} failed to attach"). All of these strings flow through `labels.attachments` for localization.
 
 **Image alt text.** `Attachment.alt` is an optional human-authored description used as the image `alt` when the message renders in the transcript. When `alt` is omitted, the renderer falls back to a role-hinted label (`Attached image: {name}` by default, localizable via `labels.attachments.imageFallbackAlt`) rather than the bare filename. Image attachment chips in the composer expose an inline "Describe this image" affordance that captures alt text before send; the typed value flows into the `Attachment.alt` passed to `onSend`. Custom upload flows can also set `alt` themselves before returning the attachment from `uploadAttachment`.
+
+### Sources and citations
+
+Assistant messages can carry structured source/citation references in `message.sources`:
+
+```ts
+type MessageSource = {
+  id?: string;
+  type?: 'url' | 'document' | 'file' | 'unknown';
+  title?: string;
+  url?: string;
+  snippet?: string;
+  metadata?: Record<string, unknown>;
+};
+```
+
+Built-in source-aware connectors attach provider source frames to the active assistant message: AI SDK UI-message-stream `source-url` / `source-document` / source-like `message-metadata`, AI SDK data-stream `j:` sources and source-like annotation frames (`7:`/`8:`), and OpenAI Responses output-text annotation events. These frames never become assistant text. The default renderer shows a `Sources` footer, `renderMessage` receives the same data as `ctx.sources`, per-message Copy includes the source list, and `useChorusTranscriptActions` search/export/copy-all include source title/url/snippet. Built-in JSON persistence stores `sources` with the rest of the message; if you provide custom `serializeMessages` / `deserializeMessages`, keep the array JSON-serializable or revive it yourself.
+
+For custom `onSend` RAG clients, either return an assistant message with `sources` already populated or stream them with `helpers.appendSource({ title, url, snippet })`. If you bridge `useChorusStream`, `helpers.streamCallbacks()` wires `onSource` for you.
 
 ### Hiding or showing tool calls
 
@@ -696,7 +719,7 @@ const { send, abort, sending } = useChorusStream<MyMeta>(transport, { connector:
 
 - `transport` — async function `(text, history: Message<TMeta>[], signal) => Promise<Response>`. Use `createFetchSSETransport<TMeta>(url)` or write your own.
 - `send(..., { minDelayMs })` buffers the first streamed chunks until that many milliseconds have elapsed from send start, then flushes them before continuing normally.
-- `send(..., { onReasoning, onToolDelta })` receives connector-emitted reasoning chunks and accumulated tool deltas when you use the hook directly. `<Chorus>` wires these into `Message.reasoning` and `role: 'tool'` messages automatically; advanced `onSend` bridges can pass `helpers.streamCallbacks?.()` to preserve the same behavior.
+- `send(..., { onReasoning, onSource, onToolDelta })` receives connector-emitted reasoning chunks, source/citation references, and accumulated tool deltas when you use the hook directly. `<Chorus>` wires these into `Message.reasoning`, `Message.sources`, and `role: 'tool'` messages automatically; advanced `onSend` bridges can pass `helpers.streamCallbacks?.()` to preserve the same behavior.
 - `send(..., { onWarning })` receives non-fatal connector warnings (`ConnectorWarning` — `{ code, message, payload? }`) such as `truncated` (max-token stop) or safety notices. The stream is not aborted; `onDone` still fires. `<Chorus>` surfaces these through the `onStreamWarning` prop, and `helpers.streamCallbacks?.()` forwards them on the `onSend` bridge. When you drive the hook directly and omit `onWarning`, warnings are logged once in development instead.
 - `send(..., { onMetadata })` receives free-form provider metadata (`Record<string, unknown>`) such as token `usage`, `finishReason`, `stopReason`, or `safetyRatings`. The stream is not aborted; `onDone` still fires. `<Chorus>` surfaces these through the `onStreamMetadata` prop, and `helpers.streamCallbacks?.()` forwards them on the `onSend` bridge. Omitting `onMetadata` drops the metadata silently.
 - Non-abort transport, HTTP, connector, and in-band provider errors call `onError` when supplied and reject the returned `send()` promise. This lets README-style `await send(...)` bridges surface the friendly Chorus error banner through the surrounding `onSend` catch path.
@@ -704,7 +727,7 @@ const { send, abort, sending } = useChorusStream<MyMeta>(transport, { connector:
 - `onError` receives raw transport details (including bounded HTTP response body snippets); the built-in UI continues to show only `errorMessage`.
 - A 200 response that contains no SSE-shaped lines at all (for example a JSON `{"error":"missing key"}` or plain-text body served instead of `text/event-stream`) rejects `send()` with a `ChorusStreamError` whose message names Server-Sent Events, includes the response `Content-Type`, and previews the body — instead of completing silently with no chunks and no error. Truly empty/no-content bodies still resolve, and so does a valid `text/event-stream` that carried only `:` keepalive comments or named `event:` lines with no `data:` field (see [Named SSE events](guide.md#named-sse-events)).
 - Calling `send()` while a previous `send()` is still in flight rejects the new call with a `ChorusStreamError` whose `code === 'concurrent-send'` (the previous send keeps running, the transport is not invoked a second time, and a dev-mode warning is logged). Custom shells that `await send(...)` can branch on `err instanceof ChorusStreamError && err.code === 'concurrent-send'` to keep their input/UI state intact, instead of mistaking the silent no-op for a successful empty stream. To start a fresh send, await the active promise or call `abort()` first.
-- `opts.connector` — `'openai'` | `'anthropic'` | `'gemini'` | `'ai-sdk'` | `'auto'` | custom `Connector`. Defaults to `'auto'` which handles OpenAI, Gemini, Anthropic, and Vercel AI SDK JSON / data-stream frames, plain-text SSE, reasoning/tool deltas, and in-band `{ error }` payloads.
+- `opts.connector` — `'openai'` | `'anthropic'` | `'gemini'` | `'ai-sdk'` | `'auto'` | custom `Connector`. Defaults to `'auto'` which handles OpenAI, Gemini, Anthropic, and Vercel AI SDK JSON / data-stream frames, plain-text SSE, reasoning/source/tool deltas, and in-band `{ error }` payloads.
 - `opts.connectorOptions` — options forwarded to the built-in connector named by `opts.connector`. Currently only `connector: 'openai'` consumes them (e.g. `{ thinkTag: { start: '<reasoning>', end: '</reasoning>' } }`). Ignored for other connector names and for custom `Connector` objects; in development a console warning fires when options are passed but the connector cannot apply them.
 - If a connector exposes `createState()`, the hook creates one state object per `send()` and passes it to every `extract(data, state)` call for that stream. Do not store per-stream parser buffers in module globals; use connector state instead.
 
@@ -819,11 +842,13 @@ const bufferedConnector: Connector<{ buffer: string }> = {
   createState: () => ({ buffer: '' }),
   extract(data, state) {
     state!.buffer += data;
-    // parse state.buffer and return { text }, { reasoning }, { toolDelta }, etc.
+    // parse state.buffer and return { text }, { reasoning }, { source }, { toolDelta }, etc.
     return null;
   },
 };
 ```
+
+Return `{ source }` or `{ sources }` when your protocol emits citations. The source shape is the public `MessageSource` described above; `<Chorus>` appends those objects to the active assistant message's `sources` array, while direct `useChorusStream` consumers receive them through `onSource`.
 
 **In-band errors.** Connectors can surface a provider error by returning `{ error: string }` (and optionally `errorPayload` with the original frame). Chorus treats that as a stream error: the assistant message is finalized, `streamError` is set, the error banner renders, and `onError` is called with a `ChorusStreamError`. The original provider payload is preserved on `error.errorPayload`/`error.cause` and on `streamRawError` for hosts that want to surface a richer banner via `renderError`.
 
@@ -1365,9 +1390,9 @@ Helpers and constants:
 - `getConnector`, `createOpenAIConnector` — connector accessors. `getConnector(name, options?)` resolves a built-in connector by name (`'openai'` / `'anthropic'` / `'gemini'` / `'ai-sdk'` / `'auto'`); `createOpenAIConnector(options?)` builds a customized OpenAI connector object.
 - `formatAnthropicMessagesBody`, `formatGeminiGenerateContentBody`, `formatOpenAIChatCompletionsBody`, `formatOpenAIResponsesBody`, `toAnthropicMessages`, `toAnthropicMessagesBody`, `toAnthropicTools`, `toGeminiContents`, `toGeminiGenerateContentBody`, `toGeminiTools`, `toOpenAIChatCompletionsBody`, `toOpenAIChatCompletionsMessages`, `toOpenAIChatCompletionsTools`, `toOpenAIResponsesBody`, `toOpenAIResponsesInput`, `toOpenAIResponsesTools` — provider request mappers.
 - `ChorusStreamError` — error class thrown by `useChorusStream` and the transport path.
-- `DEFAULT_CHORUS_LABELS`, `DEFAULT_ATTACHMENT_LABELS`, `resolveChorusLabels` — built-in localization helpers and label defaults (`DEFAULT_ATTACHMENT_LABELS` is the English `attachments` slice).
+- `DEFAULT_CHORUS_LABELS`, `DEFAULT_ATTACHMENT_LABELS`, `DEFAULT_SOURCE_LABELS`, `resolveChorusLabels` — built-in localization helpers and label defaults (`DEFAULT_ATTACHMENT_LABELS` / `DEFAULT_SOURCE_LABELS` expose individual English slices).
 
-Types: every public type re-exported from the root barrel is also importable from `react-chorus/headless` — including `Message`, `AnyChorusMessage`, `UserMessage`, `AssistantMessage`, `SystemMessage`, `ToolMessage`, `Role`, `ToolCall`, `Attachment`, `AttachmentError`, `AttachmentErrorReason`, `AttachmentSource`, `AttachmentUploadResult`, `UploadAttachment`, `UploadAttachmentOptions`, `StorageAdapter`, `ConnectorName`, `Connector`, `ConnectorResult`, `ConnectorToolDelta`, `Transport`, `FetchSSETransportOptions`, `FetchTransportInit`, `WebSocketTransport`, `WebSocketTransportOptions`, `SendCallbacks`, `StreamOptions`, `ChorusProps` (aliased to `ChorusHeadlessProps`), `ChorusRef`, `ChorusSendHelpers`, `ChorusSendPath`, `ChorusOnSend`, `ChorusOnFinish`, `ChorusOnAbort`, `ChorusOnStreamDone`, `ChorusOnToolCall`, `ChorusOnToolDelta`, `ChorusAbortContext`, `ChorusAbortReason`, `ChorusAbortSource`, `ChorusFinishContext`, `ChorusStreamDoneContext`, `ChorusStreamDoneReason`, `ChorusToolCallContext`, `ChorusToolDeltaContext`, `ChorusToolLoopContext`, `ChorusToolRegistry`, `ChorusToolHandler`, `ChorusConfirmClearConversation`, `ChorusClearConversationContext`, `ChorusConfirmDeleteMessage`, `ChorusDeleteMessageContext`, `ChorusShouldContinueToolLoop`, `ChorusMessagesChangeContext`, `ChorusMessagesChangeReason`, `ChorusMessagesChangeSource`, `ChorusToolDefinition`, `RenderErrorContext`, `RenderMessageContext`, `RenderMessageRootProps`, `MessageBubbleProps`, `MessageBubbleSlots`, `MessageMarkdownProps`, `MessageRenderActions`, `MessageTimestampFormatter`, `MessageCopyResult`, `MessageFeedback`, `GetMessageFeedback`, `ChatInputProps`, `ChatInputHandle`, `ChatInputFocusOptions`, `ChatWindowProps`, `ConversationListProps`, `ConfirmDeleteConversation`, `ConfirmDeleteConversationContext`, `ConversationStorageError`, `ConversationStorageOperation`, `ConversationSummary`, `RenameFromFirstMessageOptions`, `UseConversationsOptions`, `UseConversationsResult`, `ChorusPersistenceError`, `PersistenceOperation`, `PersistenceWriteOptions`, `SerializeMessages`, `DeserializeMessages`, `UseChorusPersistenceOptions`, `UseChorusPersistenceResult`, `ChorusTranscriptActions`, `ChorusTranscriptActionsOptions`, `TranscriptExportFormat`, `TranscriptFormatInfo`, `RenderAttachmentErrorContext`, `Palette`, `MarkdownProps`, `MarkdownSanitizer`, `CodeBlockCopy`, `CodeBlockCopyContext`, `CodeBlockCopyRenderer`, `ProviderToolsOption`, `ProviderToolsSource`, all `ChorusLabels` sub-shapes, and every provider request type (`AnthropicMessagesBody`, `AnthropicTool`, `OpenAIChatCompletionsBody`, `GeminiGenerateContentBody`, etc.).
+Types: every public type re-exported from the root barrel is also importable from `react-chorus/headless` — including `Message`, `AnyChorusMessage`, `UserMessage`, `AssistantMessage`, `SystemMessage`, `ToolMessage`, `Role`, `ToolCall`, `MessageSource`, `MessageCitation`, `MessageSourceType`, `Attachment`, `AttachmentError`, `AttachmentErrorReason`, `AttachmentSource`, `AttachmentUploadResult`, `UploadAttachment`, `UploadAttachmentOptions`, `StorageAdapter`, `ConnectorName`, `Connector`, `ConnectorResult`, `ConnectorToolDelta`, `Transport`, `FetchSSETransportOptions`, `FetchTransportInit`, `WebSocketTransport`, `WebSocketTransportOptions`, `SendCallbacks`, `StreamOptions`, `ChorusProps` (aliased to `ChorusHeadlessProps`), `ChorusRef`, `ChorusSendHelpers`, `ChorusSendPath`, `ChorusOnSend`, `ChorusOnFinish`, `ChorusOnAbort`, `ChorusOnStreamDone`, `ChorusOnToolCall`, `ChorusOnToolDelta`, `ChorusAbortContext`, `ChorusAbortReason`, `ChorusAbortSource`, `ChorusFinishContext`, `ChorusStreamDoneContext`, `ChorusStreamDoneReason`, `ChorusToolCallContext`, `ChorusToolDeltaContext`, `ChorusToolLoopContext`, `ChorusToolRegistry`, `ChorusToolHandler`, `ChorusConfirmClearConversation`, `ChorusClearConversationContext`, `ChorusConfirmDeleteMessage`, `ChorusDeleteMessageContext`, `ChorusShouldContinueToolLoop`, `ChorusMessagesChangeContext`, `ChorusMessagesChangeReason`, `ChorusMessagesChangeSource`, `ChorusToolDefinition`, `RenderErrorContext`, `RenderMessageContext`, `RenderMessageRootProps`, `MessageBubbleProps`, `MessageBubbleSlots`, `MessageMarkdownProps`, `MessageRenderActions`, `MessageTimestampFormatter`, `MessageCopyResult`, `MessageFeedback`, `GetMessageFeedback`, `ChatInputProps`, `ChatInputHandle`, `ChatInputFocusOptions`, `ChatWindowProps`, `ConversationListProps`, `ConfirmDeleteConversation`, `ConfirmDeleteConversationContext`, `ConversationStorageError`, `ConversationStorageOperation`, `ConversationSummary`, `RenameFromFirstMessageOptions`, `UseConversationsOptions`, `UseConversationsResult`, `ChorusPersistenceError`, `PersistenceOperation`, `PersistenceWriteOptions`, `SerializeMessages`, `DeserializeMessages`, `UseChorusPersistenceOptions`, `UseChorusPersistenceResult`, `ChorusTranscriptActions`, `ChorusTranscriptActionsOptions`, `TranscriptExportFormat`, `TranscriptFormatInfo`, `RenderAttachmentErrorContext`, `Palette`, `MarkdownProps`, `MarkdownSanitizer`, `CodeBlockCopy`, `CodeBlockCopyContext`, `CodeBlockCopyRenderer`, `ProviderToolsOption`, `ProviderToolsSource`, all `ChorusLabels` sub-shapes, and every provider request type (`AnthropicMessagesBody`, `AnthropicTool`, `OpenAIChatCompletionsBody`, `GeminiGenerateContentBody`, etc.).
 
 ## Message Shape
 
@@ -1391,8 +1416,21 @@ interface Attachment {
   metadata?: Record<string, unknown>;
 }
 
+type MessageSourceType = 'url' | 'document' | 'file' | 'unknown';
+interface MessageSource {
+  id?: string;
+  type?: MessageSourceType;
+  title?: string;
+  url?: string;
+  snippet?: string;
+  metadata?: Record<string, unknown>;
+}
+
+type MessageCitation = MessageSource;
+
 interface MessageBase<TMeta = Record<string, unknown>> {
   id: string;
+  sources?: MessageSource[]; // source/citation references rendered and persisted with the message
   metadata?: TMeta; // optional typed data (timestamps, model, latency, etc.)
 }
 
@@ -1463,7 +1501,7 @@ const message: ChatMessage = {
 const latency = message.metadata?.latencyMs;
 ```
 
-If you enable built-in persistence, keep metadata/tool payloads JSON-serializable or provide `serializeMessages` / `deserializeMessages`; JSON parsing does not revive `Date` instances or custom classes automatically.
+If you enable built-in persistence, keep metadata/tool payloads/source metadata JSON-serializable or provide `serializeMessages` / `deserializeMessages`; JSON parsing does not revive `Date` instances or custom classes automatically.
 
 ```tsx
 <Chorus<{ timestamp: Date }>

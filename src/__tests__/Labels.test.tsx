@@ -61,6 +61,10 @@ const FR_LABELS: ChorusLabels = {
     input: 'Entrée',
     output: 'Sortie',
   },
+  sources: {
+    sources: 'Sources citées',
+    source: (index) => `Source ${index + 1}`,
+  },
   reasoning: 'Raisonnement',
   codeCopy: {
     copy: 'Copier',
@@ -135,6 +139,7 @@ describe('resolveChorusLabels', () => {
         messageActions: { copy: '' },
         speakers: { user: '' },
         toolCall: { input: '' },
+        sources: { sources: '' },
         codeCopy: { copy: '' },
         conversationList: { newConversation: '' },
         attachments: { dismissError: '', describeImage: 'Décrire' },
@@ -149,6 +154,7 @@ describe('resolveChorusLabels', () => {
       expect(resolved.messageActions.copy).toBe(DEFAULT_CHORUS_LABELS.messageActions.copy);
       expect(resolved.speakers.user).toBe(DEFAULT_CHORUS_LABELS.speakers.user);
       expect(resolved.toolCall.input).toBe(DEFAULT_CHORUS_LABELS.toolCall.input);
+      expect(resolved.sources.sources).toBe(DEFAULT_CHORUS_LABELS.sources.sources);
       expect(resolved.codeCopy.copy).toBe(DEFAULT_CHORUS_LABELS.codeCopy.copy);
       expect(resolved.conversationList.newConversation).toBe(DEFAULT_CHORUS_LABELS.conversationList.newConversation);
       expect(resolved.attachments.dismissError).toBe(DEFAULT_CHORUS_LABELS.attachments.dismissError);
@@ -329,6 +335,17 @@ describe('ChatWindow labels', () => {
     await user.click(toggle);
     expect(screen.getByText('Entrée')).toBeInTheDocument();
     expect(screen.getByText('Sortie')).toBeInTheDocument();
+  });
+
+  it('renders localized source labels', () => {
+    render(
+      <ChatWindow
+        messages={[{ ...ASST_MSG, sources: [{ id: 'src1', title: 'Guide', url: 'https://example.com' }] }]}
+        labels={FR_LABELS}
+      />,
+    );
+    expect(screen.getByText('Sources citées')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Guide' })).toBeInTheDocument();
   });
 
   it('flashes the localized "copy failed" label when a copy override returns false', async () => {

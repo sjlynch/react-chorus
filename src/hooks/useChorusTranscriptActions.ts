@@ -39,9 +39,10 @@ export interface ChorusTranscriptActionsOptions {
 export interface ChorusTranscriptActions<TMeta = Record<string, unknown>> {
   /**
    * Case-insensitive substring search across each message's `text`, each
-   * attachment's file `name`, the `reasoning` of assistant messages, and —
-   * for tool messages — `toolCall.name` plus its serialized `input` and
-   * `output`. These are exactly the values `exportAs` renders, so a query
+   * attachment's file `name`, each source/citation's title/url/snippet, the
+   * `reasoning` of assistant messages, and — for tool messages —
+   * `toolCall.name` plus its serialized `input` and `output`. These are
+   * exactly the values `exportAs` renders, so a query
    * that matches the export matches here and vice versa. Returns `[]` for a
    * blank query.
    */
@@ -58,7 +59,7 @@ export interface ChorusTranscriptActions<TMeta = Record<string, unknown>> {
   /**
    * Serialize the transcript. `'json'` round-trips through
    * `JSON.parse(JSON.stringify(messages))`; `'markdown'` renders a readable
-   * transcript with one heading per message.
+   * transcript with one heading per message, including sources/citations and tool I/O.
    */
   exportAs(format: TranscriptExportFormat): string;
   /**

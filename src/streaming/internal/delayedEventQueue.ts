@@ -1,3 +1,4 @@
+import type { MessageSource } from '../../types';
 import type { ConnectorToolDelta } from '../../connectors/types';
 import { createAbortError } from './streamErrors';
 import type { ReleaseSchedule } from './delayedReleaseSchedule';
@@ -5,6 +6,7 @@ import type { ReleaseSchedule } from './delayedReleaseSchedule';
 export type DelayedStreamEvent =
   | { type: 'text'; chunk: string }
   | { type: 'reasoning'; chunk: string }
+  | { type: 'source'; source: MessageSource }
   | { type: 'toolDelta'; toolDelta: ConnectorToolDelta };
 
 export function isEmptyChunkEvent(event: DelayedStreamEvent): boolean {

@@ -46,6 +46,17 @@ export function unknownActivityKey(value: unknown): string {
   return typeof value;
 }
 
+export function sourceActivityKey(source: NonNullable<Message['sources']>[number]) {
+  return [
+    source.id ?? '',
+    source.type ?? '',
+    source.title ?? '',
+    source.url ?? '',
+    source.snippet ?? '',
+    unknownActivityKey(source.metadata),
+  ].join(',');
+}
+
 export function attachmentActivityKey(attachment: NonNullable<Message['attachments']>[number]) {
   const source = attachment.url ?? attachment.id ?? attachment.data ?? '';
   return [
@@ -66,6 +77,8 @@ export function messageActivityKey<TMeta>(message: Message<TMeta>) {
     stringActivityKey(message.reasoning ?? ''),
     message.attachments?.length ?? 0,
     ...(message.attachments?.map(attachmentActivityKey) ?? []),
+    message.sources?.length ?? 0,
+    ...(message.sources?.map(sourceActivityKey) ?? []),
     toolCall?.id ?? '',
     toolCall?.name ?? '',
     toolCall && Object.prototype.hasOwnProperty.call(toolCall, 'input') ? 'input' : '',

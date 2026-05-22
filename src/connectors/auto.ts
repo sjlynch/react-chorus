@@ -15,7 +15,7 @@ import type { Connector } from './types';
  *   parsed as its frame type, matching `aiSdkConnector.extract` (which parses
  *   typed frames first and only then falls back to error extraction).
  * - If data parses as JSON and carries an in-band provider error => { error }
- * - If data parses as JSON and looks like OpenAI Chat/Responses => extract text/reasoning/tool deltas
+ * - If data parses as JSON and looks like OpenAI Chat/Responses => extract text/reasoning/source/tool deltas
  * - If data parses as JSON and looks like Gemini => extract candidates text/reasoning/tool deltas
  * - If data parses as JSON and looks like Anthropic Messages => extract text/reasoning/tool deltas
  * - If data is genuinely a Vercel AI SDK data-stream line (`0:"..."`, `9:{...}`)

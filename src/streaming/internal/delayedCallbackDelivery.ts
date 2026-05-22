@@ -33,7 +33,7 @@ export function createCallbackDelivery(cb: SendCallbacks, onFailure: (error: Err
 
   const deliverEvent = (event: DelayedStreamEvent) => {
     // onStart fires once on the first delivered event of ANY type so consumers
-    // get the signal even for reasoning-first or tool-only turns that emit no
+    // get the signal even for reasoning-first, source-only, or tool-only turns that emit no
     // answer text. The first text chunk is passed through; non-text first
     // events pass '' since there is no text content to forward yet.
     if (!hasFiredOnStart) {
@@ -48,6 +48,11 @@ export function createCallbackDelivery(cb: SendCallbacks, onFailure: (error: Err
 
     if (event.type === 'reasoning') {
       cb.onReasoning?.(event.chunk);
+      return;
+    }
+
+    if (event.type === 'source') {
+      cb.onSource?.(event.source);
       return;
     }
 

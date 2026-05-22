@@ -1,6 +1,34 @@
 export type Role = 'user' | 'assistant' | 'system' | 'tool';
 export type ConnectorName = 'auto' | 'openai' | 'anthropic' | 'gemini' | 'ai-sdk';
 export type MessageFeedback = 'up' | 'down';
+export type MessageSourceType = 'url' | 'document' | 'file' | 'unknown';
+
+/**
+ * Provider- or app-supplied source/citation attached to a message.
+ *
+ * Built-in streaming connectors append these to the active assistant message
+ * when a provider emits source/citation frames. Keep values JSON-serializable
+ * when using built-in persistence; `metadata` is intentionally free-form for
+ * provider-specific details such as page numbers, offsets, media type, or file
+ * ids that your app wants to preserve without rendering as answer text.
+ */
+export interface MessageSource {
+  /** Stable source/citation id when the provider emits one. */
+  id?: string;
+  /** Broad source family used by the default renderer and transcript helpers. */
+  type?: MessageSourceType;
+  /** Human-readable title, file name, or document label. */
+  title?: string;
+  /** Canonical URL when the source can be opened in a browser. */
+  url?: string;
+  /** Short quoted excerpt or description associated with this citation. */
+  snippet?: string;
+  /** Provider/app-specific serializable details (offsets, page numbers, file ids, media type, etc.). */
+  metadata?: Record<string, unknown>;
+}
+
+/** Back-compat-friendly alias: sources are often presented to readers as citations. */
+export type MessageCitation = MessageSource;
 
 export interface Attachment {
   name: string;
@@ -59,6 +87,13 @@ interface ChorusMessageBase<TMeta = Record<string, unknown>> {
    * default renderer shows a locale-aware per-message time. Additive and safe to omit.
    */
   createdAt?: string;
+  /**
+   * Optional source/citation references for the message. Built-in source-aware
+   * connectors attach streamed citations to the active assistant message here;
+   * the default renderer shows them as a source list, transcript search/export
+   * includes them, and JSON persistence round-trips them with the message.
+   */
+  sources?: MessageSource[];
   metadata?: TMeta;
 }
 

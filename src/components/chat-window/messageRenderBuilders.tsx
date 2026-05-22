@@ -1,10 +1,9 @@
 import React from 'react';
 import type { ResolvedChorusLabels } from '../../labels/types';
 import type { Message } from '../../types';
-import { Markdown, type MarkdownSanitizer } from '../Markdown';
-import { MessageActionControls, MessageRow, MessageSpeakerLabel } from '../MessageRow';
+import type { MarkdownSanitizer } from '../Markdown';
+import { MessageActionControls, MessageRow } from '../MessageRow';
 import type { MessageBubbleSlots, MessageCopyResult, MessageFeedback, MessageMarkdownProps, MessageRenderActions, MessageTimestampFormatter } from '../MessageRow';
-import { ToolCallBlock } from '../ToolCallBlock';
 
 interface MessageDefaultRenderOptions<TMeta> {
   message: Message<TMeta>;
@@ -30,9 +29,9 @@ interface MessageDefaultRenderOptions<TMeta> {
 }
 
 /**
- * Builds the `defaultRender` slot function for one message: the tool-message
- * branch (host-authored summary text plus `ToolCallBlock`) versus the standard
- * `MessageRow`. Returns the same `(slots?) => ReactNode` callback the
+ * Builds the `defaultRender` slot function for one message. All roles flow
+ * through `MessageRow` so tool rows get the same actions, timestamps, and
+ * feedback affordances as user/assistant rows. Returns the same `(slots?) => ReactNode` callback the
  * `renderMessage` contract exposes via `RenderMessageContext`.
  */
 export function buildMessageDefaultRender<TMeta = Record<string, unknown>>({
@@ -56,45 +55,13 @@ export function buildMessageDefaultRender<TMeta = Record<string, unknown>>({
   feedbackReadOnly,
 }: MessageDefaultRenderOptions<TMeta>): (slots?: MessageBubbleSlots) => React.ReactNode {
   return (slots?: MessageBubbleSlots) => {
-    if (message.role === 'tool') {
-      // `ToolMessage.text` is an optional host-authored summary of the tool
-      // result (see types.ts). Render it above the call block as finalized
-      // Markdown so a populated `text` is visible instead of silently
-      // dropped. It is not incrementally streamed by Chorus, so it is
-      // always parsed (streaming=false) regardless of the turn state.
-      const toolText = message.text ?? '';
-      const hasToolText = toolText.trim().length > 0;
-      return (
-        <div className="chorus-msg chorus-tool" data-chorus-message-id={message.id}>
-          <MessageSpeakerLabel role={message.role} speakers={resolvedLabels.speakers} />
-          {slots?.before}
-          {slots?.headerSlot}
-          {hasToolText && (
-            <div className="chorus-bubble">
-              <Markdown
-                {...markdownProps}
-                text={toolText}
-                codeTheme={codeTheme}
-                headless={headless}
-                streaming={false}
-                sanitizer={markdownSanitizer ?? markdownProps?.sanitizer}
-                codeCopyLabels={resolvedLabels.codeCopy ?? markdownProps?.codeCopyLabels}
-              />
-            </div>
-          )}
-          <ToolCallBlock toolCall={message.toolCall} labels={resolvedLabels.toolCall} streaming={toolStreaming} />
-          {slots?.footerSlot}
-          {slots?.after}
-        </div>
-      );
-    }
-
+    const rowStreaming = message.role === 'tool' ? toolStreaming : isStreaming;
     return (
       <MessageRow
         m={message}
         codeTheme={codeTheme}
         headless={headless}
-        streaming={isStreaming}
+        streaming={rowStreaming}
         markdownProps={markdownProps}
         markdownSanitizer={markdownSanitizer}
         messageActionLabels={resolvedLabels.messageActions}
@@ -102,6 +69,8 @@ export function buildMessageDefaultRender<TMeta = Record<string, unknown>>({
         reasoningLabel={resolvedLabels.reasoning}
         codeCopyLabels={resolvedLabels.codeCopy}
         attachmentLabels={resolvedLabels.attachments}
+        sourceLabels={resolvedLabels.sources}
+        toolCallLabels={resolvedLabels.toolCall}
         showTimestamp={showTimestamps}
         formatTimestamp={formatTimestamp}
         onEdit={onEdit}

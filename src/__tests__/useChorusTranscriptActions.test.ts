@@ -5,7 +5,13 @@ import type { Message } from '../types';
 
 const MESSAGES: Message[] = [
   { id: 'u1', role: 'user', text: 'How do I deploy the app?' },
-  { id: 'a1', role: 'assistant', text: 'Run the deploy script.', reasoning: 'Consider the CI pipeline first.' },
+  {
+    id: 'a1',
+    role: 'assistant',
+    text: 'Run the deploy script.',
+    reasoning: 'Consider the CI pipeline first.',
+    sources: [{ id: 'src1', title: 'Deployment guide', url: 'https://docs.example.com/deploy', snippet: 'Use the release workflow.' }],
+  },
   {
     id: 't1',
     role: 'tool',
@@ -58,7 +64,7 @@ describe('useChorusTranscriptActions', () => {
     it('matches tool-call input and output case-insensitively', () => {
       const { result } = renderHook(() => useChorusTranscriptActions(MESSAGES));
       expect(result.current.searchMessages('RELEASE NOTES').map((m) => m.id)).toEqual(['t1']);
-      expect(result.current.searchMessages('DOCS.EXAMPLE.COM').map((m) => m.id)).toEqual(['t1']);
+      expect(result.current.searchMessages('DOCS.EXAMPLE.COM/SETUP-GUIDE').map((m) => m.id)).toEqual(['t1']);
     });
 
     it('does not throw searching a circular tool value', () => {
@@ -81,6 +87,13 @@ describe('useChorusTranscriptActions', () => {
       expect(result.current.searchMessages('SHOT.PNG').map((m) => m.id)).toEqual(['u2']);
     });
 
+    it('matches an assistant message by source title, URL, or snippet', () => {
+      const { result } = renderHook(() => useChorusTranscriptActions(MESSAGES));
+      expect(result.current.searchMessages('deployment guide').map((m) => m.id)).toEqual(['a1']);
+      expect(result.current.searchMessages('docs.example.com/deploy').map((m) => m.id)).toEqual(['a1']);
+      expect(result.current.searchMessages('release workflow').map((m) => m.id)).toEqual(['a1']);
+    });
+
     it('does not match reasoning carried on a non-assistant message', () => {
       // exportMarkdown only renders reasoning for assistant messages, so search
       // ignores it elsewhere to keep the search/export contract symmetric.
@@ -98,6 +111,10 @@ describe('useChorusTranscriptActions', () => {
       // Attachment file name: rendered in the export AND findable via search.
       expect(md).toContain('shot.png');
       expect(result.current.searchMessages('shot.png').map((m) => m.id)).toEqual(['u2']);
+      // Source title/snippet/URL: rendered in the export AND findable via search.
+      expect(md).toContain('Deployment guide');
+      expect(md).toContain('https://docs.example.com/deploy');
+      expect(result.current.searchMessages('release workflow').map((m) => m.id)).toEqual(['a1']);
     });
 
     it('returns the original message references', () => {
@@ -143,6 +160,8 @@ describe('useChorusTranscriptActions', () => {
       expect(md).toContain('## System');
       expect(md).toContain('## Tool: searchDocs');
       expect(md).toContain('Run the deploy script.');
+      expect(md).toContain('**Sources:**');
+      expect(md).toContain('[Deployment guide](https://docs.example.com/deploy)');
       expect(md).toContain('**Input:**');
       expect(md).toContain('**Output:**');
       expect(md).toContain('📎 shot.png');

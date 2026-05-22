@@ -410,6 +410,44 @@ describe('openaiConnector (Responses API)', () => {
     });
   });
 
+  it('extracts Responses output_text annotations as message sources instead of text', () => {
+    const payload = {
+      type: 'response.output_text.annotation.added',
+      annotation: {
+        type: 'url_citation',
+        url: 'https://example.com/rag',
+        title: 'RAG guide',
+        start_index: 12,
+        end_index: 18,
+      },
+    };
+    expect(openaiConnector.extract(JSON.stringify(payload))).toEqual({
+      sources: [{
+        id: 'https://example.com/rag',
+        type: 'url',
+        title: 'RAG guide',
+        url: 'https://example.com/rag',
+        metadata: { provider: 'openai', annotationType: 'url_citation', startIndex: 12, endIndex: 18 },
+      }],
+    });
+  });
+
+  it('extracts annotations carried on response.output_text.done', () => {
+    const payload = {
+      type: 'response.output_text.done',
+      annotations: [{ type: 'file_citation', file_id: 'file_1', filename: 'manual.pdf', quote: 'See page 2' }],
+    };
+    expect(openaiConnector.extract(JSON.stringify(payload))).toEqual({
+      sources: [{
+        id: 'file_1',
+        type: 'file',
+        title: 'manual.pdf',
+        snippet: 'See page 2',
+        metadata: { provider: 'openai', annotationType: 'file_citation', fileId: 'file_1' },
+      }],
+    });
+  });
+
   it('accumulates refusal deltas and emits a connector error on response.refusal.done', () => {
     const state = openaiConnector.createState?.();
     const added = JSON.stringify({ type: 'response.refusal.added', item_id: 'msg_1', output_index: 0 });

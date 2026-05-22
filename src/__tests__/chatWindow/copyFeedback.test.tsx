@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import {
   ASST_MSG,
   ChatWindow,
+  TOOL_MSG,
   USER_MSG,
   type Message,
   type MessageFeedback,
@@ -124,6 +125,23 @@ describe('ChatWindow copy and feedback actions', () => {
       else Reflect.deleteProperty(navigator, 'clipboard');
     }
   });
+  it('copies assistant sources with the default message copy fallback', async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    const originalClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+
+    try {
+      render(<ChatWindow messages={[{ ...ASST_MSG, sources: [{ title: 'Docs', url: 'https://docs.example.com' }] }]} />);
+      await user.click(screen.getByRole('button', { name: 'Copy' }));
+      expect(writeText).toHaveBeenCalledWith(expect.stringContaining('Hi there'));
+      expect(writeText).toHaveBeenCalledWith(expect.stringContaining('[Docs](https://docs.example.com)'));
+    } finally {
+      if (originalClipboard) Object.defineProperty(navigator, 'clipboard', originalClipboard);
+      else Reflect.deleteProperty(navigator, 'clipboard');
+    }
+  });
+
   it('shows failed feedback when the default message copy action rejects', async () => {
     vi.useFakeTimers();
     const writeText = vi.fn().mockRejectedValue(new Error('Permission denied'));
@@ -275,5 +293,49 @@ describe('ChatWindow copy and feedback actions', () => {
     expect(thumbsUp).toHaveAttribute('aria-pressed', 'true');
     await user.click(screen.getByRole('button', { name: 'Thumbs down' }));
     expect(onFeedback).toHaveBeenCalledWith(ASST_MSG, 'down');
+  });
+
+  it('renders default tool-row delete/copy/feedback actions and timestamps', async () => {
+    const user = userEvent.setup();
+    const onDelete = vi.fn();
+    const onFeedback = vi.fn();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    const originalClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    const tool: Message = { ...TOOL_MSG, createdAt: '2026-05-20T15:47:06.425Z' };
+
+    try {
+      const { container } = render(
+        <ChatWindow
+          messages={[tool]}
+          hiddenRoles={[]}
+          showTimestamps
+          formatTimestamp={() => '3:47 PM'}
+          getMessageFeedback={() => 'up'}
+          onFeedback={onFeedback}
+          onDelete={onDelete}
+        />
+      );
+
+      expect(screen.getByText('3:47 PM')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Thumbs up' })).toHaveAttribute('aria-pressed', 'true');
+
+      await user.click(screen.getByRole('button', { name: 'Copy' }));
+      expect(writeText).toHaveBeenCalledWith(expect.stringContaining('Tool: search'));
+      expect(writeText).toHaveBeenCalledWith(expect.stringContaining('Input:'));
+      expect(writeText).toHaveBeenCalledWith(expect.stringContaining('"q": "test"'));
+      expect(writeText).toHaveBeenCalledWith(expect.stringContaining('Output:'));
+      expect(writeText).toHaveBeenCalledWith(expect.stringContaining('results'));
+
+      await user.click(screen.getByRole('button', { name: 'Thumbs down' }));
+      expect(onFeedback).toHaveBeenCalledWith(tool, 'down');
+
+      await user.click(screen.getByRole('button', { name: 'Delete' }));
+      expect(onDelete).toHaveBeenCalledWith('t1');
+      expect(container.querySelector('.chorus-tool .chorus-actions')).toBeInTheDocument();
+    } finally {
+      if (originalClipboard) Object.defineProperty(navigator, 'clipboard', originalClipboard);
+      else Reflect.deleteProperty(navigator, 'clipboard');
+    }
   });
 });

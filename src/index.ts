@@ -9,7 +9,7 @@ export type { ConfirmDeleteConversation, ConfirmDeleteConversationContext, Conve
 export { Chorus } from './Chorus';
 export { ChorusTheme } from './components/ChorusTheme';
 export type { Palette } from './components/ChorusTheme';
-export { DEFAULT_ATTACHMENT_LABELS, DEFAULT_CHORUS_LABELS, resolveChorusLabels } from './labels';
+export { DEFAULT_ATTACHMENT_LABELS, DEFAULT_CHORUS_LABELS, DEFAULT_SOURCE_LABELS, resolveChorusLabels } from './labels';
 export type {
   ChorusAttachmentFailureContext,
   ChorusAttachmentLabels,
@@ -21,6 +21,7 @@ export type {
   ChorusConversationListLabels,
   ChorusLabels,
   ChorusMessageActionLabels,
+  ChorusSourceLabels,
   ChorusSpeakerLabels,
   ChorusToolCallLabels,
   ChorusTranscriptLabels,
@@ -39,6 +40,9 @@ export type {
   AttachmentSource,
   AttachmentUploadResult,
   ConnectorName,
+  MessageCitation,
+  MessageSource,
+  MessageSourceType,
   StorageAdapter,
   SystemMessage,
   ToolCall,

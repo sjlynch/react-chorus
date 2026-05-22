@@ -54,6 +54,13 @@ export interface ChorusToolCallLabels {
   empty: string;
 }
 
+export interface ChorusSourceLabels {
+  /** Section title and aria label for assistant sources/citations. */
+  sources: string;
+  /** Fallback visible label for a source without title/url/id; receives a zero-based source index. */
+  source: (index: number) => string;
+}
+
 export interface ChorusCodeCopyLabels {
   copy: string;
   copied: string;
@@ -148,6 +155,7 @@ export interface ResolvedChorusLabels {
   messageActions: ChorusMessageActionLabels;
   speakers: ChorusSpeakerLabels;
   toolCall: ChorusToolCallLabels;
+  sources: ChorusSourceLabels;
   reasoning: string;
   codeCopy: ChorusCodeCopyLabels;
   conversationList: ChorusConversationListLabels;
@@ -178,6 +186,7 @@ export type ChorusLabels = {
   messageActions?: Partial<ChorusMessageActionLabels> | null;
   speakers?: Partial<ChorusSpeakerLabels> | null;
   toolCall?: Partial<ChorusToolCallLabels> | null;
+  sources?: Partial<ChorusSourceLabels> | null;
   reasoning?: string | null;
   codeCopy?: Partial<ChorusCodeCopyLabels> | null;
   conversationList?: Partial<ChorusConversationListLabels> | null;

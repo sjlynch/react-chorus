@@ -7,6 +7,7 @@ import { handleResponseErrorEvent } from './responseErrorEvents';
 import { handleResponseRefusalEvent } from './responseRefusalEvents';
 import { handleResponseTextEvent } from './responseTextEvents';
 import { handleResponseToolEvent } from './responseToolEvents';
+import { handleResponseSourceEvent } from './responseSourceEvents';
 
 // Re-exported so `openai.ts` (and the public `Connector` flush path) can drain
 // orphan tool-call / refusal buffers without importing `responseToolCalls.ts`.
@@ -42,6 +43,9 @@ const RESPONSE_EVENT_HANDLERS: Record<string, ResponseEventHandler> = {
   'response.reasoning_summary_text.delta': handleResponseTextEvent,
   'response.reasoning_text.delta': handleResponseTextEvent,
   'response.reasoning_summary.delta': handleResponseTextEvent,
+  // output annotations / sources — see responseSourceEvents.ts
+  'response.output_text.annotation.added': handleResponseSourceEvent,
+  'response.output_text.done': handleResponseSourceEvent,
   // tool-call lifecycle — see responseToolEvents.ts
   'response.output_item.added': handleResponseToolEvent,
   'response.output_item.done': handleResponseToolEvent,

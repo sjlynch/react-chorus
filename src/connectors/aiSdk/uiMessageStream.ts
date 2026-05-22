@@ -1,5 +1,6 @@
 import { extractErrorMessage } from '../error';
 import type { ConnectorResult } from '../types';
+import { sourceFromAiSdkUiFrame, sourcesFromAiSdkMetadataFrame } from '../sourceMapping';
 import {
   type AiSdkConnectorState,
   aiSdkFinishResult,
@@ -26,6 +27,9 @@ export const AI_SDK_FRAME_TYPES = new Set([
   'tool-call',
   'tool-output-available',
   'tool-result',
+  'source-url',
+  'source-document',
+  'message-metadata',
   'error',
   'finish',
   'finish-message',
@@ -38,10 +42,7 @@ export const AI_SDK_FRAME_TYPES = new Set([
   'text-end',
   'reasoning-start',
   'reasoning-end',
-  'source-url',
-  'source-document',
   'file',
-  'message-metadata',
 ]);
 
 /**
@@ -101,6 +102,16 @@ export function uiMessageStreamResult(state: AiSdkConnectorState, obj: Record<st
     return toolDelta ? { toolDelta } : null;
   }
 
+  if (type === 'source-url' || type === 'source-document') {
+    const source = sourceFromAiSdkUiFrame(obj);
+    return source ? { source } : null;
+  }
+
+  if (type === 'message-metadata') {
+    const sources = sourcesFromAiSdkMetadataFrame(obj);
+    return sources.length ? { sources } : null;
+  }
+
   if (type === 'error') {
     const message = typeof obj.errorText === 'string' && obj.errorText
       ? obj.errorText
@@ -118,6 +129,6 @@ export function uiMessageStreamResult(state: AiSdkConnectorState, obj: Record<st
   }
 
   // Frames we deliberately ignore: start, start-step, finish-step, text-start, text-end,
-  // reasoning-start, reasoning-end, source-url, source-document, file, data-*, message-metadata.
+  // reasoning-start, reasoning-end, file, data-*.
   return null;
 }

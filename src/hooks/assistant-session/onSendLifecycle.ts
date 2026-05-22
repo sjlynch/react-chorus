@@ -1,6 +1,6 @@
 import type React from 'react';
 import type { ConnectorToolDelta } from '../../connectors/connectors';
-import type { Message } from '../../types';
+import type { Message, MessageSource } from '../../types';
 import { isChorusDevMode } from '../../utils/devMode';
 import { isAbortError } from '../../utils/errors';
 import type { ObserverCallbacks } from './observerCallbacks';
@@ -25,6 +25,7 @@ export interface OnSendLifecycleDeps<TMeta> {
   resetStreamState: () => void;
   appendAssistantNow: (chunk: string) => void;
   appendAssistantReasoningNow: (chunk: string) => void;
+  appendAssistantSourceNow: (source: MessageSource) => void;
   appendToolDeltaNow: (delta: ConnectorToolDelta) => void;
   completeActiveSession: (sessionId: number, finish?: CompleteActiveSessionFinish<TMeta>) => Message<TMeta> | null;
   isAssistantSessionActive: (sessionId: number) => boolean;
@@ -73,6 +74,7 @@ export function startOnSendLifecycle<TMeta>({
   resetStreamState,
   appendAssistantNow,
   appendAssistantReasoningNow,
+  appendAssistantSourceNow,
   appendToolDeltaNow,
   completeActiveSession,
   isAssistantSessionActive,
@@ -118,6 +120,7 @@ export function startOnSendLifecycle<TMeta>({
   const sessionHelpers = createSessionHelpers<TMeta>({
     appendAssistantNow,
     appendAssistantReasoningNow,
+    appendAssistantSourceNow,
     appendToolDeltaNow,
     safeOnStreamWarning: observers.safeOnStreamWarning,
     safeOnStreamMetadata: observers.safeOnStreamMetadata,

@@ -1,5 +1,5 @@
 import React from 'react';
-import type { Message } from '../../types';
+import type { Message, MessageSource } from '../../types';
 import type { ConnectorToolDelta } from '../../connectors/connectors';
 import { cloneHistoryForRetry, findLastUserMessage } from './messageUtils';
 import type { ObserverCallbacks } from './observerCallbacks';
@@ -53,6 +53,7 @@ export interface SessionOrchestratorDeps<TMeta> {
 
   appendAssistantNow: (chunk: string) => void;
   appendAssistantReasoningNow: (chunk: string) => void;
+  appendAssistantSourceNow: (source: MessageSource) => void;
   finalizeAssistantNow: () => Message<TMeta> | null;
   resetPendingAssistantState: () => void;
   resetStreamState: () => void;
@@ -117,6 +118,7 @@ export function useSessionOrchestrator<TMeta>(deps: SessionOrchestratorDeps<TMet
     showStreamError,
     appendAssistantNow,
     appendAssistantReasoningNow,
+    appendAssistantSourceNow,
     finalizeAssistantNow,
     resetPendingAssistantState,
     resetStreamState,
@@ -302,6 +304,7 @@ export function useSessionOrchestrator<TMeta>(deps: SessionOrchestratorDeps<TMet
       resetStreamState,
       appendAssistantNow,
       appendAssistantReasoningNow,
+      appendAssistantSourceNow,
       appendToolDeltaNow,
       completeActiveSession,
       isAssistantSessionActive,
@@ -317,7 +320,7 @@ export function useSessionOrchestrator<TMeta>(deps: SessionOrchestratorDeps<TMet
       history,
       onSend: sendPath.onSend,
     });
-  }, [abortActiveAssistant, appendAssistantNow, appendAssistantReasoningNow, beginAssistantSession, clearStreamError, completeActiveSession, hasStartedAssistantRef, invalidateAssistantSession, isAssistantSessionActive, messagesRef, minAssistantDelayMsRef, observers, onSendRef, rememberSubmittedTurn, removePendingAssistant, resetStreamState, setInternalSending, setTransportBusy, showStreamError, systemPromptRef, transportRef, updateSessionMessages, warnEmptyOnSend, warnMissingResponseHandler, warnReturnedMessageIgnored, warnTransportOnSend]);
+  }, [abortActiveAssistant, appendAssistantNow, appendAssistantReasoningNow, appendAssistantSourceNow, beginAssistantSession, clearStreamError, completeActiveSession, hasStartedAssistantRef, invalidateAssistantSession, isAssistantSessionActive, messagesRef, minAssistantDelayMsRef, observers, onSendRef, rememberSubmittedTurn, removePendingAssistant, resetStreamState, setInternalSending, setTransportBusy, showStreamError, systemPromptRef, transportRef, updateSessionMessages, warnEmptyOnSend, warnMissingResponseHandler, warnReturnedMessageIgnored, warnTransportOnSend]);
 
   // `abortActiveAssistant` is stable in real <Chorus> usage, but a hook-level
   // consumer can pass an unstable `flushPersistence` whose identity ripples

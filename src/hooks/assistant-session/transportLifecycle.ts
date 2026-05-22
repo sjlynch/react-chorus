@@ -1,5 +1,5 @@
 import React from 'react';
-import type { Message, ToolMessage } from '../../types';
+import type { Message, MessageSource, ToolMessage } from '../../types';
 import type { ConnectorToolDelta } from '../../connectors/connectors';
 import { isAbortError } from '../../utils/errors';
 import { isUnstartedSendError } from '../../streaming/errors';
@@ -36,6 +36,7 @@ export interface TransportLifecycleDeps<TMeta> {
   setTransportBusy: (next: boolean) => void;
   appendAssistantNow: (chunk: string) => void;
   appendAssistantReasoningNow: (chunk: string) => void;
+  appendAssistantSourceNow: (source: MessageSource) => void;
   appendToolDeltaNow: (delta: ConnectorToolDelta) => void;
   finalizeAssistantNow: () => Message<TMeta> | null;
   resetPendingAssistantState: () => void;
@@ -83,6 +84,7 @@ export function useTransportLifecycle<TMeta>(deps: TransportLifecycleDeps<TMeta>
     setTransportBusy,
     appendAssistantNow,
     appendAssistantReasoningNow,
+    appendAssistantSourceNow,
     appendToolDeltaNow,
     finalizeAssistantNow,
     resetPendingAssistantState,
@@ -114,6 +116,9 @@ export function useTransportLifecycle<TMeta>(deps: TransportLifecycleDeps<TMeta>
       },
       onReasoning: (chunk) => {
         if (isAssistantSessionActive(sessionId)) appendAssistantReasoningNow(chunk);
+      },
+      onSource: (source) => {
+        if (isAssistantSessionActive(sessionId)) appendAssistantSourceNow(source);
       },
       onToolDelta: (delta) => {
         if (isAssistantSessionActive(sessionId)) appendToolDeltaNow(delta);
@@ -167,7 +172,7 @@ export function useTransportLifecycle<TMeta>(deps: TransportLifecycleDeps<TMeta>
       }
       releaseTransportController({ controllerRef, controller, setTransportBusy });
     });
-  }, [appendAssistantNow, appendAssistantReasoningNow, appendToolDeltaNow, controllerRef, doStream, historyForTransport, invalidateAssistantSession, isAssistantSessionActive, minAssistantDelayMsRef, observers, removePendingAssistant, setTransportBusy, showStreamError]);
+  }, [appendAssistantNow, appendAssistantReasoningNow, appendAssistantSourceNow, appendToolDeltaNow, controllerRef, doStream, historyForTransport, invalidateAssistantSession, isAssistantSessionActive, minAssistantDelayMsRef, observers, removePendingAssistant, setTransportBusy, showStreamError]);
 
   const decideToolLoopContinuation = React.useCallback(async (
     iteration: number,

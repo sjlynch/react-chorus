@@ -1,5 +1,6 @@
 import React from 'react';
-import type { Message } from '../../types';
+import type { Message, MessageSource } from '../../types';
+import { appendMessageSource } from '../../utils/messageSources';
 import { useRAFQueue } from '../useRAFQueue';
 import { createMessageId } from './messageUtils';
 import type { UpdateSessionMessages } from './types';
@@ -22,9 +23,10 @@ export interface AssistantBuffer<TMeta> {
   /** Clears the in-flight assistant/tool refs and flushes persistence. Shared by `finalizeAssistantNow`, the forced-message branch of `completeActiveSession`, and the catch arm of `finishTransportStream`. */
   resetPendingAssistantState: () => void;
   resetStreamState: () => void;
-  startAssistant: (opts: { text?: string; reasoning?: string }) => void;
+  startAssistant: (opts: { text?: string; reasoning?: string; sources?: MessageSource[] }) => void;
   appendAssistantNow: (chunk: string) => void;
   appendAssistantReasoningNow: (chunk: string) => void;
+  appendAssistantSourceNow: (source: MessageSource) => void;
   finalizeAssistantNow: () => Message<TMeta> | null;
 }
 
@@ -81,12 +83,12 @@ export function useAssistantBuffer<TMeta>(deps: AssistantBufferDeps<TMeta>): Ass
     forceRender();
   }, [cancelPending, forceRender]);
 
-  const startAssistant = React.useCallback(({ text = '', reasoning }: { text?: string; reasoning?: string }) => {
+  const startAssistant = React.useCallback(({ text = '', reasoning, sources }: { text?: string; reasoning?: string; sources?: MessageSource[] }) => {
     const id = createMessageId();
     pendingAssistantIdRef.current = id;
     hasStartedAssistantRef.current = true;
     cancelPending(false);
-    updateSessionMessages(prev => prev.concat({ id, role: 'assistant', text, reasoning }), { reason: 'assistant' });
+    updateSessionMessages(prev => prev.concat({ id, role: 'assistant', text, reasoning, sources }), { reason: 'assistant' });
     if (text) safeOnChunk(text, id);
     forceRender();
   }, [cancelPending, forceRender, safeOnChunk, updateSessionMessages]);
@@ -106,6 +108,18 @@ export function useAssistantBuffer<TMeta>(deps: AssistantBufferDeps<TMeta>): Ass
     if (!pendingAssistantIdRef.current) startAssistant({ reasoning: chunk });
     else enqueueReasoningChunk(chunk);
   }, [enqueueReasoningChunk, startAssistant]);
+
+  const appendAssistantSourceNow = React.useCallback((source: MessageSource) => {
+    if (!pendingAssistantIdRef.current) {
+      startAssistant({ sources: [source] });
+      return;
+    }
+    const id = pendingAssistantIdRef.current;
+    updateSessionMessages(
+      prev => prev.map(m => m.id === id ? { ...m, sources: appendMessageSource(m.sources, source) } : m),
+      { reason: 'assistant' },
+    );
+  }, [startAssistant, updateSessionMessages]);
 
   const finalizeAssistantNow = React.useCallback((): Message<TMeta> | null => {
     cancelPending(true);
@@ -132,6 +146,7 @@ export function useAssistantBuffer<TMeta>(deps: AssistantBufferDeps<TMeta>): Ass
     startAssistant,
     appendAssistantNow,
     appendAssistantReasoningNow,
+    appendAssistantSourceNow,
     finalizeAssistantNow,
   };
 }

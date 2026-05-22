@@ -1,6 +1,6 @@
 import type React from 'react';
 import type { ChorusLabels } from '../../labels/types';
-import type { Message, Role } from '../../types';
+import type { Message, MessageSource, Role } from '../../types';
 import type { Palette } from '../ChorusTheme';
 import type { MarkdownSanitizer } from '../Markdown';
 import type { GetMessageFeedback, MessageBubbleSlots, MessageCopyResult, MessageFeedback, MessageMarkdownProps, MessageRenderActions, MessageTimestampFormatter } from '../MessageRow';
@@ -25,6 +25,8 @@ export interface RenderMessageContext<TMeta = Record<string, unknown>> {
   isEditing: boolean;
   defaultRender: (slots?: MessageBubbleSlots) => React.ReactNode;
   actions: MessageRenderActions;
+  /** Source/citation references attached to this message (empty when none). */
+  sources: MessageSource[];
   message: Message<TMeta>;
   /** Spread on a custom row root so ChorusRef.scrollToMessage can target it. */
   messageProps: RenderMessageRootProps;
@@ -81,7 +83,7 @@ export interface ChatWindowProps<TMeta = Record<string, unknown>> extends Omit<R
   suggestedPromptsDisabled?: boolean;
   suggestedPromptsDisabledReason?: string;
   typing?: boolean;
-  /** Localized labels for the transcript, message actions, speakers, tool calls, reasoning, and code copy. Defaults to English. */
+  /** Localized labels for the transcript, message actions, speakers, sources, tool calls, reasoning, and code copy. Defaults to English. */
   labels?: ChorusLabels;
   /**
    * Theme palette applied as `--chorus-*` CSS variables on the component root.

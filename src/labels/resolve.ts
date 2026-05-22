@@ -4,6 +4,7 @@ import { DEFAULT_TRANSCRIPT_LABELS } from './transcript';
 import { DEFAULT_MESSAGE_ACTION_LABELS } from './messageActions';
 import { DEFAULT_SPEAKER_LABELS } from './speakers';
 import { DEFAULT_TOOL_CALL_LABELS } from './toolCall';
+import { DEFAULT_SOURCE_LABELS } from './sources';
 import { DEFAULT_CODE_COPY_LABELS } from './codeCopy';
 import { DEFAULT_CONVERSATION_LIST_LABELS } from './conversationList';
 import { DEFAULT_CLEAR_CONVERSATION_LABEL, DEFAULT_REASONING_LABEL } from './reasoning';
@@ -15,6 +16,7 @@ export const DEFAULT_CHORUS_LABELS: ResolvedChorusLabels = {
   messageActions: DEFAULT_MESSAGE_ACTION_LABELS,
   speakers: DEFAULT_SPEAKER_LABELS,
   toolCall: DEFAULT_TOOL_CALL_LABELS,
+  sources: DEFAULT_SOURCE_LABELS,
   reasoning: DEFAULT_REASONING_LABEL,
   codeCopy: DEFAULT_CODE_COPY_LABELS,
   conversationList: DEFAULT_CONVERSATION_LIST_LABELS,
@@ -56,6 +58,7 @@ export function resolveChorusLabels(labels?: ChorusLabels): ResolvedChorusLabels
     messageActions: mergeSection(DEFAULT_MESSAGE_ACTION_LABELS, labels.messageActions),
     speakers: mergeSection(DEFAULT_SPEAKER_LABELS, labels.speakers),
     toolCall: mergeSection(DEFAULT_TOOL_CALL_LABELS, labels.toolCall),
+    sources: mergeSection(DEFAULT_SOURCE_LABELS, labels.sources),
     reasoning: mergeString(DEFAULT_REASONING_LABEL, labels.reasoning),
     codeCopy: mergeSection(DEFAULT_CODE_COPY_LABELS, labels.codeCopy),
     conversationList: mergeSection(DEFAULT_CONVERSATION_LIST_LABELS, labels.conversationList),

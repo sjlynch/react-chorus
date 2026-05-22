@@ -417,6 +417,18 @@ describe('ChatWindow rendering behavior', () => {
     expect(screen.getByText('Hi there')).toBeInTheDocument();
     expect(container.querySelector('.chorus-assistant .chorus-bubble')).toBeInTheDocument();
   });
+  it('renders assistant sources below the message bubble', () => {
+    const { container } = render(<ChatWindow messages={[{
+      ...ASST_MSG,
+      sources: [{ id: 'src1', title: 'Deployment docs', url: 'https://docs.example.com/deploy', snippet: 'Run the deploy script.' }],
+    }]} />);
+
+    expect(screen.getByText('Sources')).toBeInTheDocument();
+    const link = screen.getByRole('link', { name: 'Deployment docs' });
+    expect(link).toHaveAttribute('href', 'https://docs.example.com/deploy');
+    expect(screen.getByText('Run the deploy script.')).toBeInTheDocument();
+    expect(container.querySelector('.chorus-bubble')?.nextElementSibling).toHaveClass('chorus-sources');
+  });
   it('uses renderError instead of the default error banner', async () => {
     const user = userEvent.setup();
     const rawError = new Error('raw upstream');

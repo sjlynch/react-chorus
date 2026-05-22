@@ -247,6 +247,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     resetStreamState,
     appendAssistantNow,
     appendAssistantReasoningNow,
+    appendAssistantSourceNow,
     finalizeAssistantNow,
   } = buffer;
 
@@ -268,6 +269,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     showStreamError,
     appendAssistantNow,
     appendAssistantReasoningNow,
+    appendAssistantSourceNow,
     finalizeAssistantNow,
     resetPendingAssistantState,
     resetStreamState,
@@ -326,6 +328,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>({
     setTransportBusy,
     appendAssistantNow,
     appendAssistantReasoningNow,
+    appendAssistantSourceNow,
     appendToolDeltaNow,
     finalizeAssistantNow,
     resetPendingAssistantState,

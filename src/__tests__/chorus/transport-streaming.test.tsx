@@ -118,6 +118,28 @@ describe('Chorus transport streaming', () => {
     expect(onFinish).toHaveBeenCalled();
   });
 
+  it('preserves streamed sources on the completed assistant message and renders them', async () => {
+    const user = userEvent.setup();
+    const onFinish = vi.fn();
+    const transport = vi.fn<Transport>(async () => sseResponse([
+      JSON.stringify({ type: 'text-delta', delta: 'Answer with citations.' }),
+      JSON.stringify({ type: 'source-url', sourceId: 'src_1', url: 'https://docs.example.com/rag', title: 'RAG docs' }),
+      JSON.stringify({ type: 'finish' }),
+    ]));
+
+    render(<Chorus transport={transport} connector="ai-sdk" minAssistantDelayMs={0} onFinish={onFinish} />);
+
+    await sendMessage(user, 'cite it');
+
+    expect(await screen.findByText('Answer with citations.')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'RAG docs' })).toHaveAttribute('href', 'https://docs.example.com/rag');
+    await waitFor(() => expect(onFinish).toHaveBeenCalledTimes(1));
+    expect(onFinish.mock.calls[0][0].message).toEqual(expect.objectContaining({
+      role: 'assistant',
+      sources: [expect.objectContaining({ id: 'src_1', title: 'RAG docs', url: 'https://docs.example.com/rag' })],
+    }));
+  });
+
   it('reports completed when a transport stream ends with no auto-continue tool calls', async () => {
     const user = userEvent.setup();
     const onStreamDone = vi.fn();

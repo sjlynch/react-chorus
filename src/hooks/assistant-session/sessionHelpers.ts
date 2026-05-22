@@ -1,11 +1,13 @@
 import type React from 'react';
 import type { ConnectorToolDelta, ConnectorWarning } from '../../connectors/connectors';
+import type { MessageSource } from '../../types';
 import type { SendCallbacks } from '../useChorusStream';
 import type { ChorusFinishContext, ChorusSendHelpers } from './types';
 
 export interface SessionHelpersDeps<TMeta> {
   appendAssistantNow: (chunk: string) => void;
   appendAssistantReasoningNow: (chunk: string) => void;
+  appendAssistantSourceNow: (source: MessageSource) => void;
   appendToolDeltaNow: (delta: ConnectorToolDelta) => void;
   safeOnStreamWarning: (warning: ConnectorWarning) => void;
   safeOnStreamMetadata: (metadata: Record<string, unknown>) => void;
@@ -50,6 +52,7 @@ export function createSessionHelpers<TMeta>(
   const {
     appendAssistantNow,
     appendAssistantReasoningNow,
+    appendAssistantSourceNow,
     appendToolDeltaNow,
     safeOnStreamWarning,
     safeOnStreamMetadata,
@@ -64,6 +67,7 @@ export function createSessionHelpers<TMeta>(
   type BufferedHelperEvent =
     | { type: 'text'; chunk: string }
     | { type: 'reasoning'; chunk: string }
+    | { type: 'source'; source: MessageSource }
     | { type: 'toolDelta'; delta: ConnectorToolDelta };
 
   let released = minAssistantDelayMsRef.current <= 0;
@@ -85,6 +89,7 @@ export function createSessionHelpers<TMeta>(
     if (!isActive()) return;
     if (event.type === 'text') appendAssistantNow(event.chunk);
     else if (event.type === 'reasoning') appendAssistantReasoningNow(event.chunk);
+    else if (event.type === 'source') appendAssistantSourceNow(event.source);
     else appendToolDeltaNow(event.delta);
   };
 
@@ -130,6 +135,7 @@ export function createSessionHelpers<TMeta>(
 
   const appendAssistant = (chunk: string) => appendEvent({ type: 'text', chunk });
   const appendReasoning = (chunk: string) => appendEvent({ type: 'reasoning', chunk });
+  const appendSource = (source: MessageSource) => appendEvent({ type: 'source', source });
   const appendToolDelta = (delta: ConnectorToolDelta) => appendEvent({ type: 'toolDelta', delta });
 
   const requestFinalize = (forceFlush: boolean) => {
@@ -182,6 +188,7 @@ export function createSessionHelpers<TMeta>(
   const streamCallbacks = (): SendCallbacks => ({
     onChunk: appendAssistant,
     onReasoning: appendReasoning,
+    onSource: appendSource,
     onToolDelta: appendToolDelta,
     onWarning: safeOnStreamWarning,
     onMetadata: safeOnStreamMetadata,
@@ -190,7 +197,7 @@ export function createSessionHelpers<TMeta>(
   });
 
   return {
-    helpers: { appendAssistant, appendReasoning, appendToolDelta, finalizeAssistant, streamCallbacks, signal, systemPrompt: systemPromptRef.current },
+    helpers: { appendAssistant, appendReasoning, appendSource, appendToolDelta, finalizeAssistant, streamCallbacks, signal, systemPrompt: systemPromptRef.current },
     hasPendingAssistant: () => bufferedEvents.length > 0 || finalizeRequested,
     hasAssistantOutput: () => hasStartedAssistantRef.current || bufferedEvents.length > 0,
     wasFinalizeRequested: () => finalizeCalled,

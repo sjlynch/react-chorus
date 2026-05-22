@@ -58,11 +58,15 @@ export function cloneMessageForRetry<TMeta>(message: Message<TMeta>): Message<TM
   if (message.role === 'user' || message.role === 'assistant') {
     return {
       ...message,
+      sources: message.sources?.map(source => ({ ...source, metadata: source.metadata ? { ...source.metadata } : undefined })),
       attachments: message.attachments?.map(attachment => ({ ...attachment })),
     };
   }
 
-  return { ...message };
+  return {
+    ...message,
+    sources: message.sources?.map(source => ({ ...source, metadata: source.metadata ? { ...source.metadata } : undefined })),
+  };
 }
 
 export function cloneHistoryForRetry<TMeta>(history: Message<TMeta>[]): Message<TMeta>[] {
@@ -89,6 +93,7 @@ export function normalizeReturnedMessage<TMeta>(message: Partial<Message<TMeta>>
       text,
       metadata: message.metadata,
       reasoning: message.reasoning,
+      sources: message.sources,
       // Guarantee a stable tool-call id so downstream identity (createToolCallContext,
       // provider-id metadata, delta mapping) can address each tool message uniquely.
       toolCall: toolCall.id ? toolCall : { ...toolCall, id: createMessageId() },
@@ -102,6 +107,7 @@ export function normalizeReturnedMessage<TMeta>(message: Partial<Message<TMeta>>
       text,
       metadata: message.metadata,
       reasoning: message.reasoning,
+      sources: message.sources,
       attachments: message.attachments,
     };
   }
@@ -113,6 +119,7 @@ export function normalizeReturnedMessage<TMeta>(message: Partial<Message<TMeta>>
       text,
       metadata: message.metadata,
       reasoning: message.reasoning,
+      sources: message.sources,
     };
   }
 
@@ -122,6 +129,7 @@ export function normalizeReturnedMessage<TMeta>(message: Partial<Message<TMeta>>
     text,
     metadata: message.metadata,
     reasoning: message.reasoning,
+    sources: message.sources,
     attachments: message.attachments,
   };
 }

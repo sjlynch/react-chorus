@@ -1,4 +1,4 @@
-import type { ConnectorName } from '../types';
+import type { ConnectorName, MessageSource } from '../types';
 
 export interface ConnectorToolDelta {
   id: string;
@@ -30,6 +30,10 @@ export interface ConnectorWarning {
 export interface ConnectorResult {
   text?: string;
   reasoning?: string;
+  /** Single source/citation emitted by the connector for the active assistant message. */
+  source?: MessageSource;
+  /** Multiple sources/citations emitted by one provider chunk. */
+  sources?: MessageSource[];
   toolDelta?: ConnectorToolDelta;
   toolDeltas?: ConnectorToolDelta[];
   done?: boolean;

@@ -1,22 +1,24 @@
 import type { Connector, ConnectorToolDelta, ConnectorWarning } from '../../connectors/connectors';
 import type { OpenAIConnectorOptions } from '../../connectors/openai';
-import type { ConnectorName, Message } from '../../types';
+import type { ConnectorName, Message, MessageSource } from '../../types';
 
 export interface SendCallbacks {
   /**
    * Optional notification fired once when the first stream event of any kind is
-   * delivered — text, reasoning, or a tool-call delta. This fires even for
-   * reasoning-first or tool-only turns that never emit answer text, so it is a
+   * delivered — text, reasoning, a source/citation, or a tool-call delta. This fires even for
+   * reasoning-first, source-first, or tool-only turns that never emit answer text, so it is a
    * reliable signal to clear a thinking placeholder or mark the assistant
    * message live. `firstChunk` carries the first text chunk when that first
    * event is text (the same chunk is also delivered to onChunk); for a
-   * reasoning- or tool-first turn it is an empty string.
+   * reasoning-, source-, or tool-first turn it is an empty string.
    */
   onStart?: (firstChunk: string) => void;
   /** Receives every non-empty text stream chunk, including the first one. */
   onChunk: (chunk: string) => void;
   /** Receives non-empty reasoning/thinking chunks when the connector exposes them. */
   onReasoning?: (chunk: string) => void;
+  /** Receives source/citation references when the connector exposes them. */
+  onSource?: (source: MessageSource) => void;
   /** Receives accumulated tool-call deltas when the connector exposes them. */
   onToolDelta?: (toolDelta: ConnectorToolDelta) => void;
   /**

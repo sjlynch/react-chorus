@@ -1,4 +1,5 @@
-import type { Message, Role } from '../types';
+import type { Message, MessageSource, Role } from '../types';
+import { sourceDisplayLabel } from '../utils/messageSources';
 
 export type TranscriptExportFormat = 'markdown' | 'json';
 
@@ -25,6 +26,50 @@ export function stringifyToolValue(value: unknown): string {
   }
 }
 
+function formatSourceMarkdown(source: MessageSource, index: number): string {
+  const label = sourceDisplayLabel(source, `Source ${index + 1}`);
+  const title = source.url ? `[${label}](${source.url})` : label;
+  return source.snippet ? `${title} — ${source.snippet}` : title;
+}
+
+function formatSourcesMarkdown(sources: MessageSource[] | undefined): string | null {
+  if (!sources || sources.length === 0) return null;
+  return ['**Sources:**', sources.map((source, index) => `- ${formatSourceMarkdown(source, index)}`).join('\n')].join('\n\n');
+}
+
+function sourceSearchText(source: MessageSource, index: number): string {
+  return [sourceDisplayLabel(source, `Source ${index + 1}`), source.url, source.snippet]
+    .filter((value): value is string => typeof value === 'string' && value.length > 0)
+    .join('\n');
+}
+
+function sourcesMatchQuery(sources: MessageSource[] | undefined, needle: string): boolean {
+  return Boolean(sources?.some((source, index) => sourceSearchText(source, index).toLowerCase().includes(needle)));
+}
+
+/**
+ * Serialize one message for the built-in per-message Copy fallback. Unlike the
+ * historical `message.text ?? ''` fallback, this includes structured tool I/O
+ * and sources/citations so the copied text matches the non-text content the
+ * default transcript renders and exports.
+ */
+export function formatMessageForClipboard<TMeta>(message: Message<TMeta>): string {
+  const blocks: string[] = [];
+
+  if (message.role === 'tool') {
+    blocks.push(`Tool: ${message.toolCall.name}`);
+    if (message.text) blocks.push(message.text);
+    if (message.toolCall.input !== undefined) blocks.push('Input:', stringifyToolValue(message.toolCall.input));
+    if (message.toolCall.output !== undefined) blocks.push('Output:', stringifyToolValue(message.toolCall.output));
+  } else {
+    if (message.text) blocks.push(message.text);
+  }
+
+  const sources = formatSourcesMarkdown(message.sources);
+  if (sources) blocks.push(sources);
+  return blocks.join('\n\n');
+}
+
 /**
  * Whether `message` matches `needle` (an already lower-cased, trimmed query).
  * Covers exactly the values `exportMarkdown` renders so search and export stay
@@ -41,6 +86,8 @@ export function messageMatchesQuery<TMeta>(message: Message<TMeta>, needle: stri
   // exportMarkdown lists each attachment as `- 📎 ${a.name}`, so a query for an
   // attached file name must find the message here too.
   if (message.attachments?.some((a) => a.name.toLowerCase().includes(needle))) return true;
+  // Source title/url/snippet is rendered in the `**Sources:**` export block.
+  if (sourcesMatchQuery(message.sources, needle)) return true;
   if (message.role === 'tool') {
     const { name, input, output } = message.toolCall;
     if (name.toLowerCase().includes(needle)) return true;
@@ -78,6 +125,9 @@ function exportMarkdown<TMeta>(messages: Message<TMeta>[], roleLabels?: Partial<
           blocks.push(attachments.map((a) => `- 📎 ${a.name}`).join('\n'));
         }
       }
+
+      const sources = formatSourcesMarkdown(message.sources);
+      if (sources) blocks.push(sources);
 
       return blocks.join('\n\n');
     })

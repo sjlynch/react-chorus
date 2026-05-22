@@ -1,10 +1,12 @@
 import React from 'react';
-import type { Attachment, Message } from '../../types';
+import type { Attachment, Message, MessageSource } from '../../types';
 import { DEFAULT_ATTACHMENT_LABELS } from '../../labels/attachments';
 import { DEFAULT_REASONING_LABEL } from '../../labels/reasoning';
-import type { ChorusAttachmentLabels, ChorusCodeCopyLabels, ChorusSpeakerLabels, ChorusToolCallLabels } from '../../labels/types';
+import { DEFAULT_SOURCE_LABELS } from '../../labels/sources';
+import type { ChorusAttachmentLabels, ChorusCodeCopyLabels, ChorusSourceLabels, ChorusSpeakerLabels, ChorusToolCallLabels } from '../../labels/types';
 import { getAttachmentPreviewSource } from '../../utils/attachmentPreview';
 import { joinClasses } from '../../utils/className';
+import { sourceDisplayLabel } from '../../utils/messageSources';
 import { Markdown, type MarkdownSanitizer } from '../Markdown';
 import { ToolCallBlock } from '../ToolCallBlock';
 import { defaultFormatMessageTimestamp } from './formatTimestamp';
@@ -92,6 +94,38 @@ export function MessageReasoning({ reasoning, codeTheme, headless, streaming = f
   );
 }
 
+export interface MessageSourcesProps {
+  sources?: MessageSource[];
+  labels?: ChorusSourceLabels;
+}
+
+export function MessageSources({ sources, labels = DEFAULT_SOURCE_LABELS }: MessageSourcesProps) {
+  if (!sources || sources.length === 0) return null;
+
+  return (
+    <div className="chorus-sources" aria-label={labels.sources}>
+      <div className="chorus-sources-title">{labels.sources}</div>
+      <ol className="chorus-source-list">
+        {sources.map((source, index) => {
+          const fallback = labels.source(index);
+          const label = sourceDisplayLabel(source, fallback);
+          const key = source.id ?? source.url ?? `${label}-${index}`;
+          return (
+            <li key={key} className="chorus-source-item">
+              {source.url ? (
+                <a className="chorus-source-link" href={source.url} target="_blank" rel="noreferrer">{label}</a>
+              ) : (
+                <span className="chorus-source-label">{label}</span>
+              )}
+              {source.snippet && <span className="chorus-source-snippet">{source.snippet}</span>}
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+}
+
 export interface MessageTimestampProps<TMeta = Record<string, unknown>> {
   message: Message<TMeta>;
   formatTimestamp?: MessageTimestampFormatter<TMeta>;
@@ -120,6 +154,8 @@ export interface MessageBubbleLayoutProps<TMeta = Record<string, unknown>> exten
   reasoningLabel?: string;
   codeCopyLabels?: ChorusCodeCopyLabels;
   attachmentLabels?: ChorusAttachmentLabels;
+  /** Label overrides for source/citation lists rendered on messages. */
+  sourceLabels?: ChorusSourceLabels;
   /** Label overrides for the tool-call block rendered for `role: 'tool'` messages. */
   toolCallLabels?: Partial<ChorusToolCallLabels>;
   /** Render the message's `createdAt` time below the bubble. Off by default. */
@@ -129,7 +165,7 @@ export interface MessageBubbleLayoutProps<TMeta = Record<string, unknown>> exten
   children?: React.ReactNode;
 }
 
-export function MessageBubbleLayout<TMeta = Record<string, unknown>>({ message, codeTheme, headless, streaming = false, markdownProps, markdownSanitizer, reasoningLabel, codeCopyLabels, attachmentLabels, toolCallLabels, showTimestamp = false, formatTimestamp, before, headerSlot, footerSlot, after, children }: MessageBubbleLayoutProps<TMeta>) {
+export function MessageBubbleLayout<TMeta = Record<string, unknown>>({ message, codeTheme, headless, streaming = false, markdownProps, markdownSanitizer, reasoningLabel, codeCopyLabels, attachmentLabels, sourceLabels, toolCallLabels, showTimestamp = false, formatTimestamp, before, headerSlot, footerSlot, after, children }: MessageBubbleLayoutProps<TMeta>) {
   const text = message.text ?? '';
   const hasAttachments = Boolean(message.attachments?.length);
   const hasBubbleText = text.trim().length > 0;
@@ -174,6 +210,7 @@ export function MessageBubbleLayout<TMeta = Record<string, unknown>>({ message, 
           // host-authored summary.
           <ToolCallBlock toolCall={message.toolCall} labels={toolCallLabels} streaming={streaming} />
         )}
+        <MessageSources sources={message.sources} labels={sourceLabels} />
         {showTimestamp && <MessageTimestamp message={message} formatTimestamp={formatTimestamp} />}
         {footerSlot}
         {children}
@@ -196,6 +233,8 @@ export interface MessageBubbleProps<TMeta = Record<string, unknown>> extends Mes
   codeCopyLabels?: ChorusCodeCopyLabels;
   speakerLabels?: ChorusSpeakerLabels;
   attachmentLabels?: ChorusAttachmentLabels;
+  /** Label overrides for source/citation lists rendered on messages. */
+  sourceLabels?: ChorusSourceLabels;
   /** Label overrides for the tool-call block rendered for `role: 'tool'` messages. */
   toolCallLabels?: Partial<ChorusToolCallLabels>;
   /** Render the message's `createdAt` time below the bubble. Off by default. */
@@ -204,7 +243,7 @@ export interface MessageBubbleProps<TMeta = Record<string, unknown>> extends Mes
   formatTimestamp?: MessageTimestampFormatter<TMeta>;
 }
 
-export function MessageBubble<TMeta = Record<string, unknown>>({ message, className, style, codeTheme = 'dark', headless, streaming = false, markdownProps, markdownSanitizer, reasoningLabel, codeCopyLabels, speakerLabels, attachmentLabels, toolCallLabels, showTimestamp, formatTimestamp, before, headerSlot, footerSlot, after }: MessageBubbleProps<TMeta>) {
+export function MessageBubble<TMeta = Record<string, unknown>>({ message, className, style, codeTheme = 'dark', headless, streaming = false, markdownProps, markdownSanitizer, reasoningLabel, codeCopyLabels, speakerLabels, attachmentLabels, sourceLabels, toolCallLabels, showTimestamp, formatTimestamp, before, headerSlot, footerSlot, after }: MessageBubbleProps<TMeta>) {
   const renderState = React.useContext(MessageRenderStateContext);
   if (renderState?.messageId === message.id && renderState.isEditing) return null;
 
@@ -222,6 +261,7 @@ export function MessageBubble<TMeta = Record<string, unknown>>({ message, classN
         reasoningLabel={reasoningLabel}
         codeCopyLabels={codeCopyLabels}
         attachmentLabels={attachmentLabels}
+        sourceLabels={sourceLabels}
         toolCallLabels={toolCallLabels}
         showTimestamp={showTimestamp}
         formatTimestamp={formatTimestamp}

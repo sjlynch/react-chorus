@@ -22,7 +22,7 @@ export function MessageRenderSlot<TMeta = Record<string, unknown>>({ message, is
   const isEditing = renderState?.messageId === message.id ? renderState.isEditing : false;
   if (!renderMessage) return <>{defaultRender()}</>;
 
-  const context: RenderMessageContext<TMeta> = { isStreaming, isEditing, defaultRender, actions, message, messageProps };
+  const context: RenderMessageContext<TMeta> = { isStreaming, isEditing, defaultRender, actions, sources: message.sources ?? [], message, messageProps };
   const custom = renderMessage(message, context);
   if (custom == null) return <>{defaultRender()}</>;
   return <>{attachMessageRootProps(custom, messageProps)}</>;

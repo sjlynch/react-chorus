@@ -27,7 +27,7 @@ export { isAiSdkFrameType } from './aiSdk/uiMessageStream';
  *   one as `data: <line>\n\n` (see README's Vercel AI SDK recipe for a one-line
  *   adapter).
  *
- * The connector returns text/reasoning/tool deltas, signals done on `finish` /
+ * The connector returns text/reasoning/source/tool deltas, signals done on `finish` /
  * `finish-message` / `d:` frames, and surfaces in-band errors (`type: 'error'`
  * or `3:"..."`) with the original payload as `errorPayload`. Unknown or
  * lifecycle-only frames (`start`, `start-step`, `text-start`, `text-end`, the

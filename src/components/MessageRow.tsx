@@ -1,5 +1,6 @@
 import type { Message, MessageFeedback } from '../types';
-import type { ChorusAttachmentLabels, ChorusCodeCopyLabels, ChorusMessageActionLabels, ChorusSpeakerLabels, ChorusToolCallLabels } from '../labels/types';
+import type { ChorusAttachmentLabels, ChorusCodeCopyLabels, ChorusMessageActionLabels, ChorusSourceLabels, ChorusSpeakerLabels, ChorusToolCallLabels } from '../labels/types';
+import { formatMessageForClipboard } from '../hooks/transcriptFormatters';
 import { useCanWriteTextToClipboard, writeTextToClipboard } from '../utils/messageCopy';
 import type { MarkdownSanitizer } from './Markdown';
 import { MessageActions, createCopyAction } from './message-row/actions';
@@ -13,8 +14,8 @@ import type { MessageBubbleSlots, MessageCopyResult, MessageMarkdownProps, Messa
 export type { MessageFeedback } from '../types';
 export { MessageActionControls, MessageActions, actionButtonClass, createCopyAction } from './message-row/actions';
 export type { MessageActionsProps } from './message-row/actions';
-export { MessageAttachments, MessageBubble, MessageBubbleLayout, MessageReasoning, MessageTimestamp } from './message-row/bubble';
-export type { MessageBubbleLayoutProps, MessageBubbleProps, MessageReasoningProps, MessageTimestampProps } from './message-row/bubble';
+export { MessageAttachments, MessageBubble, MessageBubbleLayout, MessageReasoning, MessageSources, MessageTimestamp } from './message-row/bubble';
+export type { MessageBubbleLayoutProps, MessageBubbleProps, MessageReasoningProps, MessageSourcesProps, MessageTimestampProps } from './message-row/bubble';
 export { getInitialMessageFeedback, getMetadataFeedback, isMessageFeedback } from './message-row/feedback';
 export type { GetMessageFeedback } from './message-row/feedback';
 export { InlineMessageEditor } from './message-row/InlineMessageEditor';
@@ -56,6 +57,8 @@ export interface MessageRowProps<TMeta = Record<string, unknown>> extends Messag
   reasoningLabel?: string;
   codeCopyLabels?: ChorusCodeCopyLabels;
   attachmentLabels?: ChorusAttachmentLabels;
+  /** Label overrides for source/citation lists rendered on messages. */
+  sourceLabels?: ChorusSourceLabels;
   /** Label overrides for the tool-call block rendered for `role: 'tool'` messages. */
   toolCallLabels?: Partial<ChorusToolCallLabels>;
   /** Render the message's `createdAt` time below the bubble. Off by default. */
@@ -64,7 +67,7 @@ export interface MessageRowProps<TMeta = Record<string, unknown>> extends Messag
   formatTimestamp?: MessageTimestampFormatter<TMeta>;
 }
 
-export function MessageRow<TMeta = Record<string, unknown>>({ m, codeTheme, headless, onEdit, onRegenerate, onDelete, onCopy, onFeedback, initialFeedback, feedbackReadOnly, streaming = false, markdownProps, markdownSanitizer, messageActionLabels, speakerLabels, reasoningLabel, codeCopyLabels, attachmentLabels, toolCallLabels, showTimestamp, formatTimestamp, before, headerSlot, footerSlot, after }: MessageRowProps<TMeta>) {
+export function MessageRow<TMeta = Record<string, unknown>>({ m, codeTheme, headless, onEdit, onRegenerate, onDelete, onCopy, onFeedback, initialFeedback, feedbackReadOnly, streaming = false, markdownProps, markdownSanitizer, messageActionLabels, speakerLabels, reasoningLabel, codeCopyLabels, attachmentLabels, sourceLabels, toolCallLabels, showTimestamp, formatTimestamp, before, headerSlot, footerSlot, after }: MessageRowProps<TMeta>) {
   // Drive editing state through MessageRenderStateContext when a provider is present
   // (the default ChatWindow path wraps every row in one) so a custom renderer's
   // `ctx.isEditing` reflects the row's inline editor. Falls back to local state when
@@ -78,7 +81,7 @@ export function MessageRow<TMeta = Record<string, unknown>>({ m, codeTheme, head
   const copy = onCopy
     ? createCopyAction(m, onCopy)
     : clipboardWritable
-      ? () => writeTextToClipboard(m.text ?? '')
+      ? () => writeTextToClipboard(formatMessageForClipboard(m))
       : undefined;
   const resolvedInitialFeedback = initialFeedback === undefined ? getInitialMessageFeedback(m) : initialFeedback;
   const actions: MessageRenderActions = {
@@ -119,6 +122,7 @@ export function MessageRow<TMeta = Record<string, unknown>>({ m, codeTheme, head
           reasoningLabel={reasoningLabel}
           codeCopyLabels={codeCopyLabels}
           attachmentLabels={attachmentLabels}
+          sourceLabels={sourceLabels}
           toolCallLabels={toolCallLabels}
           showTimestamp={showTimestamp}
           formatTimestamp={formatTimestamp}

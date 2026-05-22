@@ -2,6 +2,7 @@ import React from 'react';
 import { Copy, Pencil, RefreshCw, ThumbsDown, ThumbsUp, Trash2 } from 'lucide-react';
 import type { Message, MessageFeedback } from '../../types';
 import { DEFAULT_MESSAGE_ACTION_LABELS } from '../../labels/messageActions';
+import { formatMessageForClipboard } from '../../hooks/transcriptFormatters';
 import type { ChorusMessageActionLabels, ChorusSpeakerLabels } from '../../labels/types';
 import { canWriteTextToClipboard, writeTextToClipboard } from '../../utils/messageCopy';
 import { joinClasses } from '../../utils/className';
@@ -103,7 +104,7 @@ export function MessageActions({ actions, onEditRequested, labels = DEFAULT_MESS
 
 export function createCopyAction<TMeta>(message: Message<TMeta>, onCopy?: (message: Message<TMeta>) => MessageCopyResult) {
   if (onCopy) return () => onCopy(message);
-  if (canWriteTextToClipboard()) return () => writeTextToClipboard(message.text ?? '');
+  if (canWriteTextToClipboard()) return () => writeTextToClipboard(formatMessageForClipboard(message));
   return undefined;
 }
 

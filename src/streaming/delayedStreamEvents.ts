@@ -1,4 +1,5 @@
 import type { SendCallbacks } from '../hooks/chorus-stream/types';
+import type { MessageSource } from '../types';
 import type { ConnectorToolDelta } from '../connectors/types';
 import {
   createAbortCancellation,
@@ -10,7 +11,7 @@ import { createReleaseSchedule, createReleaseState } from './internal/delayedRel
 import { createBufferedDelivery, createCallbackDelivery } from './internal/delayedCallbackDelivery';
 
 /**
- * Buffers the first text/reasoning/tool events for `minDelayMs`, then releases
+ * Buffers the first text/reasoning/source/tool events for `minDelayMs`, then releases
  * them to the callbacks. This is the only public surface; the release timer,
  * event queue, abort cancellation, and callback delivery/error helpers live in
  * `./internal/delayed*` modules.
@@ -51,6 +52,7 @@ export function createDelayedChunkEmitter(cb: SendCallbacks, startedAt: number, 
   return {
     handleChunk: (chunk: string) => handleEvent({ type: 'text', chunk }),
     handleReasoning: (chunk: string) => handleEvent({ type: 'reasoning', chunk }),
+    handleSource: (source: MessageSource) => handleEvent({ type: 'source', source }),
     handleToolDelta: (toolDelta: ConnectorToolDelta) => handleEvent({ type: 'toolDelta', toolDelta }),
     flushBeforeDone: bufferedDelivery.flushBeforeDone,
     cancel: bufferedDelivery.cancel,

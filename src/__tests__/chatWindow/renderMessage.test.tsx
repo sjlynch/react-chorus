@@ -352,6 +352,23 @@ describe('ChatWindow renderMessage and message actions', () => {
     expect(screen.getByTestId('ctx-header')).toHaveTextContent('You · now');
     expect(screen.getByTestId('ctx-footer')).toHaveTextContent('sent');
   });
+  it('exposes sources on renderMessage context while defaultRender still renders them', () => {
+    const sourced: Message = {
+      ...ASST_MSG,
+      sources: [{ id: 'src1', title: 'API docs', url: 'https://docs.example.com/api' }],
+    };
+    const renderMessage = vi.fn((_message: Message, ctx) => (
+      <div>
+        <span data-testid="source-count">{ctx.sources.length}</span>
+        {ctx.defaultRender()}
+      </div>
+    ));
+
+    render(<ChatWindow messages={[sourced]} renderMessage={renderMessage} />);
+
+    expect(screen.getByTestId('source-count')).toHaveTextContent('1');
+    expect(screen.getByRole('link', { name: 'API docs' })).toHaveAttribute('href', 'https://docs.example.com/api');
+  });
   it('passes decoration slots through ctx.defaultRender for a tool message', () => {
     const { container } = render(
       <ChatWindow

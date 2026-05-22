@@ -72,6 +72,9 @@ export function createConnectorResultDeliverer(
     const reasoning = out.reasoning || '';
     if (reasoning) delayedChunks.handleReasoning(reasoning);
 
+    const sources = out.sources?.length ? out.sources : out.source ? [out.source] : [];
+    for (const source of sources) delayedChunks.handleSource(source);
+
     const toolDeltas = out.toolDeltas?.length ? out.toolDeltas : out.toolDelta ? [out.toolDelta] : [];
     for (const toolDelta of toolDeltas) delayedChunks.handleToolDelta(accumulateToolDelta(toolDelta));
 

@@ -33,6 +33,27 @@ describe('useChorusStream connector delivery', () => {
     expect(onToolDelta).toHaveBeenNthCalledWith(2, expect.objectContaining({ id: 'call_1', name: 'search', input: { q: 'test' }, provider: 'openai', providerId: 'call_1' }));
   });
 
+  it('routes connector sources to onSource', async () => {
+    const transport = vi.fn<Transport>(() => Promise.resolve(makeSseResponse([
+      JSON.stringify({ type: 'source-url', sourceId: 'src_1', url: 'https://example.com/source', title: 'Source doc' }),
+      JSON.stringify({ type: 'finish' }),
+    ])));
+    const onSource = vi.fn();
+    const onDone = vi.fn();
+    const { result } = renderHook(() => useChorusStream(transport, { connector: 'ai-sdk' }));
+
+    await act(async () => {
+      await result.current.send('hello', [], { onChunk: vi.fn(), onSource, onDone });
+    });
+
+    expect(onSource).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'src_1',
+      title: 'Source doc',
+      url: 'https://example.com/source',
+    }));
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
   it('routes non-fatal connector warnings to onWarning', async () => {
     const transport = vi.fn<Transport>(() => Promise.resolve(makeSseResponse([
       JSON.stringify({ candidates: [{ finishReason: 'MAX_TOKENS', content: { parts: [{ text: 'cut off' }] } }] }),

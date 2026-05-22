@@ -1,17 +1,19 @@
 import { hasOwn } from '../objectUtils';
-import { appendField, appendToolDelta, hasToolDelta } from '../resultHelpers';
+import { appendField, appendSource, appendToolDelta, hasToolDelta } from '../resultHelpers';
 import type { ConnectorResult } from '../types';
 
 export { hasOwn };
 
 // Re-exported from the shared module so connector files importing these from
 // `shared.ts` keep working; `mergeResult` below also depends on them.
-export { appendField, appendToolDelta, hasToolDelta };
+export { appendField, appendSource, appendToolDelta, hasToolDelta };
 
 export function mergeResult(target: ConnectorResult, source: ConnectorResult | null | undefined) {
   if (!source) return;
   if (source.text) appendField(target, 'text', source.text);
   if (source.reasoning) appendField(target, 'reasoning', source.reasoning);
+  const sources = source.sources?.length ? source.sources : source.source ? [source.source] : [];
+  for (const item of sources) appendSource(target, item);
   const toolDeltas = source.toolDeltas?.length ? source.toolDeltas : source.toolDelta ? [source.toolDelta] : [];
   for (const toolDelta of toolDeltas) appendToolDelta(target, toolDelta);
   if (source.error) target.error = source.error;

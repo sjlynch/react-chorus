@@ -8,7 +8,7 @@
 - `messageUtils.ts` — message IDs, retry cloning, returned-message normalization, tool metadata helpers.
 - `observer.ts` — guarded observer warning helper (`warnObserverError`).
 - `observerCallbacks.ts` — `createObserverCallbacks` factory for the `safeOn*` try/catch wrappers around host observers.
-- `assistantBuffer.ts` — `useAssistantBuffer` owns the RAF-buffered text/reasoning queues, pending-assistant/tool refs, and `startAssistant` / `append*Now` / `finalizeAssistantNow` / `resetStreamState` / `resetPendingAssistantState` mutators.
+- `assistantBuffer.ts` — `useAssistantBuffer` owns the RAF-buffered text/reasoning queues, source appends, pending-assistant/tool refs, and `startAssistant` / `append*Now` / `finalizeAssistantNow` / `resetStreamState` / `resetPendingAssistantState` mutators.
 - `toolExecution.ts` — `useToolExecution` builds the tool message mutators (`appendToolDeltaNow`, `setToolOutput`, `setToolErrorOutput`), `createToolCallContext`, and the `runCompletedToolCalls` loop. The chunk-isolated `resolveToolHandlerLocal` helper lives here too — see the comment on the function.
 - `sessionHelpers.ts` — `createSessionHelpers` plain factory that returns the `ChorusSendHelpers` exposed to `onSend`, including `minAssistantDelayMs` buffering and auto-finalize logic.
 - `onSendLifecycle.ts` — `startOnSendLifecycle` owns the custom `onSend` branch once the facade selects it: abort-controller setup, `createSessionHelpers`, returned-message normalization, auto-finalize warnings, non-abort error handling, and cleanup.
@@ -27,10 +27,10 @@ Core streaming hook for the simple `transport` path. The facade is `useChorusStr
 - `types.ts` — public `SendCallbacks`, `StreamOptions`, and `Transport` types re-exported by the facade.
 - `session.ts` — abort-controller/session wiring and forward-abort listener teardown.
 - `namedSSEEvents.ts` — named SSE `event:` handling before connector extraction.
-- `connectorDelivery.ts` — connector-result delivery, warning routing, and connector error promotion.
+- `connectorDelivery.ts` — connector-result delivery (text/reasoning/source/tool callbacks), warning routing, and connector error promotion.
 - `sendLifecycle.ts` — transport/HTTP validation, SSE pumping, connector `flush()`, onDone success path, and error teardown.
 
-Shared streaming primitives stay in `src/streaming/`: `readSSEStream.ts` parses SSE frames, `delayedStreamEvents.ts` owns `minDelayMs` buffering and callback-error propagation, `errors.ts` defines `ChorusStreamError`/HTTP snippets, and `toolDeltaAccumulator.ts` merges streamed tool-call deltas. The hook creates connector state once per send, feeds SSE payloads through `extract()`, calls connector `flush()` at EOF, delivers text/reasoning/tool events, and finalizes or reports errors. Named SSE `event:` frames are routed before `extract()`: `event: error` is surfaced as a `ChorusStreamError` (even for a bare-string payload), `event: heartbeat`/`event: ping` keepalives are dropped, and unnamed/`event: message` frames go to the connector unchanged.
+Shared streaming primitives stay in `src/streaming/`: `readSSEStream.ts` parses SSE frames, `delayedStreamEvents.ts` owns `minDelayMs` buffering and callback-error propagation, `errors.ts` defines `ChorusStreamError`/HTTP snippets, and `toolDeltaAccumulator.ts` merges streamed tool-call deltas. The hook creates connector state once per send, feeds SSE payloads through `extract()`, calls connector `flush()` at EOF, delivers text/reasoning/source/tool events, and finalizes or reports errors. Named SSE `event:` frames are routed before `extract()`: `event: error` is surfaced as a `ChorusStreamError` (even for a bare-string payload), `event: heartbeat`/`event: ping` keepalives are dropped, and unnamed/`event: message` frames go to the connector unchanged.
 
 ## `useChorusPersistence`
 
