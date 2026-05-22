@@ -1348,7 +1348,7 @@ On an accepted send, `send()` also resets the composer the same way a UI-driven 
 - `regenerate(messageId)` regenerates a specific assistant message, replaying from the user turn that preceded it. It returns `false` when `messageId` does not match a message or no user message precedes it.
 - `dismissError()` clears the current stream error state. It returns `false` when there is no error to dismiss.
 
-All three also return `false` for the shared rejection cases — `<Chorus disabled>`, `<Chorus readOnly>`, an async built-in persistence load still pending, or controlled mode (`value` provided) with no `onChange` prop.
+`retry()` and `regenerate(messageId)` also return `false` for the shared rejection cases — `<Chorus disabled>`, `<Chorus readOnly>`, an async built-in persistence load still pending, or controlled mode (`value` provided) with no `onChange` prop. `dismissError()` is **not** gated by `disabled`/`readOnly`/persistence-loading: clearing a stream error mutates transient state, not the transcript, so — like the built-in error banner's dismiss button — it stays available in those modes. (It is still rejected in controlled mode with no `onChange`.)
 
 `scrollToMessage(id)` returns `true` when it finds a rendered message row and `false` when the id is not currently mounted; check `hiddenRoles`, `maxRenderedMessages`, and custom `renderMessage` implementations that return a fragment/custom component without spreading `ctx.messageProps`. `stop()` always remains available for active responses.
 

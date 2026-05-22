@@ -77,8 +77,12 @@ export interface ChorusRef<TMeta = Record<string, unknown>> {
    * dismissing the built-in error banner. Returns `true` when an error was
    * cleared and `false` when it was rejected. Rejection cases are:
    * - there is no current stream error to dismiss;
-   * - `disabled` / `readOnly`, or an async built-in persistence load is pending;
    * - controlled mode (`value` provided) with no `onChange` prop.
+   *
+   * Unlike the other mutators, this is **not** gated by `disabled` /
+   * `readOnly` / a pending persistence load: dismissing an error mutates
+   * only transient stream-error state, not the transcript, so it stays
+   * available in those modes — matching the built-in banner's dismiss button.
    */
   dismissError(): boolean;
   focus(): void;

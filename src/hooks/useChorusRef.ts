@@ -107,7 +107,11 @@ export function useChorusRef<TMeta>(
       return true;
     },
     dismissError() {
-      if (writesDisabled) return warnRejected('dismissError', 'writesDisabled');
+      // Intentionally NOT gated on `writesDisabled` (unlike the other
+      // mutators): dismissing an error clears only transient stream-error
+      // state, not the transcript, so a `disabled`/`readOnly` Chorus may
+      // still dismiss it. This matches the built-in error banner's dismiss
+      // button, whose `onDismissError` is wired unconditionally.
       if (controlledWithoutOnChange) return warnRejected('dismissError', 'controlledWithoutOnChange');
       if (!session.streamError) return false;
       session.dismissError();

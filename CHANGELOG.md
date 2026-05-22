@@ -21,6 +21,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Fixed
 - The built-in transcript error banner now renders a dismiss (X) button when `onDismissError` is wired (it always is under `<Chorus>`), so consumers using the default error UI — not just a custom `renderError` — can clear the banner. Added a localizable `labels.transcript.dismissError` string for its accessible label.
+- `ChorusRef.dismissError()` is no longer rejected while `disabled`/`readOnly` or a built-in persistence load is pending. Dismissing a stream error mutates only transient error state — not the transcript — and the built-in banner's dismiss button was already available in those modes, so the imperative API now matches it. (`dismissError()` is still rejected in controlled mode with no `onChange`.)
 
 ### Deprecation candidates (future major)
 - The default transport body `{ prompt, history }` duplicates the latest user turn — `prompt` equals `history[history.length - 1].text`. Backends already consume `history` only (see all `examples/` proxies). A future major release should drop `prompt` from `createFetchSSETransport`, `createWebSocketTransport`, and `createDefaultFetchSSETransport` defaults and send `{ history }` exclusively. Until then, README and JSDoc warn against re-appending `prompt` server-side. See [README → Migration and Upgrading → Default transport body will drop the `prompt` field](./README.md#default-transport-body-will-drop-the-prompt-field) for the concrete migration path.
