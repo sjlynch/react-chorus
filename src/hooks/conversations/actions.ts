@@ -74,20 +74,24 @@ export function useConversationActions({
     const targetStorage = storageRef.current;
     if (!targetStorage) return;
 
+    // An adapter without `removeItem` cannot truly delete a key. The old
+    // fallback wrote `setItem(messageKey, '[]')`, but an empty-transcript `'[]'`
+    // key and an absent key render identically when re-read — so the write
+    // accomplished nothing useful while leaving a tombstone that nothing ever
+    // garbage-collects. Over many delete cycles those tombstones accumulate and
+    // exhaust storage quota. Skip the transcript write entirely; hosts that need
+    // real transcript deletion should implement `StorageAdapter.removeItem`.
+    if (!targetStorage.removeItem) return;
+
     const messageKey = `${messageKeyPrefixRef.current}${id}`;
-    // Both the `removeItem` path and the `setItem(key, '[]')` fallback report
-    // failures as `'delete'`, even though the fallback uses the same `setItem`
-    // primitive a transcript `'write'` would. This divergence is deliberate:
-    // `'delete'` describes the host's intent (it called `deleteConversation`),
-    // and — crucially — it keeps the error out of `handleIndexWriteSuccess`'s
-    // `write`-error clearing. `deleteConversation` issues an index write right
-    // after this; if the fallback failure were `'write'`, that index write's
-    // success would immediately and silently dismiss it. See "Transcript
-    // deletion" in conversations/CLAUDE.md.
+    // Failures here are reported as `'delete'`, not `'write'`: `'delete'`
+    // describes the host's intent (it called `deleteConversation`) and —
+    // crucially — keeps the error out of `handleIndexWriteSuccess`'s `write`-error
+    // clearing. `deleteConversation` issues an index write right after this; a
+    // `'write'`-classified failure would be silently dismissed by that index
+    // write's success. See "Transcript deletion" in conversations/CLAUDE.md.
     try {
-      const result = targetStorage.removeItem
-        ? targetStorage.removeItem(messageKey)
-        : targetStorage.setItem(messageKey, '[]');
+      const result = targetStorage.removeItem(messageKey);
       if (isPromiseLike<void>(result)) Promise.resolve(result).catch(deleteError => reportError(deleteError, 'delete', messageKey, id));
     } catch (deleteError) {
       reportError(deleteError, 'delete', messageKey, id);

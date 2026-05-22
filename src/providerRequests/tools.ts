@@ -1,5 +1,6 @@
 import type { ChorusToolDefinition, ChorusToolRegistry } from '../tools';
 import { toToolDefinitionList } from '../tools';
+import { warnOnceInDev } from './devWarn';
 
 /** Source accepted by every `to*Tools` helper: definition array or full registry. */
 export type ProviderToolsSource<TMeta = Record<string, unknown>> =
@@ -8,6 +9,36 @@ export type ProviderToolsSource<TMeta = Record<string, unknown>> =
 
 function defaultObjectSchema(definition: ChorusToolDefinition<unknown>): Record<string, unknown> {
   return definition.inputSchema ?? { type: 'object', properties: {} };
+}
+
+/**
+ * Apply a per-provider override (`openai`/`anthropic`/`gemini`) on top of the
+ * canonical tool fields, then re-assert `identity` so the override can never
+ * clobber it. The override hatch is for *additive* provider fields (`strict`,
+ * `cache_control`, ...); placing an identity field (`name`, `parameters`,
+ * `input_schema`) inside it would silently rename the tool or replace its
+ * validated schema, desyncing it from the Chorus dispatch key the rest of the
+ * library matches on. Such misuse re-asserts the canonical value and warns once
+ * in dev so it stays observable.
+ */
+function withToolOverride<T extends Record<string, unknown>>(
+  provider: string,
+  base: Record<string, unknown>,
+  override: Record<string, unknown>,
+  identity: Record<string, unknown>,
+): T {
+  for (const key of Object.keys(identity)) {
+    if (Object.prototype.hasOwnProperty.call(override, key)) {
+      const toolName = String(identity.name ?? base.name ?? 'tool');
+      warnOnceInDev(
+        `react-chorus:tool-override-identity:${provider}:${toolName}:${key}`,
+        `[react-chorus] ${provider} tools: the provider override on tool "${toolName}" sets the ` +
+          `identity field \`${key}\`. The override hatch is for additive provider fields ` +
+          `(e.g. strict, cache_control), not identity fields; the canonical \`${key}\` was kept.`,
+      );
+    }
+  }
+  return { ...base, ...override, ...identity } as T;
 }
 
 /** OpenAI Chat Completions tool declaration shape — `{ type: 'function', function: { ... } }`. */
@@ -53,14 +84,16 @@ export function toOpenAIChatCompletionsTools<TMeta = Record<string, unknown>>(
   return toToolDefinitionList(source).map(definition => {
     const { openai = {} } = definition;
     const description = definition.description;
+    const name = definition.name;
+    const parameters = defaultObjectSchema(definition as ChorusToolDefinition<unknown>);
     return {
       type: 'function',
-      function: {
-        name: definition.name,
-        ...(description ? { description } : {}),
-        parameters: defaultObjectSchema(definition as ChorusToolDefinition<unknown>),
-        ...openai,
-      },
+      function: withToolOverride(
+        'OpenAI Chat Completions',
+        { name, ...(description ? { description } : {}), parameters },
+        openai,
+        { name, parameters },
+      ),
     } as OpenAIChatCompletionsTool;
   });
 }
@@ -72,13 +105,14 @@ export function toOpenAIResponsesTools<TMeta = Record<string, unknown>>(
   return toToolDefinitionList(source).map(definition => {
     const { openai = {} } = definition;
     const description = definition.description;
-    return {
-      type: 'function',
-      name: definition.name,
-      ...(description ? { description } : {}),
-      parameters: defaultObjectSchema(definition as ChorusToolDefinition<unknown>),
-      ...openai,
-    } as OpenAIResponsesTool;
+    const name = definition.name;
+    const parameters = defaultObjectSchema(definition as ChorusToolDefinition<unknown>);
+    return withToolOverride<OpenAIResponsesTool>(
+      'OpenAI Responses',
+      { type: 'function', name, ...(description ? { description } : {}), parameters },
+      openai,
+      { name, parameters },
+    );
   });
 }
 
@@ -89,12 +123,14 @@ export function toAnthropicTools<TMeta = Record<string, unknown>>(
   return toToolDefinitionList(source).map(definition => {
     const { anthropic = {} } = definition;
     const description = definition.description;
-    return {
-      name: definition.name,
-      ...(description ? { description } : {}),
-      input_schema: defaultObjectSchema(definition as ChorusToolDefinition<unknown>),
-      ...anthropic,
-    } as AnthropicTool;
+    const name = definition.name;
+    const input_schema = defaultObjectSchema(definition as ChorusToolDefinition<unknown>);
+    return withToolOverride<AnthropicTool>(
+      'Anthropic',
+      { name, ...(description ? { description } : {}), input_schema },
+      anthropic,
+      { name, input_schema },
+    );
   });
 }
 
@@ -108,12 +144,14 @@ export function toGeminiTools<TMeta = Record<string, unknown>>(
   const declarations = list.map(definition => {
     const { gemini = {} } = definition;
     const description = definition.description;
-    return {
-      name: definition.name,
-      ...(description ? { description } : {}),
-      parameters: defaultObjectSchema(definition as ChorusToolDefinition<unknown>),
-      ...gemini,
-    } as GeminiFunctionDeclaration;
+    const name = definition.name;
+    const parameters = defaultObjectSchema(definition as ChorusToolDefinition<unknown>);
+    return withToolOverride<GeminiFunctionDeclaration>(
+      'Gemini',
+      { name, ...(description ? { description } : {}), parameters },
+      gemini,
+      { name, parameters },
+    );
   });
 
   return [{ functionDeclarations: declarations }];

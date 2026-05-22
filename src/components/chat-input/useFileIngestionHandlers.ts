@@ -1,6 +1,7 @@
 import type React from 'react';
 import type { AttachmentSource } from '../../types';
 import { filesFromTransfer, transferHasFiles } from './attachmentUtils';
+import type { DragScopeHandlers } from './useAttachmentDragState';
 import { useChatSurfaceFileDrop } from './useChatSurfaceFileDrop';
 
 type HandleFiles = (files: FileList | File[] | null, source: AttachmentSource) => void | Promise<void>;
@@ -14,9 +15,10 @@ interface UseFileIngestionHandlersOptions {
   rootRef: React.RefObject<HTMLElement | null>;
   handleFiles: HandleFiles;
   clearDragState: () => void;
-  markDragEnter: () => void;
-  markDragLeave: () => void;
-  markDragOver: () => void;
+  /** Drag bookkeeping for the surrounding `.chorus` surface listeners. */
+  surfaceDrag: DragScopeHandlers;
+  /** Drag bookkeeping for the composer root's React handlers. */
+  composerDrag: DragScopeHandlers;
   onPaste?: React.ClipboardEventHandler<HTMLDivElement>;
   onDragEnter?: React.DragEventHandler<HTMLDivElement>;
   onDragOver?: React.DragEventHandler<HTMLDivElement>;
@@ -31,9 +33,8 @@ export function useFileIngestionHandlers({
   rootRef,
   handleFiles,
   clearDragState,
-  markDragEnter,
-  markDragLeave,
-  markDragOver,
+  surfaceDrag,
+  composerDrag,
   onPaste,
   onDragEnter,
   onDragOver,
@@ -68,7 +69,7 @@ export function useFileIngestionHandlers({
     // navigates the browser away to the dropped file's URL.
     e.preventDefault();
     if (!canIngestFiles) return;
-    markDragEnter();
+    composerDrag.markDragEnter();
   };
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
@@ -76,14 +77,14 @@ export function useFileIngestionHandlers({
     e.preventDefault();
     if (!canIngestFiles) return;
     e.dataTransfer.dropEffect = 'copy';
-    markDragOver();
+    composerDrag.markDragOver();
   };
 
   const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
     if (!transferHasFiles(e.dataTransfer)) return;
     e.preventDefault();
     if (!canIngestFiles) return;
-    markDragLeave();
+    composerDrag.markDragLeave();
   };
 
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
@@ -124,9 +125,7 @@ export function useFileIngestionHandlers({
     canIngestFiles,
     handleFiles,
     clearDragState,
-    markDragEnter,
-    markDragLeave,
-    markDragOver,
+    surfaceDrag,
   });
 
   return {

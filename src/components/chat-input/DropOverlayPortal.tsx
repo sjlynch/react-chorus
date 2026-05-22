@@ -18,16 +18,15 @@ interface DropOverlayPortalProps {
  * always renders under the cursor — `useChatSurfaceFileDrop` also accepts file
  * drops over the transcript, far above the composer. It portals onto the
  * surrounding `.chorus` surface when one exists; a standalone ChatInput (no
- * surface) keeps the overlay inside its own composer-sized root. The host is
- * resolved once on mount: the `.chorus` ancestor of a mounted ChatInput does
- * not change.
+ * surface) keeps the overlay inside its own composer-sized root.
+ *
+ * The host is resolved fresh on every render rather than cached at mount: a
+ * ChatInput can be re-parented into (or out of) a `.chorus` surface after mount
+ * — a conditional layout, a lazy-mounted shell, or a route transition that
+ * re-parents without unmounting — and a stale mount-time host would leave the
+ * overlay nested in the composer, no longer covering transcript-area drops.
  */
 export function DropOverlayPortal({ active, label, rootRef }: DropOverlayPortalProps) {
-  const [host, setHost] = React.useState<HTMLElement | null>(null);
-  React.useEffect(() => {
-    setHost(rootRef.current?.closest<HTMLElement>('.chorus') ?? null);
-  }, [rootRef]);
-
   if (!active) return null;
 
   const overlay = (
@@ -36,5 +35,6 @@ export function DropOverlayPortal({ active, label, rootRef }: DropOverlayPortalP
     </div>
   );
 
+  const host = rootRef.current?.closest<HTMLElement>('.chorus') ?? null;
   return host ? createPortal(overlay, host) : overlay;
 }

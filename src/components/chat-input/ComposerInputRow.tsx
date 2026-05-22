@@ -88,8 +88,14 @@ export function ComposerInputRow({
         // a purely read-only (not disabled) textarea.
         aria-readonly={readOnly && !disabled ? true : undefined}
       />
+      {/*
+       * Stop chrome (square icon + "Stop" label) appears only when
+       * `stopAvailable` — i.e. a host `onStop` exists to action. While
+       * `sending` without `onStop` the button stays disabled but keeps the
+       * Send affordance, so assistive tech never hears an inert "Stop".
+       */}
       <button type="button" className="chorus-send" onClick={onSendClick} aria-label={sendActionLabel} title={sendActionLabel} disabled={sending ? !stopAvailable : !canSend}>
-        {sending ? <span className="chorus-stop-fill" /> : <ArrowUp size={18} strokeWidth={2} />}
+        {stopAvailable ? <span className="chorus-stop-fill" /> : <ArrowUp size={18} strokeWidth={2} />}
       </button>
     </div>
   );

@@ -25,9 +25,19 @@ describe('anthropicConnector', () => {
     expect(anthropicConnector.extract(data)).toBeNull();
   });
 
-  it('returns null for message_start', () => {
+  it('returns null for message_start without usage', () => {
     const data = JSON.stringify({ type: 'message_start', message: { id: 'msg_1', role: 'assistant' } });
     expect(anthropicConnector.extract(data)).toBeNull();
+  });
+
+  it('surfaces message_start usage.input_tokens as metadata', () => {
+    const data = JSON.stringify({
+      type: 'message_start',
+      message: { id: 'msg_1', role: 'assistant', usage: { input_tokens: 42, output_tokens: 1 } },
+    });
+    expect(anthropicConnector.extract(data)).toEqual({
+      metadata: { usage: { promptTokens: 42, completionTokens: 1 } },
+    });
   });
 
   it('returns null for text_delta with empty text', () => {
@@ -113,13 +123,15 @@ describe('anthropicConnector', () => {
     expect(anthropicConnector.extract(data)).toEqual({ text: 'hello' });
   });
 
-  it('surfaces message_delta.stop_reason=end_turn as metadata only', () => {
+  it('surfaces message_delta.stop_reason=end_turn with token usage as metadata', () => {
     const data = JSON.stringify({
       type: 'message_delta',
       delta: { stop_reason: 'end_turn', stop_sequence: null },
       usage: { output_tokens: 7 },
     });
-    expect(anthropicConnector.extract(data)).toEqual({ metadata: { stopReason: 'end_turn' } });
+    expect(anthropicConnector.extract(data)).toEqual({
+      metadata: { stopReason: 'end_turn', usage: { completionTokens: 7 } },
+    });
   });
 
   it('surfaces message_delta.stop_reason=stop_sequence including the matched sequence', () => {
@@ -162,8 +174,13 @@ describe('anthropicConnector', () => {
     });
   });
 
-  it('returns null for message_delta without a stop_reason', () => {
+  it('surfaces message_delta usage even when no stop_reason is present', () => {
     const data = JSON.stringify({ type: 'message_delta', delta: { stop_sequence: null }, usage: { output_tokens: 1 } });
+    expect(anthropicConnector.extract(data)).toEqual({ metadata: { usage: { completionTokens: 1 } } });
+  });
+
+  it('returns null for message_delta with neither a stop_reason nor usage', () => {
+    const data = JSON.stringify({ type: 'message_delta', delta: { stop_sequence: null } });
     expect(anthropicConnector.extract(data)).toBeNull();
   });
 
