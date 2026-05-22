@@ -592,6 +592,51 @@ describe('useConversations', () => {
       expect(result.current.conversations.map(c => c.id)).toEqual(['b']);
     });
 
+    it('drops an armed debounced index write so it cannot clobber a cross-tab storage event', () => {
+      vi.useFakeTimers();
+      const indexKey = 'chorus-cross-tab-index-armed-debounce';
+      const transcriptKey = 'chorus-conversation:local';
+      let unmount: (() => void) | undefined;
+      try {
+        const ids = ['local'];
+        const hook = renderHook(() => useConversations({
+          indexKey,
+          createId: () => ids.shift() ?? 'fallback',
+          now: () => '2026-05-21T00:00:00.000Z',
+        }));
+        unmount = hook.unmount;
+        const { result } = hook;
+
+        // Create a conversation (immediate index write), then touch it with a
+        // transcript write — touchConversation commits in 'debounced' mode,
+        // arming the index write's debounce timer without starting it.
+        act(() => { result.current.createConversation('Local chat'); });
+        act(() => { result.current.storage?.setItem(transcriptKey, '[{"id":"m","role":"user","text":"hi"}]'); });
+
+        // Another tab writes the index and the storage event arrives while the
+        // debounce timer is still armed.
+        const externalPayload = JSON.stringify({
+          activeId: 'from-b',
+          conversations: [makeConversation('from-b', 'From tab B')],
+        });
+        window.localStorage.setItem(indexKey, externalPayload);
+        act(() => dispatchStorageEvent(indexKey, externalPayload));
+        expect(result.current.conversations.map(c => c.id)).toEqual(['from-b']);
+
+        // When the debounce window elapses the armed timer must not fire its
+        // stale index snapshot over the other tab's conversation.
+        act(() => { vi.advanceTimersByTime(5000); });
+        expect(result.current.conversations.map(c => c.id)).toEqual(['from-b']);
+        const stored = JSON.parse(window.localStorage.getItem(indexKey) ?? '{}');
+        expect(stored.conversations.map((c: { id: string }) => c.id)).toEqual(['from-b']);
+      } finally {
+        unmount?.();
+        vi.useRealTimers();
+        window.localStorage.removeItem(indexKey);
+        window.localStorage.removeItem(transcriptKey);
+      }
+    });
+
     it('defers a cross-tab index event behind an in-flight index write (no lost update)', async () => {
       const indexKey = 'chorus-cross-tab-index-inflight';
       const setItemGate = deferred<void>();
