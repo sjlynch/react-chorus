@@ -14,6 +14,15 @@ export interface SessionHelpersDeps<TMeta> {
     finish?: { reason: ChorusFinishContext<TMeta>['reason']; response?: Response; message?: import('../../types').Message<TMeta> },
   ) => import('../../types').Message<TMeta> | null;
   isAssistantSessionActive: (sessionId: number) => boolean;
+  /**
+   * Surface a stream error on the `onSend` path: drop the half-streamed
+   * partial assistant message, close the session, release `sending`, and
+   * route the error to the `onError` observer and the UI banner. Shared with
+   * `startOnSendLifecycle`'s catch so a rejected `onSend` promise and a
+   * bridged `streamCallbacks().onError` clean up identically — see
+   * `onSendLifecycle.ts`.
+   */
+  reportStreamError: (rawError: unknown) => void;
   minAssistantDelayMsRef: React.MutableRefObject<number>;
   systemPromptRef: React.MutableRefObject<string | undefined>;
   hasStartedAssistantRef: React.MutableRefObject<boolean>;
@@ -46,6 +55,7 @@ export function createSessionHelpers<TMeta>(
     safeOnStreamMetadata,
     completeActiveSession,
     isAssistantSessionActive,
+    reportStreamError,
     minAssistantDelayMsRef,
     systemPromptRef,
     hasStartedAssistantRef,
@@ -143,6 +153,32 @@ export function createSessionHelpers<TMeta>(
 
   const autoFinalizeAssistant = () => requestFinalize(true);
 
+  /**
+   * `onError` for the bridged callback set. `useChorusStream.send()` rejects
+   * on a non-abort stream error, but a host whose `onSend` does not
+   * return/await that promise never lets `startOnSendLifecycle`'s catch see
+   * it — so without this the error would vanish: no banner, no `onError`, and
+   * any half-streamed partial left committed. Routing it through
+   * `reportStreamError` surfaces the failure regardless of what `onSend`
+   * returns.
+   *
+   * Guards before reporting:
+   * - `signal.aborted` — a user stop, conversation switch, or superseding
+   *   send already owns this turn's teardown; surfacing a stale error would
+   *   clobber it.
+   * - `isAssistantSessionActive(sessionId + 1)` — when this session closes
+   *   normally it leaves the active id one ahead of `sessionId` (see
+   *   `invalidateAssistantSession`). Accepting that placeholder lets a
+   *   just-finished bridged turn still surface its error, while a stream that
+   *   errors after the user already started another turn (active id two or
+   *   more ahead) is dropped so it cannot delete the new turn's messages.
+   */
+  const handleStreamError = (error: Error) => {
+    if (signal.aborted) return;
+    if (!isAssistantSessionActive(sessionId) && !isAssistantSessionActive(sessionId + 1)) return;
+    reportStreamError(error);
+  };
+
   const streamCallbacks = (): SendCallbacks => ({
     onChunk: appendAssistant,
     onReasoning: appendReasoning,
@@ -150,6 +186,7 @@ export function createSessionHelpers<TMeta>(
     onWarning: safeOnStreamWarning,
     onMetadata: safeOnStreamMetadata,
     onDone: finalizeAssistant,
+    onError: handleStreamError,
   });
 
   return {

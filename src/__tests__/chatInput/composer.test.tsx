@@ -226,10 +226,19 @@ describe('ChatInput composer behavior', () => {
     expect(onSend).toHaveBeenCalledOnce();
     expect(screen.getByText('blocked.txt')).toBeInTheDocument();
   });
-  it('shows the stop button when sending=true', () => {
+  it('shows the stop button when sending with an onStop handler', () => {
+    render(<ChatInput value="" onChange={vi.fn()} onSend={vi.fn()} onStop={vi.fn()} sending />);
+
+    expect(screen.getByRole('button', { name: /stop/i })).toBeEnabled();
+  });
+  it('keeps an accurate disabled Send button when sending without onStop', () => {
     render(<ChatInput value="" onChange={vi.fn()} onSend={vi.fn()} sending />);
 
-    expect(screen.getByRole('button', { name: /stop/i })).toBeInTheDocument();
+    // Without `onStop` there is nothing to stop, so the button must not
+    // advertise an inert "Stop" to assistive tech or visually — it stays a
+    // disabled "Send".
+    expect(screen.queryByRole('button', { name: /stop/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /send/i })).toBeDisabled();
   });
   it('calls onStop when the stop button is clicked', async () => {
     const user = userEvent.setup();

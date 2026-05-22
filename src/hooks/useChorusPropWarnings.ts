@@ -13,6 +13,7 @@ interface UseChorusPropWarningsArgs<TMeta> {
   connectorOptions: ChorusProps<TMeta>['connectorOptions'];
   transport: ChorusProps<TMeta>['transport'];
   onSend: ChorusProps<TMeta>['onSend'];
+  onStreamDone: ChorusProps<TMeta>['onStreamDone'];
   sending: boolean | undefined;
   autoContinueTools: ChorusProps<TMeta>['autoContinueTools'];
   maxToolIterations: ChorusProps<TMeta>['maxToolIterations'];
@@ -33,6 +34,7 @@ export function useChorusPropWarnings<TMeta>({
   connectorOptions,
   transport,
   onSend,
+  onStreamDone,
   sending,
   autoContinueTools,
   maxToolIterations,
@@ -88,6 +90,10 @@ export function useChorusPropWarnings<TMeta>({
       console.warn('[Chorus] `connectorOptions` only applies to the `transport` send path. With `onSend` you parse the response yourself — pass `connectorOptions` into the `useChorusStream` call inside your `onSend` if you need it.');
     }
 
+    if (onStreamDone !== undefined && transport === undefined && onSend) {
+      console.warn('[Chorus] `onStreamDone` only fires on the `transport` send path. With `onSend` it never fires — use `onFinish` for per-message completion, or surface stream-done telemetry from your `onSend` client.');
+    }
+
     const toolExecutionProps = [
       tools !== undefined && 'tools',
       onToolCall !== undefined && 'onToolCall',
@@ -122,5 +128,5 @@ export function useChorusPropWarnings<TMeta>({
         console.warn(`[Chorus] ${propList} ${verb} ignored without \`transport\`. The automatic tool loop runs only on the \`transport\` send path; with \`onSend\` you drive tool continuations yourself. Pass \`transport\`, or gate continuations inside your \`onSend\` client.`);
       }
     }
-  }, [messages, initialMessages, onChange, value, persistenceKey, connector, connectorOptions, transport, onSend, sending, autoContinueTools, maxToolIterations, shouldContinueToolLoop, tools, onToolCall, onToolDelta, continueOnToolError]);
+  }, [messages, initialMessages, onChange, value, persistenceKey, connector, connectorOptions, transport, onSend, onStreamDone, sending, autoContinueTools, maxToolIterations, shouldContinueToolLoop, tools, onToolCall, onToolDelta, continueOnToolError]);
 }

@@ -76,6 +76,24 @@ describe('development warnings', () => {
     await waitFor(() => expect(warn).toHaveBeenCalledWith('[Chorus] `connectorOptions` only applies to the `transport` send path. With `onSend` you parse the response yourself — pass `connectorOptions` into the `useChorusStream` call inside your `onSend` if you need it.'));
   });
 
+  it('warns when onStreamDone is provided for an onSend-only flow', async () => {
+    process.env.NODE_ENV = 'development';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    render(<Chorus onStreamDone={vi.fn()} onSend={vi.fn()} />);
+
+    await waitFor(() => expect(warn).toHaveBeenCalledWith('[Chorus] `onStreamDone` only fires on the `transport` send path. With `onSend` it never fires — use `onFinish` for per-message completion, or surface stream-done telemetry from your `onSend` client.'));
+  });
+
+  it('does not warn when onStreamDone is provided with transport', async () => {
+    process.env.NODE_ENV = 'development';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    render(<Chorus onStreamDone={vi.fn()} transport={async () => new Response(null, { status: 200 })} />);
+
+    await waitFor(() => expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('`onStreamDone` only fires')));
+  });
+
   it('warns that connectorOptions are ignored when connector is not "openai"', async () => {
     process.env.NODE_ENV = 'development';
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);

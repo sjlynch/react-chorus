@@ -11,7 +11,7 @@ Internals behind the `geminiConnector` singleton, re-exported from `../gemini.ts
 - `finish.ts` — maps `finishReason`: STOP/MAX_TOKENS finish the stream (MAX_TOKENS also warns `truncated`), blocked/unspecified reasons become connector errors.
 - `promptFeedback.ts` — handles `promptFeedback` prompt-level blocking (request rejected before any candidate) as an error with safety metadata.
 - `state.ts` — per-stream parse state: first-seen-wins function-call id map (`createGeminiConnectorState`, `resolveFunctionCallId`).
-- `unsupportedParts.ts` — detects `inlineData`/`fileData` parts the connector cannot render, so they surface as an `unsupported-part` warning instead of being dropped.
+- `unsupportedParts.ts` — detects parts the connector cannot render (`inlineData`/`fileData`, and `executableCode`/`codeExecutionResult` from the code-execution tool), so they surface as an `unsupported-part` warning instead of being dropped.
 - `result.ts` — `ConnectorResult` append helpers (`appendField`, `appendToolDelta`, `addWarning`, `hasToolDelta`).
 
 ## Parse flow

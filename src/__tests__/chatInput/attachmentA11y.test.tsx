@@ -37,7 +37,7 @@ describe('ChatInput attachment accessibility and localization', () => {
       uploadFailedError: ({ name, detail }) => `Envoi impossible de ${name} : ${detail}`,
     };
 
-    it('marks pending chips with aria-busy and announces the localized pending status politely', async () => {
+    it('marks pending chips with aria-busy and announces the localized pending status through the shared announcer', async () => {
       const mockReader = installDeferredFileReader();
       try {
         const file = new File(['bytes'], 'slow-read.png', { type: 'image/png' });
@@ -54,8 +54,17 @@ describe('ChatInput attachment accessibility and localization', () => {
           return el as HTMLElement;
         });
         expect(chip).toHaveAttribute('aria-busy', 'true');
+
+        // The pending status is announced through the always-mounted announcer
+        // span, not a per-chip live region: a live region inserted into the DOM
+        // already containing its text is not reliably announced.
+        const announcer = local.getByTestId('chorus-attachment-announcer');
+        await waitFor(() => expect(announcer).toHaveTextContent('Lecture de slow-read.png'));
+
+        // The per-chip status span stays mounted as an `aria-describedby` target,
+        // but it is no longer a live region.
         const pendingStatus = within(chip).getByText('Lecture de slow-read.png');
-        expect(pendingStatus).toHaveAttribute('aria-live', 'polite');
+        expect(pendingStatus).not.toHaveAttribute('aria-live');
         expect(pendingStatus).toHaveClass('chorus-sr-only');
 
         mockReader.readers[0].resolve('data:image/png;base64,c2xvdw==');

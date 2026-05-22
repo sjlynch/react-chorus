@@ -1,10 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  defineTool,
   toAnthropicMessagesBody,
+  toAnthropicTools,
   toGeminiGenerateContentBody,
+  toGeminiTools,
   toOpenAIChatCompletionsBody,
   toOpenAIChatCompletionsTools,
   toOpenAIResponsesBody,
+  toOpenAIResponsesTools,
 } from '../../providerRequests';
 import type { Message } from '../../types';
 
@@ -127,6 +131,64 @@ describe('Part D — provider request mapper consistency fixes', () => {
     expect(toOpenAIChatCompletionsBody([
       { id: 'sys', role: 'system', text: '  Be concise.  ' },
     ]).messages).toEqual([{ role: 'system', content: 'Be concise.' }]);
+  });
+
+  it('trims message text consistently across all four provider mappers', () => {
+    const padded: Message[] = [{ id: 'u', role: 'user', text: '  spaced out  ' }];
+
+    expect(toOpenAIChatCompletionsBody(padded).messages).toEqual([
+      { role: 'user', content: 'spaced out' },
+    ]);
+    expect(toOpenAIResponsesBody(padded).input).toEqual([
+      { role: 'user', content: [{ type: 'input_text', text: 'spaced out' }] },
+    ]);
+    expect(toAnthropicMessagesBody(padded).messages).toEqual([
+      { role: 'user', content: [{ type: 'text', text: 'spaced out' }] },
+    ]);
+    expect(toGeminiGenerateContentBody(padded).contents).toEqual([
+      { role: 'user', parts: [{ text: 'spaced out' }] },
+    ]);
+  });
+
+  it('keeps a provider override from clobbering tool identity fields', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const tool = defineTool({
+        name: 'clobber-probe',
+        description: 'Search the docs',
+        inputSchema: { type: 'object', properties: { q: { type: 'string' } } },
+        handler: async () => null,
+        // The override hatch is for additive fields only; these identity keys
+        // must not survive into the serialized declaration.
+        openai: { name: 'evil', parameters: { type: 'string' }, strict: true },
+        anthropic: { name: 'evil', input_schema: { type: 'string' } },
+        gemini: { name: 'evil', parameters: { type: 'string' } },
+      });
+      const canonicalSchema = { type: 'object', properties: { q: { type: 'string' } } };
+
+      expect(toOpenAIChatCompletionsTools([tool])[0].function).toMatchObject({
+        name: 'clobber-probe',
+        parameters: canonicalSchema,
+        strict: true,
+      });
+      expect(toOpenAIResponsesTools([tool])[0]).toMatchObject({
+        name: 'clobber-probe',
+        parameters: canonicalSchema,
+      });
+      expect(toAnthropicTools([tool])[0]).toMatchObject({
+        name: 'clobber-probe',
+        input_schema: canonicalSchema,
+      });
+      expect(toGeminiTools([tool])[0].functionDeclarations[0]).toMatchObject({
+        name: 'clobber-probe',
+        parameters: canonicalSchema,
+      });
+
+      // The misuse is observable: a dev warn-once fires for each clobbered key.
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('identity field'));
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('emits an OpenAI image `detail` hint from attachment.metadata.openai.imageDetail', () => {

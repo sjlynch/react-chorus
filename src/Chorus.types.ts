@@ -23,6 +23,17 @@ export const DEFAULT_MIN_ASSISTANT_DELAY_MS = 300;
 export const DEFAULT_PERSISTENCE_WRITE_DEBOUNCE_MS = 80;
 export const DEFAULT_CHORUS_HIDDEN_ROLES: Role[] = ['system'];
 
+/**
+ * Type of the `connectorOptions` prop. Currently an alias for
+ * `OpenAIConnectorOptions` because the `'openai'` connector is the only
+ * built-in connector that consumes options today. It is declared as its own
+ * named type so the underlying shape can later widen to a union (e.g. once
+ * Gemini/Anthropic gain options) without changing the declared identity of
+ * `ChorusProps['connectorOptions']` — honoring the "never break `ChorusProps`"
+ * invariant.
+ */
+export type ChorusConnectorOptions = OpenAIConnectorOptions;
+
 export interface ChorusRef<TMeta = Record<string, unknown>> {
   /**
    * Programmatically submit a user message. Returns `true` when Chorus accepted
@@ -109,7 +120,7 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
    * reasoning tag pair). Ignored when `connector` is a custom `Connector`
    * object — build that object with `createOpenAIConnector(options)` instead.
    */
-  connectorOptions?: OpenAIConnectorOptions;
+  connectorOptions?: ChorusConnectorOptions;
   /** Optional gate for built-in message deletes. Return or resolve false to cancel. */
   confirmDeleteMessage?: ChorusConfirmDeleteMessage<TMeta>;
   /** Optional gate for the built-in clear/reset action. Return or resolve false to cancel before persistence is touched. While an async confirmation is pending, the clear button is disabled and duplicate clears are ignored. */
