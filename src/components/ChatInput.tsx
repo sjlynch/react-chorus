@@ -108,7 +108,10 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(funct
   const inactiveReason = disabledReason || (readOnly ? labels.readOnlyReason : disabled ? labels.disabledReason : undefined);
   const placeholderText = inactiveReason || placeholder || labels.placeholder;
   const textareaAriaLabel = placeholder || labels.ariaLabel;
-  const sendActionLabel = sending ? labels.stop : labels.send;
+  // Only advertise "Stop" when there is an `onStop` to action. A host that
+  // streams without `onStop` keeps the accurate Send label/icon (a disabled
+  // "Send" while `sending`) rather than presenting an inert "Stop" button.
+  const sendActionLabel = stopAvailable ? labels.stop : labels.send;
 
   const resetAfterAcceptedSend = () => {
     clearAttachmentsAndPendingWork();
