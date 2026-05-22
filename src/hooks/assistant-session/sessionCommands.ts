@@ -112,7 +112,9 @@ export function useSessionCommands<TMeta>({
     messagesRef,
     pendingDeleteIdsRef,
     confirmDeleteMessageRef,
+    lastSubmittedTurnRef,
     isBusy,
+    clearStreamError,
     updateSessionMessages,
   });
 

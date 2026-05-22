@@ -185,7 +185,18 @@ export function useSessionOrchestrator<TMeta>(deps: SessionOrchestratorDeps<TMet
     const partialId = pendingAssistantIdRef.current;
     const toolMessageIds = new Set(pendingToolMessageIdsRef.current);
     resetStreamState();
-    if (partialId || toolMessageIds.size > 0) {
+    // Only rewrite the transcript when the partial/tool messages are actually
+    // present in the CURRENT message array. On a `persistenceKey` switch the
+    // cleanup effect runs `abortActiveAssistant('superseded')` after the
+    // component has already re-rendered with the newly opened conversation, so
+    // `messagesRef.current` no longer holds the old stream's partial. Filtering
+    // it out then is a no-op rewrite, but it would still flush a spurious
+    // `error-cleanup` `onMessagesChange` and persistence write against a
+    // conversation that never had anything streaming.
+    const partialInTranscript = messagesRef.current.some(
+      m => m.id === partialId || toolMessageIds.has(m.id),
+    );
+    if (partialInTranscript) {
       updateSessionMessages(
         prev => prev.filter(m => m.id !== partialId && !toolMessageIds.has(m.id)),
         // `'error-cleanup'`, not `'delete'`: dropping a half-streamed partial
@@ -195,7 +206,7 @@ export function useSessionOrchestrator<TMeta>(deps: SessionOrchestratorDeps<TMet
         { flushPersistence: true, reason: 'error-cleanup' },
       );
     }
-  }, [pendingAssistantIdRef, pendingToolMessageIdsRef, resetStreamState, updateSessionMessages]);
+  }, [messagesRef, pendingAssistantIdRef, pendingToolMessageIdsRef, resetStreamState, updateSessionMessages]);
 
   const abortActiveAssistant = React.useCallback((reason: ChorusAbortReason, source: ChorusAbortSource) => {
     const path = resolveAbortSendPath(activeSendPathRef.current, transportRef.current);
