@@ -183,6 +183,28 @@ describe('geminiConnector', () => {
     });
   });
 
+  it('attaches usageMetadata token counts as metadata.usage only on the terminal frame', () => {
+    const usageMetadata = { promptTokenCount: 18, candidatesTokenCount: 24, totalTokenCount: 42 };
+    // Gemini repeats usageMetadata (the counts are cumulative) on every chunk.
+    // A mid-stream frame (no finishReason) must not attach it, mirroring the
+    // safetyRatings handling so onStreamMetadata fires once per stream.
+    const midStream = JSON.stringify({
+      candidates: [{ content: { parts: [{ text: 'hi' }] } }],
+      usageMetadata,
+    });
+    expect(geminiConnector.extract(midStream)).toEqual({ text: 'hi' });
+
+    const terminal = JSON.stringify({
+      candidates: [{ finishReason: 'STOP', content: { parts: [{ text: '!' }] } }],
+      usageMetadata,
+    });
+    expect(geminiConnector.extract(terminal)).toEqual({
+      text: '!',
+      done: true,
+      metadata: { usage: { promptTokens: 18, completionTokens: 24, totalTokens: 42 } },
+    });
+  });
+
   it('surfaces promptFeedback.blockReason as an error even when candidates is empty', () => {
     const safetyRatings = [{ category: 'HARM_CATEGORY_HATE_SPEECH', probability: 'HIGH' }];
     const payload = {
@@ -397,6 +419,53 @@ describe('geminiConnector', () => {
       expect(result?.metadata).toEqual({ finishReason: 'MAX_TOKENS' });
       expect(result?.warnings?.map(w => w.code)).toEqual(['unsupported-part', 'truncated']);
       // `warning` keeps the first warning for back-compat with the legacy single slot.
+      expect(result?.warning?.code).toBe('unsupported-part');
+    });
+  });
+
+  describe('executableCode / codeExecutionResult parts', () => {
+    it('emits an unsupported-part warning instead of dropping a pure-executableCode chunk', () => {
+      const payload = {
+        candidates: [{ content: { parts: [{ executableCode: { language: 'PYTHON', code: 'print(1)' } }] } }],
+      };
+      const result = geminiConnector.extract(JSON.stringify(payload));
+      expect(result).not.toBeNull();
+      expect(result?.warning?.code).toBe('unsupported-part');
+      expect(result?.warning?.message).toContain('executableCode');
+      expect(result?.warning?.payload).toEqual(payload);
+    });
+
+    it('emits an unsupported-part warning for codeExecutionResult parts', () => {
+      const data = JSON.stringify({
+        candidates: [{ content: { parts: [{ codeExecutionResult: { outcome: 'OUTCOME_OK', output: '1\n' } }] } }],
+      });
+      const result = geminiConnector.extract(data);
+      expect(result?.warning?.code).toBe('unsupported-part');
+      expect(result?.warning?.message).toContain('codeExecutionResult');
+    });
+
+    it('accepts snake_case executable_code / code_execution_result spellings from proxies', () => {
+      const data = JSON.stringify({
+        candidates: [{ content: { parts: [
+          { executable_code: { language: 'PYTHON', code: 'print(1)' } },
+          { code_execution_result: { outcome: 'OUTCOME_OK', output: '1\n' } },
+        ] } }],
+      });
+      const result = geminiConnector.extract(data);
+      expect(result?.warning?.code).toBe('unsupported-part');
+      expect(result?.warning?.message).toContain('executableCode');
+      expect(result?.warning?.message).toContain('codeExecutionResult');
+    });
+
+    it('keeps text alongside an unsupported executableCode part in the same candidate', () => {
+      const data = JSON.stringify({
+        candidates: [{ content: { parts: [
+          { text: 'Running some code:' },
+          { executableCode: { language: 'PYTHON', code: 'print(1)' } },
+        ] } }],
+      });
+      const result = geminiConnector.extract(data);
+      expect(result?.text).toBe('Running some code:');
       expect(result?.warning?.code).toBe('unsupported-part');
     });
   });

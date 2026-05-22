@@ -507,3 +507,65 @@ describe('ChatWindow rendering behavior', () => {
     expect(screen.queryByText('Running…')).not.toBeInTheDocument();
   });
 });
+
+describe('ChatWindow maxRenderedMessages windowing with an active stream', () => {
+  const emptyTool = (id: string, name: string): Message => ({ id, role: 'tool', text: '', toolCall: { name } });
+
+  it('classifies tool rows by the full pre-window streaming turn, not the windowed slice', () => {
+    // `t-old` finished in the first turn; `t-new` belongs to the in-flight
+    // streaming turn. The window drops the first user message, so MessageList
+    // never sees it — but the streaming turn is derived from the full visible
+    // array, so `t-old` stays settled while `t-new` shows "Running…".
+    render(
+      <ChatWindow
+        messages={[
+          USER_MSG,
+          emptyTool('t-old', 'lookup'),
+          ASST_MSG,
+          { id: 'u2', role: 'user', text: 'Again' },
+          emptyTool('t-new', 'fetch'),
+          { id: 'a2', role: 'assistant', text: '' },
+        ]}
+        streamingMessageId="a2"
+        maxRenderedMessages={5}
+        hiddenRoles={[]}
+      />,
+    );
+    expect(screen.queryByText('Hello')).not.toBeInTheDocument();
+    expect(screen.getByText('No output')).toBeInTheDocument();
+    expect(screen.getByText('Running…')).toBeInTheDocument();
+  });
+
+  it('force-includes the streaming message when host rows after it push it out of the window', () => {
+    render(
+      <ChatWindow
+        messages={[
+          USER_MSG,
+          { id: 'a-stream', role: 'assistant', text: 'partial reply' },
+          { id: 'x1', role: 'user', text: 'late user' },
+          { id: 'x2', role: 'assistant', text: 'late reply' },
+        ]}
+        streamingMessageId="a-stream"
+        maxRenderedMessages={2}
+      />,
+    );
+    // The trailing window is [x1, x2]; the streaming message is unioned back in
+    // so its partial text never vanishes mid-stream.
+    const streamingMarkdown = screen.getByText('partial reply');
+    expect(streamingMarkdown).toBeInTheDocument();
+    expect(streamingMarkdown).toHaveAttribute('data-streaming', 'true');
+    // A non-streaming windowed row is still parsed as full Markdown.
+    expect(screen.getByText('late reply')).toHaveAttribute('data-streaming', 'false');
+  });
+
+  it('still renders the streaming message when maxRenderedMessages is 0', () => {
+    render(
+      <ChatWindow
+        messages={[USER_MSG, { id: 'a-stream', role: 'assistant', text: 'partial reply' }]}
+        streamingMessageId="a-stream"
+        maxRenderedMessages={0}
+      />,
+    );
+    expect(screen.getByText('partial reply')).toHaveAttribute('data-streaming', 'true');
+  });
+});

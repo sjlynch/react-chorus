@@ -1,6 +1,7 @@
 import type { ConnectorResult, ConnectorToolDelta } from '../types';
 import type { OpenAIConnectorState } from '../openai';
 import { warnOnceInDev } from '../../utils/warnings';
+import { extractUsage } from '../usage';
 import { appendField, appendToolDelta, collectTextFragments, hasOwn, hasToolDelta, mergeResult } from './shared';
 import { createThinkTagSplitter } from './thinkTagSplitter';
 
@@ -79,7 +80,16 @@ const FINISH_REASON_WARNINGS: Record<string, { code: string; message: string }> 
 
 export function extractChatCompletionEvent(obj: Record<string, unknown>, state: OpenAIConnectorState): ConnectorResult | null {
   const choices = obj.choices;
-  if (!Array.isArray(choices) || choices.length === 0) return null;
+  if (!Array.isArray(choices)) return null;
+  if (choices.length === 0) {
+    // OpenAI Chat Completions with `stream_options: { include_usage: true }`
+    // emits a final `{ choices: [], usage: {...} }` chunk that carries no
+    // delta or finish_reason. Surface its token usage as metadata — without
+    // this, a cost-telemetry consumer sees usage on the Responses path but
+    // silently nothing here.
+    const usage = extractUsage(obj.usage);
+    return usage ? { metadata: { usage } } : null;
+  }
 
   const { choice, arrayIndex } = selectedChoice(choices);
   if (!choice || typeof choice !== 'object') return null;
@@ -122,5 +132,11 @@ export function extractChatCompletionEvent(obj: Record<string, unknown>, state: 
     if (warning) result.warning = { code: warning.code, message: warning.message, payload: obj };
   }
 
-  return result.text || result.reasoning || hasToolDelta(result) || result.done ? result : null;
+  // Some OpenAI-compatible proxies attach `usage` to the final content chunk
+  // rather than (or in addition to) the trailing `choices: []` usage chunk
+  // handled above. Surface it wherever it lands so the count is never dropped.
+  const usage = extractUsage(obj.usage);
+  if (usage) result.metadata = { ...(result.metadata ?? {}), usage };
+
+  return result.text || result.reasoning || hasToolDelta(result) || result.done || result.metadata ? result : null;
 }

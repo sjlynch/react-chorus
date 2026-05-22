@@ -25,7 +25,7 @@ describe('ChatInput attachment lifecycle', () => {
 
       expect(await local.findByText('slow-read.png')).toBeInTheDocument();
       expect(container.querySelector('.chorus-attachment-chip--pending')).toBeInTheDocument();
-      expect(local.getByText('Reading slow-read.png', { selector: '.chorus-sr-only' })).toBeInTheDocument();
+      expect(container.querySelector('[id^="chorus-attachment-status-"]')).toHaveTextContent('Reading slow-read.png');
       expect(local.getByRole('button', { name: /send/i })).toBeDisabled();
 
       await user.type(local.getByRole('textbox'), '{Enter}');
@@ -367,7 +367,7 @@ describe('ChatInput attachment lifecycle', () => {
     });
   });
   describe('pending / failed / accepted chip states', () => {
-    it('renders a pending chip with a spinner and a Cancel-upload label described by the live status', async () => {
+    it('renders a pending chip with a spinner and a Cancel-upload label described by the pending status', async () => {
       const upload = deferred<AttachmentUploadResult>();
       const uploadAttachment = vi.fn(() => upload.promise);
       const file = new File(['img'], 'state.png', { type: 'image/png' });
