@@ -21,7 +21,7 @@ export interface AttachmentAnnouncement {
   /** Stable id used as the announcement key (mirrors the attachment uid). */
   id: string;
   /** Type of announcement so callers can vary tone/role if desired. */
-  kind: 'completed' | 'failed';
+  kind: 'pending' | 'completed' | 'failed';
   /** Localized text to render inside a polite live region. */
   message: string;
 }
@@ -90,6 +90,25 @@ export function usePendingAttachmentWork({
     pendingControllersRef.current.clear();
   }, []);
 
+  // Routes "read/upload in progress" status through the shared, always-mounted
+  // `chorus-attachment-announcer` span instead of a per-chip `aria-live` span.
+  // A per-chip live region is inserted into the DOM already containing its text
+  // (the chip mounts in the `pending` state), and screen readers do not reliably
+  // announce a live region created with content. The announcer span predates
+  // every chip, so toggling its text content announces reliably.
+  const announcePendingWork = React.useCallback((operation: PendingAttachmentOperation, entries: { uid: string; name: string }[]) => {
+    const first = entries[0];
+    if (!first) return;
+    const statusLabel = operation === 'upload'
+      ? labelsRef.current.uploadingStatus
+      : labelsRef.current.readingStatus;
+    setAnnouncement({
+      id: first.uid,
+      kind: 'pending',
+      message: entries.map(entry => statusLabel(entry.name)).join(', '),
+    });
+  }, [setAnnouncement]);
+
   // Runs (or re-runs) the read/upload for one queued attachment, keyed by uid.
   // Resolution targets the chip by uid, so a chip removed or cleared while the
   // work was in flight is never resurrected and an aborted chip is left alone.
@@ -130,6 +149,10 @@ export function usePendingAttachmentWork({
             kind: 'failed',
             message: errorLabels.failedAnnouncement(file.name),
           });
+        } else {
+          // The error region carries this failure announcement; drop the now-stale
+          // pending announcement so the announcer span stops reading "Reading…".
+          setAnnouncement(prev => (prev?.kind === 'pending' ? null : prev));
         }
         // Keep the chip in the row in a `failed` state so the user can retry or remove it.
         setQueuedAttachments(prev => updateQueuedAttachment(prev, uid, item => ({ ...item, status: 'failed' })));
@@ -153,20 +176,23 @@ export function usePendingAttachmentWork({
     }));
 
     setQueuedAttachments(prev => [...prev, ...newItems]);
+    announcePendingWork(operation, newItems.map(item => ({ uid: item.uid, name: item.file.name })));
 
     await Promise.all(newItems.map(item => runAttachmentWork(item.uid, item.file, item.source)));
-  }, [runAttachmentWork, uploadAttachment, setQueuedAttachments]);
+  }, [announcePendingWork, runAttachmentWork, uploadAttachment, setQueuedAttachments]);
 
   // Re-runs the work for a `failed` chip, reusing its stable uid so the chip
   // transitions failed → pending → ready/failed in place.
   const retryAttachmentWork = React.useCallback(async (uid: string, file: File, source: AttachmentSource) => {
+    const operation: PendingAttachmentOperation = uploadAttachment ? 'upload' : 'read';
     setQueuedAttachments(prev => updateQueuedAttachment(prev, uid, item => ({
       ...item,
       status: 'pending',
       attachment: createPlaceholderAttachment(file),
     })));
+    announcePendingWork(operation, [{ uid, name: file.name }]);
     await runAttachmentWork(uid, file, source);
-  }, [runAttachmentWork, setQueuedAttachments]);
+  }, [announcePendingWork, runAttachmentWork, uploadAttachment, setQueuedAttachments]);
 
   return {
     startPendingAttachmentWork,
