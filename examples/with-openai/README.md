@@ -2,7 +2,7 @@
 
 A full-stack demo: a Vite-served React frontend talks to an Express backend that proxies OpenAI Chat Completions and streams SSE chunks back. Frontend uses `createFetchSSETransport('/api/chat')` with the built-in `openai` connector; Vite proxies `/api` to <http://localhost:3001> in dev (see [`vite.config.ts`](./vite.config.ts)).
 
-This example exercises the [Built-in connectors](../../README.md#built-in-connectors), [`createFetchSSETransport`](../../README.md#createfetchssetransporturl-init), and [Minimal Express + OpenAI backend](../../README.md#minimal-express--openai-backend) sections of the root README.
+This example exercises the [Built-in connectors](../../docs/guide.md#built-in-connectors), [`createFetchSSETransport`](../../docs/api.md#createfetchssetransporturl-init), and [Minimal Express + OpenAI backend](../../docs/guide.md#minimal-express--openai-backend) sections of the documentation.
 
 ## Prerequisites
 

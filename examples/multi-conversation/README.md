@@ -2,7 +2,7 @@
 
 A sidebar-driven Vite demo: `<ConversationList>` + `useConversations` manage multiple local chats with per-conversation persistence, pin/rename, and auto-titles derived from the first message. Replies are simulated locally so the demo runs with no backend.
 
-This example exercises the [`ConversationList`](../../README.md#individual-components) component and the [persistence examples](../../README.md#persistence-examples) section of the root README.
+This example exercises the [`ConversationList`](../../docs/api.md#individual-components) component and the [persistence examples](../../docs/api.md#persistence-examples) section of the documentation.
 
 ## Prerequisites
 

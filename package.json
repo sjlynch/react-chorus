@@ -44,7 +44,7 @@
     "./dist/styles.css"
   ],
   "engines": {
-    "node": ">=20.19.0"
+    "node": ">=20.19.0 <21 || >=22.12"
   },
   "packageManager": "npm@10.9.3",
   "peerDependencies": {

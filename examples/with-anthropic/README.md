@@ -6,8 +6,8 @@ ships a mock `Transport` that streams Anthropic Messages SSE events — a
 can watch the connector parse reasoning and text out of a real Anthropic-shaped
 stream without an API key.
 
-This example reflects the [Anthropic SSE format](../../README.md#anthropic-sse-format)
-section of the root README.
+This example reflects the [Anthropic SSE format](../../docs/guide.md#anthropic-sse-format)
+section of the documentation.
 
 ## Prerequisites
 
@@ -46,7 +46,7 @@ Then add an SSE proxy that maps Chorus history with `toAnthropicMessagesBody`
 and frames the Anthropic SDK stream with `react-chorus/server`:
 
 ```js
-// server/index.js  —  npm install express @anthropic-ai/sdk
+// server/index.js  —  npm install express @anthropic-ai/sdk react-chorus
 import express from 'express';
 import Anthropic from '@anthropic-ai/sdk';
 import { toAnthropicMessagesBody } from 'react-chorus/provider-requests';

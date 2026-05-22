@@ -10,7 +10,10 @@ const KiB = 1024;
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const distDir = path.join(rootDir, 'dist');
 const playgroundDir = path.join(rootDir, 'dist-playground');
-const readmePath = path.join(rootDir, 'README.md');
+// The bundle-size table and playground paragraph live in docs/deployment.md
+// (the README was slimmed to onboarding-only). Keep this path in sync with
+// wherever the "## Bundle size" section is documented.
+const bundleSizeDocPath = path.join(rootDir, 'docs', 'deployment.md');
 const reportDir = path.join(rootDir, '.cache', 'react-chorus');
 const args = new Set(process.argv.slice(2));
 const runPlayground = args.has('--playground');
@@ -83,18 +86,18 @@ async function writeReport(kind, report) {
 
 function compareReadmeMeasurement({ match, readmeLabel, measured, refreshCommand }) {
   if (!match) {
-    fail(`README bundle-size documentation for ${readmeLabel} was not found; update README.md or the verification parser.`);
+    fail(`docs/deployment.md bundle-size documentation for ${readmeLabel} was not found; update docs/deployment.md or the verification parser.`);
     return;
   }
 
   const [, readmeSize, readmeGzip] = match;
   if (readmeSize !== measured.size || readmeGzip !== measured.gzip) {
-    fail(`README bundle-size documentation for ${readmeLabel} says ${readmeSize} / gzip ${readmeGzip}, but verification measured ${measured.size} / gzip ${measured.gzip}. Run \`${refreshCommand}\` and update README.md.`);
+    fail(`docs/deployment.md bundle-size documentation for ${readmeLabel} says ${readmeSize} / gzip ${readmeGzip}, but verification measured ${measured.size} / gzip ${measured.gzip}. Run \`${refreshCommand}\` and update docs/deployment.md.`);
   }
 }
 
 async function verifyReadmeLibraryMeasurements(measurements) {
-  const readme = await readText(readmePath);
+  const readme = await readText(bundleSizeDocPath);
   const rows = [
     {
       key: 'root',
@@ -161,10 +164,10 @@ async function verifyReadmeLibraryMeasurements(measurements) {
 }
 
 async function verifyReadmePlaygroundMeasurements(measurements) {
-  const readme = await readText(readmePath);
+  const readme = await readText(bundleSizeDocPath);
   const match = readme.match(/current playground initial JS graph is ([\d.]+ kB) \/ ([\d.]+ kB) gzip and its largest lazy chunk \(highlight\.js\) is ([\d.]+ kB) \/ ([\d.]+ kB) gzip/);
   if (!match) {
-    fail('README playground bundle-size paragraph was not found; update README.md or the verification parser.');
+    fail('docs/deployment.md playground bundle-size paragraph was not found; update docs/deployment.md or the verification parser.');
     return;
   }
 
@@ -174,10 +177,10 @@ async function verifyReadmePlaygroundMeasurements(measurements) {
 
   const [, readmeInitialSize, readmeInitialGzip, readmeLazySize, readmeLazyGzip] = match;
   if (readmeInitialSize !== initial.size || readmeInitialGzip !== initial.gzip) {
-    fail(`README playground initial JS graph says ${readmeInitialSize} / gzip ${readmeInitialGzip}, but verification measured ${initial.size} / gzip ${initial.gzip}. Run \`${reportCommand('playground')}\` and update README.md.`);
+    fail(`docs/deployment.md playground initial JS graph says ${readmeInitialSize} / gzip ${readmeInitialGzip}, but verification measured ${initial.size} / gzip ${initial.gzip}. Run \`${reportCommand('playground')}\` and update docs/deployment.md.`);
   }
   if (readmeLazySize !== lazy.size || readmeLazyGzip !== lazy.gzip) {
-    fail(`README playground lazy chunk says ${readmeLazySize} / gzip ${readmeLazyGzip}, but verification measured ${lazy.size} / gzip ${lazy.gzip}. Run \`${reportCommand('playground')}\` and update README.md.`);
+    fail(`docs/deployment.md playground lazy chunk says ${readmeLazySize} / gzip ${readmeLazyGzip}, but verification measured ${lazy.size} / gzip ${lazy.gzip}. Run \`${reportCommand('playground')}\` and update docs/deployment.md.`);
   }
 }
 

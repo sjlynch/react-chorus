@@ -6,15 +6,16 @@ same-origin route handler, [`app/api/chat/route.ts`](./app/api/chat/route.ts),
 which proxies OpenAI Chat Completions and streams the reply back as SSE using
 `react-chorus/server` framing helpers.
 
-This example reflects the [Next.js App Router route handler](../../README.md#nextjs-app-router-route-handler)
-and [Built-in connectors](../../README.md#built-in-connectors) sections of the
-root README.
+This example reflects the [Next.js App Router route handler](../../docs/guide.md#nextjs-app-router-route-handler)
+and [Built-in connectors](../../docs/guide.md#built-in-connectors) sections of the
+documentation.
 
 ## Prerequisites
 
-- Node.js 20.19+ — the floor declared in this example's `engines.node`. (Next.js
-  15 itself only needs ≥18.18, but every example in this repo standardizes on
-  the higher floor.)
+- Node.js 20.19+ or 22.12+ — the floor declared in this example's `engines.node`.
+  (Next.js 15 itself only needs ≥18.18, but every example in this repo
+  standardizes on the higher floor to match the library's Vite 8 toolchain,
+  which rejects Node 21.x and 22.0–22.11.)
 - An `OPENAI_API_KEY`. Without it the route handler throws `Missing
   OPENAI_API_KEY` on the first send and the UI renders a connection-style error.
 

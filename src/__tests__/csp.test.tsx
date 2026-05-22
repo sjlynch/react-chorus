@@ -10,14 +10,16 @@ import {
 } from '../utils/cspNonce';
 import { setChorusStyleNonce as setChorusStyleNonceFromBarrel } from '../index';
 
-const README_PATH = resolve(__dirname, '..', '..', 'README.md');
-const README = readFileSync(README_PATH, 'utf8');
+// The "## Security and CSP" reference section lives in docs/deployment.md
+// (the README was slimmed to onboarding-only).
+const CSP_DOC_PATH = resolve(__dirname, '..', '..', 'docs', 'deployment.md');
+const CSP_DOC = readFileSync(CSP_DOC_PATH, 'utf8');
 
 function extractCspSection(): string {
-  const start = README.indexOf('## Security and CSP');
-  expect(start, 'README "## Security and CSP" heading not found').toBeGreaterThan(-1);
-  const end = README.indexOf('\n## ', start + '## Security and CSP'.length);
-  return end === -1 ? README.slice(start) : README.slice(start, end);
+  const start = CSP_DOC.indexOf('## Security and CSP');
+  expect(start, 'docs/deployment.md "## Security and CSP" heading not found').toBeGreaterThan(-1);
+  const end = CSP_DOC.indexOf('\n## ', start + '## Security and CSP'.length);
+  return end === -1 ? CSP_DOC.slice(start) : CSP_DOC.slice(start, end);
 }
 
 beforeEach(() => {
@@ -67,7 +69,7 @@ describe('CSP nonce support', () => {
   });
 });
 
-describe('README CSP guidance matches runtime behavior', () => {
+describe('docs CSP guidance matches runtime behavior', () => {
   it('names every runtime-injected <style> id so doc/runtime cannot silently drift', () => {
     const cspSection = extractCspSection();
     expect(cspSection).toContain('#chorus-md-styles');

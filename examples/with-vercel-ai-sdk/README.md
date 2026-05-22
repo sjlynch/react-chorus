@@ -6,8 +6,8 @@ ships a mock `Transport` that streams Vercel AI SDK **UI message stream** events
 frames — so you can watch the connector parse a real AI SDK stream without an
 API key.
 
-This example reflects the [Vercel AI SDK stream format](../../README.md#vercel-ai-sdk-stream-format)
-section of the root README.
+This example reflects the [Vercel AI SDK stream format](../../docs/guide.md#vercel-ai-sdk-stream-format)
+section of the documentation.
 
 ## Prerequisites
 
@@ -60,12 +60,17 @@ export async function POST(request: Request) {
 
   const result = streamText({
     model: openai('gpt-4o-mini'),
+    // Chorus `history` can include `system` and `tool` rows; convertToModelMessages
+    // only accepts plain user/assistant text-part messages, so filter first — the
+    // unfiltered map type-errors (and breaks) for a host with a systemPrompt or tools.
     messages: convertToModelMessages(
-      history.map((m) => ({
-        id: m.id,
-        role: m.role,
-        parts: [{ type: 'text', text: m.text ?? '' }],
-      })),
+      history
+        .filter((m) => m.role === 'user' || m.role === 'assistant')
+        .map((m) => ({
+          id: m.id,
+          role: m.role,
+          parts: [{ type: 'text', text: m.text ?? '' }],
+        })),
     ),
   });
 
@@ -76,8 +81,8 @@ export async function POST(request: Request) {
 
 See [`examples/with-next`](../with-next) for a full Next.js App Router project
 layout. The AI SDK v4 `toDataStreamResponse()` protocol is also supported — the
-root README's [Vercel AI SDK stream format](../../README.md#vercel-ai-sdk-stream-format)
-section covers the one-line server re-framing it needs.
+[Vercel AI SDK stream format](../../docs/guide.md#vercel-ai-sdk-stream-format)
+section of the docs covers the one-line server re-framing it needs.
 
 ## Where to look next
 

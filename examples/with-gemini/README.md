@@ -6,8 +6,8 @@ chunk carries a `candidates` array, a `thought: true` part maps to reasoning,
 and the final chunk sets `finishReason: "STOP"` — so you can watch the connector
 parse a real Gemini-shaped stream without an API key.
 
-This example reflects the [Gemini SSE format](../../README.md#gemini-sse-format)
-section of the root README.
+This example reflects the [Gemini SSE format](../../docs/guide.md#gemini-sse-format)
+section of the documentation.
 
 ## Prerequisites
 
@@ -46,7 +46,7 @@ Then add an SSE proxy that maps Chorus history with `toGeminiGenerateContentBody
 and frames the Gemini SDK stream with `react-chorus/server`:
 
 ```js
-// server/index.js  —  npm install express @google/generative-ai
+// server/index.js  —  npm install express @google/generative-ai react-chorus
 import express from 'express';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { toGeminiGenerateContentBody } from 'react-chorus/provider-requests';

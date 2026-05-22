@@ -2,7 +2,7 @@
 
 A zero-backend Vite demo: `<Chorus>` drives a simulated word-by-word streaming reply, persists the transcript to `localStorage`, exposes the clear button, and surfaces a custom error banner. Good for local hacking before you wire up a real model.
 
-This example **intentionally demonstrates the advanced [`onSend` callback path](../../README.md#advanced-path--onsend-callback)**, not the simple `transport` + `connector` form headlined in the root README's [Quick start](../../README.md#quick-start). It uses `onSend` deliberately: a plain function can stream a reply with no backend at all, which is what makes this a zero-setup first-touch demo. For a no-backend demo of the Quick Start `transport` + `connector` pairing instead, see [`examples/with-anthropic`](../with-anthropic) — it pairs a mock `transport` with `connector="anthropic"`, exercising the same wiring as the headline `<Chorus transport="/api/chat" connector="openai" />` snippet. This example also exercises the [persistence examples](../../README.md#persistence-examples) from the root README.
+This example **intentionally demonstrates the advanced [`onSend` callback path](../../docs/guide.md#advanced-path--onsend-callback)**, not the simple `transport` + `connector` form headlined in the root README's [Quick start](../../README.md#quick-start). It uses `onSend` deliberately: a plain function can stream a reply with no backend at all, which is what makes this a zero-setup first-touch demo. For a no-backend demo of the Quick Start `transport` + `connector` pairing instead, see [`examples/with-anthropic`](../with-anthropic) — it pairs a mock `transport` with `connector="anthropic"`, exercising the same wiring as the headline `<Chorus transport="/api/chat" connector="openai" />` snippet. This example also exercises the [persistence examples](../../docs/api.md#persistence-examples) from the documentation.
 
 ## Prerequisites
 
@@ -27,6 +27,6 @@ Vite prints the local URL (usually <http://localhost:5173>). Type a message and 
 
 ## Where to look next
 
-- [`src/App.tsx`](./src/App.tsx) — replace the simulated `onSend` with `createFetchSSETransport('/api/chat')` to point at a real backend.
+- [`src/App.tsx`](./src/App.tsx) — to point at a real backend, remove the `onSend` prop and add `transport="/api/chat" connector="openai"` (they are separate props with different signatures — you swap one path for the other rather than rename `onSend`).
 - [`examples/with-openai`](../with-openai) — same shape, but talking to a real OpenAI proxy.
 - [Root README](../../README.md) — full API reference and recipes.

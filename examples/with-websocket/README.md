@@ -8,9 +8,9 @@ one SSE payload, so the built-in `anthropic` connector parses
 
 The bundled server uses **canned frames**, so the demo runs with no API key.
 
-This example reflects the [Using the WebSocket transport](../../README.md#using-the-websocket-transport)
-and [Anthropic SSE format](../../README.md#anthropic-sse-format) sections of the
-root README.
+This example reflects the [Using the WebSocket transport](../../docs/guide.md#using-the-websocket-transport)
+and [Anthropic SSE format](../../docs/guide.md#anthropic-sse-format) sections of the
+documentation.
 
 ## Prerequisites
 
@@ -56,7 +56,7 @@ watch the reply stream in over the WebSocket.
 
 Keep your `ANTHROPIC_API_KEY` on the server. Replace the canned-frame block in
 [`server/index.js`](./server/index.js) with the streaming Claude backend from
-the root README's [Minimal Node.js `ws` + Claude backend](../../README.md#minimal-nodejs-ws--claude-backend)
+the [Minimal Node.js `ws` + Claude backend](../../docs/guide.md#minimal-nodejs-ws--claude-backend)
 recipe — it forwards raw Anthropic SDK events verbatim, which the `anthropic`
 connector already understands. The frontend wiring in `src/App.tsx` does not
 change.
