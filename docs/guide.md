@@ -438,10 +438,23 @@ The provider connector objects themselves (`openaiConnector`, `anthropicConnecto
 | Name | Provider | SSE format |
 |------|----------|------------|
 | `'openai'` | OpenAI Chat Completions / Responses-compatible streams | selected `choices[0].delta.content`, reasoning fields, `tool_calls`, common Responses API deltas, and Responses output-text annotations as sources |
-| `'anthropic'` | Anthropic Messages API | `content_block_delta` text/thinking deltas plus `tool_use` / `input_json_delta` |
-| `'gemini'` | Google Gemini (AI / Vertex AI) | selected `candidates[0].content.parts[*].text`, thought parts, and `functionCall` parts |
+| `'anthropic'` | Anthropic Messages API | `content_block_delta` text/thinking deltas plus `tool_use` / `input_json_delta`, web-search and document `citations_delta` events, and `web_search_tool_result` content blocks as sources |
+| `'gemini'` | Google Gemini (AI / Vertex AI) | selected `candidates[0].content.parts[*].text`, thought parts, `functionCall` parts, plus `groundingMetadata.groundingChunks` and `citationMetadata.citationSources` / `citations` as sources |
 | `'ai-sdk'` | Vercel AI SDK (`toUIMessageStreamResponse` / `toDataStreamResponse`) | `text-delta` / `reasoning-delta` / `source-url` / `source-document` / `tool-input-*` / `tool-output-*` JSON events, plus prefix-coded data-stream frames (`0:"..."`, `g:"..."`, `j:{...}` sources, `7:`/`8:` source-like annotations, `9:{...}`, `c:{...}`, `a:{...}`, `d:`/`e:` finish, `3:"..."` error) |
 | `'auto'` *(default)* | Auto-detect | Tries OpenAI, then Gemini, known Anthropic events, known Vercel AI SDK events (UI-message-stream JSON and data-stream prefix lines), generic JSON text fields (`text`/`content`/`delta`), then raw plain text |
+
+#### Connector source/citation support matrix
+
+All four built-in connectors emit `MessageSource` entries — see [`MessageSource`](api.md#messagesource) for the field semantics and JSON-persistence contract.
+
+| Connector | Source/citation events parsed | `MessageSource` fields populated |
+|-----------|-------------------------------|----------------------------------|
+| `'openai'` | Responses API `response.output_text.annotation.added` (and annotations on `response.output_text.done`) — `url_citation`, `file_citation`, `file_path`, `container_file_citation` | `id`, `type`, `title`, `url`, `snippet`, `metadata.provider = 'openai'`, plus `annotationType`/`startIndex`/`endIndex`/`fileId`/`containerId` |
+| `'anthropic'` | `content_block_delta` with `citations_delta` (`char_location`, `page_location`, `content_block_location`, `web_search_result_location`); `content_block_start` for `web_search_tool_result` blocks; text-block seeded `citations` arrays | `id` (provider url or `documentTitle#documentIndex`), `type` (`url` for web/web-search results, `document` otherwise), `title`, `url`, `snippet` (Anthropic `cited_text`), `metadata.provider = 'anthropic'`, plus `citationType`/`documentIndex`/`documentTitle`/`startCharIndex`/`endCharIndex`/`startPageNumber`/`endPageNumber`/`startBlockIndex`/`endBlockIndex`/`encryptedIndex`/`toolUseId`/`pageAge`/`encryptedContent` |
+| `'gemini'` | `candidates[].groundingMetadata.groundingChunks` (Google Search grounding `web` and Vertex `retrievedContext`); `candidates[].citationMetadata.citationSources` or `citations` (training-source attribution) | `id` (uri or derived), `type: 'url'`, `title`, `url`, `metadata.provider = 'gemini'`, plus `chunkKind`/`chunkIndex` for grounding chunks and `citationKind`/`startIndex`/`endIndex`/`license`/`publicationDate` for citations |
+| `'ai-sdk'` | UI-message-stream `source-url` / `source-document` and source-like `message-metadata`; data-stream `j:` source frames and source-like `7:` / `8:` annotations | `id`, `type`, `title`, `url`, `snippet`, `metadata.provider = 'ai-sdk'`, plus passthrough `mediaType`/`filename`/`page` |
+
+All connectors derive stable ids (provider id where available, otherwise URL or location-derived) so `appendMessageSource` dedups duplicate streamed frames across deltas and across resumed connections. Sources never become assistant text and never block the stream: the default renderer shows them as a `Sources` footer, `useChorusTranscriptActions` includes them in search/export/copy, and built-in JSON persistence round-trips the whole array.
 
 All built-in connectors also recognise in-band stream errors. If a backend has already started a `200` SSE/WebSocket stream, send `data: {"error":"message"}` (or `{"error":{"message":"message"}}`) to abort the response, call `onError` with an `Error`, and show the configured error banner. Unknown JSON events with a `type` field are no longer assumed to be Anthropic; `{ "type": "delta", "text": "hi" }` renders `hi`, and unknown JSON without a text-like field falls back to the raw payload string.
 
@@ -594,6 +607,8 @@ data: {"type":"message_stop"}
 
 Anthropic `tool_use` maps to a Chorus tool message by `content_block.id` (`toolDelta.id`), `content_block.name` (`toolCall.name`), and accumulated `input_json_delta.partial_json` (`toolCall.input`).
 
+Anthropic citations also flow through this connector. `content_block_delta` events whose `delta.type === 'citations_delta'` (web-search results, document char/page/content-block citations, and code-execution citations) become `MessageSource` entries on the active assistant message — the citation's `cited_text` lands on `source.snippet`, `url`/`title` populate the link, and the original location offsets (char/page/block indexes, `encrypted_index`, `document_index`, `document_title`) are preserved on `source.metadata` so callers can re-anchor citations to source text. `content_block_start` events whose `content_block.type === 'web_search_tool_result'` expand to one source per `web_search_result` entry in the block's `content` array — the encrypted result body stays in `metadata.encryptedContent` instead of leaking into the assistant text.
+
 > **Runnable example:** [`examples/with-anthropic`](../examples/with-anthropic) drives the `anthropic` connector from a built-in mock that streams the events above, so it runs with no API key; its README documents the matching Express + `@anthropic-ai/sdk` proxy.
 
 ## Gemini SSE format
@@ -609,6 +624,8 @@ data: {"candidates":[{"index":0,"content":{"parts":[{"text":"Hello world"}]},"fi
 ```
 
 Gemini `functionCall.name` maps to `toolCall.name`, `functionCall.args` maps to `toolCall.input`, and the connector generates a stable tool delta id from the candidate/part index when Gemini does not provide one.
+
+Grounding and citation sources are also surfaced. `candidates[0].groundingMetadata.groundingChunks` entries (Google Search grounding's `{ web: { uri, title } }` and Vertex AI's `{ retrievedContext: { uri, title } }`) become `MessageSource` entries on the active assistant message, and so does each `candidates[0].citationMetadata.citationSources` (or the alternative `citations`) entry — including its `startIndex`/`endIndex`/`license`/`publicationDate` on `source.metadata`. Sources are extracted whether they arrive on a mid-stream text chunk or on the terminal `finishReason: STOP` frame (whose `content.parts` is empty), and `appendMessageSource` dedups repeated grounding chunks across cumulative chunks via the chunk URI.
 
 > **Runnable example:** [`examples/with-gemini`](../examples/with-gemini) drives the `gemini` connector from a built-in mock that streams the `candidates` chunks above, so it runs with no API key; its README documents the matching Express + `@google/generative-ai` proxy.
 

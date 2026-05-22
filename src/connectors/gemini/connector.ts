@@ -5,6 +5,7 @@ import { extractUsage } from '../usage';
 import { extractCandidateContent, getCandidateKey, selectedCandidate } from './candidates';
 import { applyFinishReason } from './finish';
 import { handlePromptFeedback } from './promptFeedback';
+import { hasSource } from '../resultHelpers';
 import { hasToolDelta } from './result';
 import { createGeminiConnectorState, type GeminiConnectorState } from './state';
 
@@ -99,6 +100,7 @@ export const geminiConnector: Connector<GeminiConnectorState> = {
       if (
         finalResult.text ||
         finalResult.reasoning ||
+        hasSource(finalResult) ||
         hasToolDelta(finalResult) ||
         finalResult.done ||
         finalResult.metadata ||

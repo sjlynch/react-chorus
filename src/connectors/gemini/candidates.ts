@@ -1,5 +1,10 @@
 import { DEFAULT_CANDIDATE_INDEX } from '../geminiSemantics';
+import {
+  sourcesFromGeminiCitationMetadata,
+  sourcesFromGeminiGroundingMetadata,
+} from '../sourceMapping';
 import type { ConnectorResult } from '../types';
+import { appendSource } from '../resultHelpers';
 import { addWarning, appendField, appendToolDelta } from './result';
 import { extractFunctionCallToolDelta } from './toolDeltas';
 import type { GeminiConnectorState } from './state';
@@ -25,6 +30,17 @@ export function extractCandidateContent(
   state: GeminiConnectorState,
   payload: unknown,
 ) {
+  // Gemini attaches grounding / citation metadata to the candidate (NOT inside
+  // `parts`) when Search grounding or training-source citations are enabled,
+  // and the metadata often arrives on the terminal frame whose `content.parts`
+  // is empty — so extract sources before the parts check that returns early.
+  // `appendMessageSource` (downstream in useChorusStream) dedups repeated
+  // chunks across deltas via stable provider/url-derived ids.
+  const groundingSources = sourcesFromGeminiGroundingMetadata(candidateObj.groundingMetadata);
+  for (const source of groundingSources) appendSource(result, source);
+  const citationSources = sourcesFromGeminiCitationMetadata(candidateObj.citationMetadata);
+  for (const source of citationSources) appendSource(result, source);
+
   const parts = (candidateObj.content as { parts?: unknown } | undefined)?.parts;
   if (!Array.isArray(parts)) return;
   const unsupportedParts: string[] = [];
@@ -41,6 +57,7 @@ export function extractCandidateContent(
     const unsupported = describeUnsupportedPart(partObj);
     if (unsupported) unsupportedParts.push(unsupported);
   });
+
   // Surface unsupported parts as a non-fatal warning so a candidate that
   // contains *only* unrenderable parts (inlineData/fileData, or
   // executableCode/codeExecutionResult from the code-execution tool) is
