@@ -1,5 +1,6 @@
 import type { ConnectorResult } from '../types';
 import type { OpenAIConnectorState } from '../openai';
+import { warnOnceInDev } from '../../utils/warnings';
 import { drainResponseRefusalText, drainResponseToolBuffer } from './responseToolCalls';
 import { IGNORED_RESPONSE_EVENT_TYPES } from './responseMetadata';
 import { handleResponseTerminalEvent } from './responseTerminalEvents';
@@ -55,11 +56,32 @@ const RESPONSE_EVENT_HANDLERS: Record<string, ResponseEventHandler> = {
 /**
  * Thin dispatcher for the OpenAI Responses API (`response.*`) streaming
  * protocol. Filters out explicitly-ignored lifecycle events, then routes the
- * typed event to its focused handler via `RESPONSE_EVENT_HANDLERS`. Unhandled
- * event types return `null`.
+ * typed event to its focused handler via `RESPONSE_EVENT_HANDLERS`.
+ *
+ * An unknown `response.*` type (a new event added by OpenAI, a proxy that
+ * leaks frames from a different protocol, or a typo in a custom backend) is
+ * surfaced two ways instead of being silently dropped: a one-time dev console
+ * warning keyed by the type, and a non-fatal `ConnectorWarning` so a host's
+ * `onWarning` handler can record telemetry. The Responses API still adds new
+ * `response.*` events (e.g. `response.web_search_call.*`,
+ * `response.code_interpreter_call.*`); without this signal a rollout produces
+ * silent regressions instead of an actionable warning.
  */
 export function extractOpenAIResponseEvent(obj: Record<string, unknown>, state: OpenAIConnectorState): ConnectorResult | null {
   const type = typeof obj.type === 'string' ? obj.type : '';
   if (IGNORED_RESPONSE_EVENT_TYPES.has(type)) return null;
-  return RESPONSE_EVENT_HANDLERS[type]?.(obj, state) ?? null;
+  const handler = RESPONSE_EVENT_HANDLERS[type];
+  if (handler) return handler(obj, state);
+  if (!type) return null;
+  warnOnceInDev(
+    `openai-responses-unknown-event:${type}`,
+    `[react-chorus] OpenAI Responses connector received unknown event type "${type}". Add it to IGNORED_RESPONSE_EVENT_TYPES (responseMetadata.ts) if it should be skipped, or implement a handler and register it in RESPONSE_EVENT_HANDLERS (responses.ts).`,
+  );
+  return {
+    warning: {
+      code: 'unknown-event',
+      message: `OpenAI Responses connector received unknown event type "${type}"`,
+      payload: obj,
+    },
+  };
 }

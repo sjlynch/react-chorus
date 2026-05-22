@@ -1,0 +1,16 @@
+// Next.js App Router example. Extends the shared examples base so compiler
+// options (target ES2022, module/moduleResolution, strict, etc.) stay in sync
+// with the Vite examples, then layers on the few settings Next needs
+// differently: `jsx: "preserve"` (Next compiles JSX itself), the Next TS
+// plugin, and `allowJs`/`incremental`.
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "preserve",
+    "allowJs": true,
+    "incremental": true,
+    "plugins": [{ "name": "next" }]
+  },
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+  "exclude": ["node_modules"]
+}

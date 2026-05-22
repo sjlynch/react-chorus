@@ -25,7 +25,7 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | Prop | Type | Default | Description |
 |------|------|---------|-------------|
 | `transport` | `string \| FetchTransportInit<TMeta> \| Transport<TMeta>` | — | Simple path: a URL to POST to, a `{ url, headers, credentials, method, … }` config object (`FetchTransportInit`), or a custom Transport function. Chorus handles all streaming. |
-| `systemPrompt` | `string` | — | Hidden instruction for both send paths. With `transport`, Chorus prepends it as a `system` message in request history. With `onSend`, read it from `helpers.systemPrompt`; `messages` is left unchanged to avoid duplicates. |
+| `systemPrompt` | `string` | — | Hidden instruction for both send paths. With `transport`, Chorus prepends it as a `system` message in request history (using the reserved id `RESERVED_SYSTEM_PROMPT_ID`); the synthetic row is never stored on the transcript. With `onSend`, read it from `helpers.systemPrompt`; `messages` is left unchanged to avoid duplicates. The value is read at send time, so swapping it at runtime takes effect on the next Send / Retry / Regenerate — see [Changing the system prompt at runtime](guide.md#changing-the-system-prompt-at-runtime) for multi-persona toggles, Regenerate semantics, and precedence vs. a host-supplied `role: 'system'` row. |
 | `connector` | `Connector \| 'auto' \| 'openai' \| 'anthropic' \| 'gemini' \| 'ai-sdk'` | `'auto'` | SSE connector used to parse the stream. `'auto'` detects OpenAI, Anthropic, Gemini, and Vercel AI SDK frames; pass an explicit name when the format is known. |
 | `connectorOptions` | `OpenAIConnectorOptions` | — | Options forwarded to the built-in connector resolved from a `connector` string. Currently only the `'openai'` connector consumes options (e.g. `{ thinkTag }` for a custom reasoning tag pair). Ignored for other names and for custom `Connector` objects — build those with `createOpenAIConnector(options)`. |
 | `onSend` | `(text, messages, helpers) => Message<TMeta> \| void \| Promise<Message<TMeta> \| void>` | — | Advanced path: called when the user submits a message. Use `helpers.appendAssistant`/`helpers.finalizeAssistant` to stream tokens, or return a complete assistant `Message` for non-streaming replies. |
@@ -33,7 +33,7 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `onChange` | `(messages: Message<TMeta>[]) => void` | — | Called whenever Chorus wants to change the message list in controlled mode (`value` is provided). Not called for legacy `messages`-only uncontrolled state. |
 | `onMessagesChange` | `(messages, context) => void` | — | Read-only transcript observer for controlled, uncontrolled, and persistence-backed modes. Fires for initial/loaded messages, sends, stream chunks, returned messages, edits, deletes, retry/regenerate truncation, and clear without making Chorus controlled. `context.source` is `'controlled'`, `'uncontrolled'`, or `'persistence'`. |
 | `messages` | `Message<TMeta>[]` | — | Legacy initial-only seed for uncontrolled mode. Read once on mount; later prop changes are ignored (dev warns once on a reference change). Prefer `initialMessages` for seeding or `value` + `onChange` for controlled mode. |
-| `initialMessages` | `Message<TMeta>[]` | — | Initial-only seed for uncontrolled mode, captured once at mount (frozen-seed contract — later reference changes are ignored and dev-warned once). Useful for welcome messages; `system` messages are hidden by default via `hiddenRoles`. Tool calls remain visible by default. |
+| `initialMessages` | `Message<TMeta>[]` | — | Initial-only seed for uncontrolled mode, captured once at mount (frozen-seed contract — later reference changes are ignored and dev-warned once). Useful for welcome messages; `system` messages are hidden by default via `hiddenRoles`. Tool calls remain visible by default. To seed from a server-fetched transcript (Next.js loader / `getServerSideProps`) and keep follow-up turns cached in the browser via `persistenceKey`, see the [Server-side history pre-load](guide.md#server-side-history-pre-load) recipe — it documents the precedence rule when both seeds collide and the `useId` pattern for fresh conversations. |
 | `emptyState` | `ReactNode` | — | Custom content shown in the transcript when the visible message list is empty and the assistant is not typing. |
 | `suggestedPrompts` | `string[]` | — | Default empty-state prompt buttons. Clicking one fills and focuses the composer without sending. Ignored when `emptyState` is provided. |
 | `placeholder` | `string` | `"Send a message"` | Input placeholder text. |
@@ -372,7 +372,7 @@ When the default `localStorage` adapter is used, both `useConversations` and `us
 
 ### Persistence examples
 
-The basic runnable example enables `persistenceKey`, so it saves to `localStorage` by default. You can swap storage adapters without changing the rest of the chat:
+The basic runnable example enables `persistenceKey`, so it saves to `localStorage` by default. To combine `persistenceKey` with a server-loaded transcript (Next.js `page.tsx` / `getServerSideProps` / Remix `loader` seeded into `initialMessages`), see the [Server-side history pre-load](guide.md#server-side-history-pre-load) recipe — it covers the precedence rule when both seeds are present and the `useId` pattern for fresh conversations. You can swap storage adapters without changing the rest of the chat:
 
 ```tsx
 // localStorage (default)
@@ -592,20 +592,46 @@ All accepted files first appear as pending attachment chips while they are read 
 
 ### Sources and citations
 
-Assistant messages can carry structured source/citation references in `message.sources`:
+Assistant messages can carry structured source/citation references in `message.sources`. Each entry is a `MessageSource`:
+
+#### `MessageSource`
 
 ```ts
-type MessageSource = {
+type MessageSourceType = 'url' | 'document' | 'file' | 'unknown';
+
+interface MessageSource {
   id?: string;
-  type?: 'url' | 'document' | 'file' | 'unknown';
+  type?: MessageSourceType;
   title?: string;
   url?: string;
   snippet?: string;
   metadata?: Record<string, unknown>;
-};
+}
+
+// Alias preserved because sources are usually shown to readers as citations.
+type MessageCitation = MessageSource;
 ```
 
-Built-in source-aware connectors attach provider source frames to the active assistant message: AI SDK UI-message-stream `source-url` / `source-document` / source-like `message-metadata`, AI SDK data-stream `j:` sources and source-like annotation frames (`7:`/`8:`), and OpenAI Responses output-text annotation events. These frames never become assistant text. The default renderer shows a `Sources` footer, `renderMessage` receives the same data as `ctx.sources`, per-message Copy includes the source list, and `useChorusTranscriptActions` search/export/copy-all include source title/url/snippet. Built-in JSON persistence stores `sources` with the rest of the message; if you provide custom `serializeMessages` / `deserializeMessages`, keep the array JSON-serializable or revive it yourself.
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `string` | Stable identifier used to deduplicate streamed source frames via [`appendMessageSource`](#sources-and-citations). When the provider does not emit one, built-in connectors derive a stable id from the URL or a location-based key (e.g. `documentTitle#documentIndex`, `gemini-grounding-${chunkIndex}`); for arbitrary string ids the default UI falls back through `title || url || id || fallback` (see below). |
+| `type` | `'url' \| 'document' \| 'file' \| 'unknown'` | Broad source family. The default renderer treats `url` as a link target, `document`/`file` as inline labels, and `unknown` as a passthrough. Custom shells can use it to choose an icon or section. |
+| `title` | `string` | Human-readable label — page title, file name, or document heading. **Rendered as plain text** by the default `MessageSources` UI (no Markdown parsing, no HTML sanitization), so it can hold any user-facing string without escaping. |
+| `url` | `string` | Canonical URL the source can be opened at. When present, the default UI renders the source as a hyperlink. |
+| `snippet` | `string` | Short quoted excerpt or description (provider citations populate this from `cited_text`, `quote`, or `snippet` fields). **Rendered as plain text** alongside the title — not Markdown, not sanitized HTML. |
+| `metadata` | `Record<string, unknown>` | Host-owned free-form details — page numbers, char/page/block offsets, file ids, encrypted result bodies, media types, licenses, etc. Chorus never reads or mutates this field, but it **round-trips through built-in JSON persistence** (`JSON.stringify` / `JSON.parse`), so keep values JSON-serializable (no `Date`, `BigInt`, or class instances) unless you also pass custom `serializeMessages` / `deserializeMessages`. The connectors that emit sources set `metadata.provider` (`'openai'`, `'anthropic'`, `'gemini'`, `'ai-sdk'`) so a custom renderer can branch on the originator. |
+
+`MessageCitation` is exported as an alias for `MessageSource` for back-compat readability; both names refer to the same object shape.
+
+**Display-label priority.** The default `MessageSources` UI labels each entry using `source.title || source.url || source.id || fallback` (where `fallback` is the localized `labels.sources.source(index)` string, e.g. `Source 1`). Custom shells that render their own source list can either import the `sourceDisplayLabel(source, fallback)` helper from `react-chorus` (or `react-chorus/headless`) to match the built-in label exactly, or reimplement the same priority order to stay forward-compatible if Chorus ever adds another renderer slot.
+
+```ts
+import { sourceDisplayLabel } from 'react-chorus';
+
+const label = sourceDisplayLabel(source, `Source ${index + 1}`);
+```
+
+**Which connectors emit sources today?** All four built-in connectors do — see the [connector source/citation support matrix](guide.md#connector-sourcecitation-support-matrix) in the usage guide for the per-provider fields populated and the underlying SSE events parsed. AI SDK UI-message-stream `source-url` / `source-document` / source-like `message-metadata`, AI SDK data-stream `j:` sources and source-like annotation frames (`7:`/`8:`), OpenAI Responses output-text annotation events, Anthropic `citations_delta` and `web_search_tool_result` content blocks, and Gemini `groundingMetadata.groundingChunks` plus `citationMetadata.citationSources` / `citations` all flow into `message.sources`. These frames never become assistant text — the default renderer shows a `Sources` footer, `renderMessage` receives the same data as `ctx.sources`, per-message Copy includes the source list, and `useChorusTranscriptActions` search/export/copy-all include source title/url/snippet. Built-in JSON persistence stores `sources` with the rest of the message; if you provide custom `serializeMessages` / `deserializeMessages`, keep the array JSON-serializable or revive it yourself.
 
 For custom `onSend` RAG clients, either return an assistant message with `sources` already populated or stream them with `helpers.appendSource({ title, url, snippet })`. If you bridge `useChorusStream`, `helpers.streamCallbacks()` wires `onSource` for you.
 
@@ -1459,6 +1485,7 @@ Helpers and constants:
 - `formatAiSdkModelMessagesBody`, `formatAnthropicMessagesBody`, `formatGeminiGenerateContentBody`, `formatOpenAIChatCompletionsBody`, `formatOpenAIResponsesBody`, `toAiSdkModelMessages`, `toAiSdkModelMessagesBody`, `toAnthropicMessages`, `toAnthropicMessagesBody`, `toAnthropicTools`, `toGeminiContents`, `toGeminiGenerateContentBody`, `toGeminiTools`, `toOpenAIChatCompletionsBody`, `toOpenAIChatCompletionsMessages`, `toOpenAIChatCompletionsTools`, `toOpenAIResponsesBody`, `toOpenAIResponsesInput`, `toOpenAIResponsesTools` — provider request mappers.
 - `ChorusStreamError` — error class thrown by `useChorusStream` and the transport path.
 - `DEFAULT_CHORUS_LABELS`, `DEFAULT_ATTACHMENT_LABELS`, `DEFAULT_SOURCE_LABELS`, `resolveChorusLabels` — built-in localization helpers and label defaults (`DEFAULT_ATTACHMENT_LABELS` / `DEFAULT_SOURCE_LABELS` expose individual English slices).
+- `sourceDisplayLabel(source, fallback)` — returns the display label the default `MessageSources` UI shows for a `MessageSource` (priority order: `title || url || id || fallback`). Use it in custom source-list renderers to match the built-in label.
 
 Types: every public type re-exported from the root barrel is also importable from `react-chorus/headless` — including `Message`, `AnyChorusMessage`, `UserMessage`, `AssistantMessage`, `SystemMessage`, `ToolMessage`, `Role`, `ToolCall`, `MessageSource`, `MessageCitation`, `MessageSourceType`, `Attachment`, `AttachmentError`, `AttachmentErrorReason`, `AttachmentSource`, `AttachmentUploadResult`, `UploadAttachment`, `UploadAttachmentOptions`, `StorageAdapter`, `ConnectorName`, `Connector`, `ConnectorResult`, `ConnectorToolDelta`, `Transport`, `FetchSSETransportOptions`, `FetchTransportInit`, `WebSocketTransport`, `WebSocketTransportOptions`, `SendCallbacks`, `StreamOptions`, `ChorusProps` (aliased to `ChorusHeadlessProps`), `ChorusRef`, `ChorusSendHelpers`, `ChorusSendPath`, `ChorusOnSend`, `ChorusOnFinish`, `ChorusOnAbort`, `ChorusOnStreamDone`, `ChorusOnToolCall`, `ChorusOnToolDelta`, `ChorusAbortContext`, `ChorusAbortReason`, `ChorusAbortSource`, `ChorusFinishContext`, `ChorusStreamDoneContext`, `ChorusStreamDoneReason`, `ChorusToolCallContext`, `ChorusToolDeltaContext`, `ChorusToolLoopContext`, `ChorusToolRegistry`, `ChorusToolHandler`, `ChorusConfirmClearConversation`, `ChorusClearConversationContext`, `ChorusConfirmDeleteMessage`, `ChorusDeleteMessageContext`, `ChorusShouldContinueToolLoop`, `ChorusMessagesChangeContext`, `ChorusMessagesChangeReason`, `ChorusMessagesChangeSource`, `ChorusToolDefinition`, `RenderErrorContext`, `RenderMessageContext`, `RenderMessageRootProps`, `MessageBubbleProps`, `MessageBubbleSlots`, `MessageMarkdownProps`, `MessageRenderActions`, `MessageTimestampFormatter`, `MessageCopyResult`, `MessageFeedback`, `GetMessageFeedback`, `ChatInputProps`, `ChatInputHandle`, `ChatInputFocusOptions`, `ChatWindowProps`, `ConversationListProps`, `ConfirmDeleteConversation`, `ConfirmDeleteConversationContext`, `ConversationStorageError`, `ConversationStorageOperation`, `ConversationSummary`, `RenameFromFirstMessageOptions`, `UseConversationsOptions`, `UseConversationsResult`, `ChorusPersistenceError`, `PersistenceOperation`, `PersistenceWriteOptions`, `SerializeMessages`, `DeserializeMessages`, `UseChorusPersistenceOptions`, `UseChorusPersistenceResult`, `ChorusTranscriptActions`, `ChorusTranscriptActionsOptions`, `TranscriptExportFormat`, `TranscriptFormatInfo`, `RenderAttachmentErrorContext`, `Palette`, `MarkdownProps`, `MarkdownSanitizer`, `CodeBlockCopy`, `CodeBlockCopyContext`, `CodeBlockCopyRenderer`, `ProviderToolsOption`, `ProviderToolsSource`, all `ChorusLabels` sub-shapes, and every provider request type (`AnthropicMessagesBody`, `AnthropicTool`, `OpenAIChatCompletionsBody`, `GeminiGenerateContentBody`, etc.).
 

@@ -209,4 +209,130 @@ describe('anthropicConnector', () => {
   it('flush() tolerates being called with no state argument', () => {
     expect(anthropicConnector.flush?.()).toBeNull();
   });
+
+  it('extracts citations_delta as a message source', () => {
+    const data = JSON.stringify({
+      type: 'content_block_delta',
+      index: 0,
+      delta: {
+        type: 'citations_delta',
+        citation: {
+          type: 'web_search_result_location',
+          cited_text: 'react-chorus is great',
+          url: 'https://example.com/post',
+          title: 'Example Post',
+          encrypted_index: 'enc-1',
+        },
+      },
+    });
+    expect(anthropicConnector.extract(data)).toEqual({
+      source: {
+        id: 'https://example.com/post',
+        type: 'url',
+        title: 'Example Post',
+        url: 'https://example.com/post',
+        snippet: 'react-chorus is great',
+        metadata: {
+          provider: 'anthropic',
+          citationType: 'web_search_result_location',
+          encryptedIndex: 'enc-1',
+        },
+      },
+    });
+  });
+
+  it('extracts a document char_location citations_delta with document metadata', () => {
+    const data = JSON.stringify({
+      type: 'content_block_delta',
+      index: 0,
+      delta: {
+        type: 'citations_delta',
+        citation: {
+          type: 'char_location',
+          cited_text: 'page text',
+          document_index: 0,
+          document_title: 'manual.pdf',
+          start_char_index: 10,
+          end_char_index: 19,
+        },
+      },
+    });
+    expect(anthropicConnector.extract(data)).toEqual({
+      source: {
+        id: 'manual.pdf#0',
+        type: 'document',
+        title: 'manual.pdf',
+        snippet: 'page text',
+        metadata: {
+          provider: 'anthropic',
+          citationType: 'char_location',
+          documentIndex: 0,
+          documentTitle: 'manual.pdf',
+          startCharIndex: 10,
+          endCharIndex: 19,
+        },
+      },
+    });
+  });
+
+  it('extracts a web_search_tool_result content block as a list of sources', () => {
+    const data = JSON.stringify({
+      type: 'content_block_start',
+      index: 1,
+      content_block: {
+        type: 'web_search_tool_result',
+        tool_use_id: 'srvtoolu_1',
+        content: [
+          { type: 'web_search_result', url: 'https://a.example/one', title: 'One', encrypted_content: 'enc-a', page_age: '1 day' },
+          { type: 'web_search_result', url: 'https://b.example/two', title: 'Two' },
+        ],
+      },
+    });
+    expect(anthropicConnector.extract(data)).toEqual({
+      sources: [
+        {
+          id: 'https://a.example/one',
+          type: 'url',
+          title: 'One',
+          url: 'https://a.example/one',
+          metadata: {
+            provider: 'anthropic',
+            resultType: 'web_search_result',
+            toolUseId: 'srvtoolu_1',
+            pageAge: '1 day',
+            encryptedContent: 'enc-a',
+          },
+        },
+        {
+          id: 'https://b.example/two',
+          type: 'url',
+          title: 'Two',
+          url: 'https://b.example/two',
+          metadata: {
+            provider: 'anthropic',
+            resultType: 'web_search_result',
+            toolUseId: 'srvtoolu_1',
+          },
+        },
+      ],
+    });
+  });
+
+  it('returns null for a web_search_tool_result with no renderable entries', () => {
+    const data = JSON.stringify({
+      type: 'content_block_start',
+      index: 1,
+      content_block: { type: 'web_search_tool_result', tool_use_id: 'srvtoolu_2', content: [] },
+    });
+    expect(anthropicConnector.extract(data)).toBeNull();
+  });
+
+  it('returns null for a citations_delta with no renderable fields', () => {
+    const data = JSON.stringify({
+      type: 'content_block_delta',
+      index: 0,
+      delta: { type: 'citations_delta', citation: { type: 'char_location' } },
+    });
+    expect(anthropicConnector.extract(data)).toBeNull();
+  });
 });

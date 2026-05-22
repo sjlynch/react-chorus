@@ -1,6 +1,11 @@
 import { extractErrorMessage } from './error';
 import { hasOwn } from './objectUtils';
+import {
+  sourceFromAnthropicCitation,
+  sourcesFromAnthropicWebSearchToolResult,
+} from './sourceMapping';
 import type { Connector, ConnectorResult, ConnectorToolDelta } from './types';
+import type { MessageSource } from '../types';
 import { extractUsage } from './usage';
 
 export interface AnthropicConnectorState {
@@ -23,6 +28,26 @@ function blockIndexKey(index: unknown) {
 
 function fallbackToolId(index: unknown) {
   return `anthropic-tool-${blockIndexKey(index)}`;
+}
+
+function collectAnthropicCitations(list: unknown[] | undefined): MessageSource[] {
+  if (!list) return [];
+  const sources: MessageSource[] = [];
+  for (const entry of list) {
+    const source = sourceFromAnthropicCitation(entry);
+    if (source) sources.push(source);
+  }
+  return sources;
+}
+
+// `source`/`sources` are mutually exclusive in ConnectorResult: a single
+// source goes on `source`, multiple on `sources`. Pick the right slot so
+// useChorusStream's source pipeline appends every entry through
+// `appendMessageSource` instead of dropping array elements.
+function sourcesResult(sources: MessageSource[]): ConnectorResult {
+  return sources.length === 1
+    ? { source: sources[0] as MessageSource }
+    : { sources };
 }
 
 /**
@@ -130,6 +155,23 @@ export const anthropicConnector: Connector<AnthropicConnectorState> = {
           return toolDelta.name || hasOwn(toolDelta, 'input') ? { toolDelta } : null;
         }
 
+        // `web_search_tool_result` carries an array of `web_search_result`
+        // entries (url/title/encrypted_content) that the model used as
+        // grounding. Surface each as a MessageSource so they appear in the
+        // assistant's Sources footer instead of being silently dropped.
+        if (block.type === 'web_search_tool_result') {
+          const sources = sourcesFromAnthropicWebSearchToolResult(block);
+          return sources.length ? sourcesResult(sources) : null;
+        }
+
+        // A text content block can be seeded with `citations` (rare on
+        // streaming responses, but valid). Capture them so a non-streaming
+        // replay through the same connector behaves identically.
+        if (block.type === 'text' && Array.isArray((block as { citations?: unknown }).citations)) {
+          const sources = collectAnthropicCitations((block as { citations?: unknown[] }).citations);
+          return sources.length ? sourcesResult(sources) : null;
+        }
+
         return null;
       }
 
@@ -161,6 +203,16 @@ export const anthropicConnector: Connector<AnthropicConnectorState> = {
           obj.delta.signature
         ) {
           return { metadata: { thinkingSignature: obj.delta.signature } };
+        }
+
+        // `citations_delta` events stream one citation per delta against the
+        // active text content block (web-search, document, and code-execution
+        // tool citations all use this shape). Surface each as a MessageSource;
+        // the assistant text continues to come from `text_delta` events.
+        if (obj.delta?.type === 'citations_delta') {
+          const citation = (obj.delta as { citation?: unknown }).citation;
+          const source = sourceFromAnthropicCitation(citation);
+          return source ? { source } : null;
         }
 
         if (obj.delta?.type === 'input_json_delta' && typeof obj.delta.partial_json === 'string') {

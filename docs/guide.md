@@ -3,7 +3,9 @@
 How to send messages, stream responses, and parse provider formats with react-chorus.
 
 - [Two usage paths](#two-usage-paths) — the `transport` prop, the `onSend` callback, and auth headers
+- [Changing the system prompt at runtime](#changing-the-system-prompt-at-runtime) — multi-persona toggles, per-conversation prompts, regenerate semantics
 - [Using the WebSocket transport](#using-the-websocket-transport)
+- [Server-side history pre-load](#server-side-history-pre-load) — Next.js / SSR loaders → `initialMessages` + `persistenceKey`
 - [Provider request/body helpers](#provider-requestbody-helpers)
 - [Connectors](#connectors)
 - [Named SSE events](#named-sse-events)
@@ -76,7 +78,7 @@ Seed an uncontrolled chat with a welcome message and include a hidden system pro
 />
 ```
 
-`systemPrompt` is prepended to the request `history` sent through the `transport` prop but is not rendered in the transcript. On the advanced `onSend` path, Chorus does not mutate the `messages` array; read the same value from `helpers.systemPrompt` when building your custom request.
+`systemPrompt` is prepended to the request `history` sent through the `transport` prop but is not rendered in the transcript. On the advanced `onSend` path, Chorus does not mutate the `messages` array; read the same value from `helpers.systemPrompt` when building your custom request. To swap the prompt at runtime — multi-persona toggles, per-conversation prompts, localized system text — see [Changing the system prompt at runtime](#changing-the-system-prompt-at-runtime).
 
 ### Advanced path — `onSend` callback
 
@@ -252,6 +254,107 @@ app.post('/api/chat', async (req, res) => {
 app.listen(3001);
 ```
 
+## Changing the system prompt at runtime
+
+`systemPrompt` is a regular React prop, so swapping its value on a re-render is supported. Common drivers are a user-toggleable persona (Support vs. Sales), a per-conversation prompt loaded with `persistenceKey`, or a localized prompt that follows the UI language. This section spells out exactly when a new value takes effect, how Regenerate interacts with a swap, and how the synthetic system message coexists with a host-supplied `role: 'system'` row in `value` / `initialMessages`.
+
+### Synthetic system message contract
+
+When `systemPrompt` is set, Chorus injects a single synthetic message into outbound request `history`:
+
+```ts
+{ id: RESERVED_SYSTEM_PROMPT_ID, role: 'system', text: systemPrompt }
+```
+
+- The id is exported from `react-chorus`, `react-chorus/server`, and `react-chorus/provider-requests` so request mappers, proxies, and tests can recognise the Chorus-injected row without hard-coding the literal. Host-authored messages must not reuse this id.
+- The synthetic message is **never stored on the transcript.** It is built fresh from `systemPrompt` at the moment a turn is dispatched and prepended to the `history` argument that `transport`'s `formatBody` / `createFetchSSETransport` sees. It does not flow through `value` / `onChange` / `onMessagesChange` and it is not persisted by `persistenceKey`.
+- Only the simple `transport` path mutates `history`. On the `onSend` path Chorus leaves `messages` alone — read the current prompt from `helpers.systemPrompt` and decide how to merge it yourself (the `onSend` snippet above shows the canonical "skip if a host system message already exists" guard).
+
+### When a swapped value takes effect
+
+`systemPrompt` is read at send time, not render time, through a latest-ref. Concretely:
+
+- Changing `systemPrompt` and re-rendering does **not** retroactively rewrite past turns. The transcript is unchanged and no extra request goes out.
+- The very next turn dispatched after the swap — whether triggered by Send, retry after an error, or Regenerate — uses the new value. Earlier assistant messages stay rendered exactly as the server originally produced them.
+- This applies on both paths. Built-in `transport` reads the latest `systemPrompt` when building request `history`; `onSend` reads it from `helpers.systemPrompt` on every invocation.
+
+In other words: think of `systemPrompt` as configuration for the *next* outbound request, not as a piece of conversation state. If you need a system instruction that is itself a permanent part of the transcript (visible to the user, included in copy-conversation export, restored from persistence), put a `role: 'system'` row into `value` / `initialMessages` instead — see the precedence rules below.
+
+### Regenerate after a swap
+
+Regenerate (and Retry-on-error) truncate the transcript back to the last user turn and dispatch a fresh request. Because the request is built at dispatch time, **a Regenerate after the prompt swapped uses the new prompt, not the original one.** This is the intended behaviour for the multi-persona / model-switch use case: after the user picks a different persona, the next attempt should reflect that choice. Edit-and-resubmit on an earlier user message behaves the same way.
+
+If you need to preserve the prompt that was actually used for a given assistant response — for audit logs, "Why did the assistant say this?" debugging, evals — record it in `onFinish` / `onStreamDone` (which receive the assistant message) or stamp it into `Message.metadata` inside `onSend` so it travels with the row. The synthetic system message does not carry that history on its own.
+
+### Precedence vs. a host-supplied `role: 'system'` row
+
+Chorus does **not** merge, dedupe, or replace host system rows. If you set `systemPrompt` *and* include a `{ role: 'system', text: ... }` entry in `value` / `initialMessages`, both reach the request `history`: the synthetic message is prepended at index 0, and the host-authored row stays at its original position. What the provider then sees depends on the request mapper:
+
+- `toAnthropicMessagesBody` and `toGeminiGenerateContentBody` join every `role: 'system'` text in history with `\n\n` and emit a single `system` / `systemInstruction`. Both prompts are concatenated, synthetic first.
+- `toOpenAIChatCompletionsBody`, `toOpenAIResponsesBody`, and `toAiSdkModelMessages` keep each system row as its own input message, in order. The provider receives two system messages.
+- If a caller also passes an explicit `system` (Anthropic) or `systemInstruction` (Gemini) option to the helper, that caller value wins over both history sources and a dev-mode warn-once fires so the dropped history text is observable.
+
+For most apps the merged behaviour is fine — the runtime `systemPrompt` acts as a global preamble while a host-authored `system` row supplies conversation-specific instructions. If you instead need the host row to *replace* the synthetic one (e.g. a per-conversation persona stored alongside messages), drop `systemPrompt` once a host row is present, or filter by `RESERVED_SYSTEM_PROMPT_ID` in a custom `formatBody` / proxy:
+
+```ts
+import { createFetchSSETransport, RESERVED_SYSTEM_PROMPT_ID } from 'react-chorus';
+
+const transport = createFetchSSETransport('/api/chat', {
+  formatBody: (prompt, history) => {
+    const hasHostSystem = history.some(
+      (m) => m.role === 'system' && m.id !== RESERVED_SYSTEM_PROMPT_ID,
+    );
+    const filtered = hasHostSystem
+      ? history.filter((m) => m.id !== RESERVED_SYSTEM_PROMPT_ID)
+      : history;
+    return JSON.stringify({ prompt, history: filtered });
+  },
+});
+```
+
+### Recipe: multi-persona toggle
+
+A minimal persona switcher that compiles against the current public API. The transcript stays intact across persona changes; only the next turn uses the new system prompt.
+
+```tsx
+import 'react-chorus/styles.css';
+import React from 'react';
+import { Chorus } from 'react-chorus';
+import type { Message } from 'react-chorus';
+
+const PERSONAS = {
+  support: 'You are a calm, concise customer-support assistant. Cite docs when relevant.',
+  sales: 'You are an upbeat sales assistant. Highlight value and offer to book a demo.',
+} as const;
+
+type PersonaId = keyof typeof PERSONAS;
+
+export default function App() {
+  const [persona, setPersona] = React.useState<PersonaId>('support');
+  const [messages, setMessages] = React.useState<Message[]>([]);
+
+  return (
+    <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column' }}>
+      <label style={{ padding: 8 }}>
+        Persona:{' '}
+        <select value={persona} onChange={(e) => setPersona(e.target.value as PersonaId)}>
+          <option value="support">Support</option>
+          <option value="sales">Sales</option>
+        </select>
+      </label>
+      <Chorus
+        value={messages}
+        onChange={setMessages}
+        transport="/api/chat"
+        systemPrompt={PERSONAS[persona]}
+      />
+    </div>
+  );
+}
+```
+
+Swapping the dropdown re-renders `<Chorus>` with a new `systemPrompt`. Existing rendered messages keep their text. The next Send — and any Regenerate on the most recent user turn — goes out under the newly selected persona.
+
 ## Using the WebSocket transport
 
 For backends built on Socket.IO, `ws`, Ably, Pusher, or any other WebSocket server, use `createWebSocketTransport`:
@@ -385,6 +488,124 @@ The front-end pairs this with `connector: 'anthropic'` (see the React snippet ab
 
 > **Runnable example:** [`examples/with-websocket`](../examples/with-websocket) wires `createWebSocketTransport` to a tiny local `ws` server that streams canned Claude-style frames, so you can see this recipe end-to-end without an API key — and its README shows the one-line swap to the real Anthropic backend above.
 
+## Server-side history pre-load
+
+The README documents two seed mechanisms in isolation — `initialMessages` (a frozen-at-mount seed) and `persistenceKey` (browser-side storage of follow-up turns). The most common production wiring combines them: a server-rendered route (Next.js App Router `page.tsx`, `getServerSideProps`, Remix `loader`, etc.) fetches the user's conversation from your database, the loader passes that array as `initialMessages`, and `persistenceKey` keeps subsequent edits cached in the browser so a reload between server fetches still shows the in-progress turn.
+
+This recipe lives at the intersection of three subtle behaviors — get one wrong and either the server transcript silently clobbers an in-flight draft, or a stale browser copy clobbers the server transcript. Read the precedence rule below before wiring it up.
+
+### The full recipe
+
+```tsx
+// app/c/[id]/page.tsx — server component (no 'use client')
+import { loadConversation } from '@/lib/conversations';
+import { ChatClient } from './ChatClient';
+
+export default async function Page({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  // Server-side fetch. Run inside the request so the transcript is bound to
+  // the authenticated user — never trust an id you cannot authorize.
+  const initial = await loadConversation(id);
+  return <ChatClient conversationId={id} initial={initial} />;
+}
+```
+
+```tsx
+// app/c/[id]/ChatClient.tsx — client component
+'use client';
+import { Chorus, type Message } from 'react-chorus';
+
+export function ChatClient({ conversationId, initial }: { conversationId: string; initial: Message[] }) {
+  return (
+    <Chorus
+      transport="/api/chat"
+      connector="openai"
+      // Server-loaded transcript becomes the seed. Captured once at mount —
+      // later prop reference changes are ignored (frozen-seed contract).
+      initialMessages={initial}
+      // Browser-side cache of follow-up turns, scoped to this conversation
+      // so different chats never clobber each other.
+      persistenceKey={`chorus:c:${conversationId}`}
+    />
+  );
+}
+```
+
+### Precedence rule when both seeds are present
+
+When `persistenceKey` is set without `value`, Chorus resolves the displayed transcript in this order on every mount:
+
+1. **A stored payload for this key wins.** If `persistenceStorage.getItem(persistenceKey)` returns a non-empty value, that value is rendered and `initialMessages` is silently dropped from the visible transcript.
+2. **No stored payload → `initialMessages` is rendered AND written to storage.** The seed is persisted on first mount so a reload before the user types anything still shows it. From then on, rule 1 applies.
+3. **Async adapters block the composer.** While `getItem()` is still resolving the built-in `<Chorus>` shows its loading placeholder ("Loading saved conversation…") and `useChorusPersistence().loaded` is `false`.
+
+The asymmetry in rule 1 is the footgun: once a user has used the app on a given browser, the server-loaded `initialMessages` becomes *only* a fallback for first visits. If the same conversation has new turns from another device, those turns will not appear because the local stored copy is taken to be authoritative. Pick one of the strategies in the next section based on which source you trust.
+
+### Choosing what to trust
+
+| Pattern | When to use | How to wire it |
+|---------|-------------|----------------|
+| **Cache draft only** | The server is the source of truth and follow-up turns are written to the server when they stream in. Use `persistenceKey` only as a per-load draft cache so a reload mid-turn does not lose the in-flight assistant message. | Scope the key per session: `persistenceKey={`chorus:draft:${conversationId}:${sessionId}`}`. Clear it from `localStorage` after `onFinish` fires (or accept that an old draft eventually rolls off as users start new conversations). |
+| **Browser is the source of truth after first load** | Single-device usage; no server writes after the initial load. The fixture-seeded chat in `examples/with-next-resume` is this shape. | The simple recipe above. `initialMessages` seeds, `persistenceKey` takes over from there. |
+| **Server is the source of truth** | Multi-device, server writes after every turn. | Drop `persistenceKey` entirely. Drive Chorus in **controlled** mode (`value` + `onChange`) and POST follow-up turns to your own write API in `onChange` / `onFinish`. The frozen-seed precedence rule does not apply because there is no `useChorusPersistence` reading from storage. |
+| **Reconcile on mount** | You want a browser draft cache *and* a fresh server fetch to win on reload. | Read the stored payload yourself before mounting, compare to `initial`, and if the server timestamp is newer call `localStorage.removeItem(persistenceKey)` (or your custom adapter's `removeItem`) before rendering `<Chorus>`. |
+
+### SSR and hydration considerations
+
+`<Chorus>` is a client component because it touches `window.localStorage`. The server component above only fetches the transcript and renders the client wrapper — it never imports `react-chorus` directly. Two SSR gotchas to know about:
+
+- **The first paint is empty on async adapters.** With the default synchronous `localStorage` adapter, the stored payload is read during initial render so the client renders the persisted transcript immediately and there is no transcript-shaped hydration mismatch. With an async adapter (IndexedDB, a remote draft API, `Promise`-returning `getItem`), the first client paint shows the loading placeholder and the transcript appears after `getItem()` resolves. Either is fine — just do not expect the server-rendered HTML to include the persisted body.
+- **Pass `initialMessages` as a stable prop.** It is captured once at mount; later reference changes are ignored and dev-warned once. In Next.js this means seed it from a server-fetched array that is shaped during the request, not from React state that mutates on the client.
+
+### Pattern: fresh conversations with `useId` / `useEffect`
+
+For a brand-new conversation that has no server-side row yet, the goal is the opposite of the precedence rule above: every fresh mount should start empty, with no risk that a stored payload from an unrelated previous chat is loaded under the same key. Make the persistence key unique to *this* fresh conversation so storage cannot collide:
+
+```tsx
+'use client';
+import * as React from 'react';
+import { Chorus } from 'react-chorus';
+
+export function NewChatClient() {
+  // React.useId() returns a string that matches between server and client
+  // render for the same component, so the persistenceKey is the same on the
+  // initial paint and after hydration. It is unique per `<NewChatClient>`
+  // mount but stable across re-renders.
+  const id = React.useId();
+  return (
+    <Chorus
+      transport="/api/chat"
+      connector="openai"
+      persistenceKey={`chorus:draft:${id}`}
+    />
+  );
+}
+```
+
+`useId` is stable across re-renders, so React's StrictMode double-invoke and prop changes do not generate a new key mid-conversation (which would split the draft across two storage entries). If you instead want a fresh key per *session* — for example, regenerate it once the user has navigated away and come back — combine `useId` with a `useEffect` that calls `localStorage.removeItem` on mount of a "compose new" route, or use the loader-redirect pattern shown in `examples/with-next-resume` where `/c/new` redirects to `/c/<server-generated-uuid>` so the URL is the source of truth for the conversation id.
+
+```tsx
+'use client';
+import * as React from 'react';
+import { Chorus } from 'react-chorus';
+
+export function NewChatClient({ resetKey }: { resetKey: string }) {
+  const id = React.useId();
+  // Clear any stale draft under this id the first time we mount with a new
+  // resetKey. Use this when the parent route signals "start over" — e.g.,
+  // a "New chat" button bumps resetKey, which forces a one-shot wipe.
+  React.useEffect(() => {
+    window.localStorage.removeItem(`chorus:draft:${id}`);
+  }, [id, resetKey]);
+
+  return <Chorus transport="/api/chat" connector="openai" persistenceKey={`chorus:draft:${id}`} />;
+}
+```
+
+Do not call `useId()` and then immediately overwrite the key with `crypto.randomUUID()` inside a `useEffect` — React StrictMode runs effects twice in development, and the second invocation would change the key after Chorus has already loaded its initial value, which `useChorusPersistence` would dev-warn as a key change mid-session.
+
+> **Runnable example:** [`examples/with-next-resume`](../examples/with-next-resume) wires the full recipe end-to-end — a Next.js App Router page with a stub `loadConversation()` server function that seeds `initialMessages`, a `persistenceKey` scoped to the conversation id, and a `/c/new` route that redirects to a fresh server-generated uuid so each new chat starts with no stored payload.
+
 ## Provider request/body helpers
 
 Connectors parse provider streams on the way back; request helpers serialize Chorus `Message[]` on the way out. Use them on your server proxy (recommended) or as `createFetchSSETransport(..., { formatBody })` body formatters when posting to your own backend.
@@ -439,10 +660,23 @@ The provider connector objects themselves (`openaiConnector`, `anthropicConnecto
 | Name | Provider | SSE format |
 |------|----------|------------|
 | `'openai'` | OpenAI Chat Completions / Responses-compatible streams | selected `choices[0].delta.content`, reasoning fields, `tool_calls`, common Responses API deltas, and Responses output-text annotations as sources |
-| `'anthropic'` | Anthropic Messages API | `content_block_delta` text/thinking deltas plus `tool_use` / `input_json_delta` |
-| `'gemini'` | Google Gemini (AI / Vertex AI) | selected `candidates[0].content.parts[*].text`, thought parts, and `functionCall` parts |
+| `'anthropic'` | Anthropic Messages API | `content_block_delta` text/thinking deltas plus `tool_use` / `input_json_delta`, web-search and document `citations_delta` events, and `web_search_tool_result` content blocks as sources |
+| `'gemini'` | Google Gemini (AI / Vertex AI) | selected `candidates[0].content.parts[*].text`, thought parts, `functionCall` parts, plus `groundingMetadata.groundingChunks` and `citationMetadata.citationSources` / `citations` as sources |
 | `'ai-sdk'` | Vercel AI SDK (`toUIMessageStreamResponse` / `toDataStreamResponse`) | `text-delta` / `reasoning-delta` / `source-url` / `source-document` / `tool-input-*` / `tool-output-*` JSON events, plus prefix-coded data-stream frames (`0:"..."`, `g:"..."`, `j:{...}` sources, `7:`/`8:` source-like annotations, `9:{...}`, `c:{...}`, `a:{...}`, `d:`/`e:` finish, `3:"..."` error) |
 | `'auto'` *(default)* | Auto-detect | Tries OpenAI, then Gemini, known Anthropic events, known Vercel AI SDK events (UI-message-stream JSON and data-stream prefix lines), generic JSON text fields (`text`/`content`/`delta`), then raw plain text |
+
+#### Connector source/citation support matrix
+
+All four built-in connectors emit `MessageSource` entries — see [`MessageSource`](api.md#messagesource) for the field semantics and JSON-persistence contract.
+
+| Connector | Source/citation events parsed | `MessageSource` fields populated |
+|-----------|-------------------------------|----------------------------------|
+| `'openai'` | Responses API `response.output_text.annotation.added` (and annotations on `response.output_text.done`) — `url_citation`, `file_citation`, `file_path`, `container_file_citation` | `id`, `type`, `title`, `url`, `snippet`, `metadata.provider = 'openai'`, plus `annotationType`/`startIndex`/`endIndex`/`fileId`/`containerId` |
+| `'anthropic'` | `content_block_delta` with `citations_delta` (`char_location`, `page_location`, `content_block_location`, `web_search_result_location`); `content_block_start` for `web_search_tool_result` blocks; text-block seeded `citations` arrays | `id` (provider url or `documentTitle#documentIndex`), `type` (`url` for web/web-search results, `document` otherwise), `title`, `url`, `snippet` (Anthropic `cited_text`), `metadata.provider = 'anthropic'`, plus `citationType`/`documentIndex`/`documentTitle`/`startCharIndex`/`endCharIndex`/`startPageNumber`/`endPageNumber`/`startBlockIndex`/`endBlockIndex`/`encryptedIndex`/`toolUseId`/`pageAge`/`encryptedContent` |
+| `'gemini'` | `candidates[].groundingMetadata.groundingChunks` (Google Search grounding `web` and Vertex `retrievedContext`); `candidates[].citationMetadata.citationSources` or `citations` (training-source attribution) | `id` (uri or derived), `type: 'url'`, `title`, `url`, `metadata.provider = 'gemini'`, plus `chunkKind`/`chunkIndex` for grounding chunks and `citationKind`/`startIndex`/`endIndex`/`license`/`publicationDate` for citations |
+| `'ai-sdk'` | UI-message-stream `source-url` / `source-document` and source-like `message-metadata`; data-stream `j:` source frames and source-like `7:` / `8:` annotations | `id`, `type`, `title`, `url`, `snippet`, `metadata.provider = 'ai-sdk'`, plus passthrough `mediaType`/`filename`/`page` |
+
+All connectors derive stable ids (provider id where available, otherwise URL or location-derived) so `appendMessageSource` dedups duplicate streamed frames across deltas and across resumed connections. Sources never become assistant text and never block the stream: the default renderer shows them as a `Sources` footer, `useChorusTranscriptActions` includes them in search/export/copy, and built-in JSON persistence round-trips the whole array.
 
 All built-in connectors also recognise in-band stream errors. If a backend has already started a `200` SSE/WebSocket stream, send `data: {"error":"message"}` (or `{"error":{"message":"message"}}`) to abort the response, call `onError` with an `Error`, and show the configured error banner. Unknown JSON events with a `type` field are no longer assumed to be Anthropic; `{ "type": "delta", "text": "hi" }` renders `hi`, and unknown JSON without a text-like field falls back to the raw payload string.
 
@@ -595,6 +829,8 @@ data: {"type":"message_stop"}
 
 Anthropic `tool_use` maps to a Chorus tool message by `content_block.id` (`toolDelta.id`), `content_block.name` (`toolCall.name`), and accumulated `input_json_delta.partial_json` (`toolCall.input`).
 
+Anthropic citations also flow through this connector. `content_block_delta` events whose `delta.type === 'citations_delta'` (web-search results, document char/page/content-block citations, and code-execution citations) become `MessageSource` entries on the active assistant message — the citation's `cited_text` lands on `source.snippet`, `url`/`title` populate the link, and the original location offsets (char/page/block indexes, `encrypted_index`, `document_index`, `document_title`) are preserved on `source.metadata` so callers can re-anchor citations to source text. `content_block_start` events whose `content_block.type === 'web_search_tool_result'` expand to one source per `web_search_result` entry in the block's `content` array — the encrypted result body stays in `metadata.encryptedContent` instead of leaking into the assistant text.
+
 > **Runnable example:** [`examples/with-anthropic`](../examples/with-anthropic) drives the `anthropic` connector from a built-in mock that streams the events above, so it runs with no API key; its README documents the matching Express + `@anthropic-ai/sdk` proxy.
 
 ## Gemini SSE format
@@ -610,6 +846,8 @@ data: {"candidates":[{"index":0,"content":{"parts":[{"text":"Hello world"}]},"fi
 ```
 
 Gemini `functionCall.name` maps to `toolCall.name`, `functionCall.args` maps to `toolCall.input`, and the connector generates a stable tool delta id from the candidate/part index when Gemini does not provide one.
+
+Grounding and citation sources are also surfaced. `candidates[0].groundingMetadata.groundingChunks` entries (Google Search grounding's `{ web: { uri, title } }` and Vertex AI's `{ retrievedContext: { uri, title } }`) become `MessageSource` entries on the active assistant message, and so does each `candidates[0].citationMetadata.citationSources` (or the alternative `citations`) entry — including its `startIndex`/`endIndex`/`license`/`publicationDate` on `source.metadata`. Sources are extracted whether they arrive on a mid-stream text chunk or on the terminal `finishReason: STOP` frame (whose `content.parts` is empty), and `appendMessageSource` dedups repeated grounding chunks across cumulative chunks via the chunk URI.
 
 > **Runnable example:** [`examples/with-gemini`](../examples/with-gemini) drives the `gemini` connector from a built-in mock that streams the `candidates` chunks above, so it runs with no API key; its README documents the matching Express + `@google/generative-ai` proxy.
 

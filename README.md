@@ -126,6 +126,7 @@ Then `cd` into an example and follow its README — each has full, copy-pasteabl
 | [`examples/basic`](./examples/basic/README.md) | Zero-backend demo using a simulated streaming response, local persistence, clear/reset, and a custom error banner — great for local development |
 | [`examples/multi-conversation`](./examples/multi-conversation/README.md) | Sidebar-driven local conversations with pinned chats, per-chat persistence, and first-message auto-titles |
 | [`examples/with-next`](./examples/with-next/README.md) | Next.js App Router example with a serverless `/api/chat` SSE route handler proxying to OpenAI |
+| [`examples/with-next-resume`](./examples/with-next-resume/README.md) | Next.js App Router example seeding `initialMessages` from a server-side `loadConversation()` and caching follow-up turns under a per-conversation `persistenceKey` — see the [Server-side history pre-load](./docs/guide.md#server-side-history-pre-load) recipe |
 | [`examples/with-openai`](./examples/with-openai/README.md) | Full-stack example: Vite frontend + Express backend proxying to OpenAI |
 | [`examples/with-websocket`](./examples/with-websocket/README.md) | `createWebSocketTransport` + the `anthropic` connector talking to a tiny local `ws` server (canned Claude-style frames; README shows the real Anthropic swap) |
 | [`examples/with-anthropic`](./examples/with-anthropic/README.md) | The `anthropic` connector parsing Anthropic Messages SSE — runs with a built-in mock stream, README documents the Express proxy |
@@ -138,7 +139,7 @@ Then `cd` into an example and follow its README — each has full, copy-pasteabl
 
 The README above is the happy path. The full reference lives in [`docs/`](./docs):
 
-- **[Usage guide](./docs/guide.md)** — the two send paths in depth, auth headers, the WebSocket transport, Next.js / Express / `ws` backends, provider request helpers, connectors, named SSE events, the four provider stream formats, and [using `<Markdown>` and `<ToolCallBlock>` standalone](./docs/guide.md#standalone-components).
+- **[Usage guide](./docs/guide.md)** — the two send paths in depth, auth headers, the WebSocket transport, the [server-side history pre-load](./docs/guide.md#server-side-history-pre-load) recipe (Next.js loader → `initialMessages` + `persistenceKey`), Next.js / Express / `ws` backends, provider request helpers, connectors, named SSE events, the four provider stream formats, and [using `<Markdown>` and `<ToolCallBlock>` standalone](./docs/guide.md#standalone-components).
 - **[API reference](./docs/api.md)** — every `<Chorus>` prop, the `onSend` `helpers`, `ChorusRef`, persistence, `useChorusStream`, the transport factories, custom connectors, tool calls and agent steps, theming, the individual components, and the `Message` shape.
 - **[Out-of-band attachment uploads](./docs/uploads.md)** — an end-to-end `uploadAttachment` recipe for large or non-image files (PDFs, big images) that won't fit inline.
 - **[Deployment notes](./docs/deployment.md)** — bundle-size budgets, SSR and Markdown sanitization, and a strict Content-Security-Policy guide.

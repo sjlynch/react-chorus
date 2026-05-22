@@ -198,4 +198,28 @@ describe('ToolCallBlock', () => {
     const root = container.firstElementChild as HTMLElement;
     expect(root.style.paddingBlock).toBe('2px');
   });
+
+  // CSS regression note: long, single-line tool input/output must render via
+  // horizontal scroll (white-space: pre + overflow-x: auto on
+  // .chorus-tool-call-pre), not mid-token wrapping (the previous
+  // word-break: break-all + pre-wrap combination broke identifiers and URLs).
+  // jsdom does not apply external stylesheets, so this test only pins the
+  // class contract — see src/Chorus.css for the declarations themselves.
+  it('renders long single-line JSON input inside the scroll-affordance class', async () => {
+    const user = userEvent.setup();
+    const longUrl = `https://example.com/${'a'.repeat(220)}`;
+    const call: ToolCall = {
+      name: 'fetch',
+      input: { url: longUrl, payload: JSON.stringify({ blob: 'x'.repeat(180) }) },
+      output: `200 OK ${longUrl}`,
+    };
+    render(<ToolCallBlock toolCall={call} />);
+    await user.click(screen.getByRole('button'));
+
+    const pres = document.querySelectorAll('pre.chorus-tool-call-pre');
+    expect(pres.length).toBe(2);
+    for (const pre of pres) {
+      expect(pre.textContent ?? '').toContain('aaaaaaaaaa');
+    }
+  });
 });

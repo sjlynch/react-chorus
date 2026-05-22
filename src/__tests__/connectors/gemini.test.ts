@@ -482,4 +482,138 @@ describe('geminiConnector', () => {
       expect(result?.warning?.code).toBe('unsupported-part');
     });
   });
+
+  describe('grounding and citation sources', () => {
+    it('extracts a single groundingChunks web source as result.source', () => {
+      const data = JSON.stringify({
+        candidates: [{
+          content: { parts: [{ text: 'Answer' }] },
+          groundingMetadata: {
+            groundingChunks: [{ web: { uri: 'https://docs.example/a', title: 'Doc A' } }],
+          },
+        }],
+      });
+      expect(geminiConnector.extract(data)).toEqual({
+        text: 'Answer',
+        source: {
+          id: 'https://docs.example/a',
+          type: 'url',
+          title: 'Doc A',
+          url: 'https://docs.example/a',
+          metadata: { provider: 'gemini', chunkKind: 'web', chunkIndex: 0 },
+        },
+      });
+    });
+
+    it('extracts multiple groundingChunks as result.sources (with .source mirroring the first)', () => {
+      const data = JSON.stringify({
+        candidates: [{
+          content: { parts: [] },
+          groundingMetadata: {
+            groundingChunks: [
+              { web: { uri: 'https://a.example', title: 'A' } },
+              { retrievedContext: { uri: 'https://b.example', title: 'B' } },
+            ],
+          },
+        }],
+      });
+      const first = {
+        id: 'https://a.example',
+        type: 'url' as const,
+        title: 'A',
+        url: 'https://a.example',
+        metadata: { provider: 'gemini', chunkKind: 'web', chunkIndex: 0 },
+      };
+      const second = {
+        id: 'https://b.example',
+        type: 'url' as const,
+        title: 'B',
+        url: 'https://b.example',
+        metadata: { provider: 'gemini', chunkKind: 'retrievedContext', chunkIndex: 1 },
+      };
+      // `source` mirrors the first, `sources` lists all — matches the
+      // singular/plural pairing already used for `toolDelta` / `toolDeltas`.
+      expect(geminiConnector.extract(data)).toEqual({ source: first, sources: [first, second] });
+    });
+
+    it('extracts citationMetadata.citationSources with index metadata', () => {
+      const data = JSON.stringify({
+        candidates: [{
+          content: { parts: [{ text: 'Cited' }] },
+          citationMetadata: {
+            citationSources: [
+              { startIndex: 0, endIndex: 5, uri: 'https://src.example', title: 'Src', license: 'MIT' },
+            ],
+          },
+        }],
+      });
+      expect(geminiConnector.extract(data)).toEqual({
+        text: 'Cited',
+        source: {
+          id: 'https://src.example',
+          type: 'url',
+          title: 'Src',
+          url: 'https://src.example',
+          metadata: {
+            provider: 'gemini',
+            citationKind: 'citationMetadata',
+            startIndex: 0,
+            endIndex: 5,
+            license: 'MIT',
+          },
+        },
+      });
+    });
+
+    it('also accepts the Vertex `citationMetadata.citations` shape', () => {
+      const data = JSON.stringify({
+        candidates: [{
+          content: { parts: [] },
+          citationMetadata: {
+            citations: [{ uri: 'https://vertex.example', title: 'Vertex' }],
+          },
+        }],
+      });
+      expect(geminiConnector.extract(data)).toEqual({
+        source: {
+          id: 'https://vertex.example',
+          type: 'url',
+          title: 'Vertex',
+          url: 'https://vertex.example',
+          metadata: { provider: 'gemini', citationKind: 'citationMetadata' },
+        },
+      });
+    });
+
+    it('returns sources on a terminal STOP frame with no parts content', () => {
+      const data = JSON.stringify({
+        candidates: [{
+          finishReason: 'STOP',
+          content: { parts: [] },
+          groundingMetadata: {
+            groundingChunks: [{ web: { uri: 'https://final.example', title: 'Final' } }],
+          },
+        }],
+      });
+      const result = geminiConnector.extract(data);
+      expect(result?.done).toBe(true);
+      expect(result?.source).toEqual({
+        id: 'https://final.example',
+        type: 'url',
+        title: 'Final',
+        url: 'https://final.example',
+        metadata: { provider: 'gemini', chunkKind: 'web', chunkIndex: 0 },
+      });
+    });
+
+    it('skips groundingChunks without a renderable uri/title', () => {
+      const data = JSON.stringify({
+        candidates: [{
+          content: { parts: [{ text: 'Answer' }] },
+          groundingMetadata: { groundingChunks: [{ web: {} }, { retrievedContext: {} }] },
+        }],
+      });
+      expect(geminiConnector.extract(data)).toEqual({ text: 'Answer' });
+    });
+  });
 });
