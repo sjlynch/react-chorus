@@ -281,9 +281,9 @@ async function runCommand(command, args, { cwd, env = {}, shell = process.platfo
   });
 }
 
-async function runNpm(args, { cwd, logger }) {
+async function runNpm(args, { cwd, logger, quiet = false }) {
   const result = await runCommand(npmBin, args, { cwd });
-  if (result.exitCode !== 0) {
+  if (result.exitCode !== 0 && !quiet) {
     logger.error(`Command failed in ${toRelative(rootDir, cwd)}: ${commandForLog(npmBin, args)}`);
     if (result.stdout.trim()) logger.error(result.stdout.trimEnd());
     if (result.stderr.trim()) logger.error(result.stderr.trimEnd());
@@ -292,18 +292,46 @@ async function runNpm(args, { cwd, logger }) {
 }
 
 /**
- * npm install args for an example package. Examples that ship a committed
- * package-lock.json install reproducibly with `npm ci`; the rest fall back to
- * `npm install`. `--package-lock=false` is intentionally NOT passed: it would
- * make npm ignore a committed lockfile, so every CI run would re-resolve the
- * dependency tree fresh against the registry and a registry-side release could
- * change what CI builds with no source change.
+ * Install an example package's dependencies for verification.
+ *
+ * Examples that ship a committed package-lock.json install reproducibly with
+ * `npm ci`, so a registry-side dependency release cannot silently change what
+ * CI builds. `--package-lock=false` is intentionally NOT passed: it would make
+ * npm ignore a committed lockfile and re-resolve the whole tree fresh against
+ * the registry. Examples without a lockfile install with `npm install`.
+ *
+ * Every example also depends on the library under test via `file:../..`, which
+ * a committed lockfile snapshots alongside its registry dependencies. `npm ci`
+ * requires package.json and package-lock.json to be exactly in sync and
+ * hard-fails (EUSAGE) otherwise, so a library change — a version/dependency
+ * bump, or on some npm versions a `dist/` rebuild — can leave that `file:`
+ * snapshot stale enough to reject an example whose own sources never changed.
+ * That would break `verify:examples` (and therefore `prepublishOnly`) from a
+ * clean clone after a library rebuild. To stay reproducible, a failed `npm ci`
+ * falls back to `npm install`, which reconciles the stale `file:` entry in
+ * place; registry dependencies still resolve from the committed lockfile, so
+ * the reproducibility guarantee for third-party packages is preserved. The
+ * fallback is loud — regenerate the example lockfile after a library version
+ * bump to keep `npm ci` as the fast path.
  */
-function exampleInstallArgs(packageDir) {
+async function installExampleDependencies(packageDir, { logger }) {
   const base = ['--prefer-offline', '--no-audit', '--no-fund'];
-  return existsSync(path.join(packageDir, 'package-lock.json'))
-    ? ['ci', ...base]
-    : ['install', ...base];
+  const relativeDir = toRelative(rootDir, packageDir);
+
+  if (!existsSync(path.join(packageDir, 'package-lock.json'))) {
+    return runNpm(['install', ...base], { cwd: packageDir, logger });
+  }
+
+  const ci = await runNpm(['ci', ...base], { cwd: packageDir, logger, quiet: true });
+  if (ci.exitCode === 0) return ci;
+
+  logger.warn(
+    `Warning: \`npm ci\` failed in ${relativeDir}; retrying with \`npm install\`. ` +
+      'A committed example lockfile can fall out of sync with the local ' +
+      '`file:../..` react-chorus dependency after a library change — regenerate ' +
+      `the lockfile (\`npm install\` in ${relativeDir}) to restore the \`npm ci\` fast path.`,
+  );
+  return runNpm(['install', ...base], { cwd: packageDir, logger });
 }
 
 export async function runExampleBuilds({ cwd = rootDir, logger = console } = {}) {
@@ -325,10 +353,7 @@ export async function runExampleBuilds({ cwd = rootDir, logger = console } = {})
     const relativeDir = toRelative(cwd, example.packageDir);
     logger.log(`Verifying runnable example ${relativeDir}...`);
 
-    const install = await runNpm(exampleInstallArgs(example.packageDir), {
-      cwd: example.packageDir,
-      logger,
-    });
+    const install = await installExampleDependencies(example.packageDir, { logger });
     if (install.exitCode !== 0) {
       problems.push(`${relativeDir} dependencies failed to install.`);
       continue;
@@ -437,7 +462,7 @@ export async function runStartOnlyExampleChecks({ cwd = rootDir, logger = consol
       continue;
     }
 
-    const install = await runNpm(exampleInstallArgs(record.packageDir), { cwd: record.packageDir, logger });
+    const install = await installExampleDependencies(record.packageDir, { logger });
     if (install.exitCode !== 0) {
       problems.push(`${relativeDir} dependencies failed to install.`);
       continue;
