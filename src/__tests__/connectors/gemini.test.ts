@@ -183,6 +183,28 @@ describe('geminiConnector', () => {
     });
   });
 
+  it('attaches usageMetadata token counts as metadata.usage only on the terminal frame', () => {
+    const usageMetadata = { promptTokenCount: 18, candidatesTokenCount: 24, totalTokenCount: 42 };
+    // Gemini repeats usageMetadata (the counts are cumulative) on every chunk.
+    // A mid-stream frame (no finishReason) must not attach it, mirroring the
+    // safetyRatings handling so onStreamMetadata fires once per stream.
+    const midStream = JSON.stringify({
+      candidates: [{ content: { parts: [{ text: 'hi' }] } }],
+      usageMetadata,
+    });
+    expect(geminiConnector.extract(midStream)).toEqual({ text: 'hi' });
+
+    const terminal = JSON.stringify({
+      candidates: [{ finishReason: 'STOP', content: { parts: [{ text: '!' }] } }],
+      usageMetadata,
+    });
+    expect(geminiConnector.extract(terminal)).toEqual({
+      text: '!',
+      done: true,
+      metadata: { usage: { promptTokens: 18, completionTokens: 24, totalTokens: 42 } },
+    });
+  });
+
   it('surfaces promptFeedback.blockReason as an error even when candidates is empty', () => {
     const safetyRatings = [{ category: 'HARM_CATEGORY_HATE_SPEECH', probability: 'HIGH' }];
     const payload = {

@@ -1,7 +1,7 @@
 import { extractErrorMessage } from './error';
 import type { Connector, ConnectorResult } from './types';
 import { extractChatCompletionEvent } from './openai/chatCompletions';
-import { drainResponseToolBuffer, extractOpenAIResponseEvent } from './openai/responses';
+import { drainResponseRefusalText, drainResponseToolBuffer, extractOpenAIResponseEvent } from './openai/responses';
 import { appendToolDelta, hasToolDelta, type ResponseToolRef } from './openai/shared';
 import {
   compileThinkTags,
@@ -62,9 +62,14 @@ function flushOpenAIState(state: OpenAIConnectorState): ConnectorResult | null {
   // Replay any tool-call argument deltas still buffered because their
   // `output_item.added` never arrived, so the call surfaces instead of vanishing.
   const orphanToolDeltas = drainResponseToolBuffer(state);
+  // Surface a refusal buffered across `refusal.added`/`.delta` whose closing
+  // `refusal.done` never arrived before the body closed, mirroring the tool-arg
+  // drain above — otherwise the refusal is lost and the turn renders blank.
+  const refusal = drainResponseRefusalText(state);
   resetOpenAIState(state);
   for (const toolDelta of orphanToolDeltas) appendToolDelta(result, toolDelta);
-  return result.text || result.reasoning || hasToolDelta(result) ? result : null;
+  if (refusal) result.error = refusal;
+  return result.text || result.reasoning || hasToolDelta(result) || result.error ? result : null;
 }
 
 function finishResult(result: ConnectorResult | null, state: OpenAIConnectorState) {
