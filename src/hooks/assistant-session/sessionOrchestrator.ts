@@ -128,7 +128,7 @@ export function useSessionOrchestrator<TMeta>(deps: SessionOrchestratorDeps<TMet
   const activeSessionIdRef = React.useRef(0);
   const activeSendPathRef = React.useRef<ChorusSendPath | null>(null);
   const lateDepsRef = React.useRef<SessionOrchestratorLateDeps<TMeta> | null>(null);
-  const { warnMissingResponseHandler, warnEmptyOnSend, warnTransportOnSend } = useSessionWarnings();
+  const { warnMissingResponseHandler, warnEmptyOnSend, warnReturnedMessageIgnored, warnTransportOnSend } = useSessionWarnings();
 
   const bindLateDeps = React.useCallback((next: SessionOrchestratorLateDeps<TMeta>) => {
     lateDepsRef.current = next;
@@ -300,12 +300,13 @@ export function useSessionOrchestrator<TMeta>(deps: SessionOrchestratorDeps<TMet
       observers,
       showStreamError,
       warnEmptyOnSend,
+      warnReturnedMessageIgnored,
       sessionId,
       text,
       history,
       onSend: sendPath.onSend,
     });
-  }, [abortActiveAssistant, appendAssistantNow, appendAssistantReasoningNow, beginAssistantSession, clearStreamError, completeActiveSession, hasStartedAssistantRef, invalidateAssistantSession, isAssistantSessionActive, messagesRef, minAssistantDelayMsRef, observers, onSendRef, rememberSubmittedTurn, removePendingAssistant, resetStreamState, setInternalSending, setTransportBusy, showStreamError, systemPromptRef, transportRef, updateSessionMessages, warnEmptyOnSend, warnMissingResponseHandler, warnTransportOnSend]);
+  }, [abortActiveAssistant, appendAssistantNow, appendAssistantReasoningNow, beginAssistantSession, clearStreamError, completeActiveSession, hasStartedAssistantRef, invalidateAssistantSession, isAssistantSessionActive, messagesRef, minAssistantDelayMsRef, observers, onSendRef, rememberSubmittedTurn, removePendingAssistant, resetStreamState, setInternalSending, setTransportBusy, showStreamError, systemPromptRef, transportRef, updateSessionMessages, warnEmptyOnSend, warnMissingResponseHandler, warnReturnedMessageIgnored, warnTransportOnSend]);
 
   // `abortActiveAssistant` is stable in real <Chorus> usage, but a hook-level
   // consumer can pass an unstable `flushPersistence` whose identity ripples
