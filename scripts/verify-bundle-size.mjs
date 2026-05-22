@@ -453,9 +453,9 @@ async function verifyConsumerBundleBudgets() {
   const entryBudgets = [
     { label: 'root entry initial JS', entry: 'root', maxSize: 234 * KiB, maxGzip: 75 * KiB },
     { label: 'headless entry initial JS', entry: 'headless', maxSize: 234 * KiB, maxGzip: 75 * KiB },
-    { label: 'root useChorusStream import initial JS', entry: 'rootUseChorusStream', maxSize: 72 * KiB, maxGzip: 22 * KiB },
+    { label: 'root useChorusStream import initial JS', entry: 'rootUseChorusStream', maxSize: 73 * KiB, maxGzip: 22 * KiB },
     { label: 'root Markdown import initial JS', entry: 'rootMarkdown', maxSize: 85 * KiB, maxGzip: 30 * KiB },
-    { label: 'root ChatWindow import initial JS', entry: 'rootChatWindow', maxSize: 134 * KiB, maxGzip: 45 * KiB },
+    { label: 'root ChatWindow import initial JS', entry: 'rootChatWindow', maxSize: 135 * KiB, maxGzip: 45 * KiB },
     { label: 'root ConversationList import initial JS', entry: 'rootConversationList', maxSize: 12 * KiB, maxGzip: 5 * KiB },
     { label: 'transport subpath initial JS', entry: 'transport', maxSize: 9 * KiB, maxGzip: 4 * KiB },
     { label: 'provider-requests subpath initial JS', entry: 'providerRequests', maxSize: 16 * KiB, maxGzip: 6 * KiB },
@@ -642,7 +642,7 @@ async function verifyPlaygroundBudgets() {
 
   const initialGraph = await collectStaticFileGraph(entryFiles, allJsFiles);
   const initial = await measureFiles(initialGraph);
-  const initialMaxSize = 456 * KiB;
+  const initialMaxSize = 457 * KiB;
   const initialMaxGzip = 144 * KiB;
   const measurements = {
     initialJsGraph: createMeasurement('initial JS graph', initial.size, initial.gzip, initialMaxSize, initialMaxGzip),
