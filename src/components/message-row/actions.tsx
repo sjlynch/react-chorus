@@ -3,10 +3,11 @@ import { Copy, Pencil, RefreshCw, ThumbsDown, ThumbsUp, Trash2 } from 'lucide-re
 import type { Message, MessageFeedback } from '../../types';
 import { DEFAULT_MESSAGE_ACTION_LABELS } from '../../labels/messageActions';
 import type { ChorusMessageActionLabels, ChorusSpeakerLabels } from '../../labels/types';
-import { COPY_FEEDBACK_DURATION_MS, canWriteTextToClipboard, writeTextToClipboard } from '../../utils/messageCopy';
+import { canWriteTextToClipboard, writeTextToClipboard } from '../../utils/messageCopy';
 import { joinClasses } from '../../utils/className';
 import { InlineMessageEditor } from './InlineMessageEditor';
 import { useActionEditing, useReturnFocusAfterEditing } from './renderState';
+import { useCopyFeedback } from './useCopyFeedback';
 import { MessageSpeakerLabel } from './speaker';
 import type { MessageCopyResult, MessageRenderActions } from './types';
 
@@ -32,8 +33,7 @@ export function MessageActions({ actions, onEditRequested, labels = DEFAULT_MESS
   const initialFeedback = actions.initialFeedback ?? null;
   const [selectedFeedback, setSelectedFeedback] = React.useState<MessageFeedback | null>(initialFeedback);
   const selectedFeedbackRef = React.useRef<MessageFeedback | null>(initialFeedback);
-  const [copyFailed, setCopyFailed] = React.useState(false);
-  const copyFailureTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { copyFailed, showCopyFailed, copyLabel } = useCopyFeedback(labels);
   const hasActions = hasRenderableActions(actions);
 
   React.useEffect(() => {
@@ -41,20 +41,7 @@ export function MessageActions({ actions, onEditRequested, labels = DEFAULT_MESS
     setSelectedFeedback(initialFeedback);
   }, [initialFeedback]);
 
-  React.useEffect(() => () => {
-    if (copyFailureTimerRef.current) clearTimeout(copyFailureTimerRef.current);
-  }, []);
-
   if (!hasActions) return null;
-
-  const showCopyFailed = () => {
-    if (copyFailureTimerRef.current) clearTimeout(copyFailureTimerRef.current);
-    setCopyFailed(true);
-    copyFailureTimerRef.current = setTimeout(() => {
-      setCopyFailed(false);
-      copyFailureTimerRef.current = null;
-    }, COPY_FEEDBACK_DURATION_MS);
-  };
 
   const handleCopy = async () => {
     try {
@@ -73,8 +60,6 @@ export function MessageActions({ actions, onEditRequested, labels = DEFAULT_MESS
     setSelectedFeedback(next);
     actions.feedback?.(next);
   };
-
-  const copyLabel = copyFailed ? labels.copyFailed : labels.copy;
 
   return (
     <div className="chorus-actions">

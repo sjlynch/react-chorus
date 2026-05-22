@@ -6,7 +6,8 @@ Module map:
 
 - `types.ts` — shared contracts: `MessageBubbleSlots`, `MessageMarkdownProps`, `MessageTimestampFormatter`, `MessageCopyResult`, and `MessageRenderActions`.
 - `bubble.tsx` — renders message content: role class, bubble layout, attachments (image previews or file names), `reasoning` details block (reader-collapsible even while streaming auto-opens it; the auto-open hint is latched so the panel stays open after answer text arrives until the reader collapses it), text through `Markdown`, and a `ToolCallBlock` for `role: 'tool'` messages; exports `MessageBubble`.
-- `actions.tsx` — owns the copy/regenerate/edit/delete/feedback action controls, copy-failed timer state, and copy action creation.
+- `actions.tsx` — owns the copy/regenerate/edit/delete/feedback action controls, composing `useCopyFeedback` for copy-failure state, and copy action creation.
+- `useCopyFeedback.ts` — the copy-failure timer state machine extracted from `MessageActions`: owns `copyFailed`, the `COPY_FEEDBACK_DURATION_MS` reset timeout (cleared on retrigger and unmount), and the derived `copyLabel`.
 - `InlineMessageEditor.tsx` — inline `<textarea>` editor with save/cancel controls; resizes via `chat-input/useTextareaAutosize` so it matches the composer.
 - `renderState.tsx` — `MessageRenderStateContext`/provider and `useActionEditing`, which link the default action controls' edit state to the row when a host swaps in a custom `MessageBubble`; also `useReturnFocusAfterEditing` for focus return on cancel.
 - `speaker.tsx` — screen-reader speaker labels and the role-to-label helper.
