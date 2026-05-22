@@ -204,6 +204,17 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
    */
   renderAttachmentError?: ((context: RenderAttachmentErrorContext) => React.ReactNode) | null;
   onChange?: (messages: Message<TMeta>[]) => void;
+  /**
+   * Observation hook called once per streamed assistant **text** chunk, on both
+   * the `transport` and `onSend` paths. `chunk` is the incremental text delta
+   * (not the running transcript); `messageId` is the assistant message it
+   * belongs to, so chunks can be correlated to a message.
+   *
+   * Text content only: reasoning/thinking deltas, tool-call deltas, and
+   * provider error frames do NOT trigger `onChunk`. A host mirroring or
+   * measuring streamed output through `onChunk` therefore never sees reasoning
+   * tokens. Pure observation — it does not affect streaming or rendering.
+   */
   onChunk?: (chunk: string, messageId: string) => void;
   /** Called after the clear/reset action chooses the next message list. */
   onClear?: (messages: Message<TMeta>[]) => void;
