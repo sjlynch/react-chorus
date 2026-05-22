@@ -61,6 +61,8 @@ interface SdkAiSdkStreamTextParams {
   messages: SdkAiSdkModelMessage[];
   model?: unknown;
   temperature?: number;
+  stream?: boolean;
+  system?: string;
 }
 
 declare function sdkAiSdkStreamText(params: SdkAiSdkStreamTextParams): Promise<unknown>;

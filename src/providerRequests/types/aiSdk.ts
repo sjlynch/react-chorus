@@ -1,6 +1,12 @@
-import type { ProviderMappingOptions, StripUnsupportedAttachmentOption } from './common';
+import type { ProviderMappingOptions, ProviderToolsOption, StripChorusOptions } from './common';
 
 export interface AiSdkModelMessagesBodyOptions<TMeta = Record<string, unknown>> extends ProviderMappingOptions<TMeta> {
+  /** Caller-provided system instruction; wins over history-derived `role: 'system'` text (a dev warn-once fires when both are present). */
+  system?: string;
+  /** Stream toggle on the serialized body. Defaults to `true` when omitted so a streaming proxy route works without further config. */
+  stream?: boolean;
+  /** Chorus tool definitions; serialized into the AI SDK `tools` record. Falls through unchanged if a raw AI SDK tool value is detected. */
+  tools?: ProviderToolsOption<TMeta>;
   [key: string]: unknown;
 }
 
@@ -86,6 +92,8 @@ export type AiSdkModelMessage =
   | AiSdkAssistantModelMessage
   | AiSdkToolModelMessage;
 
-export type AiSdkModelMessagesBody<TOptions = object> = StripUnsupportedAttachmentOption<TOptions> & {
+export type AiSdkModelMessagesBody<TOptions = object> = StripChorusOptions<TOptions> & {
   messages: AiSdkModelMessage[];
+  stream: boolean;
+  system?: string;
 };
