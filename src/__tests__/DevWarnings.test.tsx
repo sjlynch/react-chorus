@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, waitFor } from '@testing-library/react';
+import { ChatInput } from '../components/ChatInput';
 import { ChatWindow } from '../components/ChatWindow';
 import { Chorus } from '../Chorus';
 import type { Message } from '../types';
@@ -47,6 +48,38 @@ describe('development warnings', () => {
 
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('showSystemMessages'));
+  });
+
+  it('does not warn about a host `onKeyDown` on `<ChatInput>` in production', () => {
+    process.env.NODE_ENV = 'production';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    render(<ChatInput value="" onChange={() => undefined} onSend={() => undefined} onKeyDown={() => undefined} />);
+
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('does not warn about `<ChatInput>` when no host `onKeyDown` is passed', () => {
+    process.env.NODE_ENV = 'development';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    render(<ChatInput value="" onChange={() => undefined} onSend={() => undefined} />);
+
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('`onKeyDown` passed to `<ChatInput>`'));
+  });
+
+  it('warns once that a host `onKeyDown` on `<ChatInput>` attaches to the container, not the textarea', () => {
+    process.env.NODE_ENV = 'development';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { rerender } = render(
+      <ChatInput value="" onChange={() => undefined} onSend={() => undefined} onKeyDown={() => undefined} />,
+    );
+
+    rerender(<ChatInput value="" onChange={() => undefined} onSend={() => undefined} onKeyDown={() => undefined} />);
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('`onKeyDown` passed to `<ChatInput>`'));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('not the inner `<textarea>`'));
   });
 
   it('warns when both messages and initialMessages are provided', async () => {

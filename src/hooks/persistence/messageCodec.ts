@@ -58,6 +58,7 @@ function isValidToolCall(value: unknown): value is ToolCall {
  * Rejection reasons:
  * - id missing, not a string, or blank (empty or whitespace-only)
  * - role not one of 'user' | 'assistant' | 'system' | 'tool'
+ * - `createdAt` present and not a string (the public contract is an ISO-8601 string)
  * - non-tool message has non-string `text`
  * - tool message missing a valid `toolCall` (must be an object with a non-blank `name`)
  * - attachments on a role that does not support them (system, tool), or not an Attachment[]
@@ -72,6 +73,14 @@ function validateStoredMessage<TMeta>(value: unknown): { ok: true; message: Mess
   if (typeof value.id !== 'string' || value.id.trim().length === 0) return { ok: false, reason: 'missing or empty id' };
   if (typeof value.role !== 'string' || !VALID_ROLES.has(value.role as Role)) {
     return { ok: false, reason: `invalid role: ${String(value.role)}` };
+  }
+
+  // `createdAt` is optional, but when present the public contract is an
+  // ISO-8601 string. A number or object survives JSON round-trips yet renders
+  // as `Invalid Date` under `<Chorus showTimestamps>`, so reject it here —
+  // mirroring the per-role `reasoning` checks below. Applies to every role.
+  if (value.createdAt !== undefined && typeof value.createdAt !== 'string') {
+    return { ok: false, reason: 'createdAt is not a string' };
   }
 
   const role = value.role as Role;
@@ -149,11 +158,12 @@ function validateStoredMessages<TMeta>(parsed: unknown): Message<TMeta>[] {
  * warning listing what was dropped) so a corrupted payload cannot crash rendering.
  *
  * Invalid entries dropped here include: non-object entries, missing or blank `id`,
- * unknown `role`, non-string `text` on non-tool messages, tool messages without a
- * valid `toolCall` (object with non-blank `name`), and attachments on roles that do
- * not support them. A non-array payload (e.g. a `{"messages":[...]}` object) loads as
- * empty with a dev warning, so a silently unreadable transcript is not mistaken for an
- * empty one. Pass a custom `deserializeMessages` to take over validation; the
+ * unknown `role`, non-string `createdAt`, non-string `text` on non-tool messages,
+ * tool messages without a valid `toolCall` (object with non-blank `name`), and
+ * attachments on roles that do not support them. A non-array payload (e.g. a
+ * `{"messages":[...]}` object) loads as empty with a dev warning, so a silently
+ * unreadable transcript is not mistaken for an empty one. Pass a custom
+ * `deserializeMessages` to take over validation; the
  * persistence hook still applies an array guard (with the same dev warning) to whatever
  * the custom hook returns.
  */

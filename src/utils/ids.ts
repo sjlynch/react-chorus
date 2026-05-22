@@ -24,9 +24,17 @@ function createProcessNonce(): string {
 
 const processNonce = createProcessNonce();
 
+/**
+ * Build a prefixed random id. `prefix` is applied on *both* code paths so ids
+ * are consistently shaped regardless of runtime: `${prefix}-${uuid}` when
+ * `crypto.randomUUID` is available, `${prefix}-${nonce}-${time}-${counter}` on
+ * the WebCrypto-less fallback. Previously the UUID path returned a bare,
+ * prefix-less UUID, so generated ids — and the storage-key suffixes derived
+ * from them — differed between modern browsers and fallback runtimes/tests.
+ */
 export function createRandomId(prefix: string): string {
   const randomUUID = globalThis.crypto?.randomUUID;
-  if (typeof randomUUID === 'function') return randomUUID.call(globalThis.crypto);
+  if (typeof randomUUID === 'function') return `${prefix}-${randomUUID.call(globalThis.crypto)}`;
 
   const next = (fallbackCounters.get(prefix) ?? 0) + 1;
   fallbackCounters.set(prefix, next);

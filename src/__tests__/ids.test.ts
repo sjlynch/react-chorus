@@ -9,11 +9,13 @@ describe('createRandomId', () => {
     vi.resetModules();
   });
 
-  it('delegates to crypto.randomUUID when available', async () => {
+  it('delegates to crypto.randomUUID when available and keeps the prefix', async () => {
     vi.stubGlobal('crypto', { randomUUID: () => 'stub-uuid' });
     vi.resetModules();
     const { createRandomId } = await import('../utils/ids');
-    expect(createRandomId('m')).toBe('stub-uuid');
+    // The UUID path must still apply the prefix so ids are shaped consistently
+    // with the WebCrypto-less fallback path (`${prefix}-...`).
+    expect(createRandomId('m')).toBe('m-stub-uuid');
   });
 
   it('fallback produces no duplicates across sibling realms in the same millisecond', async () => {

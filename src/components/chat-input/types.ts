@@ -39,7 +39,8 @@ export interface ChatInputHandle {
  * - An `onKeyDown` passed this way fires for the root container. The composer's
  *   own Enter-to-send handler lives on the textarea and calls `preventDefault()`,
  *   so a root `onKeyDown` will NOT observe textarea keystrokes the composer
- *   consumes (notably Enter). It still sees keys the composer ignores.
+ *   consumes (notably Enter). It still sees keys the composer ignores. Passing
+ *   `onKeyDown` emits a one-time `console.warn` in development explaining this.
  * - `style` is merged after the palette CSS variables. `aria-disabled` and
  *   `title` are used only as fallbacks: the composer overrides them while it is
  *   disabled/read-only (`aria-disabled`) or has a disabled reason (`title`).

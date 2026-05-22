@@ -129,6 +129,57 @@ describe('Chorus onSend lifecycle', () => {
     warn.mockRestore();
   });
 
+  it('warns once when onSend streams via helpers and also returns a message, keeping the streamed output', async () => {
+    const user = userEvent.setup();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const onFinish = vi.fn();
+    const onSend = vi.fn<OnSend>(async (_text, _messages, helpers) => {
+      helpers.appendAssistant('streamed reply');
+      helpers.finalizeAssistant();
+      return { id: 'returned', role: 'assistant', text: 'ignored returned message' };
+    });
+
+    render(<Chorus onSend={onSend} minAssistantDelayMs={0} onFinish={onFinish} />);
+
+    await sendMessage(user, 'both');
+    await waitFor(() => expect(onFinish).toHaveBeenCalledOnce());
+
+    // The streamed output wins; the returned message is dropped.
+    expect(await screen.findByText('streamed reply')).toBeInTheDocument();
+    expect(screen.queryByText('ignored returned message')).not.toBeInTheDocument();
+    expect(onFinish.mock.calls[0][0]).toEqual(expect.objectContaining({
+      message: expect.objectContaining({ text: 'streamed reply' }),
+    }));
+
+    const ignoredWarnings = warn.mock.calls.filter(call => String(call[0]).includes('returned a `Message` after already streaming'));
+    expect(ignoredWarnings).toHaveLength(1);
+
+    // Warns at most once per hook instance.
+    await sendMessage(user, 'again');
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
+    expect(warn.mock.calls.filter(call => String(call[0]).includes('returned a `Message` after already streaming'))).toHaveLength(1);
+    warn.mockRestore();
+  });
+
+  it('warns when onSend streams without finalizing and also returns a message', async () => {
+    const user = userEvent.setup();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const onSend = vi.fn<OnSend>(async (_text, _messages, helpers) => {
+      // Streams a chunk but never calls finalizeAssistant — Chorus auto-finalizes.
+      helpers.appendAssistant('auto-finalized reply');
+      return { id: 'returned', role: 'assistant', text: 'ignored returned message' };
+    });
+
+    render(<Chorus onSend={onSend} minAssistantDelayMs={0} />);
+
+    await sendMessage(user, 'both-no-finalize');
+
+    expect(await screen.findByText('auto-finalized reply')).toBeInTheDocument();
+    expect(screen.queryByText('ignored returned message')).not.toBeInTheDocument();
+    await waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining('returned a `Message` after already streaming')));
+    warn.mockRestore();
+  });
+
   it('does not call onFinish on aborts, errors, or sends with no assistant output', async () => {
     const user = userEvent.setup();
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
