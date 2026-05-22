@@ -4,6 +4,26 @@ export type {
   UnsupportedAttachmentText,
 } from './types/common';
 export type {
+  AiSdkAssistantContentPart,
+  AiSdkAssistantModelMessage,
+  AiSdkDataContent,
+  AiSdkFilePart,
+  AiSdkImagePart,
+  AiSdkJsonValue,
+  AiSdkModelMessage,
+  AiSdkModelMessagesBody,
+  AiSdkModelMessagesBodyOptions,
+  AiSdkReasoningPart,
+  AiSdkSystemModelMessage,
+  AiSdkTextPart,
+  AiSdkToolCallPart,
+  AiSdkToolModelMessage,
+  AiSdkToolResultOutput,
+  AiSdkToolResultPart,
+  AiSdkUserContentPart,
+  AiSdkUserModelMessage,
+} from './types/aiSdk';
+export type {
   OpenAIChatCompletionsAssistantMessage,
   OpenAIChatCompletionsBody,
   OpenAIChatCompletionsBodyOptions,

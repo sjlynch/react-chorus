@@ -47,7 +47,8 @@ export interface FetchTransportInit<TMeta = Record<string, unknown>> extends Omi
    * `react-chorus/server`, and `react-chorus/provider-requests`). A `formatBody`
    * that ignores `system`-role messages silently drops `systemPrompt`; the
    * provider mappers (`formatOpenAIChatCompletionsBody`,
-   * `formatAnthropicMessagesBody`, `formatGeminiGenerateContentBody`) already
+   * `formatAiSdkModelMessagesBody`, `formatAnthropicMessagesBody`,
+   * `formatGeminiGenerateContentBody`) already
    * map it for you. Do NOT also pass a provider-level `system` /
    * `systemInstruction` option: that double-specifies the system prompt and
    * trips a one-time dev-mode precedence warning, with the history-derived text

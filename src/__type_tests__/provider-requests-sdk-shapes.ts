@@ -6,6 +6,8 @@
 // looser than the real SDKs accept.
 
 import {
+  toAiSdkModelMessages,
+  toAiSdkModelMessagesBody,
   toAnthropicMessages,
   toAnthropicMessagesBody,
   toGeminiContents,
@@ -22,6 +24,56 @@ const history: Message[] = [
   { id: 'u1', role: 'user', text: 'Hi', attachments: [] },
   { id: 'a1', role: 'assistant', text: 'Hello!' },
 ];
+
+// ───── Vercel AI SDK ModelMessage / streamText shape ─────
+
+type SdkAiSdkDataContent = string | URL;
+type SdkAiSdkJsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | SdkAiSdkJsonValue[]
+  | { [key: string]: SdkAiSdkJsonValue };
+type SdkAiSdkTextPart = { type: 'text'; text: string };
+type SdkAiSdkReasoningPart = { type: 'reasoning'; text: string };
+type SdkAiSdkImagePart = { type: 'image'; image: SdkAiSdkDataContent; mediaType?: string };
+type SdkAiSdkFilePart = { type: 'file'; data: SdkAiSdkDataContent; mediaType: string; filename?: string };
+type SdkAiSdkToolCallPart = { type: 'tool-call'; toolCallId: string; toolName: string; input: unknown };
+type SdkAiSdkToolResultOutput =
+  | { type: 'text'; value: string }
+  | { type: 'json'; value: SdkAiSdkJsonValue }
+  | { type: 'error-text'; value: string }
+  | { type: 'error-json'; value: SdkAiSdkJsonValue };
+type SdkAiSdkToolResultPart = {
+  type: 'tool-result';
+  toolCallId: string;
+  toolName: string;
+  output: SdkAiSdkToolResultOutput;
+};
+type SdkAiSdkModelMessage =
+  | { role: 'system'; content: string }
+  | { role: 'user'; content: string | Array<SdkAiSdkTextPart | SdkAiSdkImagePart | SdkAiSdkFilePart> }
+  | { role: 'assistant'; content: string | Array<SdkAiSdkTextPart | SdkAiSdkReasoningPart | SdkAiSdkToolCallPart> }
+  | { role: 'tool'; content: SdkAiSdkToolResultPart[] };
+
+interface SdkAiSdkStreamTextParams {
+  messages: SdkAiSdkModelMessage[];
+  model?: unknown;
+  temperature?: number;
+}
+
+declare function sdkAiSdkStreamText(params: SdkAiSdkStreamTextParams): Promise<unknown>;
+
+const aiSdkMessages = toAiSdkModelMessages(history);
+const _aiSdkMessagesAssignable: SdkAiSdkModelMessage[] = aiSdkMessages;
+void _aiSdkMessagesAssignable;
+
+const aiSdkBody = toAiSdkModelMessagesBody(history, {
+  model: 'gpt-4o-mini',
+  temperature: 0.2,
+}) satisfies SdkAiSdkStreamTextParams;
+void sdkAiSdkStreamText(aiSdkBody);
 
 // ───── OpenAI Chat Completions SDK shape ─────
 

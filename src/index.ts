@@ -60,10 +60,13 @@ export type { FetchSSETransportOptions } from './streaming/createFetchSSETranspo
 export { createWebSocketTransport } from './streaming/createWebSocketTransport';
 export type { WebSocketTransport, WebSocketTransportOptions } from './streaming/createWebSocketTransport';
 export {
+  formatAiSdkModelMessagesBody,
   formatAnthropicMessagesBody,
   formatGeminiGenerateContentBody,
   formatOpenAIChatCompletionsBody,
   formatOpenAIResponsesBody,
+  toAiSdkModelMessages,
+  toAiSdkModelMessagesBody,
   toAnthropicMessages,
   toAnthropicMessagesBody,
   toAnthropicTools,
@@ -78,6 +81,24 @@ export {
   toOpenAIResponsesTools,
 } from './providerRequests';
 export type {
+  AiSdkAssistantContentPart,
+  AiSdkAssistantModelMessage,
+  AiSdkDataContent,
+  AiSdkFilePart,
+  AiSdkImagePart,
+  AiSdkJsonValue,
+  AiSdkModelMessage,
+  AiSdkModelMessagesBody,
+  AiSdkModelMessagesBodyOptions,
+  AiSdkReasoningPart,
+  AiSdkSystemModelMessage,
+  AiSdkTextPart,
+  AiSdkToolCallPart,
+  AiSdkToolModelMessage,
+  AiSdkToolResultOutput,
+  AiSdkToolResultPart,
+  AiSdkUserContentPart,
+  AiSdkUserModelMessage,
   AnthropicContentBlock,
   AnthropicDocumentBlock,
   AnthropicImageBlock,

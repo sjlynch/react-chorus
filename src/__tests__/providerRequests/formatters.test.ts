@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  formatAiSdkModelMessagesBody,
   formatAnthropicMessagesBody,
   formatGeminiGenerateContentBody,
   formatOpenAIChatCompletionsBody,
   formatOpenAIResponsesBody,
+  toAiSdkModelMessagesBody,
   toAnthropicMessagesBody,
   toGeminiGenerateContentBody,
   toOpenAIChatCompletionsBody,
@@ -19,6 +21,9 @@ describe('provider request formatBody helpers', () => {
     );
     expect(JSON.parse(String(formatOpenAIResponsesBody({ model: 'gpt-4.1-mini' })('ignored', messages)))).toEqual(
       toOpenAIResponsesBody(messages, { model: 'gpt-4.1-mini' }),
+    );
+    expect(JSON.parse(String(formatAiSdkModelMessagesBody({ temperature: 0.2 })('ignored', messages)))).toEqual(
+      toAiSdkModelMessagesBody(messages, { temperature: 0.2 }),
     );
     expect(JSON.parse(String(formatAnthropicMessagesBody({ model: 'claude-sonnet-4-6', max_tokens: 512 })('ignored', messages)))).toEqual(
       toAnthropicMessagesBody(messages, { model: 'claude-sonnet-4-6', max_tokens: 512 }),
