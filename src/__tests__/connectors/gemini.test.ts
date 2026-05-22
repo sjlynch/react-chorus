@@ -400,4 +400,51 @@ describe('geminiConnector', () => {
       expect(result?.warning?.code).toBe('unsupported-part');
     });
   });
+
+  describe('executableCode / codeExecutionResult parts', () => {
+    it('emits an unsupported-part warning instead of dropping a pure-executableCode chunk', () => {
+      const payload = {
+        candidates: [{ content: { parts: [{ executableCode: { language: 'PYTHON', code: 'print(1)' } }] } }],
+      };
+      const result = geminiConnector.extract(JSON.stringify(payload));
+      expect(result).not.toBeNull();
+      expect(result?.warning?.code).toBe('unsupported-part');
+      expect(result?.warning?.message).toContain('executableCode');
+      expect(result?.warning?.payload).toEqual(payload);
+    });
+
+    it('emits an unsupported-part warning for codeExecutionResult parts', () => {
+      const data = JSON.stringify({
+        candidates: [{ content: { parts: [{ codeExecutionResult: { outcome: 'OUTCOME_OK', output: '1\n' } }] } }],
+      });
+      const result = geminiConnector.extract(data);
+      expect(result?.warning?.code).toBe('unsupported-part');
+      expect(result?.warning?.message).toContain('codeExecutionResult');
+    });
+
+    it('accepts snake_case executable_code / code_execution_result spellings from proxies', () => {
+      const data = JSON.stringify({
+        candidates: [{ content: { parts: [
+          { executable_code: { language: 'PYTHON', code: 'print(1)' } },
+          { code_execution_result: { outcome: 'OUTCOME_OK', output: '1\n' } },
+        ] } }],
+      });
+      const result = geminiConnector.extract(data);
+      expect(result?.warning?.code).toBe('unsupported-part');
+      expect(result?.warning?.message).toContain('executableCode');
+      expect(result?.warning?.message).toContain('codeExecutionResult');
+    });
+
+    it('keeps text alongside an unsupported executableCode part in the same candidate', () => {
+      const data = JSON.stringify({
+        candidates: [{ content: { parts: [
+          { text: 'Running some code:' },
+          { executableCode: { language: 'PYTHON', code: 'print(1)' } },
+        ] } }],
+      });
+      const result = geminiConnector.extract(data);
+      expect(result?.text).toBe('Running some code:');
+      expect(result?.warning?.code).toBe('unsupported-part');
+    });
+  });
 });
