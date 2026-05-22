@@ -5,7 +5,7 @@
 Module map:
 
 - `types.ts` — shared contracts: `MessageBubbleSlots`, `MessageMarkdownProps`, `MessageTimestampFormatter`, `MessageCopyResult`, and `MessageRenderActions`.
-- `bubble.tsx` — renders message content: role class, bubble layout, attachments (image previews or file names), `reasoning` details block, text through `Markdown`; exports `MessageBubble`.
+- `bubble.tsx` — renders message content: role class, bubble layout, attachments (image previews or file names), `reasoning` details block (reader-collapsible even while streaming auto-opens it), text through `Markdown`, and a `ToolCallBlock` for `role: 'tool'` messages; exports `MessageBubble`.
 - `actions.tsx` — owns the copy/regenerate/edit/delete/feedback action controls, copy-failed timer state, and copy action creation.
 - `InlineMessageEditor.tsx` — inline `<textarea>` editor with save/cancel controls; resizes via `chat-input/useTextareaAutosize` so it matches the composer.
 - `renderState.tsx` — `MessageRenderStateContext`/provider and `useActionEditing`, which link the default action controls' edit state to the row when a host swaps in a custom `MessageBubble`; also `useReturnFocusAfterEditing` for focus return on cancel.

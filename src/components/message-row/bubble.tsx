@@ -2,10 +2,11 @@ import React from 'react';
 import type { Attachment, Message } from '../../types';
 import { DEFAULT_ATTACHMENT_LABELS } from '../../labels/attachments';
 import { DEFAULT_REASONING_LABEL } from '../../labels/reasoning';
-import type { ChorusAttachmentLabels, ChorusCodeCopyLabels, ChorusSpeakerLabels } from '../../labels/types';
+import type { ChorusAttachmentLabels, ChorusCodeCopyLabels, ChorusSpeakerLabels, ChorusToolCallLabels } from '../../labels/types';
 import { getAttachmentPreviewSource } from '../../utils/attachmentPreview';
 import { joinClasses } from '../../utils/className';
 import { Markdown, type MarkdownSanitizer } from '../Markdown';
+import { ToolCallBlock } from '../ToolCallBlock';
 import { defaultFormatMessageTimestamp } from './formatTimestamp';
 import { MessageRenderStateContext } from './renderState';
 import { MessageSpeakerLabel } from './speaker';
@@ -41,20 +42,35 @@ export interface MessageReasoningProps {
   reasoningLabel?: string;
   codeCopyLabels?: ChorusCodeCopyLabels;
   /**
-   * Force the reasoning `<details>` open. When omitted the disclosure is
-   * uncontrolled — collapsed by default and freely toggled by the reader. The
-   * default transcript passes `true` for a reasoning-only streaming turn so a
-   * chain-of-thought model's output is visible as it arrives instead of looking
-   * frozen behind a collapsed summary with an empty bubble.
+   * Suggests the reasoning `<details>` should start open. When omitted the
+   * disclosure is collapsed by default. The default transcript passes `true`
+   * for a reasoning-only streaming turn so a chain-of-thought model's output is
+   * visible as it arrives instead of looking frozen behind a collapsed summary
+   * with an empty bubble. This is only a starting suggestion: once the reader
+   * toggles the disclosure their choice sticks, even as further chunks stream.
    */
   open?: boolean;
 }
 
-export function MessageReasoning({ reasoning, codeTheme, headless, streaming = false, markdownProps, markdownSanitizer, reasoningLabel = DEFAULT_REASONING_LABEL, codeCopyLabels, open }: MessageReasoningProps) {
+export function MessageReasoning({ reasoning, codeTheme, headless, streaming = false, markdownProps, markdownSanitizer, reasoningLabel = DEFAULT_REASONING_LABEL, codeCopyLabels, open: openHint }: MessageReasoningProps) {
+  // Track the reader's own collapse/expand separately from `openHint` (the
+  // transcript's "should be open" suggestion for a reasoning-only streaming
+  // turn). A controlled `open={true}` would re-force the disclosure back open
+  // on every streamed chunk, so a reader who collapsed the chain-of-thought
+  // mid-stream could not keep it collapsed. Once the reader has toggled it,
+  // their choice wins over `openHint` until the component unmounts.
+  const [readerOpen, setReaderOpen] = React.useState<boolean | null>(null);
+
   if (!reasoning) return null;
 
+  const open = readerOpen ?? Boolean(openHint);
+
   return (
-    <details className="chorus-reasoning" open={open}>
+    <details
+      className="chorus-reasoning"
+      open={open}
+      onToggle={(event) => setReaderOpen(event.currentTarget.open)}
+    >
       <summary className="chorus-reasoning-summary">{reasoningLabel}</summary>
       <div className="chorus-reasoning-body">
         <Markdown {...markdownProps} text={reasoning} codeTheme={codeTheme} headless={headless} streaming={streaming} sanitizer={markdownSanitizer ?? markdownProps?.sanitizer} codeCopyLabels={codeCopyLabels ?? markdownProps?.codeCopyLabels} />
@@ -91,6 +107,8 @@ export interface MessageBubbleLayoutProps<TMeta = Record<string, unknown>> exten
   reasoningLabel?: string;
   codeCopyLabels?: ChorusCodeCopyLabels;
   attachmentLabels?: ChorusAttachmentLabels;
+  /** Label overrides for the tool-call block rendered for `role: 'tool'` messages. */
+  toolCallLabels?: Partial<ChorusToolCallLabels>;
   /** Render the message's `createdAt` time below the bubble. Off by default. */
   showTimestamp?: boolean;
   /** Override the locale-aware default timestamp formatting. Only used when `showTimestamp` is true. */
@@ -98,7 +116,7 @@ export interface MessageBubbleLayoutProps<TMeta = Record<string, unknown>> exten
   children?: React.ReactNode;
 }
 
-export function MessageBubbleLayout<TMeta = Record<string, unknown>>({ message, codeTheme, headless, streaming = false, markdownProps, markdownSanitizer, reasoningLabel, codeCopyLabels, attachmentLabels, showTimestamp = false, formatTimestamp, before, headerSlot, footerSlot, after, children }: MessageBubbleLayoutProps<TMeta>) {
+export function MessageBubbleLayout<TMeta = Record<string, unknown>>({ message, codeTheme, headless, streaming = false, markdownProps, markdownSanitizer, reasoningLabel, codeCopyLabels, attachmentLabels, toolCallLabels, showTimestamp = false, formatTimestamp, before, headerSlot, footerSlot, after, children }: MessageBubbleLayoutProps<TMeta>) {
   const text = message.text ?? '';
   const hasAttachments = Boolean(message.attachments?.length);
   const hasBubbleText = text.trim().length > 0;
@@ -133,6 +151,15 @@ export function MessageBubbleLayout<TMeta = Record<string, unknown>>({ message, 
             {hasBubbleText && <Markdown {...markdownProps} text={text} codeTheme={codeTheme} headless={headless} streaming={streaming} sanitizer={markdownSanitizer ?? markdownProps?.sanitizer} codeCopyLabels={codeCopyLabels ?? markdownProps?.codeCopyLabels} />}
           </div>
         )}
+        {message.role === 'tool' && (
+          // Render the tool call here, not only in ChatWindow's tool branch, so
+          // a host composing a custom shell with the exported MessageRow /
+          // MessageBubble gets the structured call instead of an empty bubble
+          // (or nothing, since `shouldRenderBubble` is false for an empty-text
+          // tool message). `message.text`, when present, renders above as a
+          // host-authored summary.
+          <ToolCallBlock toolCall={message.toolCall} labels={toolCallLabels} streaming={streaming} />
+        )}
         {showTimestamp && <MessageTimestamp message={message} formatTimestamp={formatTimestamp} />}
         {footerSlot}
         {children}
@@ -155,13 +182,15 @@ export interface MessageBubbleProps<TMeta = Record<string, unknown>> extends Mes
   codeCopyLabels?: ChorusCodeCopyLabels;
   speakerLabels?: ChorusSpeakerLabels;
   attachmentLabels?: ChorusAttachmentLabels;
+  /** Label overrides for the tool-call block rendered for `role: 'tool'` messages. */
+  toolCallLabels?: Partial<ChorusToolCallLabels>;
   /** Render the message's `createdAt` time below the bubble. Off by default. */
   showTimestamp?: boolean;
   /** Override the locale-aware default timestamp formatting. Only used when `showTimestamp` is true. */
   formatTimestamp?: MessageTimestampFormatter<TMeta>;
 }
 
-export function MessageBubble<TMeta = Record<string, unknown>>({ message, className, style, codeTheme = 'dark', headless, streaming = false, markdownProps, markdownSanitizer, reasoningLabel, codeCopyLabels, speakerLabels, attachmentLabels, showTimestamp, formatTimestamp, before, headerSlot, footerSlot, after }: MessageBubbleProps<TMeta>) {
+export function MessageBubble<TMeta = Record<string, unknown>>({ message, className, style, codeTheme = 'dark', headless, streaming = false, markdownProps, markdownSanitizer, reasoningLabel, codeCopyLabels, speakerLabels, attachmentLabels, toolCallLabels, showTimestamp, formatTimestamp, before, headerSlot, footerSlot, after }: MessageBubbleProps<TMeta>) {
   const renderState = React.useContext(MessageRenderStateContext);
   if (renderState?.messageId === message.id && renderState.isEditing) return null;
 
@@ -179,6 +208,7 @@ export function MessageBubble<TMeta = Record<string, unknown>>({ message, classN
         reasoningLabel={reasoningLabel}
         codeCopyLabels={codeCopyLabels}
         attachmentLabels={attachmentLabels}
+        toolCallLabels={toolCallLabels}
         showTimestamp={showTimestamp}
         formatTimestamp={formatTimestamp}
         before={before}
