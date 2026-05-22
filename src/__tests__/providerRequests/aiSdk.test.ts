@@ -1,8 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   RESERVED_SYSTEM_PROMPT_ID,
+  defineTool,
   toAiSdkModelMessages,
   toAiSdkModelMessagesBody,
+  toAiSdkTools,
 } from '../../providerRequests';
 import type { Message } from '../../types';
 
@@ -113,12 +115,130 @@ describe('AI SDK provider request mapping', () => {
     ]);
   });
 
-  it('builds an AI SDK messages body while preserving extra options', () => {
+  it('builds an AI SDK messages body while preserving extra options and defaulting stream to true', () => {
     const history: Message[] = [{ id: 'user', role: 'user', text: 'Hello' }];
 
     expect(toAiSdkModelMessagesBody(history, { temperature: 0.2 })).toEqual({
       temperature: 0.2,
       messages: [{ role: 'user', content: 'Hello' }],
+      stream: true,
     });
+  });
+
+  it('honors an explicit `stream: false` instead of defaulting to true', () => {
+    const history: Message[] = [{ id: 'user', role: 'user', text: 'Hello' }];
+
+    expect(toAiSdkModelMessagesBody(history, { stream: false })).toEqual({
+      messages: [{ role: 'user', content: 'Hello' }],
+      stream: false,
+    });
+  });
+});
+
+describe('AI SDK system precedence', () => {
+  it('lets a caller-provided AI SDK system option win over history system text, warning once', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const body = toAiSdkModelMessagesBody([
+        { id: 'sys', role: 'system', text: 'History system instructions.' },
+        { id: 'user', role: 'user', text: 'Hello' },
+      ], { system: 'Caller system instructions.' });
+
+      expect(body.system).toBe('Caller system instructions.');
+      // History system rows continue to appear in `messages` since the AI SDK
+      // convention is system-as-message; the warn-once flags the duplication.
+      expect(body.messages).toEqual([
+        { role: 'system', content: 'History system instructions.' },
+        { role: 'user', content: 'Hello' },
+      ]);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toContain('caller-provided `system`');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('keeps the caller system option without warning when the history has no system message', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const body = toAiSdkModelMessagesBody([
+        { id: 'user', role: 'user', text: 'Hello' },
+      ], { system: 'Only the caller system.' });
+
+      expect(body.system).toBe('Only the caller system.');
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('omits the top-level `system` field when no caller-provided value is set', () => {
+    const body = toAiSdkModelMessagesBody([
+      { id: 'sys', role: 'system', text: 'History system instructions.' },
+      { id: 'user', role: 'user', text: 'Hello' },
+    ]);
+
+    expect(body).not.toHaveProperty('system');
+  });
+});
+
+describe('AI SDK tool serialization', () => {
+  const searchTool = defineTool({
+    name: 'search',
+    description: 'Search the docs',
+    inputSchema: {
+      type: 'object',
+      properties: { q: { type: 'string' } },
+      required: ['q'],
+    },
+    handler: async () => 'ok',
+  });
+
+  it('serializes definitions into a Vercel AI SDK ToolSet record keyed by name', () => {
+    expect(toAiSdkTools([searchTool])).toEqual({
+      search: {
+        type: 'function',
+        description: 'Search the docs',
+        inputSchema: { type: 'object', properties: { q: { type: 'string' } }, required: ['q'] },
+      },
+    });
+  });
+
+  it('flows Chorus tool definitions through `toAiSdkModelMessagesBody` as the AI SDK `tools` record', () => {
+    const body = toAiSdkModelMessagesBody([], { tools: [searchTool] });
+    expect(body.tools).toEqual(toAiSdkTools([searchTool]));
+  });
+
+  it('forwards a raw array-shape tools value verbatim as the escape hatch', () => {
+    const rawTools = [{ name: 'lookup', type: 'function', inputSchema: { type: 'object' } }];
+    const body = toAiSdkModelMessagesBody([], {
+      tools: rawTools,
+    } as Parameters<typeof toAiSdkModelMessagesBody>[1]);
+    expect(body.tools).toBe(rawTools);
+  });
+
+  it('accepts a Chorus registry record and re-keys the tool by its registry key', () => {
+    const registry = {
+      search: defineTool({
+        name: 'will-be-overridden',
+        description: 'Search the docs',
+        inputSchema: { type: 'object', properties: { q: { type: 'string' } } },
+        handler: async () => null,
+      }),
+    };
+
+    const body = toAiSdkModelMessagesBody([], { tools: registry });
+    expect(body.tools).toEqual({
+      search: {
+        type: 'function',
+        description: 'Search the docs',
+        inputSchema: { type: 'object', properties: { q: { type: 'string' } } },
+      },
+    });
+  });
+
+  it('omits tools entirely when an empty definition array is provided', () => {
+    const body = toAiSdkModelMessagesBody([], { tools: [] });
+    expect(body).not.toHaveProperty('tools');
   });
 });

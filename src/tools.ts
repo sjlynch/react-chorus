@@ -18,6 +18,8 @@ export interface ChorusToolDefinition<TMeta = Record<string, unknown>, TInput = 
   anthropic?: Record<string, unknown>;
   /** Provider-specific overrides merged into the Gemini functionDeclaration. */
   gemini?: Record<string, unknown>;
+  /** Provider-specific overrides merged into the Vercel AI SDK `Tool` shape. */
+  aiSdk?: Record<string, unknown>;
   /** Local executor. Receives the parsed input and the same context object as `onToolCall`. */
   handler: (input: TInput, context: ChorusToolCallContext<TMeta>) => unknown | Promise<unknown>;
 }

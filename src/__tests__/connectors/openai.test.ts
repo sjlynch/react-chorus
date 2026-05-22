@@ -645,4 +645,59 @@ describe('openaiConnector (Responses API)', () => {
     openaiConnector.extract(JSON.stringify({ type: 'response.refusal.delta', item_id: 'msg_1', delta: 'refused' }), state);
     expect(openaiConnector.extract('[DONE]', state)).toEqual({ error: 'refused', done: true });
   });
+
+  it('warns once and emits a non-fatal warning for an unknown response.* event type', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const payload = { type: 'response.foo', detail: 1 };
+      const first = openaiConnector.extract(JSON.stringify(payload));
+      expect(first?.warning?.code).toBe('unknown-event');
+      expect(first?.warning?.message).toContain('response.foo');
+      expect(first?.warning?.payload).toEqual(payload);
+      expect(first?.text).toBeUndefined();
+      expect(first?.done).toBeUndefined();
+
+      // The dev console warning is fired exactly once per type per process.
+      const unknownWarnings = warn.mock.calls.filter(call =>
+        String(call[0]).includes('openai-responses-unknown-event') ||
+        String(call[0]).includes('unknown event type "response.foo"'),
+      );
+      expect(unknownWarnings).toHaveLength(1);
+
+      // A second occurrence still surfaces the ConnectorWarning but does not
+      // re-log to the console (warnOnceInDev keys by type).
+      const second = openaiConnector.extract(JSON.stringify(payload));
+      expect(second?.warning?.code).toBe('unknown-event');
+      const stillOne = warn.mock.calls.filter(call =>
+        String(call[0]).includes('openai-responses-unknown-event') ||
+        String(call[0]).includes('unknown event type "response.foo"'),
+      );
+      expect(stillOne).toHaveLength(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('does not warn for ignored lifecycle events or known handler types', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      // IGNORED_RESPONSE_EVENT_TYPES entries return null with no warning.
+      expect(openaiConnector.extract(JSON.stringify({ type: 'response.created' }))).toBeNull();
+      expect(openaiConnector.extract(JSON.stringify({ type: 'response.output_item.started' }))).toBeNull();
+
+      // A handled type (text delta) does not trigger the unknown-event path.
+      const handled = openaiConnector.extract(
+        JSON.stringify({ type: 'response.output_text.delta', delta: 'hello' }),
+      );
+      expect(handled?.text).toBe('hello');
+      expect(handled?.warning).toBeUndefined();
+
+      const unknownWarnings = warn.mock.calls.filter(call =>
+        String(call[0]).includes('unknown event type'),
+      );
+      expect(unknownWarnings).toHaveLength(0);
+    } finally {
+      warn.mockRestore();
+    }
+  });
 });
