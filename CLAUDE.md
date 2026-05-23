@@ -7,7 +7,8 @@ react-chorus is a composable React chat UI library with batteries-included messa
 - `src/index.ts` — root public barrel; update it when the exported API surface changes.
 - `src/types.ts` — core public types for messages, roles, attachments, tool calls, connectors, and storage adapters.
 - `src/reservedIds.ts` — dependency-free leaf holding `RESERVED_SYSTEM_PROMPT_ID` (the id of the `system` message Chorus injects from the `systemPrompt` prop); re-exported by `index.ts`, `server.ts`, and `providerRequests.ts` so it can be shared without dragging in the `chorus-session` chunk.
-- `src/Chorus.tsx` — main public component and `ChorusProps`; coordinates state, streaming, persistence, errors, retry/stop/edit/regenerate while delegating shell-derived state/composer actions.
+- `src/Chorus.tsx` — main public component; coordinates state, streaming, persistence, errors, retry/stop/edit/regenerate while delegating shell-derived state/composer actions.
+- `src/Chorus.props.ts` / `src/Chorus.ref.ts` / `src/Chorus.defaults.ts` / `src/Chorus.types.ts` — focused `<Chorus>` public props, imperative ref, defaults, and compatibility type barrel.
 - `src/chorus-shell/` — internal helpers for `<Chorus>` shell derived flags, composer draft/reset state, and UI action handlers; see `src/chorus-shell/CLAUDE.md`.
 - `src/headless.ts` / `src/ChorusHeadless.tsx` — `react-chorus/headless` entry and wrapper that default supported components to `headless: true`.
 - `src/providerRequests.ts` — outbound request mappers and `formatXyzBody` helpers for OpenAI Chat/Responses, Anthropic Messages, and Gemini GenerateContent, exported via root and `react-chorus/provider-requests`.
