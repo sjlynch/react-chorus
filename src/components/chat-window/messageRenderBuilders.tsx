@@ -26,6 +26,8 @@ interface MessageDefaultRenderOptions<TMeta> {
   feedback?: (variant: MessageFeedback | null) => void;
   initialFeedback: MessageFeedback | null;
   feedbackReadOnly: boolean;
+  /** Optional meta-line renderer placed under the bubble (e.g. a cost chip). */
+  renderMessageFooter?: (message: Message<TMeta>) => React.ReactNode;
 }
 
 /**
@@ -53,9 +55,15 @@ export function buildMessageDefaultRender<TMeta = Record<string, unknown>>({
   feedback,
   initialFeedback,
   feedbackReadOnly,
+  renderMessageFooter,
 }: MessageDefaultRenderOptions<TMeta>): (slots?: MessageBubbleSlots) => React.ReactNode {
   return (slots?: MessageBubbleSlots) => {
     const rowStreaming = message.role === 'tool' ? toolStreaming : isStreaming;
+    // Merge a host-rendered cost/meta chip under the bubble via `footerSlot`.
+    // Host-supplied `slots.footerSlot` wins so a `renderMessage` consumer can
+    // suppress the chip entirely or wrap it with their own meta line.
+    const footerChip = renderMessageFooter?.(message);
+    const mergedFooter = slots?.footerSlot ?? footerChip;
     return (
       <MessageRow
         m={message}
@@ -81,6 +89,7 @@ export function buildMessageDefaultRender<TMeta = Record<string, unknown>>({
         initialFeedback={initialFeedback}
         feedbackReadOnly={feedbackReadOnly}
         {...slots}
+        footerSlot={mergedFooter}
       />
     );
   };

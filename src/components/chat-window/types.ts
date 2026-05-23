@@ -86,6 +86,14 @@ export interface ChatWindowProps<TMeta = Record<string, unknown>> extends Omit<R
   /** Localized labels for the transcript, message actions, speakers, sources, tool calls, reasoning, and code copy. Defaults to English. */
   labels?: ChorusLabels;
   /**
+   * Optional renderer for a meta line under each bubble (e.g. a cost/token
+   * chip). Receives the message and returns a node that is placed in the
+   * default row's `footerSlot`. `<Chorus showCost>` wires this internally to
+   * render the per-message cost chip; standalone consumers can pass any
+   * meta-line renderer here (latency, model id, custom badges).
+   */
+  renderMessageFooter?: (message: Message<TMeta>) => React.ReactNode;
+  /**
    * Theme palette applied as `--chorus-*` CSS variables on the component root.
    * Equivalent to wrapping this component in `<ChorusTheme palette={…}>`. When
    * it is nested inside another `<Chorus palette>` or `<ChorusTheme>`, the

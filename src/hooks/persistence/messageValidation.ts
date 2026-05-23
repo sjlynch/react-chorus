@@ -1,4 +1,4 @@
-import type { Attachment, Message, Role, ToolCall } from '../../types';
+import type { ArtifactKind, ArtifactSummary, Attachment, Message, Role, ToolCall } from '../../types';
 import { warnInDev } from '../../utils/warnings';
 
 export const VALID_ROLES: ReadonlySet<Role> = new Set<Role>(['user', 'assistant', 'system', 'tool']);
@@ -14,6 +14,18 @@ export function isValidAttachment(value: unknown): value is Attachment {
     typeof value.type === 'string' &&
     typeof value.data === 'string' &&
     typeof value.size === 'number'
+  );
+}
+
+const ARTIFACT_KINDS: ReadonlySet<ArtifactKind> = new Set<ArtifactKind>(['code', 'document', 'html', 'react']);
+
+export function isValidArtifactSummary(value: unknown): value is ArtifactSummary {
+  if (!isPlainObject(value)) return false;
+  return (
+    typeof value.id === 'string' && value.id.length > 0 &&
+    typeof value.title === 'string' &&
+    typeof value.version === 'number' && Number.isFinite(value.version) &&
+    typeof value.kind === 'string' && ARTIFACT_KINDS.has(value.kind as ArtifactKind)
   );
 }
 
@@ -55,6 +67,10 @@ export function validateStoredMessage<TMeta>(value: unknown): { ok: true; messag
   // mirroring the per-role `reasoning` checks below. Applies to every role.
   if (value.createdAt !== undefined && typeof value.createdAt !== 'string') {
     return { ok: false, reason: 'createdAt is not a string' };
+  }
+
+  if (value.artifact !== undefined && !isValidArtifactSummary(value.artifact)) {
+    return { ok: false, reason: 'invalid artifact summary' };
   }
 
   const role = value.role as Role;

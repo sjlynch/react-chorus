@@ -1,5 +1,7 @@
 import React from 'react';
-import type { Message, ToolMessage } from '../../types';
+import type { Message, MessageBlock, ToolMessage } from '../../types';
+import { RESERVED_BLOCK_TOOL_NAME } from '../../reservedIds';
+import { parseStreamingJson } from '../../blocks/streamingJson';
 import type { ConnectorToolDelta } from '../../connectors/connectors';
 import type { ChorusToolDefinition, ChorusToolRegistry } from '../../tools';
 import type { ToolPolicyStore } from '../conversations/toolPolicyStore';
@@ -59,7 +61,7 @@ export function buildToolMessageFromDelta<TMeta>(
   if (hasOwn(delta, 'input')) toolCall.input = delta.input;
   if (hasOwn(delta, 'output')) toolCall.output = delta.output;
 
-  return {
+  const next: ToolMessage<TMeta> = {
     id: messageId,
     role: 'tool',
     text: existing?.text ?? '',
@@ -67,6 +69,43 @@ export function buildToolMessageFromDelta<TMeta>(
     metadata: metadataWithToolProvider(existing?.metadata, delta),
     toolCall,
   };
+  // Map `__render_block` tool deltas into a streaming `block` field on the
+  // message. The default transcript renders this as the registered block
+  // component instead of the standard ToolCallBlock chrome (see
+  // MessageBubbleLayout). Keeping the underlying message as `role: 'tool'`
+  // means tool-delta accumulation, run-completed-tool-calls, transport
+  // history mapping, and persistence all continue to work unchanged — but
+  // the visible row is the block, not a tool row.
+  if (toolCall.name === RESERVED_BLOCK_TOOL_NAME) {
+    const block = resolveBlockFromToolInput(toolCall.input, existing?.block);
+    if (block) next.block = block;
+  } else if (existing?.block) {
+    next.block = existing.block;
+  }
+  return next;
+}
+
+/**
+ * Derives the `MessageBlock` payload from a `__render_block` tool-call input.
+ * Inputs arrive either as accumulated JSON strings (OpenAI Chat function
+ * arguments) or as object/value deltas (Anthropic / AI SDK / Gemini). We try
+ * to parse the string form tolerantly so the block re-renders on each delta
+ * with the best-effort partial props.
+ */
+function resolveBlockFromToolInput(input: unknown, existing?: MessageBlock): MessageBlock | undefined {
+  let parsed: unknown = input;
+  if (typeof input === 'string') {
+    const result = parseStreamingJson(input);
+    if (result.ok) parsed = result.value;
+  }
+  if (parsed && typeof parsed === 'object') {
+    const obj = parsed as Record<string, unknown>;
+    const name = typeof obj.name === 'string' ? obj.name : existing?.name;
+    const props = obj.props !== undefined ? obj.props : existing?.props ?? {};
+    if (typeof name === 'string') return { name, props, status: existing?.status === 'done' ? 'done' : 'streaming' };
+  }
+  if (existing) return { ...existing, props: parsed ?? existing.props };
+  return undefined;
 }
 
 interface ApplyToolOutputOptions {
@@ -216,6 +255,20 @@ export function useToolExecution<TMeta>(deps: ToolExecutionDeps<TMeta>): ToolExe
 
       const currentMessage = messagesRef.current.find(message => message.id === initialMessage.id) ?? initialMessage;
       if (currentMessage.role !== 'tool') continue;
+
+      // __render_block is a synthetic tool name used to render UI blocks
+      // inline. It has no handler, produces no tool output, and is not fed
+      // back to the model. Flip the block status to 'done' so the renderer
+      // can run any validator and stop showing partial-streaming chrome.
+      if (currentMessage.toolCall.name === RESERVED_BLOCK_TOOL_NAME) {
+        updateSessionMessages(prev => prev.map(message => {
+          if (message.id !== currentMessage.id || message.role !== 'tool') return message;
+          const block = message.block ? { ...message.block, status: 'done' as const } : undefined;
+          return { ...message, block };
+        }), { reason: 'assistant' });
+        continue;
+      }
+
       const context = createToolCallContext(currentMessage, signal);
       if (!context) continue;
 
@@ -291,7 +344,7 @@ export function useToolExecution<TMeta>(deps: ToolExecutionDeps<TMeta>): ToolExe
         if (!continueOnToolErrorRef.current) throw error;
       }
     }
-  }, [continueOnToolErrorRef, createToolCallContext, isAssistantSessionActive, messagesRef, onToolCallRef, policyStoreRef, safeNotifyToolCall, setToolApprovalState, setToolErrorOutput, setToolOutput, toolsRef]);
+  }, [continueOnToolErrorRef, createToolCallContext, isAssistantSessionActive, messagesRef, onToolCallRef, policyStoreRef, safeNotifyToolCall, setToolApprovalState, setToolErrorOutput, setToolOutput, toolsRef, updateSessionMessages]);
 
   return {
     toolMessageIdForDelta,

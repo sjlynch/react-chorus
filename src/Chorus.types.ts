@@ -10,3 +10,4 @@ export type { ChorusMessagesChangeContext, ChorusMessagesChangeReason, ChorusMes
 export type { Transport } from './hooks/useChorusStream';
 export type { McpServerConfig } from './mcp/types';
 export type { ChorusToolPolicy, ToolApprovalPolicy, ToolApprovalDecision, ToolPolicyScope } from './approvals/types';
+export type { BudgetExceededContext, ModelPricing, PricingTable } from './Chorus.props';

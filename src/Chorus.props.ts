@@ -10,10 +10,16 @@ import type { ChorusMessagesChangeContext } from './hooks/useChorusMessages';
 import type { DeserializeMessages, SerializeMessages } from './hooks/useChorusPersistence';
 import type { Transport } from './hooks/useChorusStream';
 import type { ChorusLabels } from './labels/types';
-import type { AttachmentError, ConnectorName, Message, Role, StorageAdapter, UploadAttachment } from './types';
+import type { ArtifactVersion, AttachmentError, ConnectorName, Message, Role, StorageAdapter, UploadAttachment } from './types';
 import type { ChorusConnectorOptions } from './Chorus.defaults';
 import type { McpServerConfig } from './mcp/types';
 import type { ChorusToolPolicy, ToolPolicyScope } from './approvals/types';
+import type { BlockRegistry, ToolLoadingComponents } from './blocks/types';
+import type { BudgetExceededContext } from './chorus-shell/useCostMeter';
+import type { PricingTable } from './pricing';
+
+export type { BudgetExceededContext } from './chorus-shell/useCostMeter';
+export type { ModelPricing, PricingTable } from './pricing';
 
 export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React.HTMLAttributes<HTMLDivElement>, 'onChange' | 'onError' | 'onCopy' | 'onAbort'> {
   accept?: string;
@@ -227,6 +233,68 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
   uploadAttachment?: UploadAttachment;
   value?: Message<TMeta>[];
   /**
+   * Generative-UI block registry. Keyed by block name; the assistant emits a
+   * `__render_block` tool call with `{ name, props }` and Chorus maps it to
+   * `message.block`. The default transcript renders the registered component
+   * inline (no tool row), re-rendering on every streamed prop delta. Each
+   * block definition can optionally provide a validator (run on `'done'`)
+   * and a `streamingMode: 'whole'` to defer rendering until done. Unknown
+   * names render a small fallback so old transcripts still load.
+   */
+  blocks?: BlockRegistry;
+  /**
+   * Per-tool loaders displayed while a tool call is streaming and has no
+   * output yet. Pass a record `{ get_weather: WeatherLoader }` or a function
+   * `(toolName, partialInput) => ReactNode` to react to streamed input. Tools
+   * without an override use a 3-dot default loader.
+   */
+  toolLoadingComponents?: ToolLoadingComponents;
+  /**
+   * Show a small `$0.003 · 412 tok` chip at the bottom-right of each assistant
+   * bubble plus a conversation total in the transcript header. Off by default.
+   *
+   * Pricing comes from the built-in `PRICING` snapshot (see `react-chorus/pricing`)
+   * merged with the optional `pricing` prop on top — host overrides win per
+   * model. Costs are computed from `metadata.usage` on each assistant message;
+   * the built-in connectors emit usage via `onStreamMetadata` and the meter
+   * attaches it to the active streaming message automatically.
+   */
+  showCost?: boolean;
+  /**
+   * Per-model pricing overrides (USD per 1k tokens). Merged on top of the
+   * built-in `PRICING` snapshot, so partial overrides win per model without
+   * dropping the defaults for unmentioned models. Ship a fresh snapshot from
+   * your billing system here when the built-in table goes stale.
+   */
+  pricing?: PricingTable;
+  /**
+   * Fallback model id used when an assistant message has no
+   * `metadata.modelId`. Useful for single-provider apps that always route
+   * through one model — set it once and the meter picks the correct pricing
+   * entry without each message carrying the id.
+   */
+  modelId?: string;
+  /**
+   * Host-supplied per-message cost override. Returns the USD cost for one
+   * assistant message; return `undefined` to fall back to the built-in
+   * pricing-table lookup. Useful for custom billing (e.g. cached input
+   * discounts, batch pricing) that the static table cannot express.
+   */
+  costEstimator?: (message: Message<TMeta>, modelId: string | undefined) => number | undefined;
+  /**
+   * Conversation budget threshold in USD. Once the running total strictly
+   * exceeds this, `onBudgetExceeded` fires exactly once. The latch re-arms
+   * when the total drops back at or below the threshold (e.g. after a
+   * `clear()`), so the next over-budget run still alerts.
+   */
+  budgetAlert?: number;
+  /**
+   * Fires once when the conversation total crosses `budgetAlert`. Receives
+   * `{ total, perModel, threshold }`. Pure observer — throwing here does
+   * not interrupt rendering.
+   */
+  onBudgetExceeded?: (context: BudgetExceededContext) => void;
+  /**
    * Localized labels for every built-in UI string (composer placeholder/aria-labels,
    * transcript aria-label/typing/retry/jump/empty title, message actions, speakers,
    * tool call sections, reasoning summary, code-copy button, and the clear button).
@@ -234,4 +302,13 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
    * `disabledReason`, and `clearLabel` props take precedence when provided.
    */
   labels?: ChorusLabels;
+  /**
+   * Render a `react` artifact through a host-supplied block registry. Called
+   * with the active `ArtifactVersion` when the side panel needs to show a
+   * `kind: 'react'` artifact. The returned element is rendered inside an
+   * error boundary in the panel body. Without a handler, react artifacts
+   * fall back to a placeholder message — pairs with the Generative-UI block
+   * registry task.
+   */
+  renderReactArtifact?: (version: ArtifactVersion) => React.ReactNode;
 }

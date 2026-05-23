@@ -167,6 +167,19 @@
 /* Opt-in per-message timestamp (rendered when <Chorus showTimestamps> is set) */
 .chorus-msg-time { margin-top: 3px; color: var(--chorus-action-text, #a3a3a3); font-size: 11px; }
 
+/* Opt-in per-message cost chip (rendered when <Chorus showCost> is set) */
+.chorus-cost-chip { display: inline-block; align-self: flex-end; margin-top: 3px; padding: 1px 6px; border-radius: 9999px; background: var(--chorus-input-bg, #1a1a1a); border: 1px solid var(--chorus-border, #2a2a2a); color: var(--chorus-action-text, #a3a3a3); font-size: 10px; line-height: 1.4; white-space: nowrap; }
+.chorus-cost-chip[data-chorus-cost-approximate="true"] { opacity: .75; font-style: italic; }
+.chorus-user .chorus-cost-chip { align-self: flex-end; }
+.chorus-assistant .chorus-cost-chip { align-self: flex-start; }
+
+/* Cost meter header (rendered above the transcript when <Chorus showCost> is set) */
+.chorus-cost-header { display: flex; align-items: baseline; gap: 6px; margin-bottom: 8px; padding: 4px 10px; border: 1px solid var(--chorus-border, #2a2a2a); border-radius: 8px; background: var(--chorus-input-bg, #1a1a1a); color: var(--chorus-chat-text, #f3f4f6); font-size: 12px; }
+.chorus-cost-header[data-chorus-cost-over-budget="true"] { border-color: var(--chorus-error-border, rgba(220, 38, 38, 0.4)); color: var(--chorus-error-text, #fca5a5); }
+.chorus-cost-header-label { color: var(--chorus-action-text, #a3a3a3); text-transform: uppercase; letter-spacing: .05em; font-size: 10px; }
+.chorus-cost-header-total { font-weight: 600; cursor: help; }
+.chorus-cost-header-budget { color: var(--chorus-action-text, #a3a3a3); font-size: 11px; }
+
 /* Collapsed reasoning/thinking trace */
 .chorus-reasoning { max-width: 100%; margin: 0 0 6px; border: 1px solid var(--chorus-border, #2a2a2a); border-radius: 8px; background: var(--chorus-chat-bg, #161616); color: var(--chorus-chat-text, #f3f4f6); overflow: hidden; }
 .chorus-reasoning-summary { padding: 6px 10px; color: var(--chorus-action-text, #a3a3a3); font-size: 12px; font-weight: 600; cursor: pointer; user-select: none; }
@@ -251,6 +264,87 @@
 .chorus-error-dismiss:hover { background: var(--chorus-error-bg, rgba(220, 38, 38, 0.15)); }
 .chorus-error-dismiss:focus-visible { outline: 2px solid var(--chorus-error-text, #fca5a5); outline-offset: 2px; }
 
+/* Shell main column (transcript + composer). Always present, so the artifact
+   side panel can slot in beside it without restructuring the DOM tree. */
+.chorus-shell-main { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; min-width: 0; }
+
+/* Artifact card (inline in the bubble) */
+.chorus-artifact-card { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--chorus-border, #2a2a2a); border-radius: 10px; background: var(--chorus-input-bg, #1a1a1a); color: var(--chorus-chat-text, #f3f4f6); width: 100%; max-width: 380px; }
+.chorus-artifact-card-body { flex: 1; min-width: 0; }
+.chorus-artifact-card-title { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chorus-artifact-card-meta { display: flex; gap: 8px; margin-top: 2px; font-size: 11px; color: var(--chorus-action-text, #a3a3a3); }
+.chorus-artifact-card-kind { text-transform: uppercase; letter-spacing: .05em; }
+.chorus-artifact-card-version { font-family: monospace; }
+.chorus-artifact-card-open { padding: 6px 12px; border-radius: 6px; border: 1px solid var(--chorus-border, #2a2a2a); background: var(--chorus-input-bg, #1a1a1a); color: var(--chorus-chat-text, #f3f4f6); cursor: pointer; font: inherit; font-size: 12px; }
+.chorus-artifact-card-open:hover:not(:disabled) { background: var(--chorus-action-hover-bg, rgba(255,255,255,0.15)); color: var(--chorus-action-hover-text, #eee); }
+.chorus-artifact-card-open:disabled { opacity: .5; cursor: default; }
+
+/* Artifact side panel — slides in to the right of the transcript inside the Chorus shell */
+.chorus--with-artifact { display: flex; flex-direction: row; align-items: stretch; }
+.chorus-artifact-panel { display: flex; flex-direction: column; flex: 0 0 40%; width: 40%; max-width: 720px; min-width: 320px; margin-inline-start: 12px; background: var(--chorus-chat-bg, #161616); border: 1px solid var(--chorus-border, #2a2a2a); border-radius: 12px; color: var(--chorus-chat-text, #f3f4f6); overflow: hidden; animation: chorus-artifact-slide .18s ease-out; }
+@keyframes chorus-artifact-slide { from { transform: translateX(8px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+.chorus-artifact-header { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--chorus-border, #2a2a2a); background: var(--chorus-input-bg, #1a1a1a); }
+.chorus-artifact-header-title-row { display: flex; align-items: center; gap: 8px; }
+.chorus-artifact-title { flex: 1; margin: 0; font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chorus-artifact-close { width: 24px; height: 24px; border: none; border-radius: 6px; background: transparent; color: var(--chorus-action-text, #a3a3a3); cursor: pointer; font-size: 18px; line-height: 1; }
+.chorus-artifact-close:hover { background: var(--chorus-action-hover-bg, rgba(255,255,255,0.15)); color: var(--chorus-action-hover-text, #eee); }
+.chorus-artifact-header-controls { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.chorus-artifact-version-switcher { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--chorus-action-text, #a3a3a3); }
+.chorus-artifact-version-btn { padding: 2px 6px; border: 1px solid var(--chorus-border, #2a2a2a); border-radius: 6px; background: transparent; color: inherit; cursor: pointer; font-size: 12px; }
+.chorus-artifact-version-btn:hover:not(:disabled) { background: var(--chorus-action-hover-bg, rgba(255,255,255,0.15)); color: var(--chorus-action-hover-text, #eee); }
+.chorus-artifact-version-btn:disabled { opacity: .35; cursor: default; }
+.chorus-artifact-version-label { font-family: monospace; min-width: 36px; text-align: center; }
+.chorus-artifact-actions { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.chorus-artifact-action { padding: 4px 8px; border: 1px solid var(--chorus-border, #2a2a2a); border-radius: 6px; background: transparent; color: var(--chorus-action-text, #a3a3a3); cursor: pointer; font: inherit; font-size: 12px; }
+.chorus-artifact-action:hover { background: var(--chorus-action-hover-bg, rgba(255,255,255,0.15)); color: var(--chorus-action-hover-text, #eee); }
+.chorus-artifact-action--active { background: var(--chorus-action-hover-bg, rgba(255,255,255,0.15)); color: var(--chorus-action-hover-text, #eee); }
+.chorus-artifact-body { flex: 1 1 auto; overflow: auto; padding: 12px; }
+.chorus-artifact-code { margin: 0; padding: 0; font-family: monospace; font-size: 12px; line-height: 1.5; white-space: pre; }
+.chorus-artifact-doc { font-size: 14px; line-height: 1.5; }
+.chorus-artifact-iframe { width: 100%; height: 100%; min-height: 320px; border: none; background: #ffffff; }
+.chorus-artifact-placeholder { padding: 16px; border: 1px dashed var(--chorus-border, #2a2a2a); border-radius: 8px; color: var(--chorus-action-text, #a3a3a3); font-size: 13px; }
+.chorus-artifact-react { font-size: 14px; }
+.chorus-artifact-diff { margin: 0; padding: 0; font-family: monospace; font-size: 12px; line-height: 1.5; white-space: pre; }
+.chorus-artifact-diff-line { display: flex; gap: 8px; padding-inline: 6px; }
+.chorus-artifact-diff-marker { width: 12px; color: var(--chorus-action-text, #a3a3a3); flex-shrink: 0; user-select: none; }
+.chorus-artifact-diff-add { background: rgba(34, 197, 94, 0.12); color: #86efac; }
+.chorus-artifact-diff-del { background: rgba(220, 38, 38, 0.12); color: #fca5a5; }
+.chorus-artifact-diff-eq { color: var(--chorus-chat-text, #f3f4f6); }
+
+@media (max-width: 768px) {
+  .chorus--with-artifact { flex-direction: column; }
+  .chorus-artifact-panel { width: auto; max-width: none; margin-inline-start: 0; margin-top: 12px; }
+}
+
+/* Generative-UI blocks (rendered when an assistant emits a `__render_block`
+   tool call mapped to message.block, or via the BlockRenderer). Keep styles
+   minimal so host themes can override per-block presentation. */
+.chorus-block { width: 100%; }
+.chorus-block-fallback { padding: 8px 12px; border: 1px dashed var(--chorus-tool-border, #2a2a2a); border-radius: 8px; font-size: 13px; }
+.chorus-block-fallback-title { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.chorus-block-fallback-name { font-family: monospace; font-weight: 600; }
+.chorus-block-fallback-kind { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--chorus-tool-label-text, #666666); }
+.chorus-block-fallback-message { color: var(--chorus-error-text, #fca5a5); }
+.chorus-block-fallback-errors { margin: 4px 0; padding-left: 18px; color: var(--chorus-error-text, #fca5a5); }
+.chorus-block-fallback-raw pre { margin: 4px 0 0; font-family: monospace; font-size: 12px; overflow: auto; max-height: 180px; }
+
+/* Tool-aware loaders. The default loader is a 3-dot animation; presets
+   (spinner, skeleton, map ping, code shimmer) live in `react-chorus/loaders`. */
+.chorus-tool-loader { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 12px; color: var(--chorus-tool-running-text, #a3a3a3); }
+.chorus-tool-loader-label { font-family: monospace; }
+.chorus-tool-loader-dots { display: inline-flex; gap: 3px; }
+.chorus-tool-loader-dots > span { width: 5px; height: 5px; border-radius: 9999px; background: currentColor; opacity: .6; animation: chorus-typing 1.2s infinite ease-in-out; }
+.chorus-tool-loader-dots > span:nth-child(2) { animation-delay: .15s; }
+.chorus-tool-loader-dots > span:nth-child(3) { animation-delay: .3s; }
+.chorus-tool-loader-spinner { width: 12px; height: 12px; border-radius: 9999px; border: 2px solid currentColor; border-top-color: transparent; animation: chorus-tool-loader-spin 0.8s linear infinite; }
+@keyframes chorus-tool-loader-spin { to { transform: rotate(360deg); } }
+.chorus-tool-loader-skeleton-row { height: 10px; margin: 4px 0; background: linear-gradient(90deg, rgba(255,255,255,.05) 0%, rgba(255,255,255,.18) 50%, rgba(255,255,255,.05) 100%); background-size: 200% 100%; animation: chorus-tool-loader-shimmer 1.4s infinite ease-in-out; border-radius: 4px; }
+@keyframes chorus-tool-loader-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+.chorus-tool-loader-shimmer-line { display: block; height: 8px; margin: 4px 0; background: linear-gradient(90deg, rgba(255,255,255,.05) 0%, rgba(255,255,255,.18) 50%, rgba(255,255,255,.05) 100%); background-size: 200% 100%; animation: chorus-tool-loader-shimmer 1.4s infinite ease-in-out; }
+.chorus-tool-loader-ping { display: inline-block; width: 10px; height: 10px; border-radius: 9999px; background: currentColor; box-shadow: 0 0 0 0 rgba(255,255,255,.5); animation: chorus-tool-loader-ping 1.4s infinite cubic-bezier(0, 0, 0.2, 1); }
+@keyframes chorus-tool-loader-ping { 75%, 100% { box-shadow: 0 0 0 12px rgba(255,255,255,0); } }
+.chorus-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
 /* Respect prefers-reduced-motion: replace continuous loops with static states
    and drop non-essential hover/focus transitions in the chorus widget. */
 @media (prefers-reduced-motion: reduce) {
@@ -258,7 +352,14 @@
   .chorus-tool-call-status[data-chorus-tool-call-state="running"] { animation: none; opacity: 1; }
   .chorus-dot { animation: none; opacity: 1; }
   .chorus-dot:nth-child(2), .chorus-dot:nth-child(3) { animation-delay: 0s; }
+  .chorus-tool-loader-dots > span,
+  .chorus-tool-loader-spinner,
+  .chorus-tool-loader-skeleton-row,
+  .chorus-tool-loader-shimmer-line,
+  .chorus-tool-loader-ping { animation: none; }
+  .chorus-tool-loader-dots > span { opacity: 1; }
   .chorus-input-row textarea,
   .chorus-actions,
   .chorus-action-btn { transition: none; }
+  .chorus-artifact-panel { animation: none; }
 }

@@ -2,12 +2,16 @@ import type React from 'react';
 import type { ChatInputHandle, ChatInputProps } from '../components/ChatInput';
 import type { ChatWindowProps } from '../components/ChatWindow';
 import type { ResolvedChorusLabels } from '../labels/types';
-import type { Message } from '../types';
+import type { Artifact, ArtifactVersion, Message } from '../types';
+import type { ChorusArtifactHandle } from '../artifacts/artifactContext';
+import type { MarkdownSanitizer } from '../components/Markdown';
 import type { McpResourceAttachment, McpServerStatus, McpSlashCommand } from '../mcp/types';
 import type { ChorusProps } from '../Chorus.types';
 import type { ToolApprovalContextValue } from '../components/message-row/approvalContext';
 import type { ChorusShellDerivedState } from './derivedState';
 import type { ChorusComposerActions, ChorusComposerState } from './useComposerActions';
+import type { BlockEmit, BlockRegistry, ToolLoadingComponents } from '../blocks/types';
+import type { ConversationCost } from '../utils/cost';
 import { joinClasses } from '../utils/className';
 
 export type ChorusRootProps = React.HTMLAttributes<HTMLDivElement>;
@@ -29,6 +33,32 @@ export interface ChorusMcpStatusView {
   reconnect: (serverName?: string) => void;
 }
 
+export interface ChorusArtifactPanelView {
+  artifacts: Artifact[];
+  activeId: string | null;
+  activeVersion: number;
+  open: boolean;
+  onClose: () => void;
+  onChangeVersion: (version: number) => void;
+  codeTheme: 'dark' | 'light';
+  markdownSanitizer?: MarkdownSanitizer;
+  renderReactArtifact?: (version: ArtifactVersion) => React.ReactNode;
+  /** Stable handle passed via `ChorusArtifactContext.Provider`. */
+  handle: ChorusArtifactHandle;
+}
+
+export interface ChorusShellBlockRuntime {
+  blocks?: BlockRegistry;
+  toolLoadingComponents?: ToolLoadingComponents;
+  emit: BlockEmit;
+  sending?: boolean;
+}
+
+export interface ChorusCostView {
+  cost: ConversationCost;
+  budget?: number;
+}
+
 export interface ChorusShellViewProps<TMeta> {
   rootRef: React.RefObject<HTMLDivElement | null>;
   rootProps: ChorusRootProps;
@@ -39,6 +69,10 @@ export interface ChorusShellViewProps<TMeta> {
   /** When set, wraps the transcript in a ToolApprovalContext.Provider so
    *  rendered tool messages can resolve their pending approval card. */
   approvalContextValue?: ToolApprovalContextValue | null;
+  artifactPanel: ChorusArtifactPanelView;
+  blockRuntime: ChorusShellBlockRuntime;
+  /** Cost meter view data — present only when `<Chorus showCost>` is enabled. */
+  costView?: ChorusCostView;
 }
 
 export interface BuildRootPropsArgs extends React.HTMLAttributes<HTMLDivElement> {
@@ -106,6 +140,7 @@ interface BuildTranscriptPropsArgs<TMeta> {
   formatTimestamp: ChorusProps<TMeta>['formatTimestamp'];
   suggestedPrompts: ChorusProps<TMeta>['suggestedPrompts'];
   defaultHiddenRoles: NonNullable<ChorusProps<TMeta>['hiddenRoles']>;
+  renderMessageFooter?: (message: Message<TMeta>) => React.ReactNode;
 }
 
 export function buildTranscriptProps<TMeta>({
@@ -130,6 +165,7 @@ export function buildTranscriptProps<TMeta>({
   formatTimestamp,
   suggestedPrompts,
   defaultHiddenRoles,
+  renderMessageFooter,
 }: BuildTranscriptPropsArgs<TMeta>): ChatWindowProps<TMeta> {
   return {
     messages,
@@ -154,6 +190,7 @@ export function buildTranscriptProps<TMeta>({
     rawError: session.streamRawError,
     renderError,
     renderMessage,
+    renderMessageFooter,
     showJumpToBottomButton: shellState.resolvedShowJumpToBottomButton,
     showTimestamps,
     formatTimestamp,

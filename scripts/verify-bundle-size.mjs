@@ -454,11 +454,11 @@ async function verifyConsumerBundleBudgets() {
   const chunksByFileName = new Map(chunks.map(chunk => [chunk.fileName, chunk]));
   const measurements = {};
   const entryBudgets = [
-    { label: 'root entry initial JS', entry: 'root', maxSize: 252 * KiB, maxGzip: 81 * KiB },
-    { label: 'headless entry initial JS', entry: 'headless', maxSize: 252 * KiB, maxGzip: 81 * KiB },
-    { label: 'root useChorusStream import initial JS', entry: 'rootUseChorusStream', maxSize: 80 * KiB, maxGzip: 24 * KiB },
+    { label: 'root entry initial JS', entry: 'root', maxSize: 260 * KiB, maxGzip: 82 * KiB },
+    { label: 'headless entry initial JS', entry: 'headless', maxSize: 260 * KiB, maxGzip: 82 * KiB },
+    { label: 'root useChorusStream import initial JS', entry: 'rootUseChorusStream', maxSize: 84 * KiB, maxGzip: 25 * KiB },
     { label: 'root Markdown import initial JS', entry: 'rootMarkdown', maxSize: 85 * KiB, maxGzip: 30 * KiB },
-    { label: 'root ChatWindow import initial JS', entry: 'rootChatWindow', maxSize: 140 * KiB, maxGzip: 47 * KiB },
+    { label: 'root ChatWindow import initial JS', entry: 'rootChatWindow', maxSize: 144 * KiB, maxGzip: 47 * KiB },
     { label: 'root ConversationList import initial JS', entry: 'rootConversationList', maxSize: 12 * KiB, maxGzip: 5 * KiB },
     { label: 'transport subpath initial JS', entry: 'transport', maxSize: 9 * KiB, maxGzip: 4 * KiB },
     { label: 'provider-requests subpath initial JS', entry: 'providerRequests', maxSize: 16 * KiB, maxGzip: 6 * KiB },

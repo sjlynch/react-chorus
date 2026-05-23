@@ -37,6 +37,31 @@
       "import": "./dist/react-chorus-mcp.es.js",
       "require": "./dist/react-chorus-mcp.cjs"
     },
+    "./blocks": {
+      "types": "./dist/types/blocks/index.d.ts",
+      "import": "./dist/react-chorus-blocks.es.js",
+      "require": "./dist/react-chorus-blocks.cjs"
+    },
+    "./blocks/Chart": {
+      "types": "./dist/types/blocks/Chart.d.ts",
+      "import": "./dist/react-chorus-blocks-chart.es.js",
+      "require": "./dist/react-chorus-blocks-chart.cjs"
+    },
+    "./loaders": {
+      "types": "./dist/types/loaders/index.d.ts",
+      "import": "./dist/react-chorus-loaders.es.js",
+      "require": "./dist/react-chorus-loaders.cjs"
+    },
+    "./validators": {
+      "types": "./dist/types/validators/index.d.ts",
+      "import": "./dist/react-chorus-validators.es.js",
+      "require": "./dist/react-chorus-validators.cjs"
+    },
+    "./pricing": {
+      "types": "./dist/types/pricing.d.ts",
+      "import": "./dist/react-chorus-pricing.es.js",
+      "require": "./dist/react-chorus-pricing.cjs"
+    },
     "./styles.css": {
       "types": "./dist/styles.css.d.ts",
       "default": "./dist/styles.css"
