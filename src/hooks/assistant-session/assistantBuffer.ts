@@ -12,6 +12,15 @@ export interface AssistantBufferDeps<TMeta> {
   safeOnChunk: (chunk: string, messageId: string) => void;
   setInternalSending: (value: boolean) => void;
   forceRender: () => void;
+  /**
+   * Optional hook that returns extra fields to merge onto every newly-created
+   * streaming assistant message. Used by `<Chorus providers>` to tag each
+   * assistant turn with the routed `provider` and `modelId` so the bubble
+   * badge and cost-meter pricing lookup can pick them up without a separate
+   * write. Returning `undefined` (or omitting the dep) leaves the message
+   * shape unchanged.
+   */
+  getNewAssistantMessageDefaults?: () => { provider?: string; modelId?: string };
 }
 
 export interface AssistantBuffer<TMeta> {
@@ -31,7 +40,9 @@ export interface AssistantBuffer<TMeta> {
 }
 
 export function useAssistantBuffer<TMeta>(deps: AssistantBufferDeps<TMeta>): AssistantBuffer<TMeta> {
-  const { updateSessionMessages, flushPersistence, messagesRef, safeOnChunk, setInternalSending, forceRender } = deps;
+  const { updateSessionMessages, flushPersistence, messagesRef, safeOnChunk, setInternalSending, forceRender, getNewAssistantMessageDefaults } = deps;
+  const getNewAssistantMessageDefaultsRef = React.useRef(getNewAssistantMessageDefaults);
+  getNewAssistantMessageDefaultsRef.current = getNewAssistantMessageDefaults;
 
   const hasStartedAssistantRef = React.useRef(false);
   const pendingAssistantIdRef = React.useRef<string | null>(null);
@@ -88,7 +99,8 @@ export function useAssistantBuffer<TMeta>(deps: AssistantBufferDeps<TMeta>): Ass
     pendingAssistantIdRef.current = id;
     hasStartedAssistantRef.current = true;
     cancelPending(false);
-    updateSessionMessages(prev => prev.concat({ id, role: 'assistant', text, reasoning, sources }), { reason: 'assistant' });
+    const defaults = getNewAssistantMessageDefaultsRef.current?.() ?? {};
+    updateSessionMessages(prev => prev.concat({ id, role: 'assistant', text, reasoning, sources, ...defaults }), { reason: 'assistant' });
     if (text) safeOnChunk(text, id);
     forceRender();
   }, [cancelPending, forceRender, safeOnChunk, updateSessionMessages]);

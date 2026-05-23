@@ -117,6 +117,7 @@ export function useAssistantSessionAssembly<TMeta>({
     safeOnChunk: observers.safeOnChunk,
     setInternalSending,
     forceRender,
+    getNewAssistantMessageDefaults: options.getNewAssistantMessageDefaults,
   });
   const {
     pendingAssistantIdRef,

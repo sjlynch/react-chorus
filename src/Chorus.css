@@ -102,6 +102,13 @@
 .chorus-resource-picker { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
 .chorus-resource-picker:disabled { cursor: default; }
 
+/* Inline model/provider picker (sits just inside the send button) */
+.chorus-model-picker-wrap { position: absolute; inset-inline-end: 52px; top: 50%; transform: translateY(-50%); z-index: 2; display: inline-flex; align-items: center; height: 28px; padding: 0; border-radius: 6px; color: var(--chorus-input-text, #f3f4f6); opacity: .8; }
+.chorus-model-picker-wrap:hover { opacity: 1; background: rgba(255,255,255,.08); }
+.chorus-model-picker { appearance: none; -webkit-appearance: none; background: transparent; color: inherit; border: 1px solid var(--chorus-input-border, #333333); border-radius: 6px; padding: 2px 22px 2px 8px; font-size: 12px; line-height: 1.2; cursor: pointer; background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%); background-position: calc(100% - 12px) 50%, calc(100% - 8px) 50%; background-size: 4px 4px, 4px 4px; background-repeat: no-repeat; }
+.chorus-model-picker:focus-visible { outline: 2px solid var(--chorus-send-bg, #ffffff); outline-offset: 1px; }
+.chorus-model-picker:disabled { opacity: .5; cursor: default; }
+
 /* Send/Stop button (white circle, black icon — inline-end flips for RTL) */
 .chorus-send { position: absolute; inset-inline-end: 8px; top: 50%; transform: translateY(-50%); width: 36px; height: 36px; padding: 0; line-height: 0; border-radius: 9999px; border: none; background: var(--chorus-send-bg, #ffffff); color: var(--chorus-send-text, #111111); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; z-index: 2; }
 .chorus-send:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--chorus-focus-ring, rgba(255,255,255,0.45)); }
@@ -166,6 +173,9 @@
 
 /* Opt-in per-message timestamp (rendered when <Chorus showTimestamps> is set) */
 .chorus-msg-time { margin-top: 3px; color: var(--chorus-action-text, #a3a3a3); font-size: 11px; }
+.chorus-model-badge { margin-top: 3px; align-self: flex-start; display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px; border-radius: 8px; background: var(--chorus-input-bg, rgba(255,255,255,0.08)); color: var(--chorus-action-text, #a3a3a3); font-size: 10px; line-height: 1.4; }
+.chorus-model-badge-dot { width: 6px; height: 6px; border-radius: 9999px; background: var(--chorus-assistant-bg, #6366f1); display: inline-block; }
+.chorus-model-badge-model { opacity: .75; }
 
 /* Opt-in per-message cost chip (rendered when <Chorus showCost> is set) */
 .chorus-cost-chip { display: inline-block; align-self: flex-end; margin-top: 3px; padding: 1px 6px; border-radius: 9999px; background: var(--chorus-input-bg, #1a1a1a); border: 1px solid var(--chorus-border, #2a2a2a); color: var(--chorus-action-text, #a3a3a3); font-size: 10px; line-height: 1.4; white-space: nowrap; }

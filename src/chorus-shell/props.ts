@@ -1,11 +1,11 @@
 import type React from 'react';
-import type { ChatInputHandle, ChatInputProps } from '../components/ChatInput';
+import type { ChatInputHandle, ChatInputModelPicker, ChatInputProps, ChatInputSlashCommand } from '../components/ChatInput';
 import type { ChatWindowProps } from '../components/ChatWindow';
 import type { ResolvedChorusLabels } from '../labels/types';
 import type { Artifact, ArtifactVersion, Message } from '../types';
 import type { ChorusArtifactHandle } from '../artifacts/artifactContext';
 import type { MarkdownSanitizer } from '../components/Markdown';
-import type { McpResourceAttachment, McpServerStatus, McpSlashCommand } from '../mcp/types';
+import type { McpResourceAttachment, McpServerStatus } from '../mcp/types';
 import type { ChorusProps } from '../Chorus.types';
 import type { ToolApprovalContextValue } from '../components/message-row/approvalContext';
 import type { ChorusShellDerivedState } from './derivedState';
@@ -242,9 +242,11 @@ interface BuildComposerViewArgs<TMeta> {
   readOnly: boolean;
   renderAttachmentError: ChorusProps<TMeta>['renderAttachmentError'];
   uploadAttachment: ChorusProps<TMeta>['uploadAttachment'];
-  mcpSlashCommands?: McpSlashCommand[];
+  mcpSlashCommands?: ChatInputSlashCommand[];
   onMcpSlashCommand?: (commandName: string) => void | Promise<void>;
   mcpResourceAttachments?: McpResourceAttachment[];
+  /** Optional inline model/provider picker, wired by `<Chorus providers>`. */
+  modelPicker?: ChatInputModelPicker;
 }
 
 export function buildComposerView<TMeta>({
@@ -263,6 +265,7 @@ export function buildComposerView<TMeta>({
   mcpSlashCommands,
   onMcpSlashCommand,
   mcpResourceAttachments,
+  modelPicker,
 }: BuildComposerViewArgs<TMeta>): ChorusComposerView {
   return {
     ref: composer.inputRef,
@@ -288,6 +291,7 @@ export function buildComposerView<TMeta>({
       slashCommands: mcpSlashCommands,
       onSlashCommand: onMcpSlashCommand,
       resourceAttachments: mcpResourceAttachments,
+      modelPicker,
     },
   };
 }

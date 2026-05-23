@@ -9,6 +9,8 @@ import type { ChorusConfirmClearConversation, ChorusConfirmDeleteMessage, Chorus
 import type { ChorusMessagesChangeContext } from './hooks/useChorusMessages';
 import type { DeserializeMessages, SerializeMessages } from './hooks/useChorusPersistence';
 import type { Transport } from './hooks/useChorusStream';
+export type { ChorusProviderConfig } from './chorus-shell/multiProvider';
+import type { ChorusProviderConfig } from './chorus-shell/multiProvider';
 import type { ChorusLabels } from './labels/types';
 import type { ArtifactVersion, AttachmentError, ConnectorName, Message, Role, StorageAdapter, UploadAttachment } from './types';
 import type { ChorusConnectorOptions } from './Chorus.defaults';
@@ -230,6 +232,25 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
   systemPrompt?: string;
   /** Simple path: URL string, `{ url, headers, credentials, ... }` config object, or a custom `Transport` function. */
   transport?: string | FetchTransportInit<TMeta> | Transport<TMeta>;
+  /**
+   * Multi-provider registry keyed by stable provider id. Each entry pairs a
+   * `transport` (URL string, `FetchTransportInit`, or custom `Transport`)
+   * with the connector name to parse its SSE frames, plus an optional
+   * human-readable `label` for the composer model picker and an optional
+   * `modelId` propagated to `message.modelId` / cost-meter pricing lookups.
+   *
+   * When set, the composer renders a model-picker dropdown next to the send
+   * button, the `/model:<id>` slash command switches the active provider for
+   * the next turn, and each assistant message records the routed provider on
+   * `message.provider`. The conversation-level `transport` / `connector` props
+   * remain the fallback used when no provider is active.
+   */
+  providers?: Record<string, ChorusProviderConfig<TMeta>>;
+  /**
+   * Provider id selected by default when `providers` is configured. Must be
+   * a key of `providers`. Ignored when `providers` is omitted.
+   */
+  defaultProvider?: string;
   uploadAttachment?: UploadAttachment;
   value?: Message<TMeta>[];
   /**

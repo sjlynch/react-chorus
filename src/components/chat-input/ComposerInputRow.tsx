@@ -2,6 +2,7 @@ import type React from 'react';
 import { ArrowUp, Database, Paperclip } from 'lucide-react';
 import type { Attachment } from '../../types';
 import { joinClasses } from '../../utils/className';
+import type { ChatInputModelPicker } from './types';
 
 interface ComposerInputRowProps {
   // Attach button + hidden file input.
@@ -34,6 +35,8 @@ interface ComposerInputRowProps {
   sending?: boolean;
   stopAvailable: boolean;
   canSend: boolean;
+  // Optional inline model/provider picker rendered next to the send button.
+  modelPicker?: ChatInputModelPicker;
 }
 
 /**
@@ -67,8 +70,10 @@ export function ComposerInputRow({
   sending,
   stopAvailable,
   canSend,
+  modelPicker,
 }: ComposerInputRowProps) {
   const showResourcePicker = resourceAttachments.length > 0;
+  const showModelPicker = Boolean(modelPicker && modelPicker.options.length > 0);
 
   return (
     <div className={joinClasses('chorus-input-row', (showAttachBtn || showResourcePicker) && 'chorus-input-row--has-attach', showResourcePicker && 'chorus-input-row--has-resource-picker')}>
@@ -115,6 +120,22 @@ export function ComposerInputRow({
        * `sending` without `onStop` the button stays disabled but keeps the
        * Send affordance, so assistive tech never hears an inert "Stop".
        */}
+      {showModelPicker && modelPicker && (
+        <label className="chorus-model-picker-wrap" title={modelPicker.ariaLabel ?? 'Provider'}>
+          <span className="chorus-sr-only">{modelPicker.ariaLabel ?? 'Provider'}</span>
+          <select
+            className="chorus-model-picker"
+            aria-label={modelPicker.ariaLabel ?? 'Provider'}
+            value={modelPicker.value}
+            onChange={(e) => modelPicker.onChange(e.currentTarget.value)}
+            disabled={disabled || readOnly}
+          >
+            {modelPicker.options.map(option => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </label>
+      )}
       <button type="button" className="chorus-send" onClick={onSendClick} aria-label={sendActionLabel} title={sendActionLabel} disabled={sending ? !stopAvailable : !canSend}>
         {stopAvailable ? <span className="chorus-stop-fill" /> : <ArrowUp size={18} strokeWidth={2} />}
       </button>

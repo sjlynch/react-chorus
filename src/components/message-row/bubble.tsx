@@ -127,6 +127,15 @@ export function MessageBubbleLayout<TMeta = Record<string, unknown>>({ message, 
           <ToolLoaderSlot toolCall={message.toolCall} streaming={streaming} />
         )}
         <MessageSources sources={message.sources} labels={sourceLabels} />
+        {message.role === 'assistant' && (message.provider || message.modelId) && (
+          <div className="chorus-model-badge" aria-label={`Provider: ${message.provider ?? message.modelId ?? ''}`}>
+            <span className="chorus-model-badge-dot" aria-hidden="true" />
+            {message.provider && <span className="chorus-model-badge-provider">{message.provider}</span>}
+            {message.modelId && (
+              <span className="chorus-model-badge-model">{message.provider ? `· ${message.modelId}` : message.modelId}</span>
+            )}
+          </div>
+        )}
         {showTimestamp && <MessageTimestamp message={message} formatTimestamp={formatTimestamp} />}
         {footerSlot}
         {children}

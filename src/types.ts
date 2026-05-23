@@ -188,6 +188,20 @@ interface ChorusMessageBase<TMeta = Record<string, unknown>> {
    * block fallback. Round-tripped by JSON persistence.
    */
   block?: MessageBlock;
+  /**
+   * Optional provider key (from `<Chorus providers>`) that produced this
+   * message. Set automatically on assistant messages when multi-provider
+   * routing is configured; round-trips through built-in JSON persistence so
+   * the model badge survives reloads.
+   */
+  provider?: string;
+  /**
+   * Optional model id used to produce this message. Set automatically from
+   * `providers[name].modelId` (or the conversation-level `modelId` prop) when
+   * present; consumed by the cost meter and rendered as part of the model
+   * badge on assistant bubbles.
+   */
+  modelId?: string;
   metadata?: TMeta;
 }
 

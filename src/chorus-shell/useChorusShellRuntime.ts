@@ -26,6 +26,8 @@ import { resolveToolHandler } from '../tools';
 import { createMessageId } from '../hooks/assistant-session/messageUtils';
 import { useCostMeter } from './useCostMeter';
 import { buildCostFooterRenderer } from './renderCostFooter';
+import { useMultiProviderRuntime } from './multiProvider';
+import type { ChatInputSlashCommand } from '../components/chat-input/types';
 
 export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
   {
@@ -111,6 +113,8 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
     costEstimator,
     budgetAlert,
     onBudgetExceeded,
+    providers,
+    defaultProvider,
     ...rest
   }: ChorusProps<TMeta>,
   ref: React.ForwardedRef<ChorusRef<TMeta>>,
@@ -156,15 +160,31 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
   });
   const policyStoreRef = useLatestRef(policyStore);
 
+  const multiProvider = useMultiProviderRuntime<TMeta>({
+    providers,
+    defaultProvider,
+    fallbackTransport: transport,
+    fallbackConnector: typeof connector === 'string' ? connector : undefined,
+    fallbackModelId: modelId,
+  });
+  // The active provider's transport/connector replace the conversation-level
+  // fallbacks for the next turn. Falls through when no providers map is
+  // configured so the single-provider path remains untouched.
+  const effectiveTransport = multiProvider.effectiveTransport ?? transport;
+  const effectiveConnector = providers && multiProvider.effectiveConnector
+    ? multiProvider.effectiveConnector
+    : connector;
+  const effectiveModelId = multiProvider.effectiveModelId ?? modelId;
+
   useChorusPropWarnings<TMeta>({
     messages,
     initialMessages,
     onChange,
     value,
     persistenceKey,
-    connector,
+    connector: effectiveConnector,
     connectorOptions,
-    transport,
+    transport: effectiveTransport,
     onSend,
     onStreamDone,
     sending: sendingProp,
@@ -189,7 +209,7 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
     messages: msgs,
     streamingMessageIdRef,
     pricing,
-    defaultModelId: modelId,
+    defaultModelId: effectiveModelId,
     costEstimator,
     budgetAlert,
     onBudgetExceeded,
@@ -201,11 +221,12 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
     messages: msgs,
     updateMessages: updateMsgs,
     seedMessages,
-    transport,
+    transport: effectiveTransport,
     systemPrompt,
-    connector,
+    connector: effectiveConnector,
     connectorOptions,
     onSend,
+    getNewAssistantMessageDefaults: multiProvider.getAssistantMessageDefaults,
     minAssistantDelayMs,
     fallbackErrorMessage,
     onError,
@@ -235,7 +256,7 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
     palette,
     sending: sendingProp,
     sessionSending: session.sending,
-    transport,
+    transport: effectiveTransport,
     onSend,
     showJumpToBottomButton,
     headless,
@@ -431,13 +452,22 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
       readOnly,
       renderAttachmentError,
       uploadAttachment,
-      mcpSlashCommands: mcp.slashCommands,
+      mcpSlashCommands: ([] as ChatInputSlashCommand[]).concat(multiProvider.slashCommands, mcp.slashCommands),
       onMcpSlashCommand: async commandName => {
+        if (multiProvider.handleSlashCommand(commandName)) {
+          // `/model:<id>` switches the active provider without sending; clear
+          // the slash text so the composer doesn't try to send the literal
+          // command as a user turn.
+          composer.setDraft('');
+          requestAnimationFrame(() => composer.inputRef.current?.focus({ caret: 'end' }));
+          return;
+        }
         const applied = await mcp.applyPrompt(commandName);
         composer.setDraft(applied);
         requestAnimationFrame(() => composer.inputRef.current?.focus({ caret: 'end' }));
       },
       mcpResourceAttachments: mcp.resourceAttachments,
+      modelPicker: multiProvider.modelPicker,
     }),
     artifactPanel: {
       artifacts: artifacts.artifacts,

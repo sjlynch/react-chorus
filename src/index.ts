@@ -1,7 +1,7 @@
 export { ChatWindow, MessageBubble } from './components/ChatWindow';
 export type { ChatWindowProps, GetMessageFeedback, MessageBubbleProps, MessageBubbleSlots, MessageCopyResult, MessageFeedback, MessageTimestampFormatter, RenderErrorContext, RenderMessageContext, RenderMessageRootProps, MessageMarkdownProps, MessageRenderActions } from './components/ChatWindow';
 export { ChatInput } from './components/ChatInput';
-export type { ChatInputFocusOptions, ChatInputHandle, ChatInputProps, ChatInputSlashCommand, RenderAttachmentErrorContext } from './components/ChatInput';
+export type { ChatInputFocusOptions, ChatInputHandle, ChatInputModelPicker, ChatInputProps, ChatInputSlashCommand, RenderAttachmentErrorContext } from './components/ChatInput';
 export { ToolCallBlock } from './components/ToolCallBlock';
 export { ToolApprovalCard, DEFAULT_TOOL_APPROVAL_LABELS } from './components/message-row/ToolApprovalCard';
 export type { ToolApprovalCardLabels, ToolApprovalCardProps } from './components/message-row/ToolApprovalCard';
@@ -31,7 +31,7 @@ export type {
   ChorusTranscriptLabels,
   ResolvedChorusLabels,
 } from './labels';
-export type { BudgetExceededContext, ChorusAbortContext, ChorusAbortReason, ChorusAbortSource, ChorusClearConversationContext, ChorusConfirmClearConversation, ChorusConfirmDeleteMessage, ChorusConnectorOptions, ChorusDeleteMessageContext, ChorusFinishContext, ChorusMessagesChangeContext, ChorusMessagesChangeReason, ChorusMessagesChangeSource, ChorusOnAbort, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusProps, ChorusRef, ChorusSendHelpers, ChorusSendPath, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusStreamDoneReason, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolHandler, ChorusToolLoopContext, ChorusToolPolicy, ChorusToolRegistry, FetchTransportInit, McpServerConfig, ModelPricing, PricingTable, ToolApprovalDecision, ToolApprovalPolicy, ToolPolicyScope } from './Chorus';
+export type { BudgetExceededContext, ChorusAbortContext, ChorusAbortReason, ChorusAbortSource, ChorusClearConversationContext, ChorusConfirmClearConversation, ChorusConfirmDeleteMessage, ChorusConnectorOptions, ChorusDeleteMessageContext, ChorusFinishContext, ChorusMessagesChangeContext, ChorusMessagesChangeReason, ChorusMessagesChangeSource, ChorusOnAbort, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusProps, ChorusProviderConfig, ChorusRef, ChorusSendHelpers, ChorusSendPath, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusStreamDoneReason, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolHandler, ChorusToolLoopContext, ChorusToolPolicy, ChorusToolRegistry, FetchTransportInit, McpServerConfig, ModelPricing, PricingTable, ToolApprovalDecision, ToolApprovalPolicy, ToolPolicyScope } from './Chorus';
 
 export type { Message } from './types';
 export type {

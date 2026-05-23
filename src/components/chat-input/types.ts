@@ -5,6 +5,20 @@ export interface ChatInputSlashCommand {
   name: string;
   description?: string;
 }
+
+/**
+ * Composer model picker rendered inline next to the send button when set.
+ * Used by `<Chorus providers>` to let a user route the next turn to a
+ * specific provider; a host can also pass it directly when composing a
+ * custom shell from `ChatInput`.
+ */
+export interface ChatInputModelPicker {
+  options: Array<{ value: string; label: string }>;
+  value: string;
+  onChange: (next: string) => void;
+  /** Accessible label for the `<select>` element. Defaults to "Provider". */
+  ariaLabel?: string;
+}
 import type { ChorusAttachmentLabels, ChorusComposerLabels } from '../../labels/types';
 import type { Palette } from '../ChorusTheme';
 
@@ -90,6 +104,13 @@ export interface ChatInputProps extends Omit<React.HTMLAttributes<HTMLDivElement
   onSlashCommand?: (commandName: string) => void | Promise<void>;
   /** Non-file attachment references (for example MCP resources) that can be selected from the composer picker. */
   resourceAttachments?: Attachment[];
+  /**
+   * Optional inline provider/model picker rendered next to the send button.
+   * When set, the dropdown lists `options`, shows `value` as selected, and
+   * calls `onChange` with the new value. Wired automatically by `<Chorus
+   * providers>` but also exposed so custom shells can hand-roll a picker.
+   */
+  modelPicker?: ChatInputModelPicker;
   /**
    * Localized labels for the composer (placeholder, aria-labels, attach/send/stop, and
    * disabled/read-only fallback reasons). Defaults to English; the existing `placeholder`

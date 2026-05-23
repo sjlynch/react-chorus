@@ -89,6 +89,12 @@ export interface UseAssistantSessionOptions<TMeta = Record<string, unknown>> {
    * policy is configured.
    */
   policyStoreRef: React.MutableRefObject<ToolPolicyStore | null>;
+  /**
+   * Optional callback returning `{ provider, modelId }` defaults to attach to
+   * every new streaming assistant message. Wired by `<Chorus providers>` so
+   * multi-provider routing tags each turn with the routed provider/model id.
+   */
+  getNewAssistantMessageDefaults?: () => { provider?: string; modelId?: string };
 }
 
 export interface UseAssistantSessionResult {
