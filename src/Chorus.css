@@ -235,6 +235,58 @@
 .chorus-error-dismiss:hover { background: var(--chorus-error-bg, rgba(220, 38, 38, 0.15)); }
 .chorus-error-dismiss:focus-visible { outline: 2px solid var(--chorus-error-text, #fca5a5); outline-offset: 2px; }
 
+/* Shell main column (transcript + composer). Always present, so the artifact
+   side panel can slot in beside it without restructuring the DOM tree. */
+.chorus-shell-main { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; min-width: 0; }
+
+/* Artifact card (inline in the bubble) */
+.chorus-artifact-card { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--chorus-border, #2a2a2a); border-radius: 10px; background: var(--chorus-input-bg, #1a1a1a); color: var(--chorus-chat-text, #f3f4f6); width: 100%; max-width: 380px; }
+.chorus-artifact-card-body { flex: 1; min-width: 0; }
+.chorus-artifact-card-title { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chorus-artifact-card-meta { display: flex; gap: 8px; margin-top: 2px; font-size: 11px; color: var(--chorus-action-text, #a3a3a3); }
+.chorus-artifact-card-kind { text-transform: uppercase; letter-spacing: .05em; }
+.chorus-artifact-card-version { font-family: monospace; }
+.chorus-artifact-card-open { padding: 6px 12px; border-radius: 6px; border: 1px solid var(--chorus-border, #2a2a2a); background: var(--chorus-input-bg, #1a1a1a); color: var(--chorus-chat-text, #f3f4f6); cursor: pointer; font: inherit; font-size: 12px; }
+.chorus-artifact-card-open:hover:not(:disabled) { background: var(--chorus-action-hover-bg, rgba(255,255,255,0.15)); color: var(--chorus-action-hover-text, #eee); }
+.chorus-artifact-card-open:disabled { opacity: .5; cursor: default; }
+
+/* Artifact side panel — slides in to the right of the transcript inside the Chorus shell */
+.chorus--with-artifact { display: flex; flex-direction: row; align-items: stretch; }
+.chorus-artifact-panel { display: flex; flex-direction: column; flex: 0 0 40%; width: 40%; max-width: 720px; min-width: 320px; margin-inline-start: 12px; background: var(--chorus-chat-bg, #161616); border: 1px solid var(--chorus-border, #2a2a2a); border-radius: 12px; color: var(--chorus-chat-text, #f3f4f6); overflow: hidden; animation: chorus-artifact-slide .18s ease-out; }
+@keyframes chorus-artifact-slide { from { transform: translateX(8px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+.chorus-artifact-header { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--chorus-border, #2a2a2a); background: var(--chorus-input-bg, #1a1a1a); }
+.chorus-artifact-header-title-row { display: flex; align-items: center; gap: 8px; }
+.chorus-artifact-title { flex: 1; margin: 0; font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chorus-artifact-close { width: 24px; height: 24px; border: none; border-radius: 6px; background: transparent; color: var(--chorus-action-text, #a3a3a3); cursor: pointer; font-size: 18px; line-height: 1; }
+.chorus-artifact-close:hover { background: var(--chorus-action-hover-bg, rgba(255,255,255,0.15)); color: var(--chorus-action-hover-text, #eee); }
+.chorus-artifact-header-controls { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.chorus-artifact-version-switcher { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--chorus-action-text, #a3a3a3); }
+.chorus-artifact-version-btn { padding: 2px 6px; border: 1px solid var(--chorus-border, #2a2a2a); border-radius: 6px; background: transparent; color: inherit; cursor: pointer; font-size: 12px; }
+.chorus-artifact-version-btn:hover:not(:disabled) { background: var(--chorus-action-hover-bg, rgba(255,255,255,0.15)); color: var(--chorus-action-hover-text, #eee); }
+.chorus-artifact-version-btn:disabled { opacity: .35; cursor: default; }
+.chorus-artifact-version-label { font-family: monospace; min-width: 36px; text-align: center; }
+.chorus-artifact-actions { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.chorus-artifact-action { padding: 4px 8px; border: 1px solid var(--chorus-border, #2a2a2a); border-radius: 6px; background: transparent; color: var(--chorus-action-text, #a3a3a3); cursor: pointer; font: inherit; font-size: 12px; }
+.chorus-artifact-action:hover { background: var(--chorus-action-hover-bg, rgba(255,255,255,0.15)); color: var(--chorus-action-hover-text, #eee); }
+.chorus-artifact-action--active { background: var(--chorus-action-hover-bg, rgba(255,255,255,0.15)); color: var(--chorus-action-hover-text, #eee); }
+.chorus-artifact-body { flex: 1 1 auto; overflow: auto; padding: 12px; }
+.chorus-artifact-code { margin: 0; padding: 0; font-family: monospace; font-size: 12px; line-height: 1.5; white-space: pre; }
+.chorus-artifact-doc { font-size: 14px; line-height: 1.5; }
+.chorus-artifact-iframe { width: 100%; height: 100%; min-height: 320px; border: none; background: #ffffff; }
+.chorus-artifact-placeholder { padding: 16px; border: 1px dashed var(--chorus-border, #2a2a2a); border-radius: 8px; color: var(--chorus-action-text, #a3a3a3); font-size: 13px; }
+.chorus-artifact-react { font-size: 14px; }
+.chorus-artifact-diff { margin: 0; padding: 0; font-family: monospace; font-size: 12px; line-height: 1.5; white-space: pre; }
+.chorus-artifact-diff-line { display: flex; gap: 8px; padding-inline: 6px; }
+.chorus-artifact-diff-marker { width: 12px; color: var(--chorus-action-text, #a3a3a3); flex-shrink: 0; user-select: none; }
+.chorus-artifact-diff-add { background: rgba(34, 197, 94, 0.12); color: #86efac; }
+.chorus-artifact-diff-del { background: rgba(220, 38, 38, 0.12); color: #fca5a5; }
+.chorus-artifact-diff-eq { color: var(--chorus-chat-text, #f3f4f6); }
+
+@media (max-width: 768px) {
+  .chorus--with-artifact { flex-direction: column; }
+  .chorus-artifact-panel { width: auto; max-width: none; margin-inline-start: 0; margin-top: 12px; }
+}
+
 /* Respect prefers-reduced-motion: replace continuous loops with static states
    and drop non-essential hover/focus transitions in the chorus widget. */
 @media (prefers-reduced-motion: reduce) {
@@ -245,4 +297,5 @@
   .chorus-input-row textarea,
   .chorus-actions,
   .chorus-action-btn { transition: none; }
+  .chorus-artifact-panel { animation: none; }
 }

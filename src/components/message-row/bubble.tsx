@@ -1,9 +1,12 @@
 import React from 'react';
 import type { Message } from '../../types';
 import type { ChorusAttachmentLabels, ChorusCodeCopyLabels, ChorusSourceLabels, ChorusSpeakerLabels, ChorusToolCallLabels } from '../../labels/types';
+import { ARTIFACT_TOOL_NAME } from '../../reservedIds';
+import { isArtifactPayload } from '../../artifacts/extractArtifacts';
 import { joinClasses } from '../../utils/className';
 import { Markdown, type MarkdownSanitizer } from '../Markdown';
 import { ToolCallBlock } from '../ToolCallBlock';
+import { ArtifactCard } from './ArtifactCard';
 import { MessageAttachments } from './attachments';
 import { MessageReasoning } from './reasoning';
 import { MessageSources } from './sources';
@@ -69,15 +72,30 @@ export function MessageBubbleLayout<TMeta = Record<string, unknown>>({ message, 
             {hasBubbleText && <Markdown {...markdownProps} text={text} codeTheme={codeTheme} headless={headless} streaming={streaming} sanitizer={markdownSanitizer ?? markdownProps?.sanitizer} codeCopyLabels={codeCopyLabels ?? markdownProps?.codeCopyLabels} />}
           </div>
         )}
-        {message.role === 'tool' && (
+        {message.role === 'tool' && (() => {
+          // `__artifact` reserved tool calls render as an artifact card linking
+          // to the side panel instead of the raw tool-call block. The card's
+          // version is looked up by `messageId` against the artifact context so
+          // follow-up emissions surface as `v2`, `v3`, … on the same row.
+          if (message.toolCall.name === ARTIFACT_TOOL_NAME && isArtifactPayload(message.toolCall.input)) {
+            const payload = message.toolCall.input;
+            return (
+              <ArtifactCard
+                id={payload.id}
+                kind={payload.kind}
+                title={payload.title}
+                messageId={message.id}
+              />
+            );
+          }
           // Render the tool call here, not only in ChatWindow's tool branch, so
           // a host composing a custom shell with the exported MessageRow /
           // MessageBubble gets the structured call instead of an empty bubble
           // (or nothing, since `shouldRenderBubble` is false for an empty-text
           // tool message). `message.text`, when present, renders above as a
           // host-authored summary.
-          <ToolCallBlock toolCall={message.toolCall} labels={toolCallLabels} streaming={streaming} />
-        )}
+          return <ToolCallBlock toolCall={message.toolCall} labels={toolCallLabels} streaming={streaming} />;
+        })()}
         <MessageSources sources={message.sources} labels={sourceLabels} />
         {showTimestamp && <MessageTimestamp message={message} formatTimestamp={formatTimestamp} />}
         {footerSlot}

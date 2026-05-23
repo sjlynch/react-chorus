@@ -10,7 +10,7 @@ import type { ChorusMessagesChangeContext } from './hooks/useChorusMessages';
 import type { DeserializeMessages, SerializeMessages } from './hooks/useChorusPersistence';
 import type { Transport } from './hooks/useChorusStream';
 import type { ChorusLabels } from './labels/types';
-import type { AttachmentError, ConnectorName, Message, Role, StorageAdapter, UploadAttachment } from './types';
+import type { ArtifactVersion, AttachmentError, ConnectorName, Message, Role, StorageAdapter, UploadAttachment } from './types';
 import type { ChorusConnectorOptions } from './Chorus.defaults';
 import type { McpServerConfig } from './mcp/types';
 
@@ -209,4 +209,13 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
    * `disabledReason`, and `clearLabel` props take precedence when provided.
    */
   labels?: ChorusLabels;
+  /**
+   * Render a `react` artifact through a host-supplied block registry. Called
+   * with the active `ArtifactVersion` when the side panel needs to show a
+   * `kind: 'react'` artifact. The returned element is rendered inside an
+   * error boundary in the panel body. Without a handler, react artifacts
+   * fall back to a placeholder message — pairs with the Generative-UI block
+   * registry task.
+   */
+  renderReactArtifact?: (version: ArtifactVersion) => React.ReactNode;
 }

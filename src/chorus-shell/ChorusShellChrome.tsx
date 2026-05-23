@@ -1,5 +1,8 @@
+import { ChorusArtifactContext } from '../artifacts/artifactContext';
 import { ChatInput } from '../components/ChatInput';
 import { ChatWindow } from '../components/ChatWindow';
+import { ChorusArtifactPanel } from '../components/ChorusArtifactPanel';
+import { joinClasses } from '../utils/className';
 import type { ChorusMcpStatusView, ChorusShellViewProps } from './props';
 
 function ChorusMcpStatus({ servers, reconnect }: ChorusMcpStatusView) {
@@ -31,24 +34,43 @@ export function ChorusShellChrome<TMeta = Record<string, unknown>>({
   clearControl,
   mcpStatus,
   composer,
+  artifactPanel,
 }: ChorusShellViewProps<TMeta>) {
+  const withPanel = artifactPanel.open;
+  const rootClass = joinClasses(rootProps.className, withPanel && 'chorus--with-artifact');
   return (
-    <div {...rootProps} ref={rootRef}>
-      <ChatWindow<TMeta> {...transcriptProps} />
-      {clearControl.visible && (
-        <div className="chorus-clear-row">
-          <button
-            type="button"
-            className="chorus-clear-btn"
-            onClick={clearControl.onClick}
-            disabled={clearControl.disabled}
-          >
-            {clearControl.label}
-          </button>
+    <ChorusArtifactContext.Provider value={artifactPanel.handle}>
+      <div {...rootProps} className={rootClass} ref={rootRef}>
+        <div className="chorus-shell-main">
+          <ChatWindow<TMeta> {...transcriptProps} />
+          {clearControl.visible && (
+            <div className="chorus-clear-row">
+              <button
+                type="button"
+                className="chorus-clear-btn"
+                onClick={clearControl.onClick}
+                disabled={clearControl.disabled}
+              >
+                {clearControl.label}
+              </button>
+            </div>
+          )}
+          {mcpStatus && <ChorusMcpStatus {...mcpStatus} />}
+          <ChatInput ref={composer.ref} {...composer.props} />
         </div>
-      )}
-      {mcpStatus && <ChorusMcpStatus {...mcpStatus} />}
-      <ChatInput ref={composer.ref} {...composer.props} />
-    </div>
+        {withPanel && (
+          <ChorusArtifactPanel
+            artifacts={artifactPanel.artifacts}
+            activeId={artifactPanel.activeId}
+            activeVersion={artifactPanel.activeVersion}
+            onClose={artifactPanel.onClose}
+            onChangeVersion={artifactPanel.onChangeVersion}
+            codeTheme={artifactPanel.codeTheme}
+            markdownSanitizer={artifactPanel.markdownSanitizer}
+            renderReactArtifact={artifactPanel.renderReactArtifact}
+          />
+        )}
+      </div>
+    </ChorusArtifactContext.Provider>
   );
 }

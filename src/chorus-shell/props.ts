@@ -2,7 +2,9 @@ import type React from 'react';
 import type { ChatInputHandle, ChatInputProps } from '../components/ChatInput';
 import type { ChatWindowProps } from '../components/ChatWindow';
 import type { ResolvedChorusLabels } from '../labels/types';
-import type { Message } from '../types';
+import type { Artifact, ArtifactVersion, Message } from '../types';
+import type { ChorusArtifactHandle } from '../artifacts/artifactContext';
+import type { MarkdownSanitizer } from '../components/Markdown';
 import type { McpResourceAttachment, McpServerStatus, McpSlashCommand } from '../mcp/types';
 import type { ChorusProps } from '../Chorus.types';
 import type { ChorusShellDerivedState } from './derivedState';
@@ -28,6 +30,20 @@ export interface ChorusMcpStatusView {
   reconnect: (serverName?: string) => void;
 }
 
+export interface ChorusArtifactPanelView {
+  artifacts: Artifact[];
+  activeId: string | null;
+  activeVersion: number;
+  open: boolean;
+  onClose: () => void;
+  onChangeVersion: (version: number) => void;
+  codeTheme: 'dark' | 'light';
+  markdownSanitizer?: MarkdownSanitizer;
+  renderReactArtifact?: (version: ArtifactVersion) => React.ReactNode;
+  /** Stable handle passed via `ChorusArtifactContext.Provider`. */
+  handle: ChorusArtifactHandle;
+}
+
 export interface ChorusShellViewProps<TMeta> {
   rootRef: React.RefObject<HTMLDivElement | null>;
   rootProps: ChorusRootProps;
@@ -35,6 +51,7 @@ export interface ChorusShellViewProps<TMeta> {
   clearControl: ChorusClearControl;
   mcpStatus?: ChorusMcpStatusView;
   composer: ChorusComposerView;
+  artifactPanel: ChorusArtifactPanelView;
 }
 
 export interface BuildRootPropsArgs extends React.HTMLAttributes<HTMLDivElement> {

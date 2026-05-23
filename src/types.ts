@@ -71,6 +71,58 @@ export interface UploadAttachmentOptions {
 
 export type UploadAttachment = (file: File, options?: UploadAttachmentOptions) => AttachmentUploadResult | Promise<AttachmentUploadResult>;
 
+/**
+ * Recognized artifact kinds emitted via the reserved `__artifact` tool call.
+ * `code` and `document` route through existing Markdown/highlight pipelines;
+ * `html` renders into a sandboxed iframe; `react` defers to the generative-UI
+ * block registry (when one is wired).
+ */
+export type ArtifactKind = 'code' | 'document' | 'html' | 'react';
+
+/**
+ * Payload shape carried in a `__artifact` tool call's `input`. Each emission
+ * is a single version; subsequent emissions with the same `id` stack as new
+ * versions of the same artifact and become navigable via the panel switcher.
+ */
+export interface ArtifactPayload {
+  id: string;
+  kind: ArtifactKind;
+  title: string;
+  content: string;
+  language?: string;
+}
+
+/**
+ * One version snapshot of an artifact. `messageId` is the tool message that
+ * emitted this version, so consumers can correlate panel content back to a
+ * row in the transcript.
+ */
+export interface ArtifactVersion extends ArtifactPayload {
+  version: number;
+  messageId: string;
+}
+
+/** Aggregated artifact with its full ordered version history. */
+export interface Artifact {
+  id: string;
+  kind: ArtifactKind;
+  title: string;
+  versions: ArtifactVersion[];
+}
+
+/**
+ * Compact reference to an artifact attached to a message. Built-in rendering
+ * shows a card with the title and an "Open" button (the full content lives in
+ * the artifact registry, not on the message). Additive and safe to omit on
+ * messages that do not carry an artifact.
+ */
+export interface ArtifactSummary {
+  id: string;
+  kind: ArtifactKind;
+  title: string;
+  version: number;
+}
+
 export interface ToolCall {
   /** Provider/tool-call id when the streaming connector exposes one. */
   id?: string;
@@ -94,6 +146,13 @@ interface ChorusMessageBase<TMeta = Record<string, unknown>> {
    * includes them, and JSON persistence round-trips them with the message.
    */
   sources?: MessageSource[];
+  /**
+   * Compact reference to an artifact emitted by the assistant on this turn.
+   * When present, default rendering shows an `ArtifactCard` (title + Open
+   * button) in the bubble; the full content lives in the panel registry.
+   * Round-trips through built-in JSON persistence.
+   */
+  artifact?: ArtifactSummary;
   metadata?: TMeta;
 }
 

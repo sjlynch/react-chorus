@@ -1,5 +1,6 @@
 import React from 'react';
 import { resolveChorusLabels } from '../labels/resolve';
+import { useChorusArtifacts } from '../artifacts/useChorusArtifacts';
 import { useChorusPersistence } from '../hooks/useChorusPersistence';
 import { useChorusMessages } from '../hooks/useChorusMessages';
 import { useAssistantSession } from '../hooks/useAssistantSession';
@@ -14,7 +15,7 @@ import {
 } from '../Chorus.types';
 import { resolveBuiltInPersistenceKey, useChorusShellDerivedState } from './derivedState';
 import { useChorusComposerActions, useChorusComposerState } from './useComposerActions';
-import { buildClearControl, buildComposerView, buildRootProps, buildTranscriptProps, type ChorusShellViewProps } from './props';
+import { buildClearControl, buildComposerView, buildRootProps, buildTranscriptProps, type ChorusArtifactPanelView, type ChorusShellViewProps } from './props';
 import { mergeMcpTools } from './mcpTools';
 import { useLazyMcpRuntime } from './useLazyMcpRuntime';
 
@@ -90,6 +91,7 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
     uploadAttachment,
     value,
     labels,
+    renderReactArtifact,
     ...rest
   }: ChorusProps<TMeta>,
   ref: React.ForwardedRef<ChorusRef<TMeta>>,
@@ -205,6 +207,18 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
     writesDisabled: shellState.writesDisabled,
   });
 
+  const artifacts = useChorusArtifacts(msgs);
+  const artifactHandle = React.useMemo(() => ({
+    openArtifact: artifacts.openArtifact,
+    getArtifact: artifacts.getArtifact,
+    getMessageVersion: (artifactId: string, messageId: string) => {
+      const a = artifacts.getArtifact(artifactId);
+      if (!a) return null;
+      const v = a.versions.find(version => version.messageId === messageId);
+      return v ? v.version : null;
+    },
+  }), [artifacts.openArtifact, artifacts.getArtifact]);
+
   useChorusRef<TMeta>(ref, {
     session,
     resetComposer: composer.resetComposer,
@@ -284,5 +298,17 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
       },
       mcpResourceAttachments: mcp.resourceAttachments,
     }),
+    artifactPanel: {
+      artifacts: artifacts.artifacts,
+      activeId: artifacts.activeId,
+      activeVersion: artifacts.activeVersion,
+      open: artifacts.open,
+      onClose: artifacts.closeArtifact,
+      onChangeVersion: artifacts.setActiveVersion,
+      codeTheme: codeBlockTheme,
+      markdownSanitizer,
+      renderReactArtifact,
+      handle: artifactHandle,
+    } satisfies ChorusArtifactPanelView,
   };
 }

@@ -33,6 +33,11 @@ export type { Message } from './types';
 export type {
   Role,
   AnyChorusMessage,
+  Artifact,
+  ArtifactKind,
+  ArtifactPayload,
+  ArtifactSummary,
+  ArtifactVersion,
   AssistantMessage,
   Attachment,
   AttachmentError,
@@ -165,7 +170,18 @@ export type { McpChorusToolDefinition, McpClient, McpConnectionStatus, McpPrompt
 // transport request history from the `<Chorus systemPrompt>` prop. Also exported
 // from `react-chorus/server` and `react-chorus/provider-requests` for proxy/
 // mapper code; see its JSDoc.
-export { RESERVED_SYSTEM_PROMPT_ID } from './reservedIds';
+export { ARTIFACT_TOOL_NAME, RESERVED_SYSTEM_PROMPT_ID } from './reservedIds';
+// Artifact side-panel API. `__artifact` tool calls are aggregated into the
+// registry; the panel renders kind-specific bodies and a version switcher.
+export { ChorusArtifactPanel } from './components/ChorusArtifactPanel';
+export type { ChorusArtifactPanelProps } from './components/ChorusArtifactPanel';
+export { ArtifactCard } from './components/message-row/ArtifactCard';
+export type { ArtifactCardProps } from './components/message-row/ArtifactCard';
+export { useChorusArtifacts } from './artifacts/useChorusArtifacts';
+export type { ChorusArtifactsState } from './artifacts/useChorusArtifacts';
+export { ChorusArtifactContext, useChorusArtifactHandle } from './artifacts/artifactContext';
+export type { ChorusArtifactHandle } from './artifacts/artifactContext';
+export { extractArtifacts, isArtifactPayload } from './artifacts/extractArtifacts';
 // `sourceDisplayLabel` mirrors the priority order the default MessageSources UI
 // uses (`title || url || id || fallback`). Re-exported so custom shells that
 // render their own source list can match the built-in label exactly.
