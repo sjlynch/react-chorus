@@ -14,8 +14,15 @@ import type { MessageBubbleSlots, MessageCopyResult, MessageMarkdownProps, Messa
 export type { MessageFeedback } from '../types';
 export { MessageActionControls, MessageActions, actionButtonClass, createCopyAction } from './message-row/actions';
 export type { MessageActionsProps } from './message-row/actions';
-export { MessageAttachments, MessageBubble, MessageBubbleLayout, MessageReasoning, MessageSources, MessageTimestamp } from './message-row/bubble';
-export type { MessageBubbleLayoutProps, MessageBubbleProps, MessageReasoningProps, MessageSourcesProps, MessageTimestampProps } from './message-row/bubble';
+export { MessageAttachments } from './message-row/attachments';
+export { MessageBubble, MessageBubbleLayout } from './message-row/bubble';
+export type { MessageBubbleLayoutProps, MessageBubbleProps } from './message-row/bubble';
+export { MessageReasoning } from './message-row/reasoning';
+export type { MessageReasoningProps } from './message-row/reasoning';
+export { MessageSources } from './message-row/sources';
+export type { MessageSourcesProps } from './message-row/sources';
+export { MessageTimestamp } from './message-row/timestamp';
+export type { MessageTimestampProps } from './message-row/timestamp';
 export { getInitialMessageFeedback, getMetadataFeedback, isMessageFeedback } from './message-row/feedback';
 export type { GetMessageFeedback } from './message-row/feedback';
 export { InlineMessageEditor } from './message-row/InlineMessageEditor';
