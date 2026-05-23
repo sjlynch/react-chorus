@@ -141,6 +141,7 @@ Then `cd` into an example and follow its README — each has full, copy-pasteabl
 The README above is the happy path. The full reference lives in [`docs/`](./docs):
 
 - **[Usage guide](./docs/guide.md)** — the two send paths in depth, auth headers, the WebSocket transport, the [server-side history pre-load](./docs/guide.md#server-side-history-pre-load) recipe (Next.js loader → `initialMessages` + `persistenceKey`), Next.js / Express / `ws` backends, provider request helpers, connectors, named SSE events, the four provider stream formats, and [using `<Markdown>` and `<ToolCallBlock>` standalone](./docs/guide.md#standalone-components).
+- **[Connector capabilities](./docs/connectors.md)** — provider parity matrix for usage metadata, reasoning, citations/sources, tool calls, multimodal input/output, and code-execution limitations.
 - **[API reference](./docs/api.md)** — every `<Chorus>` prop, the `onSend` `helpers`, `ChorusRef`, persistence, `useChorusStream`, the transport factories, custom connectors, tool calls and agent steps, theming, the individual components, and the `Message` shape.
 - **[Out-of-band attachment uploads](./docs/uploads.md)** — an end-to-end `uploadAttachment` recipe for large or non-image files (PDFs, big images) that won't fit inline.
 - **[Deployment notes](./docs/deployment.md)** — bundle-size budgets, SSR and Markdown sanitization, and a strict Content-Security-Policy guide.

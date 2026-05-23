@@ -665,6 +665,8 @@ The provider connector objects themselves (`openaiConnector`, `anthropicConnecto
 | `'ai-sdk'` | Vercel AI SDK (`toUIMessageStreamResponse` / `toDataStreamResponse`) | `text-delta` / `reasoning-delta` / `source-url` / `source-document` / `tool-input-*` / `tool-output-*` JSON events, plus prefix-coded data-stream frames (`0:"..."`, `g:"..."`, `j:{...}` sources, `7:`/`8:` source-like annotations, `9:{...}`, `c:{...}`, `a:{...}`, `d:`/`e:` finish, `3:"..."` error) |
 | `'auto'` *(default)* | Auto-detect | Tries OpenAI, then Gemini, known Anthropic events, known Vercel AI SDK events (UI-message-stream JSON and data-stream prefix lines), generic JSON text fields (`text`/`content`/`delta`), then raw plain text |
 
+For the cross-provider parity checklist (usage metadata, reasoning, citations/sources, tool calls, multimodal input/output, and code-execution limitations), see the [connector capabilities matrix](connectors.md).
+
 #### Connector source/citation support matrix
 
 All four built-in connectors emit `MessageSource` entries — see [`MessageSource`](api.md#messagesource) for the field semantics and JSON-persistence contract.

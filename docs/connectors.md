@@ -1,0 +1,28 @@
+# Connector capabilities
+
+This page records the `ConnectorCapabilities` parity contract for the built-in provider connectors. It covers the provider stream shapes parsed by `connector="openai"` (Chat Completions and Responses), `connector="anthropic"`, and `connector="gemini"`. `connector="auto"` delegates to these connectors when it detects the same shapes; `connector="ai-sdk"` follows Vercel AI SDK stream protocols and is documented in the usage guide.
+
+Connector metadata is surfaced as `ConnectorResult.metadata`, which reaches `<Chorus onStreamMetadata>` and `useChorusStream(..., { onMetadata })`. Token counts are normalized to `metadata.usage` with `{ promptTokens?, completionTokens?, totalTokens? }` regardless of provider field names.
+
+Legend: ✅ supported by the built-in connector; ⚠️ documented limitation / observable warning instead of silent rendering.
+
+| Capability | OpenAI Chat Completions | OpenAI Responses | Anthropic Messages | Gemini GenerateContent |
+|---|---|---|---|---|
+| usage metadata | ✅ Top-level `usage` is emitted from the trailing `choices: []` frame produced by `stream_options: { include_usage: true }`; cumulative per-chunk usage from compatible proxies is buffered and emitted once on termination. | ✅ Terminal `response.completed` / `response.incomplete` `response.usage` is normalized and emitted once. | ✅ `message_start.message.usage.input_tokens` and `message_delta.usage.output_tokens` are normalized and emitted as metadata. | ✅ Terminal `usageMetadata` is normalized; a trailing `{ candidates: [], usageMetadata }` frame is also surfaced. |
+| reasoning streaming | ✅ Structured reasoning fields (`reasoning_content`, `reasoning_summary_text`, `reasoning`, `reasoning_summary`) and DeepSeek-style `<think>` tags stream to `message.reasoning`; field availability varies by model/proxy. | ✅ `response.reasoning_summary_text.delta`, `response.reasoning_text.delta`, and `response.reasoning_summary.delta` stream to reasoning. | ✅ `thinking` blocks / `thinking_delta` stream to reasoning; `signature_delta` is emitted as metadata. | ✅ `thought: true` text parts and `thinking` / `reasoning` fields stream to reasoning. |
+| citations / sources | ⚠️ Chat Completions streams do not expose the annotation events parsed by Chorus; use Responses for OpenAI citations/sources. | ✅ `response.output_text.annotation.added` and annotations on `response.output_text.done` become `MessageSource` entries. | ✅ `citations_delta`, seeded text-block citations, and `web_search_tool_result` blocks become `MessageSource` entries. | ✅ `groundingMetadata.groundingChunks` and `citationMetadata.citationSources` / `citations` become `MessageSource` entries. |
+| tool calls | ✅ `choices[].delta.tool_calls[]` streams one or more function/tool-call deltas. | ✅ Function-call `output_item` and `function_call_arguments.delta` events stream one or more tool-call deltas without duplicating final arguments. | ✅ `tool_use` blocks and `input_json_delta` chunks stream tool-call deltas. | ✅ `functionCall` parts stream tool-call deltas with stable fallback ids when Gemini omits an id. |
+| multimodal input | ⚠️ Request helpers map image attachments to Chat Completions `image_url` content; non-image attachments fall back to text notes. | ✅ Request helpers map image attachments and uploaded non-image files (`file_id` / `file_url`) to Responses input items; raw base64 non-image files are not inlined. | ⚠️ Request helpers map data-URL images and PDFs; other attachment types fall back to text notes. | ✅ Request helpers map data-URL attachments to `inlineData` and uploaded ids/URLs to `fileData` for any MIME type Gemini accepts. |
+| multimodal output | ⚠️ Text/reasoning/tool-call output only; media output parts are not parsed from Chat Completions streams. | ⚠️ Text, reasoning, tool calls, and output-text annotations are parsed; image/audio/file output events are not rendered as assistant media. | ⚠️ Text, thinking, tool calls, and sources are parsed; binary/media output is not rendered. | ⚠️ `inlineData` / `fileData` output parts emit an `unsupported-part` warning with the raw payload instead of rendering media. |
+| code execution | ⚠️ No dedicated Chat Completions code-execution output stream is parsed; model-requested code execution should be represented as ordinary tool calls. | ⚠️ Responses code-interpreter events are not rendered yet; unknown `response.*` events surface an `unknown-event` warning so rollouts are observable. | ⚠️ No dedicated code-execution result channel is parsed; ordinary `tool_use` still streams as tool calls and citations remain sources when emitted. | ⚠️ `executableCode` / `codeExecutionResult` parts emit an `unsupported-part` warning with the raw payload instead of producing a blank turn. |
+
+## Verification sources
+
+Last checked: 2026-05-23.
+
+- OpenAI Chat Completions streaming and `stream_options.include_usage`: <https://platform.openai.com/docs/api-reference/chat/create#chat-create-stream_options>
+- OpenAI Responses streaming events, usage, annotations, function calls, and code-interpreter event families: <https://platform.openai.com/docs/api-reference/responses-streaming>
+- Anthropic Messages streaming events, usage, extended thinking, tool use, and citations: <https://docs.anthropic.com/en/api/messages-streaming>
+- Gemini GenerateContent streaming candidates, `usageMetadata`, grounding/citation metadata, function calls, and code-execution parts: <https://ai.google.dev/api/generate-content>
+
+When adding a new provider event or output modality, update this matrix at the same time as the connector and regression tests so hosts can depend on the parity contract without inspecting provider-specific wire formats.
