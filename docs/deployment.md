@@ -14,14 +14,14 @@ react-chorus keeps React/ReactDOM as peer dependencies and externalizes runtime 
 
 | Entry | Initial JS | gzip | Notes |
 |-------|------------|------|-------|
-| `react-chorus` (`<Chorus>`) | 247.3 kB | 78.7 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
-| `react-chorus/headless` | 247.6 kB | 78.9 kB | Headless defaults, same behavior surface. |
-| `react-chorus` (`useChorusStream`) | 80.0 kB | 23.8 kB | Root hook import; CI fails if it pulls UI, Markdown, or icon dependencies. |
+| `react-chorus` (`<Chorus>`) | 255.1 kB | 81.1 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
+| `react-chorus/headless` | 255.4 kB | 81.3 kB | Headless defaults, same behavior surface. |
+| `react-chorus` (`useChorusStream`) | 82.2 kB | 24.5 kB | Root hook import; CI fails if it pulls UI, Markdown, or icon dependencies. |
 | `react-chorus` (`Markdown`) | 76.2 kB | 25.8 kB | Standalone Markdown renderer; includes Markdown parsing/sanitization, not chat icons. |
-| `react-chorus` (`ChatWindow`) | 137.5 kB | 45.4 kB | Transcript renderer with Markdown and message action icons, without the composer/widget shell. |
+| `react-chorus` (`ChatWindow`) | 141.5 kB | 46.3 kB | Transcript renderer with Markdown and message action icons, without the composer/widget shell. |
 | `react-chorus` (`ConversationList`) | 9.0 kB | 3.1 kB | Conversation sidebar component only; no Markdown/icon graph. |
 | `react-chorus/transport` | 7.6 kB | 3.1 kB | Transport factories only; no React/UI/Markdown runtime. |
-| `react-chorus/provider-requests` | 12.7 kB | 4.0 kB | Provider request mappers and tool serializers; no React/UI/Markdown runtime. |
+| `react-chorus/provider-requests` | 13.0 kB | 4.2 kB | Provider request mappers and tool serializers; no React/UI/Markdown runtime. |
 | `react-chorus/server` | 0.7 kB | 0.4 kB | SSE framing helpers for proxy routes (headers, encode/format, [DONE], error envelope); no React/UI runtime. |
 | Lazy `highlight.js` runtime | 891.7 kB | 296.2 kB | Async code-fence chunk, never part of initial JS. |
 

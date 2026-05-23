@@ -13,6 +13,7 @@ import type { ChorusLabels } from './labels/types';
 import type { AttachmentError, ConnectorName, Message, Role, StorageAdapter, UploadAttachment } from './types';
 import type { ChorusConnectorOptions } from './Chorus.defaults';
 import type { McpServerConfig } from './mcp/types';
+import type { BlockRegistry, ToolLoadingComponents } from './blocks/types';
 
 export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React.HTMLAttributes<HTMLDivElement>, 'onChange' | 'onError' | 'onCopy' | 'onAbort'> {
   accept?: string;
@@ -201,6 +202,23 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
   transport?: string | FetchTransportInit<TMeta> | Transport<TMeta>;
   uploadAttachment?: UploadAttachment;
   value?: Message<TMeta>[];
+  /**
+   * Generative-UI block registry. Keyed by block name; the assistant emits a
+   * `__render_block` tool call with `{ name, props }` and Chorus maps it to
+   * `message.block`. The default transcript renders the registered component
+   * inline (no tool row), re-rendering on every streamed prop delta. Each
+   * block definition can optionally provide a validator (run on `'done'`)
+   * and a `streamingMode: 'whole'` to defer rendering until done. Unknown
+   * names render a small fallback so old transcripts still load.
+   */
+  blocks?: BlockRegistry;
+  /**
+   * Per-tool loaders displayed while a tool call is streaming and has no
+   * output yet. Pass a record `{ get_weather: WeatherLoader }` or a function
+   * `(toolName, partialInput) => ReactNode` to react to streamed input. Tools
+   * without an override use a 3-dot default loader.
+   */
+  toolLoadingComponents?: ToolLoadingComponents;
   /**
    * Localized labels for every built-in UI string (composer placeholder/aria-labels,
    * transcript aria-label/typing/retry/jump/empty title, message actions, speakers,

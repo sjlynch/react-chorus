@@ -1,5 +1,6 @@
 import { ChatInput } from '../components/ChatInput';
 import { ChatWindow } from '../components/ChatWindow';
+import { BlockProvider } from '../blocks/BlockContext';
 import type { ChorusMcpStatusView, ChorusShellViewProps } from './props';
 
 function ChorusMcpStatus({ servers, reconnect }: ChorusMcpStatusView) {
@@ -31,24 +32,27 @@ export function ChorusShellChrome<TMeta = Record<string, unknown>>({
   clearControl,
   mcpStatus,
   composer,
+  blockRuntime,
 }: ChorusShellViewProps<TMeta>) {
   return (
-    <div {...rootProps} ref={rootRef}>
-      <ChatWindow<TMeta> {...transcriptProps} />
-      {clearControl.visible && (
-        <div className="chorus-clear-row">
-          <button
-            type="button"
-            className="chorus-clear-btn"
-            onClick={clearControl.onClick}
-            disabled={clearControl.disabled}
-          >
-            {clearControl.label}
-          </button>
-        </div>
-      )}
-      {mcpStatus && <ChorusMcpStatus {...mcpStatus} />}
-      <ChatInput ref={composer.ref} {...composer.props} />
-    </div>
+    <BlockProvider blocks={blockRuntime.blocks} toolLoadingComponents={blockRuntime.toolLoadingComponents} emit={blockRuntime.emit} sending={blockRuntime.sending}>
+      <div {...rootProps} ref={rootRef}>
+        <ChatWindow<TMeta> {...transcriptProps} />
+        {clearControl.visible && (
+          <div className="chorus-clear-row">
+            <button
+              type="button"
+              className="chorus-clear-btn"
+              onClick={clearControl.onClick}
+              disabled={clearControl.disabled}
+            >
+              {clearControl.label}
+            </button>
+          </div>
+        )}
+        {mcpStatus && <ChorusMcpStatus {...mcpStatus} />}
+        <ChatInput ref={composer.ref} {...composer.props} />
+      </div>
+    </BlockProvider>
   );
 }

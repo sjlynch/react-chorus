@@ -235,6 +235,35 @@
 .chorus-error-dismiss:hover { background: var(--chorus-error-bg, rgba(220, 38, 38, 0.15)); }
 .chorus-error-dismiss:focus-visible { outline: 2px solid var(--chorus-error-text, #fca5a5); outline-offset: 2px; }
 
+/* Generative-UI blocks (rendered when an assistant emits a `__render_block`
+   tool call mapped to message.block, or via the BlockRenderer). Keep styles
+   minimal so host themes can override per-block presentation. */
+.chorus-block { width: 100%; }
+.chorus-block-fallback { padding: 8px 12px; border: 1px dashed var(--chorus-tool-border, #2a2a2a); border-radius: 8px; font-size: 13px; }
+.chorus-block-fallback-title { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.chorus-block-fallback-name { font-family: monospace; font-weight: 600; }
+.chorus-block-fallback-kind { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--chorus-tool-label-text, #666666); }
+.chorus-block-fallback-message { color: var(--chorus-error-text, #fca5a5); }
+.chorus-block-fallback-errors { margin: 4px 0; padding-left: 18px; color: var(--chorus-error-text, #fca5a5); }
+.chorus-block-fallback-raw pre { margin: 4px 0 0; font-family: monospace; font-size: 12px; overflow: auto; max-height: 180px; }
+
+/* Tool-aware loaders. The default loader is a 3-dot animation; presets
+   (spinner, skeleton, map ping, code shimmer) live in `react-chorus/loaders`. */
+.chorus-tool-loader { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 12px; color: var(--chorus-tool-running-text, #a3a3a3); }
+.chorus-tool-loader-label { font-family: monospace; }
+.chorus-tool-loader-dots { display: inline-flex; gap: 3px; }
+.chorus-tool-loader-dots > span { width: 5px; height: 5px; border-radius: 9999px; background: currentColor; opacity: .6; animation: chorus-typing 1.2s infinite ease-in-out; }
+.chorus-tool-loader-dots > span:nth-child(2) { animation-delay: .15s; }
+.chorus-tool-loader-dots > span:nth-child(3) { animation-delay: .3s; }
+.chorus-tool-loader-spinner { width: 12px; height: 12px; border-radius: 9999px; border: 2px solid currentColor; border-top-color: transparent; animation: chorus-tool-loader-spin 0.8s linear infinite; }
+@keyframes chorus-tool-loader-spin { to { transform: rotate(360deg); } }
+.chorus-tool-loader-skeleton-row { height: 10px; margin: 4px 0; background: linear-gradient(90deg, rgba(255,255,255,.05) 0%, rgba(255,255,255,.18) 50%, rgba(255,255,255,.05) 100%); background-size: 200% 100%; animation: chorus-tool-loader-shimmer 1.4s infinite ease-in-out; border-radius: 4px; }
+@keyframes chorus-tool-loader-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+.chorus-tool-loader-shimmer-line { display: block; height: 8px; margin: 4px 0; background: linear-gradient(90deg, rgba(255,255,255,.05) 0%, rgba(255,255,255,.18) 50%, rgba(255,255,255,.05) 100%); background-size: 200% 100%; animation: chorus-tool-loader-shimmer 1.4s infinite ease-in-out; }
+.chorus-tool-loader-ping { display: inline-block; width: 10px; height: 10px; border-radius: 9999px; background: currentColor; box-shadow: 0 0 0 0 rgba(255,255,255,.5); animation: chorus-tool-loader-ping 1.4s infinite cubic-bezier(0, 0, 0.2, 1); }
+@keyframes chorus-tool-loader-ping { 75%, 100% { box-shadow: 0 0 0 12px rgba(255,255,255,0); } }
+.chorus-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
 /* Respect prefers-reduced-motion: replace continuous loops with static states
    and drop non-essential hover/focus transitions in the chorus widget. */
 @media (prefers-reduced-motion: reduce) {
@@ -242,6 +271,12 @@
   .chorus-tool-call-status[data-chorus-tool-call-state="running"] { animation: none; opacity: 1; }
   .chorus-dot { animation: none; opacity: 1; }
   .chorus-dot:nth-child(2), .chorus-dot:nth-child(3) { animation-delay: 0s; }
+  .chorus-tool-loader-dots > span,
+  .chorus-tool-loader-spinner,
+  .chorus-tool-loader-skeleton-row,
+  .chorus-tool-loader-shimmer-line,
+  .chorus-tool-loader-ping { animation: none; }
+  .chorus-tool-loader-dots > span { opacity: 1; }
   .chorus-input-row textarea,
   .chorus-actions,
   .chorus-action-btn { transition: none; }

@@ -17,6 +17,9 @@ import { useChorusComposerActions, useChorusComposerState } from './useComposerA
 import { buildClearControl, buildComposerView, buildRootProps, buildTranscriptProps, type ChorusShellViewProps } from './props';
 import { mergeMcpTools } from './mcpTools';
 import { useLazyMcpRuntime } from './useLazyMcpRuntime';
+import type { BlockEmit, BlockEmitPayload } from '../blocks/types';
+import { resolveToolHandler } from '../tools';
+import { createMessageId } from '../hooks/assistant-session/messageUtils';
 
 export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
   {
@@ -90,6 +93,8 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
     uploadAttachment,
     value,
     labels,
+    blocks,
+    toolLoadingComponents,
     ...rest
   }: ChorusProps<TMeta>,
   ref: React.ForwardedRef<ChorusRef<TMeta>>,
@@ -215,6 +220,66 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
     controlledWithoutOnChange: shellState.controlledWithoutOnChange,
   });
 
+  // Generative-UI emit channel: interactive blocks call this to synthesize a
+  // user turn (`emit(text)`) or to invoke a registered tool directly without
+  // a user-visible message (`emit({ toolCall: { name, input } })`).
+  const sessionRef = React.useRef(session);
+  sessionRef.current = session;
+  const mergedToolsRef = React.useRef(mergedTools);
+  mergedToolsRef.current = mergedTools;
+  const updateMsgsRef = React.useRef(updateMsgs);
+  updateMsgsRef.current = updateMsgs;
+  const messagesRefForEmit = messagesRef;
+  const blockEmit = React.useCallback<BlockEmit>((payload) => {
+    if (typeof payload === 'string') {
+      sessionRef.current.send(payload);
+      return;
+    }
+    const obj = payload as BlockEmitPayload | undefined;
+    if (!obj) return;
+    if (typeof obj.text === 'string') {
+      sessionRef.current.send(obj.text);
+      return;
+    }
+    if (obj.toolCall && typeof obj.toolCall.name === 'string') {
+      const { name, input } = obj.toolCall;
+      const messageId = createMessageId();
+      updateMsgsRef.current(prev => prev.concat({
+        id: messageId,
+        role: 'tool',
+        text: '',
+        toolCall: { id: messageId, name, input },
+      }), { reason: 'assistant' });
+      const handler = resolveToolHandler<TMeta>(mergedToolsRef.current, name);
+      if (handler) {
+        const controller = new AbortController();
+        const toolMessage = { id: messageId, role: 'tool' as const, text: '', toolCall: { id: messageId, name, input } };
+        const context = {
+          id: messageId,
+          name,
+          input,
+          message: toolMessage,
+          messages: messagesRefForEmit.current,
+          signal: controller.signal,
+        };
+        Promise.resolve()
+          .then(() => handler(input, context as Parameters<typeof handler>[1]))
+          .then(output => {
+            updateMsgsRef.current(prev => prev.map(m => m.id === messageId && m.role === 'tool'
+              ? { ...m, toolCall: { ...m.toolCall, output } }
+              : m), { reason: 'assistant' });
+          })
+          .catch(() => {
+            // Errors from emit-triggered tools are surfaced as the tool row's
+            // output payload, mirroring the standard tool-error recording shape.
+            updateMsgsRef.current(prev => prev.map(m => m.id === messageId && m.role === 'tool'
+              ? { ...m, toolCall: { ...m.toolCall, output: { error: 'tool failed' } } }
+              : m), { reason: 'assistant' });
+          });
+      }
+    }
+  }, [messagesRefForEmit]);
+
   return {
     rootRef,
     rootProps: buildRootProps({
@@ -262,6 +327,12 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
     mcpStatus: {
       servers: mcp.servers,
       reconnect: mcp.reconnect,
+    },
+    blockRuntime: {
+      blocks,
+      toolLoadingComponents,
+      emit: blockEmit,
+      sending: shellState.visualSending,
     },
     composer: buildComposerView<TMeta>({
       composer,

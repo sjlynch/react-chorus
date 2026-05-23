@@ -7,6 +7,7 @@ import type { McpResourceAttachment, McpServerStatus, McpSlashCommand } from '..
 import type { ChorusProps } from '../Chorus.types';
 import type { ChorusShellDerivedState } from './derivedState';
 import type { ChorusComposerActions, ChorusComposerState } from './useComposerActions';
+import type { BlockEmit, BlockRegistry, ToolLoadingComponents } from '../blocks/types';
 import { joinClasses } from '../utils/className';
 
 export type ChorusRootProps = React.HTMLAttributes<HTMLDivElement>;
@@ -28,6 +29,13 @@ export interface ChorusMcpStatusView {
   reconnect: (serverName?: string) => void;
 }
 
+export interface ChorusShellBlockRuntime {
+  blocks?: BlockRegistry;
+  toolLoadingComponents?: ToolLoadingComponents;
+  emit: BlockEmit;
+  sending?: boolean;
+}
+
 export interface ChorusShellViewProps<TMeta> {
   rootRef: React.RefObject<HTMLDivElement | null>;
   rootProps: ChorusRootProps;
@@ -35,6 +43,7 @@ export interface ChorusShellViewProps<TMeta> {
   clearControl: ChorusClearControl;
   mcpStatus?: ChorusMcpStatusView;
   composer: ChorusComposerView;
+  blockRuntime: ChorusShellBlockRuntime;
 }
 
 export interface BuildRootPropsArgs extends React.HTMLAttributes<HTMLDivElement> {
