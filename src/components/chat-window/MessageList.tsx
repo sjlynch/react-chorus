@@ -44,6 +44,8 @@ export interface MessageListProps<TMeta = Record<string, unknown>> {
    */
   streamingTurnIds: ReadonlySet<string>;
   renderMessage?: (message: Message<TMeta>, context: RenderMessageContext<TMeta>) => React.ReactNode;
+  /** Optional meta-line renderer placed under each bubble (e.g. cost chip). */
+  renderMessageFooter?: (message: Message<TMeta>) => React.ReactNode;
   /** Render each message's `createdAt` time below its bubble. */
   showTimestamps: boolean;
   /** Override the locale-aware default timestamp formatting. */
@@ -70,6 +72,7 @@ export function MessageList<TMeta = Record<string, unknown>>({
   streamingMessageId,
   streamingTurnIds,
   renderMessage,
+  renderMessageFooter,
   showTimestamps,
   formatTimestamp,
   resolvedLabels,
@@ -115,6 +118,7 @@ export function MessageList<TMeta = Record<string, unknown>>({
           feedback,
           initialFeedback,
           feedbackReadOnly,
+          renderMessageFooter,
         });
         const actions = buildMessageRenderActions<TMeta>({
           message,

@@ -1,5 +1,6 @@
 import { ChatInput } from '../components/ChatInput';
 import { ChatWindow } from '../components/ChatWindow';
+import { CostHeader } from './CostHeader';
 import type { ChorusMcpStatusView, ChorusShellViewProps } from './props';
 
 function ChorusMcpStatus({ servers, reconnect }: ChorusMcpStatusView) {
@@ -31,9 +32,11 @@ export function ChorusShellChrome<TMeta = Record<string, unknown>>({
   clearControl,
   mcpStatus,
   composer,
+  costView,
 }: ChorusShellViewProps<TMeta>) {
   return (
     <div {...rootProps} ref={rootRef}>
+      {costView && <CostHeader cost={costView.cost} budget={costView.budget} />}
       <ChatWindow<TMeta> {...transcriptProps} />
       {clearControl.visible && (
         <div className="chorus-clear-row">

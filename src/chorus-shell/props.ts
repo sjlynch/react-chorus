@@ -7,6 +7,7 @@ import type { McpResourceAttachment, McpServerStatus, McpSlashCommand } from '..
 import type { ChorusProps } from '../Chorus.types';
 import type { ChorusShellDerivedState } from './derivedState';
 import type { ChorusComposerActions, ChorusComposerState } from './useComposerActions';
+import type { ConversationCost } from '../utils/cost';
 import { joinClasses } from '../utils/className';
 
 export type ChorusRootProps = React.HTMLAttributes<HTMLDivElement>;
@@ -28,6 +29,11 @@ export interface ChorusMcpStatusView {
   reconnect: (serverName?: string) => void;
 }
 
+export interface ChorusCostView {
+  cost: ConversationCost;
+  budget?: number;
+}
+
 export interface ChorusShellViewProps<TMeta> {
   rootRef: React.RefObject<HTMLDivElement | null>;
   rootProps: ChorusRootProps;
@@ -35,6 +41,8 @@ export interface ChorusShellViewProps<TMeta> {
   clearControl: ChorusClearControl;
   mcpStatus?: ChorusMcpStatusView;
   composer: ChorusComposerView;
+  /** Cost meter view data — present only when `<Chorus showCost>` is enabled. */
+  costView?: ChorusCostView;
 }
 
 export interface BuildRootPropsArgs extends React.HTMLAttributes<HTMLDivElement> {
@@ -102,6 +110,7 @@ interface BuildTranscriptPropsArgs<TMeta> {
   formatTimestamp: ChorusProps<TMeta>['formatTimestamp'];
   suggestedPrompts: ChorusProps<TMeta>['suggestedPrompts'];
   defaultHiddenRoles: NonNullable<ChorusProps<TMeta>['hiddenRoles']>;
+  renderMessageFooter?: (message: Message<TMeta>) => React.ReactNode;
 }
 
 export function buildTranscriptProps<TMeta>({
@@ -126,6 +135,7 @@ export function buildTranscriptProps<TMeta>({
   formatTimestamp,
   suggestedPrompts,
   defaultHiddenRoles,
+  renderMessageFooter,
 }: BuildTranscriptPropsArgs<TMeta>): ChatWindowProps<TMeta> {
   return {
     messages,
@@ -150,6 +160,7 @@ export function buildTranscriptProps<TMeta>({
     rawError: session.streamRawError,
     renderError,
     renderMessage,
+    renderMessageFooter,
     showJumpToBottomButton: shellState.resolvedShowJumpToBottomButton,
     showTimestamps,
     formatTimestamp,
