@@ -57,6 +57,11 @@
       "import": "./dist/react-chorus-validators.es.js",
       "require": "./dist/react-chorus-validators.cjs"
     },
+    "./pricing": {
+      "types": "./dist/types/pricing.d.ts",
+      "import": "./dist/react-chorus-pricing.es.js",
+      "require": "./dist/react-chorus-pricing.cjs"
+    },
     "./styles.css": {
       "types": "./dist/styles.css.d.ts",
       "default": "./dist/styles.css"

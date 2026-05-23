@@ -53,6 +53,7 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
   rawError = null,
   renderError,
   renderMessage,
+  renderMessageFooter,
   showJumpToBottomButton = !headless,
   showSystemMessages,
   showTimestamps = false,
@@ -122,6 +123,7 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
         streamingMessageId={streamingMessageId}
         streamingTurnIds={streamingTurnIds}
         renderMessage={renderMessage}
+        renderMessageFooter={renderMessageFooter}
         showTimestamps={showTimestamps}
         formatTimestamp={formatTimestamp}
         resolvedLabels={resolvedLabels}

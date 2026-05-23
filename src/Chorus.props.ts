@@ -14,6 +14,11 @@ import type { AttachmentError, ConnectorName, Message, Role, StorageAdapter, Upl
 import type { ChorusConnectorOptions } from './Chorus.defaults';
 import type { McpServerConfig } from './mcp/types';
 import type { BlockRegistry, ToolLoadingComponents } from './blocks/types';
+import type { BudgetExceededContext } from './chorus-shell/useCostMeter';
+import type { PricingTable } from './pricing';
+
+export type { BudgetExceededContext } from './chorus-shell/useCostMeter';
+export type { ModelPricing, PricingTable } from './pricing';
 
 export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React.HTMLAttributes<HTMLDivElement>, 'onChange' | 'onError' | 'onCopy' | 'onAbort'> {
   accept?: string;
@@ -219,6 +224,51 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
    * without an override use a 3-dot default loader.
    */
   toolLoadingComponents?: ToolLoadingComponents;
+  /**
+   * Show a small `$0.003 · 412 tok` chip at the bottom-right of each assistant
+   * bubble plus a conversation total in the transcript header. Off by default.
+   *
+   * Pricing comes from the built-in `PRICING` snapshot (see `react-chorus/pricing`)
+   * merged with the optional `pricing` prop on top — host overrides win per
+   * model. Costs are computed from `metadata.usage` on each assistant message;
+   * the built-in connectors emit usage via `onStreamMetadata` and the meter
+   * attaches it to the active streaming message automatically.
+   */
+  showCost?: boolean;
+  /**
+   * Per-model pricing overrides (USD per 1k tokens). Merged on top of the
+   * built-in `PRICING` snapshot, so partial overrides win per model without
+   * dropping the defaults for unmentioned models. Ship a fresh snapshot from
+   * your billing system here when the built-in table goes stale.
+   */
+  pricing?: PricingTable;
+  /**
+   * Fallback model id used when an assistant message has no
+   * `metadata.modelId`. Useful for single-provider apps that always route
+   * through one model — set it once and the meter picks the correct pricing
+   * entry without each message carrying the id.
+   */
+  modelId?: string;
+  /**
+   * Host-supplied per-message cost override. Returns the USD cost for one
+   * assistant message; return `undefined` to fall back to the built-in
+   * pricing-table lookup. Useful for custom billing (e.g. cached input
+   * discounts, batch pricing) that the static table cannot express.
+   */
+  costEstimator?: (message: Message<TMeta>, modelId: string | undefined) => number | undefined;
+  /**
+   * Conversation budget threshold in USD. Once the running total strictly
+   * exceeds this, `onBudgetExceeded` fires exactly once. The latch re-arms
+   * when the total drops back at or below the threshold (e.g. after a
+   * `clear()`), so the next over-budget run still alerts.
+   */
+  budgetAlert?: number;
+  /**
+   * Fires once when the conversation total crosses `budgetAlert`. Receives
+   * `{ total, perModel, threshold }`. Pure observer — throwing here does
+   * not interrupt rendering.
+   */
+  onBudgetExceeded?: (context: BudgetExceededContext) => void;
   /**
    * Localized labels for every built-in UI string (composer placeholder/aria-labels,
    * transcript aria-label/typing/retry/jump/empty title, message actions, speakers,

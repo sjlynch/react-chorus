@@ -167,6 +167,19 @@
 /* Opt-in per-message timestamp (rendered when <Chorus showTimestamps> is set) */
 .chorus-msg-time { margin-top: 3px; color: var(--chorus-action-text, #a3a3a3); font-size: 11px; }
 
+/* Opt-in per-message cost chip (rendered when <Chorus showCost> is set) */
+.chorus-cost-chip { display: inline-block; align-self: flex-end; margin-top: 3px; padding: 1px 6px; border-radius: 9999px; background: var(--chorus-input-bg, #1a1a1a); border: 1px solid var(--chorus-border, #2a2a2a); color: var(--chorus-action-text, #a3a3a3); font-size: 10px; line-height: 1.4; white-space: nowrap; }
+.chorus-cost-chip[data-chorus-cost-approximate="true"] { opacity: .75; font-style: italic; }
+.chorus-user .chorus-cost-chip { align-self: flex-end; }
+.chorus-assistant .chorus-cost-chip { align-self: flex-start; }
+
+/* Cost meter header (rendered above the transcript when <Chorus showCost> is set) */
+.chorus-cost-header { display: flex; align-items: baseline; gap: 6px; margin-bottom: 8px; padding: 4px 10px; border: 1px solid var(--chorus-border, #2a2a2a); border-radius: 8px; background: var(--chorus-input-bg, #1a1a1a); color: var(--chorus-chat-text, #f3f4f6); font-size: 12px; }
+.chorus-cost-header[data-chorus-cost-over-budget="true"] { border-color: var(--chorus-error-border, rgba(220, 38, 38, 0.4)); color: var(--chorus-error-text, #fca5a5); }
+.chorus-cost-header-label { color: var(--chorus-action-text, #a3a3a3); text-transform: uppercase; letter-spacing: .05em; font-size: 10px; }
+.chorus-cost-header-total { font-weight: 600; cursor: help; }
+.chorus-cost-header-budget { color: var(--chorus-action-text, #a3a3a3); font-size: 11px; }
+
 /* Collapsed reasoning/thinking trace */
 .chorus-reasoning { max-width: 100%; margin: 0 0 6px; border: 1px solid var(--chorus-border, #2a2a2a); border-radius: 8px; background: var(--chorus-chat-bg, #161616); color: var(--chorus-chat-text, #f3f4f6); overflow: hidden; }
 .chorus-reasoning-summary { padding: 6px 10px; color: var(--chorus-action-text, #a3a3a3); font-size: 12px; font-weight: 600; cursor: pointer; user-select: none; }
