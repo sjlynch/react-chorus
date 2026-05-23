@@ -27,7 +27,7 @@ export type {
   ChorusTranscriptLabels,
   ResolvedChorusLabels,
 } from './labels';
-export type { ChorusAbortContext, ChorusAbortReason, ChorusAbortSource, ChorusClearConversationContext, ChorusConfirmClearConversation, ChorusConfirmDeleteMessage, ChorusConnectorOptions, ChorusDeleteMessageContext, ChorusFinishContext, ChorusMessagesChangeContext, ChorusMessagesChangeReason, ChorusMessagesChangeSource, ChorusOnAbort, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusProps, ChorusRef, ChorusSendHelpers, ChorusSendPath, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusStreamDoneReason, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolHandler, ChorusToolLoopContext, ChorusToolRegistry, FetchTransportInit, McpServerConfig } from './Chorus';
+export type { BudgetExceededContext, ChorusAbortContext, ChorusAbortReason, ChorusAbortSource, ChorusClearConversationContext, ChorusConfirmClearConversation, ChorusConfirmDeleteMessage, ChorusConnectorOptions, ChorusDeleteMessageContext, ChorusFinishContext, ChorusMessagesChangeContext, ChorusMessagesChangeReason, ChorusMessagesChangeSource, ChorusOnAbort, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusProps, ChorusRef, ChorusSendHelpers, ChorusSendPath, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusStreamDoneReason, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolHandler, ChorusToolLoopContext, ChorusToolRegistry, FetchTransportInit, McpServerConfig, ModelPricing, PricingTable } from './Chorus';
 
 export type { Message } from './types';
 export type {
@@ -45,6 +45,7 @@ export type {
   AttachmentSource,
   AttachmentUploadResult,
   ConnectorName,
+  MessageBlock,
   MessageCitation,
   MessageSource,
   MessageSourceType,
@@ -170,7 +171,7 @@ export type { McpChorusToolDefinition, McpClient, McpConnectionStatus, McpPrompt
 // transport request history from the `<Chorus systemPrompt>` prop. Also exported
 // from `react-chorus/server` and `react-chorus/provider-requests` for proxy/
 // mapper code; see its JSDoc.
-export { ARTIFACT_TOOL_NAME, RESERVED_SYSTEM_PROMPT_ID } from './reservedIds';
+export { ARTIFACT_TOOL_NAME, RESERVED_BLOCK_TOOL_NAME, RESERVED_SYSTEM_PROMPT_ID } from './reservedIds';
 // Artifact side-panel API. `__artifact` tool calls are aggregated into the
 // registry; the panel renders kind-specific bodies and a version switcher.
 export { ChorusArtifactPanel } from './components/ChorusArtifactPanel';

@@ -7,6 +7,8 @@ import { joinClasses } from '../../utils/className';
 import { Markdown, type MarkdownSanitizer } from '../Markdown';
 import { ToolCallBlock } from '../ToolCallBlock';
 import { ArtifactCard } from './ArtifactCard';
+import { BlockRenderer } from '../../blocks/BlockRenderer';
+import { ToolLoaderSlot } from '../../blocks/ToolLoader';
 import { MessageAttachments } from './attachments';
 import { MessageReasoning } from './reasoning';
 import { MessageSources } from './sources';
@@ -40,7 +42,18 @@ export function MessageBubbleLayout<TMeta = Record<string, unknown>>({ message, 
   const text = message.text ?? '';
   const hasAttachments = Boolean(message.attachments?.length);
   const hasBubbleText = text.trim().length > 0;
-  const shouldRenderBubble = hasBubbleText || hasAttachments;
+  const hasBlock = Boolean(message.block);
+  const shouldRenderBubble = (hasBubbleText || hasAttachments) && !hasBlock;
+  // A block-bearing tool message stands in for the tool row: the registered
+  // block renders inline, the standard ToolCallBlock chrome is suppressed,
+  // and per-tool loaders are skipped (the block itself is the visible state).
+  const isBlockToolMessage = message.role === 'tool' && hasBlock;
+  // Per-tool loaders surface a "thinking" affordance for a streaming tool
+  // whose output has not arrived yet. They never render for block-bearing
+  // tool rows (the block itself is the visible state). The slot itself
+  // checks `streaming` and the session-level `sending` flag so a tool-only
+  // turn (no assistant message id) still shows the loader.
+  const showToolLoader = message.role === 'tool' && !hasBlock;
 
   return (
     <>
@@ -72,7 +85,15 @@ export function MessageBubbleLayout<TMeta = Record<string, unknown>>({ message, 
             {hasBubbleText && <Markdown {...markdownProps} text={text} codeTheme={codeTheme} headless={headless} streaming={streaming} sanitizer={markdownSanitizer ?? markdownProps?.sanitizer} codeCopyLabels={codeCopyLabels ?? markdownProps?.codeCopyLabels} />}
           </div>
         )}
-        {message.role === 'tool' && (() => {
+        {hasBlock && message.block && (
+          // Generative-UI block: registered via <Chorus blocks={...}>. The
+          // assistant emits this through a `__render_block` tool call;
+          // `toolExecution.buildToolMessageFromDelta` maps the parsed
+          // `{ name, props }` onto `message.block` so the renderer can stand
+          // in for the normal tool-call chrome.
+          <BlockRenderer block={message.block} />
+        )}
+        {message.role === 'tool' && !isBlockToolMessage && (() => {
           // `__artifact` reserved tool calls render as an artifact card linking
           // to the side panel instead of the raw tool-call block. The card's
           // version is looked up by `messageId` against the artifact context so
@@ -96,6 +117,9 @@ export function MessageBubbleLayout<TMeta = Record<string, unknown>>({ message, 
           // host-authored summary.
           return <ToolCallBlock toolCall={message.toolCall} labels={toolCallLabels} streaming={streaming} />;
         })()}
+        {showToolLoader && message.role === 'tool' && (
+          <ToolLoaderSlot toolCall={message.toolCall} streaming={streaming} />
+        )}
         <MessageSources sources={message.sources} labels={sourceLabels} />
         {showTimestamp && <MessageTimestamp message={message} formatTimestamp={formatTimestamp} />}
         {footerSlot}

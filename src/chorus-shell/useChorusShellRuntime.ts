@@ -18,6 +18,11 @@ import { useChorusComposerActions, useChorusComposerState } from './useComposerA
 import { buildClearControl, buildComposerView, buildRootProps, buildTranscriptProps, type ChorusArtifactPanelView, type ChorusShellViewProps } from './props';
 import { mergeMcpTools } from './mcpTools';
 import { useLazyMcpRuntime } from './useLazyMcpRuntime';
+import type { BlockEmit, BlockEmitPayload } from '../blocks/types';
+import { resolveToolHandler } from '../tools';
+import { createMessageId } from '../hooks/assistant-session/messageUtils';
+import { useCostMeter } from './useCostMeter';
+import { buildCostFooterRenderer } from './renderCostFooter';
 
 export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
   {
@@ -92,6 +97,14 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
     value,
     labels,
     renderReactArtifact,
+    blocks,
+    toolLoadingComponents,
+    showCost = false,
+    pricing,
+    modelId,
+    costEstimator,
+    budgetAlert,
+    onBudgetExceeded,
     ...rest
   }: ChorusProps<TMeta>,
   ref: React.ForwardedRef<ChorusRef<TMeta>>,
@@ -150,6 +163,26 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
     continueOnToolError,
   });
 
+  // The cost meter intercepts `onStreamMetadata` to attach connector-emitted
+  // usage payloads to the active streaming assistant message. It reads the
+  // streaming id by ref because session.streamingMessageId is only known
+  // AFTER useAssistantSession runs — and we need to pass the wrapped callback
+  // INTO useAssistantSession. The ref keeps the callback identity stable
+  // across renders so the session doesn't see a new metadata handler each turn.
+  const streamingMessageIdRef = React.useRef<string | null>(null);
+  const costMeter = useCostMeter<TMeta>({
+    enabled: showCost,
+    messages: msgs,
+    streamingMessageIdRef,
+    pricing,
+    defaultModelId: modelId,
+    costEstimator,
+    budgetAlert,
+    onBudgetExceeded,
+    onStreamMetadata,
+    updateMessages: updateMsgs,
+  });
+
   const session = useAssistantSession<TMeta>({
     messages: msgs,
     updateMessages: updateMsgs,
@@ -167,7 +200,7 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
     onAbort,
     onStreamDone,
     onStreamWarning,
-    onStreamMetadata,
+    onStreamMetadata: costMeter.onStreamMetadata,
     onToolCall,
     onToolDelta,
     tools: mergedTools,
@@ -199,6 +232,9 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
     value,
     onChange,
   });
+  // Keep the streaming id ref aligned with the live session value so the
+  // metadata wrapper above always sees the current target message.
+  streamingMessageIdRef.current = session.streamingMessageId;
   const composerActions = useChorusComposerActions({
     draft: composer.draft,
     setDraft: composer.setDraft,
@@ -228,6 +264,79 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
     writesDisabled: shellState.writesDisabled,
     controlledWithoutOnChange: shellState.controlledWithoutOnChange,
   });
+
+  // Generative-UI emit channel: interactive blocks call this to synthesize a
+  // user turn (`emit(text)`) or to invoke a registered tool directly without
+  // a user-visible message (`emit({ toolCall: { name, input } })`).
+  const sessionRef = React.useRef(session);
+  sessionRef.current = session;
+  const mergedToolsRef = React.useRef(mergedTools);
+  mergedToolsRef.current = mergedTools;
+  const updateMsgsRef = React.useRef(updateMsgs);
+  updateMsgsRef.current = updateMsgs;
+  const messagesRefForEmit = messagesRef;
+  const blockEmit = React.useCallback<BlockEmit>((payload) => {
+    if (typeof payload === 'string') {
+      sessionRef.current.send(payload);
+      return;
+    }
+    const obj = payload as BlockEmitPayload | undefined;
+    if (!obj) return;
+    if (typeof obj.text === 'string') {
+      sessionRef.current.send(obj.text);
+      return;
+    }
+    if (obj.toolCall && typeof obj.toolCall.name === 'string') {
+      const { name, input } = obj.toolCall;
+      const messageId = createMessageId();
+      updateMsgsRef.current(prev => prev.concat({
+        id: messageId,
+        role: 'tool',
+        text: '',
+        toolCall: { id: messageId, name, input },
+      }), { reason: 'assistant' });
+      const handler = resolveToolHandler<TMeta>(mergedToolsRef.current, name);
+      if (handler) {
+        const controller = new AbortController();
+        const toolMessage = { id: messageId, role: 'tool' as const, text: '', toolCall: { id: messageId, name, input } };
+        const context = {
+          id: messageId,
+          name,
+          input,
+          message: toolMessage,
+          messages: messagesRefForEmit.current,
+          signal: controller.signal,
+        };
+        Promise.resolve()
+          .then(() => handler(input, context as Parameters<typeof handler>[1]))
+          .then(output => {
+            updateMsgsRef.current(prev => prev.map(m => m.id === messageId && m.role === 'tool'
+              ? { ...m, toolCall: { ...m.toolCall, output } }
+              : m), { reason: 'assistant' });
+          })
+          .catch(() => {
+            // Errors from emit-triggered tools are surfaced as the tool row's
+            // output payload, mirroring the standard tool-error recording shape.
+            updateMsgsRef.current(prev => prev.map(m => m.id === messageId && m.role === 'tool'
+              ? { ...m, toolCall: { ...m.toolCall, output: { error: 'tool failed' } } }
+              : m), { reason: 'assistant' });
+          });
+      }
+    }
+  }, [messagesRefForEmit]);
+
+  // Per-bubble cost chip renderer. The cost map already filters to assistant
+  // messages with usage; the streaming bubble (which has no `usage` yet)
+  // falls back to a heuristic `~N tok` chip so the meter has something to
+  // show before the terminal `done` frame.
+  const renderMessageFooter = React.useMemo(() => {
+    if (!showCost) return undefined;
+    return buildCostFooterRenderer<TMeta>({
+      cost: costMeter.cost,
+      streamingMessageId: session.streamingMessageId,
+      defaultModelId: modelId,
+    });
+  }, [showCost, costMeter.cost, session.streamingMessageId, modelId]);
 
   return {
     rootRef,
@@ -263,6 +372,7 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
       formatTimestamp,
       suggestedPrompts,
       defaultHiddenRoles: DEFAULT_CHORUS_HIDDEN_ROLES,
+      renderMessageFooter,
     }),
     clearControl: buildClearControl({
       showClearButton,
@@ -277,6 +387,13 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
       servers: mcp.servers,
       reconnect: mcp.reconnect,
     },
+    blockRuntime: {
+      blocks,
+      toolLoadingComponents,
+      emit: blockEmit,
+      sending: shellState.visualSending,
+    },
+    costView: showCost ? { cost: costMeter.cost, budget: budgetAlert } : undefined,
     composer: buildComposerView<TMeta>({
       composer,
       composerActions,

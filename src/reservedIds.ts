@@ -42,3 +42,12 @@ export const RESERVED_SYSTEM_PROMPT_ID = 'chorus-system-prompt';
  * exists purely as the structured carrier for artifact payloads.
  */
 export const ARTIFACT_TOOL_NAME = '__artifact';
+
+/**
+ * Reserved tool-call name the assistant emits to render a registered React
+ * block inline (Generative UI). Double-underscore prefix keeps it from
+ * colliding with real provider tools. Tool deltas with this name are mapped
+ * into a message-level `block` field (see `Message.block`) instead of
+ * producing a normal `role: 'tool'` row.
+ */
+export const RESERVED_BLOCK_TOOL_NAME = '__render_block';

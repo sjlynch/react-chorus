@@ -131,6 +131,25 @@ export interface ToolCall {
   output?: unknown;
 }
 
+/**
+ * Generative-UI block payload attached to a message. Rendered inline by the
+ * default transcript when the message's `block.name` matches a registered
+ * entry in the `<Chorus blocks>` registry.
+ *
+ * - `name` selects the block component from the registry.
+ * - `props` are the (possibly partial, streamed) props passed to the block.
+ * - `status` reflects streaming lifecycle: `'streaming'` while props are still
+ *   accumulating, `'done'` once the model has finished emitting the block, and
+ *   `'error'` when validation or the component throws.
+ */
+export interface MessageBlock {
+  name: string;
+  props: unknown;
+  status: 'streaming' | 'done' | 'error';
+  /** Optional error message stored when `status === 'error'`. */
+  error?: string;
+}
+
 interface ChorusMessageBase<TMeta = Record<string, unknown>> {
   id: string;
   /**
@@ -153,6 +172,15 @@ interface ChorusMessageBase<TMeta = Record<string, unknown>> {
    * Round-trips through built-in JSON persistence.
    */
   artifact?: ArtifactSummary;
+  /**
+   * Generative-UI block payload. Set by Chorus when the assistant emits a
+   * `__render_block` tool call: the streamed `{ name, props }` arguments are
+   * mapped here instead of producing a `role: 'tool'` row. The default
+   * transcript looks up `block.name` in the `<Chorus blocks>` registry and
+   * renders the component inline; unregistered names render a small unknown-
+   * block fallback. Round-tripped by JSON persistence.
+   */
+  block?: MessageBlock;
   metadata?: TMeta;
 }
 

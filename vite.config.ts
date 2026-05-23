@@ -12,6 +12,10 @@ const externalRuntimeDependencies = new Set([
   'lucide-react',
   'marked',
   'marked-highlight',
+  // Optional dependency consumed only by `react-chorus/blocks/Chart`. Stays
+  // external so the main bundle never pulls it in; the Chart block lazily
+  // imports it at runtime and degrades to an inline sparkline when absent.
+  'recharts',
 ]);
 const externalRuntimeDependencyPrefixes = [
   '@modelcontextprotocol/sdk/',
@@ -75,6 +79,12 @@ function libraryManualChunks(id: string) {
   // subpaths (mapper/proxy code). Park it in its own micro-chunk so the
   // server-safe subpaths get only the constant, not the chorus-session chunk.
   if (normalizedId.endsWith('/src/reservedIds.ts')) return 'reserved-ids';
+  // pricing.ts is a leaf data module (`PRICING` snapshot + types) consumed by
+  // the cost meter inside the chorus-session graph AND by the `react-chorus/
+  // pricing` subpath. Park it in its own micro-chunk so importing the subpath
+  // doesn't drag in chorus-session, and so the chorus-session chunk only
+  // dynamically references the data without inlining it.
+  if (normalizedId.endsWith('/src/pricing.ts')) return 'pricing';
 
   return undefined;
 }
@@ -110,6 +120,11 @@ export default defineConfig({
         'provider-requests': path.resolve(__dirname, 'src/providerRequests.ts'),
         'react-chorus-server': path.resolve(__dirname, 'src/server.ts'),
         'react-chorus-mcp': path.resolve(__dirname, 'src/mcp.ts'),
+        'react-chorus-blocks': path.resolve(__dirname, 'src/blocks/index.ts'),
+        'react-chorus-blocks-chart': path.resolve(__dirname, 'src/blocks/Chart.tsx'),
+        'react-chorus-loaders': path.resolve(__dirname, 'src/loaders/index.tsx'),
+        'react-chorus-validators': path.resolve(__dirname, 'src/validators/index.ts'),
+        'react-chorus-pricing': path.resolve(__dirname, 'src/pricing.ts'),
         // Private facades (not listed in package.json exports) keep root named
         // imports measurable and independently tree-shakeable in consumer builds.
         'react-chorus-use-chorus-stream': path.resolve(__dirname, 'src/hooks/useChorusStream.ts'),

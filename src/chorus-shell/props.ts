@@ -9,6 +9,8 @@ import type { McpResourceAttachment, McpServerStatus, McpSlashCommand } from '..
 import type { ChorusProps } from '../Chorus.types';
 import type { ChorusShellDerivedState } from './derivedState';
 import type { ChorusComposerActions, ChorusComposerState } from './useComposerActions';
+import type { BlockEmit, BlockRegistry, ToolLoadingComponents } from '../blocks/types';
+import type { ConversationCost } from '../utils/cost';
 import { joinClasses } from '../utils/className';
 
 export type ChorusRootProps = React.HTMLAttributes<HTMLDivElement>;
@@ -44,6 +46,18 @@ export interface ChorusArtifactPanelView {
   handle: ChorusArtifactHandle;
 }
 
+export interface ChorusShellBlockRuntime {
+  blocks?: BlockRegistry;
+  toolLoadingComponents?: ToolLoadingComponents;
+  emit: BlockEmit;
+  sending?: boolean;
+}
+
+export interface ChorusCostView {
+  cost: ConversationCost;
+  budget?: number;
+}
+
 export interface ChorusShellViewProps<TMeta> {
   rootRef: React.RefObject<HTMLDivElement | null>;
   rootProps: ChorusRootProps;
@@ -52,6 +66,9 @@ export interface ChorusShellViewProps<TMeta> {
   mcpStatus?: ChorusMcpStatusView;
   composer: ChorusComposerView;
   artifactPanel: ChorusArtifactPanelView;
+  blockRuntime: ChorusShellBlockRuntime;
+  /** Cost meter view data — present only when `<Chorus showCost>` is enabled. */
+  costView?: ChorusCostView;
 }
 
 export interface BuildRootPropsArgs extends React.HTMLAttributes<HTMLDivElement> {
@@ -119,6 +136,7 @@ interface BuildTranscriptPropsArgs<TMeta> {
   formatTimestamp: ChorusProps<TMeta>['formatTimestamp'];
   suggestedPrompts: ChorusProps<TMeta>['suggestedPrompts'];
   defaultHiddenRoles: NonNullable<ChorusProps<TMeta>['hiddenRoles']>;
+  renderMessageFooter?: (message: Message<TMeta>) => React.ReactNode;
 }
 
 export function buildTranscriptProps<TMeta>({
@@ -143,6 +161,7 @@ export function buildTranscriptProps<TMeta>({
   formatTimestamp,
   suggestedPrompts,
   defaultHiddenRoles,
+  renderMessageFooter,
 }: BuildTranscriptPropsArgs<TMeta>): ChatWindowProps<TMeta> {
   return {
     messages,
@@ -167,6 +186,7 @@ export function buildTranscriptProps<TMeta>({
     rawError: session.streamRawError,
     renderError,
     renderMessage,
+    renderMessageFooter,
     showJumpToBottomButton: shellState.resolvedShowJumpToBottomButton,
     showTimestamps,
     formatTimestamp,
