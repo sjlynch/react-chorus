@@ -27,7 +27,7 @@ Submodule map:
 - `message-row/feedback.ts` — `GetMessageFeedback`, metadata feedback extraction, validation, and initial-feedback resolution.
 - `message-row/renderState.tsx` — render-state context/provider and `useActionEditing` for coordinating custom `MessageBubble` + default action controls.
 - `message-row/speaker.tsx` — screen-reader speaker labels and role-to-label helper.
-- `message-row/bubble.tsx` — attachments, reasoning details, bubble layout, and exported `MessageBubble`.
+- `message-row/bubble.tsx` — bubble layout and exported `MessageBubble`; the sub-pieces (`attachments.tsx`, `reasoning.tsx`, `sources.tsx`, `timestamp.tsx`) live alongside it.
 - `message-row/InlineMessageEditor.tsx` — inline textarea editor and save/cancel controls.
 - `message-row/actions.tsx` — copy/regenerate/edit/delete/feedback buttons, copy-failed timer state, and copy action creation.
 
