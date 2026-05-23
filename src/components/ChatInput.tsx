@@ -12,7 +12,7 @@ import type { ChatInputHandle, ChatInputProps } from './chat-input/types';
 import { joinClasses } from '../utils/className';
 import { styleVarsFromPalette } from '../utils/paletteVars';
 
-export type { ChatInputFocusOptions, ChatInputHandle, ChatInputProps, RenderAttachmentErrorContext } from './chat-input/types';
+export type { ChatInputFocusOptions, ChatInputHandle, ChatInputProps, ChatInputSlashCommand, RenderAttachmentErrorContext } from './chat-input/types';
 
 // Inlined dev-mode gate + once-guard for the host-`onKeyDown` warning below.
 // Importing the shared `utils/devMode`/`utils/warnings` helper here would drag
@@ -46,6 +46,9 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(funct
   onAttachmentError,
   renderAttachmentError,
   uploadAttachment,
+  slashCommands = [],
+  onSlashCommand,
+  resourceAttachments = [],
   labels = DEFAULT_COMPOSER_LABELS,
   attachmentLabels = DEFAULT_ATTACHMENT_LABELS,
   palette,
@@ -104,6 +107,7 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(funct
     removeAttachment,
     updateAttachmentAlt,
     retryAttachment,
+    addReadyAttachment,
   } = useAttachmentQueue({
     resetKey,
     accept,
@@ -117,7 +121,15 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(funct
     labels: attachmentLabels,
   });
 
-  const canSend = !composerInactive && (value.trim().length > 0 || hasSendableAttachment) && !hasPendingAttachments;
+  const trimmedValue = value.trim();
+  const filteredSlashCommands = React.useMemo(() => {
+    if (!trimmedValue.startsWith('/') || slashCommands.length === 0) return [];
+    return slashCommands.filter(command => command.name.toLowerCase().startsWith(trimmedValue.toLowerCase()));
+  }, [slashCommands, trimmedValue]);
+  const exactSlashCommand = React.useMemo(() => (
+    slashCommands.find(command => command.name === trimmedValue)
+  ), [slashCommands, trimmedValue]);
+  const canSend = !composerInactive && (trimmedValue.length > 0 || hasSendableAttachment) && !hasPendingAttachments;
   const stopAvailable = Boolean(sending && onStop);
   const inactiveReason = disabledReason || (readOnly ? labels.readOnlyReason : disabled ? labels.disabledReason : undefined);
   const placeholderText = inactiveReason || placeholder || labels.placeholder;
@@ -163,18 +175,35 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(funct
     onDrop: onDropProp,
   });
 
+  const runSlashCommand = React.useCallback((commandName: string) => {
+    if (!onSlashCommand || composerInactive) return false;
+    void onSlashCommand(commandName);
+    return true;
+  }, [composerInactive, onSlashCommand]);
+
+  const handleResourceAttachmentChange = React.useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
+    const index = Number(e.currentTarget.value);
+    e.currentTarget.value = '';
+    const attachment = Number.isInteger(index) ? resourceAttachments[index] : undefined;
+    if (!attachment || composerInactive) return;
+    addReadyAttachment(attachment);
+  }, [addReadyAttachment, composerInactive, resourceAttachments]);
+
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key !== 'Enter' || e.shiftKey) return;
     // Let the IME consume Enter while a composition is active (CJK / accented
     // input) instead of sending a half-composed message.
     if (isComposingRef.current || e.nativeEvent.isComposing) return;
     e.preventDefault();
+    if (!sending && exactSlashCommand && runSlashCommand(exactSlashCommand.name)) return;
     if (!sending && canSend) handleSend();
   };
 
   const handleClick = () => {
     if (sending) {
       onStop?.();
+    } else if (exactSlashCommand && runSlashCommand(exactSlashCommand.name)) {
+      return;
     } else if (canSend) {
       handleSend();
     }
@@ -251,6 +280,9 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(funct
         attachFileLabel={labels.attachFile}
         fileInputRef={fileInputRef}
         onFileInputChange={onFileInputChange}
+        resourceAttachments={resourceAttachments}
+        onResourceAttachmentChange={handleResourceAttachmentChange}
+        canAttachResource={resourceAttachments.length > 0 && !composerInactive}
         textareaRef={textareaRef}
         value={value}
         onTextareaChange={handleTextareaChange}
@@ -269,6 +301,22 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(funct
         stopAvailable={stopAvailable}
         canSend={canSend}
       />
+      {filteredSlashCommands.length > 0 && !composerInactive && (
+        <div className="chorus-slash-palette" role="listbox" aria-label="Slash commands">
+          {filteredSlashCommands.map(command => (
+            <button
+              key={command.name}
+              type="button"
+              className="chorus-slash-command"
+              onClick={() => runSlashCommand(command.name)}
+              role="option"
+            >
+              <span className="chorus-slash-command-name">{command.name}</span>
+              {command.description && <span className="chorus-slash-command-description">{command.description}</span>}
+            </button>
+          ))}
+        </div>
+      )}
       <DropOverlayPortal
         active={draggingFiles && canIngestFiles}
         label={labels.dropToAttach}

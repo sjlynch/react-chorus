@@ -12,6 +12,7 @@ import type { Transport } from './hooks/useChorusStream';
 import type { ChorusLabels } from './labels/types';
 import type { AttachmentError, ConnectorName, Message, Role, StorageAdapter, UploadAttachment } from './types';
 import type { ChorusConnectorOptions } from './Chorus.defaults';
+import type { McpServerConfig } from './mcp/types';
 
 export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React.HTMLAttributes<HTMLDivElement>, 'onChange' | 'onError' | 'onCopy' | 'onAbort'> {
   accept?: string;
@@ -91,6 +92,8 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
    */
   messages?: Message<TMeta>[];
   minAssistantDelayMs?: number;
+  /** Browser-side MCP servers to connect on mount. MCP tools are merged into the executable tool registry; prompts/resources surface in the composer. */
+  mcpServers?: McpServerConfig[];
   onAttachmentError?: (error: AttachmentError) => void;
   /**
    * Replace the built-in attachment error region rendered under the composer.

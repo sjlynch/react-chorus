@@ -3,6 +3,7 @@ import { Chorus } from 'react-chorus';
 import { ChorusHeadless } from 'react-chorus/headless';
 import { createFetchSSETransport } from 'react-chorus/transport';
 import { encodeSSEDone, encodeSSEError, encodeSSEEvent, sseHeaders } from 'react-chorus/server';
+import { createMcpClient, type McpServerConfig } from 'react-chorus/mcp';
 import 'react-chorus/styles.css';
 
 const props = {
@@ -18,3 +19,6 @@ export const serverHelpers = {
   done: encodeSSEDone(),
   error: encodeSSEError(new Error('boom')),
 };
+
+const mcpConfig = { url: 'http://localhost:3001/sse', transport: 'sse' } satisfies McpServerConfig;
+export const mcpClient = createMcpClient(mcpConfig);

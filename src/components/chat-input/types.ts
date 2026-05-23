@@ -1,5 +1,10 @@
 import type * as React from 'react';
 import type { Attachment, AttachmentError, UploadAttachment } from '../../types';
+
+export interface ChatInputSlashCommand {
+  name: string;
+  description?: string;
+}
 import type { ChorusAttachmentLabels, ChorusComposerLabels } from '../../labels/types';
 import type { Palette } from '../ChorusTheme';
 
@@ -79,6 +84,12 @@ export interface ChatInputProps extends Omit<React.HTMLAttributes<HTMLDivElement
    */
   renderAttachmentError?: ((context: RenderAttachmentErrorContext) => React.ReactNode) | null;
   uploadAttachment?: UploadAttachment;
+  /** Slash-command suggestions shown when the draft starts with `/`. */
+  slashCommands?: ChatInputSlashCommand[];
+  /** Called when a slash-command suggestion is chosen or an exact command is submitted. */
+  onSlashCommand?: (commandName: string) => void | Promise<void>;
+  /** Non-file attachment references (for example MCP resources) that can be selected from the composer picker. */
+  resourceAttachments?: Attachment[];
   /**
    * Localized labels for the composer (placeholder, aria-labels, attach/send/stop, and
    * disabled/read-only fallback reasons). Defaults to English; the existing `placeholder`

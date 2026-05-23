@@ -27,7 +27,7 @@ How it compares to the alternatives:
 
 - **Versus Vercel AI SDK:** react-chorus focuses on the visible chat UI and composer UX; pair it with any backend or SDK, including Vercel AI SDK, instead of adopting a specific transport stack. A dedicated [`'ai-sdk'` connector](./docs/guide.md#vercel-ai-sdk-stream-format) understands both AI SDK UI-message-stream JSON and the prefix-coded data-stream protocol so AI SDK routes work without writing a custom parser.
 - **Versus assistant-ui:** react-chorus keeps the default path small and direct while still exposing message rendering, streaming, persistence, and theme primitives.
-- **Versus rolling your own:** you get SSE parsing, retry/edit/regenerate flows, Markdown, attachment handling, and local persistence without rebuilding the common edge cases.
+- **Versus rolling your own:** you get SSE parsing, retry/edit/regenerate flows, Markdown, attachment handling, local persistence, and browser-side MCP discovery without rebuilding the common edge cases.
 
 ## Install
 
@@ -127,6 +127,7 @@ Then `cd` into an example and follow its README — each has full, copy-pasteabl
 | [`examples/multi-conversation`](./examples/multi-conversation/README.md) | Sidebar-driven local conversations with pinned chats, per-chat persistence, and first-message auto-titles |
 | [`examples/with-next`](./examples/with-next/README.md) | Next.js App Router example with a serverless `/api/chat` SSE route handler proxying to OpenAI |
 | [`examples/with-next-resume`](./examples/with-next-resume/README.md) | Next.js App Router example seeding `initialMessages` from a server-side `loadConversation()` and caching follow-up turns under a per-conversation `persistenceKey` — see the [Server-side history pre-load](./docs/guide.md#server-side-history-pre-load) recipe |
+| [`examples/with-mcp`](./examples/with-mcp/README.md) | Next.js demo connecting `<Chorus mcpServers>` directly to a local MCP everything server; tools execute in the browser, prompts appear as slash commands, and resources attach as references |
 | [`examples/with-openai`](./examples/with-openai/README.md) | Full-stack example: Vite frontend + Express backend proxying to OpenAI |
 | [`examples/with-websocket`](./examples/with-websocket/README.md) | `createWebSocketTransport` + the `anthropic` connector talking to a tiny local `ws` server (canned Claude-style frames; README shows the real Anthropic swap) |
 | [`examples/with-anthropic`](./examples/with-anthropic/README.md) | The `anthropic` connector parsing Anthropic Messages SSE — runs with a built-in mock stream, README documents the Express proxy |

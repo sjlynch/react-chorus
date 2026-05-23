@@ -1,7 +1,7 @@
 export { ChatWindow, MessageBubble } from './components/ChatWindow';
 export type { ChatWindowProps, GetMessageFeedback, MessageBubbleProps, MessageBubbleSlots, MessageCopyResult, MessageFeedback, MessageTimestampFormatter, RenderErrorContext, RenderMessageContext, RenderMessageRootProps, MessageMarkdownProps, MessageRenderActions } from './components/ChatWindow';
 export { ChatInput } from './components/ChatInput';
-export type { ChatInputFocusOptions, ChatInputHandle, ChatInputProps, RenderAttachmentErrorContext } from './components/ChatInput';
+export type { ChatInputFocusOptions, ChatInputHandle, ChatInputProps, ChatInputSlashCommand, RenderAttachmentErrorContext } from './components/ChatInput';
 export { ToolCallBlock } from './components/ToolCallBlock';
 export { ConversationList } from './components/ConversationList';
 export type { ConfirmDeleteConversation, ConfirmDeleteConversationContext, ConversationListProps } from './components/ConversationList';
@@ -27,7 +27,7 @@ export type {
   ChorusTranscriptLabels,
   ResolvedChorusLabels,
 } from './labels';
-export type { ChorusAbortContext, ChorusAbortReason, ChorusAbortSource, ChorusClearConversationContext, ChorusConfirmClearConversation, ChorusConfirmDeleteMessage, ChorusConnectorOptions, ChorusDeleteMessageContext, ChorusFinishContext, ChorusMessagesChangeContext, ChorusMessagesChangeReason, ChorusMessagesChangeSource, ChorusOnAbort, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusProps, ChorusRef, ChorusSendHelpers, ChorusSendPath, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusStreamDoneReason, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolHandler, ChorusToolLoopContext, ChorusToolRegistry, FetchTransportInit } from './Chorus';
+export type { ChorusAbortContext, ChorusAbortReason, ChorusAbortSource, ChorusClearConversationContext, ChorusConfirmClearConversation, ChorusConfirmDeleteMessage, ChorusConnectorOptions, ChorusDeleteMessageContext, ChorusFinishContext, ChorusMessagesChangeContext, ChorusMessagesChangeReason, ChorusMessagesChangeSource, ChorusOnAbort, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusProps, ChorusRef, ChorusSendHelpers, ChorusSendPath, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusStreamDoneReason, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolHandler, ChorusToolLoopContext, ChorusToolRegistry, FetchTransportInit, McpServerConfig } from './Chorus';
 
 export type { Message } from './types';
 export type {
@@ -160,6 +160,7 @@ export type {
 } from './providerRequests';
 export { defineTool } from './tools';
 export type { ChorusToolDefinition } from './tools';
+export type { McpChorusToolDefinition, McpClient, McpConnectionStatus, McpPrompt, McpResource, McpResourceAttachment, McpRuntimeSnapshot, McpServerStatus, McpSlashCommand, McpTool, McpTransportKind } from './mcp/types';
 // Reserved id of the synthetic `role: 'system'` message Chorus injects into
 // transport request history from the `<Chorus systemPrompt>` prop. Also exported
 // from `react-chorus/server` and `react-chorus/provider-requests` for proxy/

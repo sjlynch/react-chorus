@@ -6,6 +6,7 @@ const reactPeerDependencies = new Set(['react', 'react-dom']);
 // Runtime dependencies stay declared in package.json but external to the published
 // library chunks so consumers can dedupe and update compatible versions.
 const externalRuntimeDependencies = new Set([
+  '@modelcontextprotocol/sdk',
   'dompurify',
   'highlight.js',
   'lucide-react',
@@ -13,6 +14,7 @@ const externalRuntimeDependencies = new Set([
   'marked-highlight',
 ]);
 const externalRuntimeDependencyPrefixes = [
+  '@modelcontextprotocol/sdk/',
   'lucide-react/',
 ];
 
@@ -67,6 +69,7 @@ function libraryManualChunks(id: string) {
   // provider-requests subpath (defineTool, tool-definition serialization).
   // Park it in its own micro-chunk so importing one side does not drag in the other.
   if (normalizedId.endsWith('/src/tools.ts')) return 'tools';
+  if (normalizedId.includes('/src/mcp/')) return 'mcp';
   // reservedIds.ts holds RESERVED_SYSTEM_PROMPT_ID, shared by the chorus-session
   // graph (system-prompt history injection) and the server/provider-requests
   // subpaths (mapper/proxy code). Park it in its own micro-chunk so the
@@ -106,6 +109,7 @@ export default defineConfig({
         'react-chorus-transport': path.resolve(__dirname, 'src/transport.ts'),
         'provider-requests': path.resolve(__dirname, 'src/providerRequests.ts'),
         'react-chorus-server': path.resolve(__dirname, 'src/server.ts'),
+        'react-chorus-mcp': path.resolve(__dirname, 'src/mcp.ts'),
         // Private facades (not listed in package.json exports) keep root named
         // imports measurable and independently tree-shakeable in consumer builds.
         'react-chorus-use-chorus-stream': path.resolve(__dirname, 'src/hooks/useChorusStream.ts'),

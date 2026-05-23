@@ -54,6 +54,7 @@ export const requiredSourcemapPrefixes = [
   { prefix: 'dist/providerRequests-', suffixes: ['.js.map', '.cjs.map'] },
   { prefix: 'dist/transport-core-', suffixes: ['.js.map', '.cjs.map'] },
   { prefix: 'dist/tools-', suffixes: ['.js.map', '.cjs.map'] },
+  { prefix: 'dist/mcp-', suffixes: ['.js.map', '.cjs.map'] },
   { prefix: 'dist/src-', suffixes: ['.cjs.map'] },
 ];
 

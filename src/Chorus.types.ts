@@ -8,3 +8,4 @@ export type { FetchTransportInit } from './hooks/assistant-session/transport';
 export type { ChorusAbortContext, ChorusAbortReason, ChorusAbortSource, ChorusClearConversationContext, ChorusConfirmClearConversation, ChorusConfirmDeleteMessage, ChorusDeleteMessageContext, ChorusFinishContext, ChorusOnAbort, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusSendHelpers, ChorusSendPath, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusStreamDoneReason, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolHandler, ChorusToolLoopContext, ChorusToolRegistry } from './hooks/useAssistantSession';
 export type { ChorusMessagesChangeContext, ChorusMessagesChangeReason, ChorusMessagesChangeSource } from './hooks/useChorusMessages';
 export type { Transport } from './hooks/useChorusStream';
+export type { McpServerConfig } from './mcp/types';

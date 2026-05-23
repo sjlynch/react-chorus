@@ -10,7 +10,7 @@ function createAbortError(message: string) {
   return error;
 }
 
-export type PendingAttachmentOperation = 'read' | 'upload';
+export type PendingAttachmentOperation = 'read' | 'upload' | 'reference';
 
 /** Lifecycle state of a composer attachment. */
 export type QueuedAttachmentStatus =
@@ -40,8 +40,8 @@ export interface QueuedAttachment {
   operation: PendingAttachmentOperation;
   /** Where the file arrived from; retained so a retry reports errors with the original source. */
   source: AttachmentSource;
-  /** The original File, retained so a cancelled or failed chip can be retried. */
-  file: File;
+  /** The original File, retained so a cancelled or failed chip can be retried. Reference attachments do not have one. */
+  file?: File;
   /** The sendable payload: a placeholder while `pending`/`failed`, the real attachment once `ready`. */
   attachment: Attachment;
 }

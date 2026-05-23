@@ -176,9 +176,9 @@ export function usePendingAttachmentWork({
     }));
 
     setQueuedAttachments(prev => [...prev, ...newItems]);
-    announcePendingWork(operation, newItems.map(item => ({ uid: item.uid, name: item.file.name })));
+    announcePendingWork(operation, newItems.map(item => ({ uid: item.uid, name: item.attachment.name })));
 
-    await Promise.all(newItems.map(item => runAttachmentWork(item.uid, item.file, item.source)));
+    await Promise.all(newItems.map(item => runAttachmentWork(item.uid, item.file as File, item.source)));
   }, [announcePendingWork, runAttachmentWork, uploadAttachment, setQueuedAttachments]);
 
   // Re-runs the work for a `failed` chip, reusing its stable uid so the chip

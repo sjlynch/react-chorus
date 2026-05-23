@@ -8,22 +8,22 @@ Bundle size, SSR rendering, and Content-Security-Policy guidance for shipping re
 
 ## Bundle size
 
-react-chorus keeps React/ReactDOM as peer dependencies and externalizes runtime packages (`dompurify`, `marked`, `marked-highlight`, `lucide-react`, and `highlight.js`) from the published library build. They remain regular `dependencies` so installs work out of the box, while app bundlers can dedupe them and pick up compatible dependency fixes without a react-chorus republish.
+react-chorus keeps React/ReactDOM as peer dependencies and externalizes runtime packages (`@modelcontextprotocol/sdk`, `dompurify`, `marked`, `marked-highlight`, `lucide-react`, and `highlight.js`) from the published library build. They remain regular `dependencies` so installs work out of the box, while app bundlers can dedupe them and pick up compatible dependency fixes without a react-chorus republish.
 
 `npm run verify:bundle-size` builds tiny consumer bundles from the published entry points with React peers excluded, reports minified/gzip sizes, writes a machine-readable report to `.cache/react-chorus/library-bundle-size-report.json`, and fails CI if budgets are exceeded, external/lazy dependencies move into the wrong graph, root named imports stop tree-shaking, or the numbers on this page drift from the report. Root named imports are expected to tree-shake in modern side-effects-aware bundlers; the low-cost transport and provider helper paths are also available as subpaths for server/utility code. Current numbers:
 
 | Entry | Initial JS | gzip | Notes |
 |-------|------------|------|-------|
-| `react-chorus` (`<Chorus>`) | 242.4 kB | 77.0 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
-| `react-chorus/headless` | 242.8 kB | 77.2 kB | Headless defaults, same behavior surface. |
+| `react-chorus` (`<Chorus>`) | 247.3 kB | 78.7 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
+| `react-chorus/headless` | 247.6 kB | 78.9 kB | Headless defaults, same behavior surface. |
 | `react-chorus` (`useChorusStream`) | 80.0 kB | 23.8 kB | Root hook import; CI fails if it pulls UI, Markdown, or icon dependencies. |
-| `react-chorus` (`Markdown`) | 76.1 kB | 25.7 kB | Standalone Markdown renderer; includes Markdown parsing/sanitization, not chat icons. |
-| `react-chorus` (`ChatWindow`) | 135.4 kB | 44.7 kB | Transcript renderer with Markdown and message action icons, without the composer/widget shell. |
+| `react-chorus` (`Markdown`) | 76.2 kB | 25.8 kB | Standalone Markdown renderer; includes Markdown parsing/sanitization, not chat icons. |
+| `react-chorus` (`ChatWindow`) | 137.5 kB | 45.4 kB | Transcript renderer with Markdown and message action icons, without the composer/widget shell. |
 | `react-chorus` (`ConversationList`) | 9.0 kB | 3.1 kB | Conversation sidebar component only; no Markdown/icon graph. |
 | `react-chorus/transport` | 7.6 kB | 3.1 kB | Transport factories only; no React/UI/Markdown runtime. |
 | `react-chorus/provider-requests` | 12.7 kB | 4.0 kB | Provider request mappers and tool serializers; no React/UI/Markdown runtime. |
 | `react-chorus/server` | 0.7 kB | 0.4 kB | SSE framing helpers for proxy routes (headers, encode/format, [DONE], error envelope); no React/UI runtime. |
-| Lazy `highlight.js` runtime | 891.4 kB | 295.9 kB | Async code-fence chunk, never part of initial JS. |
+| Lazy `highlight.js` runtime | 891.7 kB | 296.2 kB | Async code-fence chunk, never part of initial JS. |
 
 `highlight.js` is only fetched the first time a fenced code block (` ``` ` or `~~~`) appears in rendered text. The matching GitHub dark/light token-color stylesheet is also injected on demand based on `codeBlockTheme`; code renders immediately as plain text and is re-rendered with syntax highlighting once the chunk arrives. While an assistant message is actively streaming, Chorus renders that growing message as React-escaped plain text and switches to full Markdown parsing/sanitization when the stream finalizes.
 

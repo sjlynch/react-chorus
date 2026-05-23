@@ -2,7 +2,7 @@ import React from 'react';
 import type { Attachment, AttachmentError, AttachmentSource, UploadAttachment } from '../../types';
 import { DEFAULT_ATTACHMENT_LABELS } from '../../labels/attachments';
 import type { ChorusAttachmentLabels } from '../../labels/types';
-import { listFiles, updateQueuedAttachment, type QueuedAttachment } from './attachmentUtils';
+import { createAttachmentUid, listFiles, updateQueuedAttachment, type QueuedAttachment } from './attachmentUtils';
 import { useAttachmentDragState } from './useAttachmentDragState';
 import { usePendingAttachmentWork, type AttachmentAnnouncement } from './attachmentPendingWork';
 import { validateAttachmentBatch } from './attachmentValidation';
@@ -162,11 +162,24 @@ export function useAttachmentQueue({
   const retryAttachment = React.useCallback((uid: string) => {
     if (composerInactive) return;
     const item = queuedAttachmentsRef.current.find(entry => entry.uid === uid);
-    if (!item || item.status !== 'failed') return;
+    if (!item || item.status !== 'failed' || !item.file) return;
     // Fresh attempt — drop the prior failure so this retry's outcome is surfaced.
     setAttachmentError(null);
     void retryAttachmentWork(uid, item.file, item.source);
   }, [composerInactive, retryAttachmentWork]);
+
+  const addReadyAttachment = React.useCallback((attachment: Attachment) => {
+    if (composerInactive) return;
+    const uid = createAttachmentUid();
+    setAttachmentError(null);
+    setQueuedAttachments(prev => prev.concat({
+      uid,
+      status: 'ready',
+      operation: 'reference',
+      source: 'picker',
+      attachment,
+    }));
+  }, [composerInactive]);
 
   const sendableAttachments = React.useMemo(
     () => queuedAttachments.filter(item => item.status === 'ready').map(item => item.attachment),
@@ -190,5 +203,6 @@ export function useAttachmentQueue({
     removeAttachment,
     updateAttachmentAlt,
     retryAttachment,
+    addReadyAttachment,
   };
 }

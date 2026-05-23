@@ -1,5 +1,6 @@
 import type React from 'react';
-import { ArrowUp, Paperclip } from 'lucide-react';
+import { ArrowUp, Database, Paperclip } from 'lucide-react';
+import type { Attachment } from '../../types';
 import { joinClasses } from '../../utils/className';
 
 interface ComposerInputRowProps {
@@ -10,6 +11,9 @@ interface ComposerInputRowProps {
   attachFileLabel: string;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
   onFileInputChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  resourceAttachments: Attachment[];
+  onResourceAttachmentChange: (e: React.ChangeEvent<HTMLSelectElement>) => void;
+  canAttachResource: boolean;
   // Textarea.
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   value: string;
@@ -43,6 +47,9 @@ export function ComposerInputRow({
   attachFileLabel,
   fileInputRef,
   onFileInputChange,
+  resourceAttachments,
+  onResourceAttachmentChange,
+  canAttachResource,
   textareaRef,
   value,
   onTextareaChange,
@@ -61,8 +68,10 @@ export function ComposerInputRow({
   stopAvailable,
   canSend,
 }: ComposerInputRowProps) {
+  const showResourcePicker = resourceAttachments.length > 0;
+
   return (
-    <div className={joinClasses('chorus-input-row', showAttachBtn && 'chorus-input-row--has-attach')}>
+    <div className={joinClasses('chorus-input-row', (showAttachBtn || showResourcePicker) && 'chorus-input-row--has-attach', showResourcePicker && 'chorus-input-row--has-resource-picker')}>
       {showAttachBtn && (
         <input ref={fileInputRef} type="file" accept={accept} multiple style={{ display: 'none' }} onChange={onFileInputChange} disabled={!canIngestFiles} />
       )}
@@ -70,6 +79,18 @@ export function ComposerInputRow({
         <button type="button" className="chorus-attach" onClick={() => { if (canIngestFiles) fileInputRef.current?.click(); }} aria-label={attachFileLabel} title={attachFileLabel} disabled={!canIngestFiles} aria-disabled={!canIngestFiles}>
           <Paperclip size={18} strokeWidth={2} />
         </button>
+      )}
+      {showResourcePicker && (
+        <label className="chorus-resource-picker-wrap" title="Attach MCP resource">
+          <Database size={15} strokeWidth={2} aria-hidden="true" />
+          <span className="chorus-sr-only">Attach MCP resource</span>
+          <select className="chorus-resource-picker" aria-label="Attach MCP resource" defaultValue="" onChange={onResourceAttachmentChange} disabled={!canAttachResource}>
+            <option value="" disabled>Resources</option>
+            {resourceAttachments.map((attachment, index) => (
+              <option key={attachment.id ?? attachment.data ?? `${attachment.name}-${index}`} value={index}>{attachment.name}</option>
+            ))}
+          </select>
+        </label>
       )}
       <textarea
         ref={textareaRef}

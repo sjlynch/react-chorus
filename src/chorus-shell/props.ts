@@ -3,6 +3,7 @@ import type { ChatInputHandle, ChatInputProps } from '../components/ChatInput';
 import type { ChatWindowProps } from '../components/ChatWindow';
 import type { ResolvedChorusLabels } from '../labels/types';
 import type { Message } from '../types';
+import type { McpResourceAttachment, McpServerStatus, McpSlashCommand } from '../mcp/types';
 import type { ChorusProps } from '../Chorus.types';
 import type { ChorusShellDerivedState } from './derivedState';
 import type { ChorusComposerActions, ChorusComposerState } from './useComposerActions';
@@ -22,11 +23,17 @@ export interface ChorusComposerView {
   props: ChatInputProps;
 }
 
+export interface ChorusMcpStatusView {
+  servers: McpServerStatus[];
+  reconnect: (serverName?: string) => void;
+}
+
 export interface ChorusShellViewProps<TMeta> {
   rootRef: React.RefObject<HTMLDivElement | null>;
   rootProps: ChorusRootProps;
   transcriptProps: ChatWindowProps<TMeta>;
   clearControl: ChorusClearControl;
+  mcpStatus?: ChorusMcpStatusView;
   composer: ChorusComposerView;
 }
 
@@ -194,6 +201,9 @@ interface BuildComposerViewArgs<TMeta> {
   readOnly: boolean;
   renderAttachmentError: ChorusProps<TMeta>['renderAttachmentError'];
   uploadAttachment: ChorusProps<TMeta>['uploadAttachment'];
+  mcpSlashCommands?: McpSlashCommand[];
+  onMcpSlashCommand?: (commandName: string) => void | Promise<void>;
+  mcpResourceAttachments?: McpResourceAttachment[];
 }
 
 export function buildComposerView<TMeta>({
@@ -209,6 +219,9 @@ export function buildComposerView<TMeta>({
   readOnly,
   renderAttachmentError,
   uploadAttachment,
+  mcpSlashCommands,
+  onMcpSlashCommand,
+  mcpResourceAttachments,
 }: BuildComposerViewArgs<TMeta>): ChorusComposerView {
   return {
     ref: composer.inputRef,
@@ -231,6 +244,9 @@ export function buildComposerView<TMeta>({
       onAttachmentError,
       renderAttachmentError,
       uploadAttachment,
+      slashCommands: mcpSlashCommands,
+      onSlashCommand: onMcpSlashCommand,
+      resourceAttachments: mcpResourceAttachments,
     },
   };
 }

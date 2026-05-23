@@ -32,6 +32,11 @@
       "import": "./dist/react-chorus-server.es.js",
       "require": "./dist/react-chorus-server.cjs"
     },
+    "./mcp": {
+      "types": "./dist/types/mcp.d.ts",
+      "import": "./dist/react-chorus-mcp.es.js",
+      "require": "./dist/react-chorus-mcp.cjs"
+    },
     "./styles.css": {
       "types": "./dist/styles.css.d.ts",
       "default": "./dist/styles.css"
@@ -88,6 +93,7 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "dompurify": "^3.4.2",
     "highlight.js": "^11.11.1",
     "lucide-react": "^0.544.0",

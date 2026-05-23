@@ -15,6 +15,8 @@ import {
 import { resolveBuiltInPersistenceKey, useChorusShellDerivedState } from './derivedState';
 import { useChorusComposerActions, useChorusComposerState } from './useComposerActions';
 import { buildClearControl, buildComposerView, buildRootProps, buildTranscriptProps, type ChorusShellViewProps } from './props';
+import { mergeMcpTools } from './mcpTools';
+import { useLazyMcpRuntime } from './useLazyMcpRuntime';
 
 export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
   {
@@ -47,6 +49,7 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
     maxRenderedMessages,
     messages,
     minAssistantDelayMs = DEFAULT_MIN_ASSISTANT_DELAY_MS,
+    mcpServers,
     onAttachmentError,
     renderAttachmentError,
     onChange,
@@ -121,6 +124,8 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
     onPersistedChange: persisted.onChange,
     onChunk,
   });
+  const mcp = useLazyMcpRuntime<TMeta>(mcpServers);
+  const mergedTools = React.useMemo(() => mergeMcpTools<TMeta>(tools, mcp.tools), [mcp.tools, tools]);
 
   useChorusPropWarnings<TMeta>({
     messages,
@@ -137,7 +142,7 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
     autoContinueTools,
     maxToolIterations,
     shouldContinueToolLoop,
-    tools,
+    tools: mergedTools,
     onToolCall,
     onToolDelta,
     continueOnToolError,
@@ -163,7 +168,7 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
     onStreamMetadata,
     onToolCall,
     onToolDelta,
-    tools,
+    tools: mergedTools,
     autoContinueTools,
     maxToolIterations,
     continueOnToolError,
@@ -254,6 +259,10 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
       sending: session.sending,
       messageCount: msgs.length,
     }),
+    mcpStatus: {
+      servers: mcp.servers,
+      reconnect: mcp.reconnect,
+    },
     composer: buildComposerView<TMeta>({
       composer,
       composerActions,
@@ -267,6 +276,13 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
       readOnly,
       renderAttachmentError,
       uploadAttachment,
+      mcpSlashCommands: mcp.slashCommands,
+      onMcpSlashCommand: async commandName => {
+        const applied = await mcp.applyPrompt(commandName);
+        composer.setDraft(applied);
+        requestAnimationFrame(() => composer.inputRef.current?.focus({ caret: 'end' }));
+      },
+      mcpResourceAttachments: mcp.resourceAttachments,
     }),
   };
 }

@@ -123,6 +123,48 @@ describe('ChatInput composer behavior', () => {
 
     expect(screen.getByRole('button', { name: /send/i })).toBeEnabled();
   });
+  it('shows slash-command suggestions and runs exact slash commands instead of sending', async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn();
+    const onSlashCommand = vi.fn();
+    render(
+      <ControlledChatInput
+        onSend={onSend}
+        slashCommands={[{ name: '/fs:list-dir', description: 'List a directory' }]}
+        onSlashCommand={onSlashCommand}
+      />,
+    );
+
+    const textbox = screen.getByRole('textbox');
+    await user.type(textbox, '/fs');
+    expect(screen.getByRole('listbox', { name: /slash commands/i })).toBeInTheDocument();
+    await user.click(screen.getByRole('option', { name: /\/fs:list-dir/i }));
+    expect(onSlashCommand).toHaveBeenCalledWith('/fs:list-dir');
+
+    await user.clear(textbox);
+    await user.type(textbox, '/fs:list-dir{Enter}');
+    expect(onSlashCommand).toHaveBeenCalledTimes(2);
+    expect(onSend).not.toHaveBeenCalled();
+  });
+  it('attaches resource references from the composer resource picker', async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn();
+    const resource = {
+      id: 'file:///tmp/notes.md',
+      name: 'notes.md',
+      type: 'text/markdown',
+      data: 'file:///tmp/notes.md',
+      size: 0,
+      metadata: { mcp: { server: 'fs', uri: 'file:///tmp/notes.md', name: 'notes.md' } },
+    };
+    render(<ControlledChatInput onSend={onSend} resourceAttachments={[resource]} />);
+
+    fireEvent.change(screen.getByLabelText(/attach mcp resource/i), { target: { value: '0' } });
+    expect(screen.getByRole('button', { name: 'Remove notes.md' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(onSend).toHaveBeenCalledWith([resource]);
+  });
   it('blocks sends and attachment ingestion while disabled', async () => {
     const user = userEvent.setup();
     const onSend = vi.fn();
