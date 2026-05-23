@@ -5,7 +5,11 @@
 Module map:
 
 - `types.ts` — shared contracts: `MessageBubbleSlots`, `MessageMarkdownProps`, `MessageTimestampFormatter`, `MessageCopyResult`, and `MessageRenderActions`.
-- `bubble.tsx` — renders message content: role class, bubble layout, attachments (image previews or file names), `reasoning` details block (reader-collapsible even while streaming auto-opens it; the auto-open hint is latched so the panel stays open after answer text arrives until the reader collapses it), text through `Markdown`, and a `ToolCallBlock` for `role: 'tool'` messages; exports `MessageBubble`.
+- `bubble.tsx` — composes the message content layout: role class, bubble container, text through `Markdown`, and a `ToolCallBlock` for `role: 'tool'` messages; exports `MessageBubble` and `MessageBubbleLayout`. Each sub-piece (attachments, reasoning, sources, timestamp) lives in its own file imported here.
+- `attachments.tsx` — `MessageAttachments` (image previews or file-name chips) and the `resolveAttachmentImageAlt` helper.
+- `reasoning.tsx` — `MessageReasoning` + `MessageReasoningProps`. Reader-collapsible even while streaming auto-opens it; the auto-open hint is latched so the panel stays open after answer text arrives until the reader collapses it.
+- `sources.tsx` — `MessageSources` + `MessageSourcesProps` (citation list rendered below the bubble).
+- `timestamp.tsx` — `MessageTimestamp` + `MessageTimestampProps` (`<time>` element rendered when `showTimestamp` is on).
 - `actions.tsx` — owns the copy/regenerate/edit/delete/feedback action controls, composing `useCopyFeedback` for copy-failure state, and copy action creation.
 - `useCopyFeedback.ts` — the copy-failure timer state machine extracted from `MessageActions`: owns `copyFailed`, the `COPY_FEEDBACK_DURATION_MS` reset timeout (cleared on retrigger and unmount), and the derived `copyLabel`.
 - `InlineMessageEditor.tsx` — inline `<textarea>` editor with save/cancel controls; resizes via `chat-input/useTextareaAutosize` so it matches the composer.
