@@ -17,6 +17,8 @@ Module map:
 - `speaker.tsx` — screen-reader speaker labels and the role-to-label helper.
 - `feedback.ts` — low-level feedback helpers: the `isMessageFeedback` type guard, `getMetadataFeedback` metadata extraction, and `getInitialMessageFeedback` resolution.
 - `formatTimestamp.ts` — `defaultFormatMessageTimestamp`, the default per-message timestamp formatter.
+- `ToolApprovalCard.tsx` — three-button approval card ("Allow once / Allow always / Deny") rendered in place of the `ToolCallBlock` while `toolCall.approval === 'pending'`. Resolves decisions through `approvalContext.ts`, which the shell wires up to the `toolPolicyStore`. The card is decoupled from the policy store; a host composing a custom shell can render `ToolApprovalCard` and supply its own `ToolApprovalContext.Provider` value to integrate a non-built-in approval store.
+- `approvalContext.tsx` — `ToolApprovalContext` carrying the `respond(toolCallId, toolName, decision)` callback. The `<Chorus>` shell provides the value (`useChorusShellRuntime`); `ToolApprovalCard` reads it. Missing context = no-op clicks (e.g. when `ToolApprovalCard` is rendered standalone in tests/storybook).
 
 ## Two `formatTimestamp.ts` files
 

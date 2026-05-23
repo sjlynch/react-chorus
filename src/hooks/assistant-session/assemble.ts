@@ -179,6 +179,7 @@ export function useAssistantSessionAssembly<TMeta>({
     safeNotifyToolCall: observers.safeNotifyToolCall,
     isAssistantSessionActive,
     forceRender,
+    policyStoreRef: options.policyStoreRef,
   });
   const { appendToolDeltaNow, getToolMessagesByIds, runCompletedToolCalls } = toolExec;
 

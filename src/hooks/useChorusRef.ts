@@ -4,6 +4,7 @@ import type { ChorusRef } from '../Chorus.types';
 import type { Attachment, Message } from '../types';
 import { isChorusDevMode } from '../utils/devMode';
 import type { UseAssistantSessionResult } from './useAssistantSession';
+import type { ToolPolicyStore } from './conversations/toolPolicyStore';
 
 type ImperativeRejectionCause = 'writesDisabled' | 'controlledWithoutOnChange';
 
@@ -20,6 +21,7 @@ interface UseChorusRefArgs<TMeta> {
   inputRef: React.RefObject<ChatInputHandle | null>;
   writesDisabled: boolean;
   controlledWithoutOnChange: boolean;
+  policyStore: ToolPolicyStore;
 }
 
 /**
@@ -47,6 +49,7 @@ export function useChorusRef<TMeta>(
     inputRef,
     writesDisabled,
     controlledWithoutOnChange,
+    policyStore,
   }: UseChorusRefArgs<TMeta>,
 ): void {
   // A `false` return from an imperative method is ambiguous: it can mean an
@@ -123,6 +126,15 @@ export function useChorusRef<TMeta>(
     getMessages() {
       return messagesRef.current.slice();
     },
+    respondToApproval(toolCallId: string, decision) {
+      if (decision === 'allow-always') {
+        const message = messagesRef.current.find(m => m.role === 'tool' && m.toolCall?.id === toolCallId);
+        if (message && message.role === 'tool' && message.toolCall?.name) {
+          policyStore.setPerToolDecision(message.toolCall.name, 'allow');
+        }
+      }
+      return policyStore.respondToApproval(toolCallId, decision === 'deny' ? 'denied' : 'allowed');
+    },
     scrollToMessage(id: string) {
       const root = rootRef.current;
       if (!root) return false;
@@ -152,5 +164,5 @@ export function useChorusRef<TMeta>(
       return false;
     },
     };
-  }, [controlledWithoutOnChange, inputRef, messagesRef, resetComposer, rootRef, session, writesDisabled]);
+  }, [controlledWithoutOnChange, inputRef, messagesRef, policyStore, resetComposer, rootRef, session, writesDisabled]);
 }

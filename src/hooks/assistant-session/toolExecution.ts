@@ -2,6 +2,8 @@ import React from 'react';
 import type { Message, ToolMessage } from '../../types';
 import type { ConnectorToolDelta } from '../../connectors/connectors';
 import type { ChorusToolDefinition, ChorusToolRegistry } from '../../tools';
+import type { ToolPolicyStore } from '../conversations/toolPolicyStore';
+import { RESERVED_UI_TOOL_NAMES } from '../../approvals/types';
 import { createAbortError, isAbortError, toError } from '../../utils/errors';
 import { createMessageId, metadataWithToolError, metadataWithToolProvider } from './messageUtils';
 import type { ObserverCallbacks } from './observerCallbacks';
@@ -22,6 +24,18 @@ export function resolveToolHandlerLocal<TMeta>(
   if (!entry) return undefined;
   if (typeof entry === 'function') return entry as ChorusToolHandler<TMeta>;
   return typeof entry.handler === 'function' ? (entry.handler as ChorusToolHandler<TMeta>) : undefined;
+}
+
+function lookupToolDefinitionLocal<TMeta>(
+  registry: ChorusToolRegistry<TMeta> | undefined,
+  name: string,
+): ChorusToolDefinition<TMeta> | undefined {
+  if (!registry) return undefined;
+  const entry = Array.isArray(registry)
+    ? registry.find((definition: ChorusToolDefinition<TMeta>) => definition.name === name)
+    : registry[name];
+  if (!entry || typeof entry === 'function') return undefined;
+  return entry;
 }
 
 function hasOwn(value: object, key: string): boolean {
@@ -106,6 +120,7 @@ export interface ToolExecutionDeps<TMeta> {
   safeNotifyToolCall: ObserverCallbacks<TMeta>['safeNotifyToolCall'];
   isAssistantSessionActive: (sessionId: number) => boolean;
   forceRender: () => void;
+  policyStoreRef: React.MutableRefObject<ToolPolicyStore | null>;
 }
 
 export interface ToolExecution<TMeta> {
@@ -132,7 +147,18 @@ export function useToolExecution<TMeta>(deps: ToolExecutionDeps<TMeta>): ToolExe
     safeNotifyToolCall,
     isAssistantSessionActive,
     forceRender,
+    policyStoreRef,
   } = deps;
+
+  const setToolApprovalState = React.useCallback((messageId: string, approval: 'pending' | 'allowed' | 'denied' | undefined) => {
+    updateSessionMessages(prev => prev.map(message => {
+      if (message.id !== messageId || message.role !== 'tool') return message;
+      const nextToolCall = { ...message.toolCall };
+      if (approval === undefined) delete (nextToolCall as { approval?: unknown }).approval;
+      else nextToolCall.approval = approval;
+      return { ...message, toolCall: nextToolCall };
+    }), { reason: 'assistant' });
+  }, [updateSessionMessages]);
 
   const toolMessageIdForDelta = React.useCallback((deltaId: string) => {
     const existing = toolMessageIdsByDeltaIdRef.current.get(deltaId);
@@ -193,6 +219,42 @@ export function useToolExecution<TMeta>(deps: ToolExecutionDeps<TMeta>): ToolExe
       const context = createToolCallContext(currentMessage, signal);
       if (!context) continue;
 
+      // Approval gate: applies only to tools whose definition marks them
+      // `requiresApproval` (or MCP-defaulted), and only when the resolved
+      // policy is `'ask'` or `'deny'`. Reserved UI tools are exempt — the
+      // policy store hands back `'allow'` for them.
+      const policyStore = policyStoreRef.current;
+      const definition = lookupToolDefinitionLocal(toolsRef.current, context.name);
+      const needsApproval = Boolean(definition?.requiresApproval) && !RESERVED_UI_TOOL_NAMES.has(context.name);
+      if (needsApproval && policyStore) {
+        const decision = policyStore.getDecision(context.name);
+        if (decision === 'deny') {
+          setToolApprovalState(currentMessage.id, 'denied');
+          setToolErrorOutput(currentMessage.id, { error: '(denied by user)' });
+          continue;
+        }
+        if (decision === 'ask') {
+          setToolApprovalState(currentMessage.id, 'pending');
+          const onAbort = () => policyStore.respondToApproval(context.id, 'denied');
+          signal.addEventListener('abort', onAbort, { once: true });
+          let resolved;
+          try {
+            resolved = await policyStore.requestApproval(context.id);
+          } finally {
+            signal.removeEventListener('abort', onAbort);
+          }
+          if (!isAssistantSessionActive(sessionId)) return;
+          if (signal.aborted) throw createAbortError();
+          if (resolved !== 'allowed') {
+            const reason = resolved === 'timed-out' ? '(approval timed out)' : '(denied by user)';
+            setToolApprovalState(currentMessage.id, 'denied');
+            setToolErrorOutput(currentMessage.id, { error: reason });
+            continue;
+          }
+          setToolApprovalState(currentMessage.id, 'allowed');
+        }
+      }
+
       try {
         const handler = resolveToolHandlerLocal(toolsRef.current, context.name);
         if (handler) {
@@ -229,7 +291,7 @@ export function useToolExecution<TMeta>(deps: ToolExecutionDeps<TMeta>): ToolExe
         if (!continueOnToolErrorRef.current) throw error;
       }
     }
-  }, [continueOnToolErrorRef, createToolCallContext, isAssistantSessionActive, messagesRef, onToolCallRef, safeNotifyToolCall, setToolErrorOutput, setToolOutput, toolsRef]);
+  }, [continueOnToolErrorRef, createToolCallContext, isAssistantSessionActive, messagesRef, onToolCallRef, policyStoreRef, safeNotifyToolCall, setToolApprovalState, setToolErrorOutput, setToolOutput, toolsRef]);
 
   return {
     toolMessageIdForDelta,

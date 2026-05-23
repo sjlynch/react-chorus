@@ -9,3 +9,4 @@ export type { ChorusAbortContext, ChorusAbortReason, ChorusAbortSource, ChorusCl
 export type { ChorusMessagesChangeContext, ChorusMessagesChangeReason, ChorusMessagesChangeSource } from './hooks/useChorusMessages';
 export type { Transport } from './hooks/useChorusStream';
 export type { McpServerConfig } from './mcp/types';
+export type { ChorusToolPolicy, ToolApprovalPolicy, ToolApprovalDecision, ToolPolicyScope } from './approvals/types';

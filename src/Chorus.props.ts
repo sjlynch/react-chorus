@@ -13,6 +13,7 @@ import type { ChorusLabels } from './labels/types';
 import type { AttachmentError, ConnectorName, Message, Role, StorageAdapter, UploadAttachment } from './types';
 import type { ChorusConnectorOptions } from './Chorus.defaults';
 import type { McpServerConfig } from './mcp/types';
+import type { ChorusToolPolicy, ToolPolicyScope } from './approvals/types';
 
 export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React.HTMLAttributes<HTMLDivElement>, 'onChange' | 'onError' | 'onCopy' | 'onAbort'> {
   accept?: string;
@@ -156,6 +157,30 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
   onToolDelta?: ChorusOnToolDelta<TMeta>;
   /** Registry of executable tool handlers keyed by tool name. Matching handlers run after stream input completes. */
   tools?: ChorusToolRegistry<TMeta>;
+  /**
+   * Per-tool approval policy. `default` applies to any `requiresApproval` tool
+   * without a `perTool` override. With `default: 'ask'` the tool row renders a
+   * three-button approval card (Allow once / Allow always / Deny) and pauses
+   * execution until the user decides. `'allow'` runs the tool; `'deny'`
+   * records a `(denied by user)` tool-error result. Tools without
+   * `requiresApproval` and the reserved UI tools (`__render_block`,
+   * `__artifact`, `__run_code`) are always exempt.
+   */
+  toolPolicy?: ChorusToolPolicy;
+  /**
+   * Where "Allow always for this tool" persists the per-tool override.
+   * Defaults to `'conversation'`: writes to the same `persistenceStorage`
+   * under `${persistenceKey}::tool-policy`. `'session'` keeps overrides in
+   * memory only; `'global'` writes to a fixed key (`chorus:tool-policy`) so
+   * the user's choices follow them across conversations.
+   */
+  toolPolicyScope?: ToolPolicyScope;
+  /**
+   * Maximum time, in milliseconds, that an `ask`-policy approval will wait
+   * before resolving as a deny with a visible `(approval timed out)` tool
+   * result. Defaults to 5 minutes. `0` or `Infinity` disables the timeout.
+   */
+  approvalTimeoutMs?: number;
   /** Called when Chorus cannot read, deserialize, write, or remove the transcript in persistenceStorage. */
   onPersistenceError?: (error: Error) => void;
   onSend?: ChorusOnSend<TMeta>;

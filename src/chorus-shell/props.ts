@@ -5,6 +5,7 @@ import type { ResolvedChorusLabels } from '../labels/types';
 import type { Message } from '../types';
 import type { McpResourceAttachment, McpServerStatus, McpSlashCommand } from '../mcp/types';
 import type { ChorusProps } from '../Chorus.types';
+import type { ToolApprovalContextValue } from '../components/message-row/approvalContext';
 import type { ChorusShellDerivedState } from './derivedState';
 import type { ChorusComposerActions, ChorusComposerState } from './useComposerActions';
 import { joinClasses } from '../utils/className';
@@ -35,6 +36,9 @@ export interface ChorusShellViewProps<TMeta> {
   clearControl: ChorusClearControl;
   mcpStatus?: ChorusMcpStatusView;
   composer: ChorusComposerView;
+  /** When set, wraps the transcript in a ToolApprovalContext.Provider so
+   *  rendered tool messages can resolve their pending approval card. */
+  approvalContextValue?: ToolApprovalContextValue | null;
 }
 
 export interface BuildRootPropsArgs extends React.HTMLAttributes<HTMLDivElement> {

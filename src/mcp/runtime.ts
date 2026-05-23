@@ -116,6 +116,12 @@ function makeToolDefinition<TMeta>(client: McpClient, serverName: string, toolNa
     name: qualifiedName,
     description,
     inputSchema,
+    // MCP servers can run arbitrary side-effectful operations on the host's
+    // behalf, so every MCP tool defaults to `requiresApproval: true`. The
+    // user can flip this off per tool via `toolPolicy.perTool` or by clicking
+    // "Allow always" on the approval card. Hosts that fully trust an MCP
+    // server can suppress the gate with `toolPolicy.perTool[qualifiedName]: 'allow'`.
+    requiresApproval: true,
     handler: (input: unknown, context: ChorusToolCallContext<TMeta>) => client.callTool(toolName, input, { signal: context.signal }),
     mcp: {
       server: serverName,

@@ -1,0 +1,112 @@
+import React from 'react';
+import type { ToolCall } from '../../types';
+import { ToolApprovalContext } from './approvalContext';
+
+function fmtJson(value: unknown): string {
+  try {
+    const out = JSON.stringify(value, null, 2);
+    return out ?? String(value);
+  } catch {
+    return String(value);
+  }
+}
+
+export interface ToolApprovalCardLabels {
+  title: string;
+  serverPrefix: string;
+  inputLabel: string;
+  allowOnce: string;
+  allowAlways: string;
+  deny: string;
+}
+
+export const DEFAULT_TOOL_APPROVAL_LABELS: ToolApprovalCardLabels = {
+  title: 'Approval required',
+  serverPrefix: 'via',
+  inputLabel: 'Input',
+  allowOnce: 'Allow once',
+  allowAlways: 'Allow always for this tool',
+  deny: 'Deny',
+};
+
+export interface ToolApprovalCardProps {
+  toolCall: ToolCall;
+  /** Optional MCP server label shown next to the tool name. */
+  serverName?: string;
+  labels?: Partial<ToolApprovalCardLabels>;
+  className?: string;
+  style?: React.CSSProperties;
+}
+
+/**
+ * Renders the three-button "Allow once / Allow always / Deny" approval card for
+ * a tool call whose `toolCall.approval === 'pending'`. Decisions are routed
+ * through the `ToolApprovalContext` so the surrounding `<Chorus>` shell can
+ * persist per-tool policy and resolve the awaiting handler.
+ */
+export function ToolApprovalCard({ toolCall, serverName, labels, className, style }: ToolApprovalCardProps) {
+  const ctx = React.useContext(ToolApprovalContext);
+  const [open, setOpen] = React.useState(false);
+  const bodyId = React.useId();
+  const merged: ToolApprovalCardLabels = { ...DEFAULT_TOOL_APPROVAL_LABELS, ...labels };
+  const id = toolCall.id;
+  const name = toolCall.name;
+
+  const respond = (decision: 'allow-once' | 'allow-always' | 'deny') => {
+    if (!ctx || !id) return;
+    ctx.respond(id, name, decision);
+  };
+
+  const rootCls = ['chorus-tool-approval', className].filter(Boolean).join(' ');
+
+  return (
+    <div className={rootCls} style={style} role="group" aria-label={merged.title}>
+      <div className="chorus-tool-approval-header">
+        <span className="chorus-tool-approval-title">{merged.title}</span>
+        <span className="chorus-tool-approval-name">
+          {name}
+          {serverName ? <span className="chorus-tool-approval-server"> {merged.serverPrefix} {serverName}</span> : null}
+        </span>
+      </div>
+      {toolCall.input !== undefined && (
+        <div className="chorus-tool-approval-input">
+          <button
+            type="button"
+            className="chorus-tool-approval-input-toggle"
+            aria-expanded={open}
+            aria-controls={bodyId}
+            onClick={() => setOpen(o => !o)}
+          >
+            {merged.inputLabel} {open ? '▲' : '▼'}
+          </button>
+          {open && (
+            <pre id={bodyId} className="chorus-tool-approval-input-body">{fmtJson(toolCall.input)}</pre>
+          )}
+        </div>
+      )}
+      <div className="chorus-tool-approval-actions">
+        <button
+          type="button"
+          className="chorus-tool-approval-btn chorus-tool-approval-btn--allow-once"
+          onClick={() => respond('allow-once')}
+        >
+          {merged.allowOnce}
+        </button>
+        <button
+          type="button"
+          className="chorus-tool-approval-btn chorus-tool-approval-btn--allow-always"
+          onClick={() => respond('allow-always')}
+        >
+          {merged.allowAlways}
+        </button>
+        <button
+          type="button"
+          className="chorus-tool-approval-btn chorus-tool-approval-btn--deny"
+          onClick={() => respond('deny')}
+        >
+          {merged.deny}
+        </button>
+      </div>
+    </div>
+  );
+}

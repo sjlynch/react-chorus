@@ -19,6 +19,7 @@ react-chorus is a composable React chat UI library with batteries-included messa
 - `src/connectors/` — provider-specific SSE payload parsers.
 - `src/streaming/` — transport factories that return SSE-shaped `Response` streams.
 - `src/utils/` — shared helpers for attachment previews, dev gates, markdown/code highlighting, and copy UX; see `src/utils/CLAUDE.md`.
+- `src/approvals/types.ts` — pure types for the tool-call approval gate (`ChorusToolPolicy`, `ToolApprovalPolicy`, `ToolPolicyScope`, `ToolApprovalDecision`) plus the reserved UI tool-name set and default timeout constant. Zero-runtime leaf so the assistant-session and shell chunks can reference the policy contracts without dragging the store hook.
 
 ## Send paths
 

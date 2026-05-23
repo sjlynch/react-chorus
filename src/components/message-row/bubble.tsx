@@ -4,6 +4,7 @@ import type { ChorusAttachmentLabels, ChorusCodeCopyLabels, ChorusSourceLabels, 
 import { joinClasses } from '../../utils/className';
 import { Markdown, type MarkdownSanitizer } from '../Markdown';
 import { ToolCallBlock } from '../ToolCallBlock';
+import { ToolApprovalCard } from './ToolApprovalCard';
 import { MessageAttachments } from './attachments';
 import { MessageReasoning } from './reasoning';
 import { MessageSources } from './sources';
@@ -75,8 +76,12 @@ export function MessageBubbleLayout<TMeta = Record<string, unknown>>({ message, 
           // MessageBubble gets the structured call instead of an empty bubble
           // (or nothing, since `shouldRenderBubble` is false for an empty-text
           // tool message). `message.text`, when present, renders above as a
-          // host-authored summary.
-          <ToolCallBlock toolCall={message.toolCall} labels={toolCallLabels} streaming={streaming} />
+          // host-authored summary. When an approval is pending, the approval
+          // card replaces the tool block — the structured call is shown again
+          // once the gate resolves.
+          message.toolCall?.approval === 'pending'
+            ? <ToolApprovalCard toolCall={message.toolCall} />
+            : <ToolCallBlock toolCall={message.toolCall} labels={toolCallLabels} streaming={streaming} />
         )}
         <MessageSources sources={message.sources} labels={sourceLabels} />
         {showTimestamp && <MessageTimestamp message={message} formatTimestamp={formatTimestamp} />}

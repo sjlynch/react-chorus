@@ -77,6 +77,13 @@ export interface ToolCall {
   name: string;
   input?: unknown;
   output?: unknown;
+  /**
+   * Approval state when a `toolPolicy: 'ask'` gate has been applied to this
+   * call: `'pending'` while awaiting a decision, `'allowed'` or `'denied'`
+   * once resolved. Omitted when no gate ran (allow-by-default or a tool
+   * without `requiresApproval`).
+   */
+  approval?: 'pending' | 'allowed' | 'denied';
 }
 
 interface ChorusMessageBase<TMeta = Record<string, unknown>> {

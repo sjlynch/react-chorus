@@ -219,6 +219,22 @@
 /* Long JSON tool input/output: prefer horizontal scroll over mid-token wrapping (matches Markdown code-block affordance). */
 .chorus-tool-call-pre { margin: 0; font-family: monospace; font-size: 12px; color: var(--chorus-tool-code-text, #e6edf3); white-space: pre; max-height: 240px; overflow-x: auto; overflow-y: auto; }
 
+/* Tool approval card (rendered in place of a tool call block while approval is pending) */
+.chorus-tool-approval { width: 100%; border: 1px solid var(--chorus-tool-approval-border, #c08a00); border-radius: 8px; overflow: hidden; font-size: 13px; background: var(--chorus-tool-approval-bg, #1a1a1a); }
+.chorus-tool-approval-header { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; background: var(--chorus-tool-approval-header-bg, #1f1a10); border-bottom: 1px solid var(--chorus-tool-approval-border, #c08a00); }
+.chorus-tool-approval-title { font-weight: 600; color: var(--chorus-tool-approval-title, #ffd078); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+.chorus-tool-approval-name { font-family: monospace; color: var(--chorus-tool-name-text, #e6edf3); font-weight: 600; }
+.chorus-tool-approval-server { font-family: monospace; color: var(--chorus-tool-label-text, #888); font-weight: 400; font-size: 12px; }
+.chorus-tool-approval-input { padding: 6px 12px; border-bottom: 1px solid var(--chorus-tool-border, #2a2a2a); }
+.chorus-tool-approval-input-toggle { background: none; border: none; color: var(--chorus-tool-label-text, #888); font: inherit; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; cursor: pointer; padding: 2px 0; }
+.chorus-tool-approval-input-body { margin: 6px 0 0 0; font-family: monospace; font-size: 12px; color: var(--chorus-tool-code-text, #e6edf3); white-space: pre; max-height: 200px; overflow: auto; }
+.chorus-tool-approval-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 12px; justify-content: flex-end; }
+.chorus-tool-approval-btn { font: inherit; font-size: 12px; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--chorus-border, #2a2a2a); background: var(--chorus-input-bg, #1a1a1a); color: var(--chorus-chat-text, #f3f4f6); cursor: pointer; }
+.chorus-tool-approval-btn:hover { background: var(--chorus-action-hover-bg, rgba(255,255,255,0.1)); }
+.chorus-tool-approval-btn--allow-once { border-color: var(--chorus-tool-approval-allow, #41a55a); color: var(--chorus-tool-approval-allow, #74d088); }
+.chorus-tool-approval-btn--allow-always { border-color: var(--chorus-tool-approval-allow, #41a55a); background: var(--chorus-tool-approval-allow, #1f5a32); color: #e6f5ec; }
+.chorus-tool-approval-btn--deny { border-color: var(--chorus-tool-approval-deny, #d05656); color: var(--chorus-tool-approval-deny, #ee8888); }
+
 /* Typing indicator (assistant replying) */
 .chorus-typing .chorus-bubble { display: inline-flex; align-items: center; gap: 4px; }
 .chorus-dot { width: 6px; height: 6px; border-radius: 9999px; background: var(--chorus-assistant-text, #ffffff); opacity: .6; animation: chorus-typing 1.2s infinite ease-in-out; }

@@ -9,6 +9,7 @@ import { useAssistantSessionAssembly } from './assistant-session/assemble';
 import type { FetchTransportInit } from './assistant-session/transport';
 import { DEFAULT_MAX_TOOL_ITERATIONS } from './assistant-session/toolLoop';
 import type { ChorusToolRegistry } from '../tools';
+import type { ToolPolicyStore } from './conversations/toolPolicyStore';
 import type {
   ChorusAbortSource,
   ChorusConfirmClearConversation,
@@ -81,6 +82,13 @@ export interface UseAssistantSessionOptions<TMeta = Record<string, unknown>> {
   flushPersistence: () => void;
   resetToInitialMessages?: boolean;
   onClear?: (messages: Message<TMeta>[]) => void;
+  /**
+   * Ref to the per-tool approval policy store. The session reads this during
+   * tool execution to decide whether to gate a `requiresApproval` tool call
+   * via the approval card flow. May be a ref pointing at `null` when no
+   * policy is configured.
+   */
+  policyStoreRef: React.MutableRefObject<ToolPolicyStore | null>;
 }
 
 export interface UseAssistantSessionResult {

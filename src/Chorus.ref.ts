@@ -65,6 +65,19 @@ export interface ChorusRef<TMeta = Record<string, unknown>> {
   focus(): void;
   getMessages(): Message<TMeta>[];
   /**
+   * Resolve an approval gate that was raised for a `requiresApproval` tool
+   * call. Decision values:
+   * - `'allow-once'` — execute this single call; do not change persisted policy.
+   * - `'allow-always'` — execute and persist `'allow'` for this tool name,
+   *   scoped by `toolPolicyScope` (defaults to per-conversation).
+   * - `'deny'` — record a `(denied by user)` tool-error result; do not execute.
+   *
+   * Returns `true` when an approval matching `toolCallId` was found and
+   * resolved; `false` when no pending approval is registered (e.g. the gate
+   * already timed out or the host called twice for the same id).
+   */
+  respondToApproval(toolCallId: string, decision: 'allow-once' | 'allow-always' | 'deny'): boolean;
+  /**
    * Scroll the transcript to a message's row. Returns `true` when a rendered
    * row for `id` was found and scrolled into view, and `false` otherwise.
    *

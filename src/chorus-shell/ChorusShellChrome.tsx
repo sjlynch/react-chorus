@@ -1,5 +1,6 @@
 import { ChatInput } from '../components/ChatInput';
 import { ChatWindow } from '../components/ChatWindow';
+import { ToolApprovalContext } from '../components/message-row/approvalContext';
 import type { ChorusMcpStatusView, ChorusShellViewProps } from './props';
 
 function ChorusMcpStatus({ servers, reconnect }: ChorusMcpStatusView) {
@@ -31,10 +32,14 @@ export function ChorusShellChrome<TMeta = Record<string, unknown>>({
   clearControl,
   mcpStatus,
   composer,
+  approvalContextValue,
 }: ChorusShellViewProps<TMeta>) {
+  const window = <ChatWindow<TMeta> {...transcriptProps} />;
   return (
     <div {...rootProps} ref={rootRef}>
-      <ChatWindow<TMeta> {...transcriptProps} />
+      {approvalContextValue
+        ? <ToolApprovalContext.Provider value={approvalContextValue}>{window}</ToolApprovalContext.Provider>
+        : window}
       {clearControl.visible && (
         <div className="chorus-clear-row">
           <button

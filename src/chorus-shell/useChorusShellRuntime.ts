@@ -17,6 +17,9 @@ import { useChorusComposerActions, useChorusComposerState } from './useComposerA
 import { buildClearControl, buildComposerView, buildRootProps, buildTranscriptProps, type ChorusShellViewProps } from './props';
 import { mergeMcpTools } from './mcpTools';
 import { useLazyMcpRuntime } from './useLazyMcpRuntime';
+import { useToolPolicyStore } from '../hooks/conversations/toolPolicyStore';
+import { useLatestRef } from '../hooks/useLatestRef';
+import type { ToolApprovalContextValue } from '../components/message-row/approvalContext';
 
 export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
   {
@@ -86,6 +89,9 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
     suggestedPrompts,
     systemPrompt,
     tools,
+    toolPolicy,
+    toolPolicyScope,
+    approvalTimeoutMs,
     transport,
     uploadAttachment,
     value,
@@ -126,6 +132,14 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
   });
   const mcp = useLazyMcpRuntime<TMeta>(mcpServers);
   const mergedTools = React.useMemo(() => mergeMcpTools<TMeta>(tools, mcp.tools), [mcp.tools, tools]);
+  const policyStore = useToolPolicyStore({
+    policy: toolPolicy,
+    scope: toolPolicyScope,
+    storage: persistenceStorage ?? null,
+    persistenceKey: builtInPersistenceKey || undefined,
+    approvalTimeoutMs,
+  });
+  const policyStoreRef = useLatestRef(policyStore);
 
   useChorusPropWarnings<TMeta>({
     messages,
@@ -179,6 +193,7 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
     flushPersistence: persisted.flush,
     resetToInitialMessages,
     onClear: composer.handleClearCommit,
+    policyStoreRef,
   });
 
   const shellState = useChorusShellDerivedState<TMeta>({
@@ -213,7 +228,15 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
     inputRef: composer.inputRef,
     writesDisabled: shellState.writesDisabled,
     controlledWithoutOnChange: shellState.controlledWithoutOnChange,
+    policyStore,
   });
+
+  const approvalContextValue = React.useMemo<ToolApprovalContextValue>(() => ({
+    respond: (toolCallId, toolName, decision) => {
+      if (decision === 'allow-always') policyStore.setPerToolDecision(toolName, 'allow');
+      policyStore.respondToApproval(toolCallId, decision === 'deny' ? 'denied' : 'allowed');
+    },
+  }), [policyStore]);
 
   return {
     rootRef,
@@ -263,6 +286,7 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
       servers: mcp.servers,
       reconnect: mcp.reconnect,
     },
+    approvalContextValue,
     composer: buildComposerView<TMeta>({
       composer,
       composerActions,

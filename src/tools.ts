@@ -20,6 +20,16 @@ export interface ChorusToolDefinition<TMeta = Record<string, unknown>, TInput = 
   gemini?: Record<string, unknown>;
   /** Provider-specific overrides merged into the Vercel AI SDK `Tool` shape. */
   aiSdk?: Record<string, unknown>;
+  /**
+   * Mark this tool as requiring user approval before each invocation. With a
+   * `toolPolicy` of `'ask'`, Chorus renders an approval card on the streamed
+   * tool row and pauses execution until the user (or
+   * `ChorusRef.respondToApproval`) decides. `'allow'` policy bypasses the gate;
+   * `'deny'` records a denied tool-error result without executing. The reserved
+   * UI tools (`__render_block`, `__artifact`, `__run_code`) are always exempt
+   * because they have no side effects.
+   */
+  requiresApproval?: boolean;
   /** Local executor. Receives the parsed input and the same context object as `onToolCall`. */
   handler: (input: TInput, context: ChorusToolCallContext<TMeta>) => unknown | Promise<unknown>;
 }
