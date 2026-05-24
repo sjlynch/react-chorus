@@ -45,3 +45,6 @@ Thumbs.db
 .claude/settings.local.json
 .lattice/
 .pi/extensions/lattice-complete.ts
+
+# lattice-managed (do not remove)
+.pi/extensions/lattice-last-shutdown.json
