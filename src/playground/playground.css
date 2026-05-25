@@ -522,6 +522,28 @@ body {
   box-shadow: 0 6px 22px rgba(239, 68, 68, 0.35);
 }
 
+/* Tab intro aside — replaces a welcome assistant message so the empty-state
+   suggested-prompt chips remain visible. */
+.pg-tab-intro {
+  margin: 0;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: #c7c7d0;
+  border: 1px solid rgba(99,102,241,0.25);
+  background: rgba(99,102,241,0.06);
+  border-radius: 10px;
+}
+.pg-tab-intro code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.06);
+  color: #e0e7ff;
+}
+.pg-tab-intro strong { color: #f4f4f5; }
+
 /* Generative-UI tab — interactive blocks */
 .pg-block-card {
   display: flex;

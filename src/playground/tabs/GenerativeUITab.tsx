@@ -1,16 +1,9 @@
 import React from 'react';
 import { Chorus } from '../../Chorus';
 import type { ChorusToolRegistry } from '../../Chorus';
-import type { Message } from '../../types';
 import type { BlockRegistry, BlockRenderProps, ToolLoadingComponents } from '../../blocks/types';
 import { DEMO_PALETTE } from './palettes';
 import { generativeUiTransport } from './generativeUiTransport';
-
-const WELCOME_MESSAGE: Message = {
-  id: 'welcome-generative-ui',
-  role: 'assistant',
-  text: "When you ask for a poll or to **pick a date**, the mock transport emits a `__render_block` tool call. Chorus maps that into `message.block` and mounts the registered component inline — no extra tool row. Your `<Chorus blocks>` registry is the contract.\n\nTry the **weather** prompt to also watch the per-tool loader (`toolLoadingComponents`) — the 3-dot default is replaced by a custom shimmer while the tool call is still streaming.",
-};
 
 const SUGGESTED_PROMPTS = [
   "Poll: which feature should we ship first?",
@@ -114,19 +107,26 @@ const TOOLS: ChorusToolRegistry = {
 
 export function GenerativeUITab() {
   return (
-    <Chorus
-      transport={generativeUiTransport}
-      connector="openai"
-      persistenceKey="react-chorus-pg:generative-ui"
-      initialMessages={[WELCOME_MESSAGE]}
-      suggestedPrompts={SUGGESTED_PROMPTS}
-      placeholder="Ask for a poll, a date picker, or the weather…"
-      showClearButton
-      palette={DEMO_PALETTE}
-      blocks={BLOCKS}
-      toolLoadingComponents={TOOL_LOADERS}
-      tools={TOOLS}
-      autoContinueTools
-    />
+    <div className="pg-tab-stack">
+      <aside className="pg-tab-intro">
+        When you ask for a poll or to <strong>pick a date</strong>, the mock transport emits a <code>__render_block</code> tool call. Chorus maps that into <code>message.block</code> and mounts the registered component inline — no extra tool row. Your <code>&lt;Chorus blocks&gt;</code> registry is the contract.
+        <br />
+        Try the <strong>weather</strong> prompt to also watch the per-tool loader (<code>toolLoadingComponents</code>) — the 3-dot default is replaced by a custom shimmer while the tool call is still streaming.
+      </aside>
+
+      <Chorus
+        transport={generativeUiTransport}
+        connector="openai"
+        persistenceKey="react-chorus-pg:generative-ui"
+        suggestedPrompts={SUGGESTED_PROMPTS}
+        placeholder="Ask for a poll, a date picker, or the weather…"
+        showClearButton
+        palette={DEMO_PALETTE}
+        blocks={BLOCKS}
+        toolLoadingComponents={TOOL_LOADERS}
+        tools={TOOLS}
+        autoContinueTools
+      />
+    </div>
   );
 }

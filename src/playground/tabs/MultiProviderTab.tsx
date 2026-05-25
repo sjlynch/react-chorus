@@ -1,21 +1,14 @@
 import React from 'react';
 import { Chorus } from '../../Chorus';
 import type { BudgetExceededContext } from '../../Chorus';
-import type { Message } from '../../types';
 import { DEMO_PALETTE } from './palettes';
 import { mockAnthropicTransport, mockGeminiTransport, mockOpenAITransport } from './multiProviderTransport';
 
-const WELCOME_MESSAGE: Message = {
-  id: 'welcome-multi-provider',
-  role: 'assistant',
-  text: "This tab routes every turn through the `<Chorus providers>` registry — pick OpenAI, Anthropic, or Gemini from the model picker next to Send (or type `/model:anthropic` to switch from the keyboard). The conversation stays a single transcript across switches.\n\nThe header above the chat is the **live cost meter** (`showCost`). Each turn's mock transport emits a trailing `usage` frame; Chorus reads pricing from the built-in `PRICING` snapshot and totals it per model. The budget banner trips once the conversation crosses `$0.0005`.",
-};
-
 const BUDGET_ALERT = 0.0005;
 const SUGGESTED_PROMPTS = [
-  '/model:openai How would you describe your tone?',
-  '/model:anthropic How would you describe your tone?',
-  '/model:gemini How would you describe your tone?',
+  'How would you describe your tone?',
+  'What does react-chorus do best?',
+  'Write a one-line haiku about streaming',
 ];
 
 const PROVIDERS = {
@@ -37,11 +30,14 @@ export function MultiProviderTab() {
 
   return (
     <div className="pg-tab-stack">
+      <aside className="pg-tab-intro">
+        Pick a provider from the dropdown next to <strong>Send</strong>, or type <code>/model:anthropic</code> and press Enter to switch from the keyboard. The conversation stays one transcript across switches. The header above the chat is the <strong>live cost meter</strong> (<code>showCost</code>); each turn's mock transport emits a trailing <code>usage</code> frame so pricing is real per model. The budget banner trips when the conversation total crosses <code>$0.0005</code>.
+      </aside>
+
       <Chorus
         providers={PROVIDERS}
         defaultProvider="openai"
         persistenceKey="react-chorus-pg:multi-provider"
-        initialMessages={[WELCOME_MESSAGE]}
         suggestedPrompts={SUGGESTED_PROMPTS}
         placeholder="Pick a provider, then send — or type /model:anthropic to switch."
         showClearButton

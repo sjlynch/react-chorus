@@ -20,11 +20,7 @@ const COLUMNS: ColumnSpec[] = [
   { id: 'gemini', label: 'Gemini', modelId: 'gemini-2.5-flash', connector: 'gemini', transport: mockGeminiTransport, badge: '#4285f4' },
 ];
 
-const WELCOME_MESSAGE: Message = {
-  id: 'welcome-multi-model',
-  role: 'assistant',
-  text: "Type once below — the shared composer fans the prompt to **all three columns in parallel**. Each column is its own `<Chorus>` driven through `ref.send`, with the built-in composer hidden by CSS. After every column finishes, click **★ winner** to pick one as canonical: the other columns roll back their last turn and future sends go only to the winner. **Reset all** re-enables fan-out.",
-};
+const LEDE = "Type once below — the shared composer fans the prompt to all three columns in parallel. Each column is its own <Chorus> driven through ref.send, with the built-in composer hidden by CSS. After every column finishes, click ★ winner to pick one as canonical: the other columns roll back their last turn and future sends go only to the winner. Reset all re-enables fan-out.";
 
 interface ColumnState {
   messages: Message[];
@@ -35,7 +31,7 @@ type ColumnsState = Record<ColumnSpec['id'], ColumnState>;
 
 function emptyState(): ColumnsState {
   return COLUMNS.reduce<ColumnsState>((acc, col) => {
-    acc[col.id] = { messages: [WELCOME_MESSAGE], streaming: false };
+    acc[col.id] = { messages: [], streaming: false };
     return acc;
   }, {} as ColumnsState);
 }
@@ -62,7 +58,7 @@ export function MultiModelTab() {
   const someoneSending = COLUMNS.some(col => state[col.id].streaming);
   const everyoneReplied = COLUMNS.every(col => {
     const msgs = state[col.id].messages;
-    return msgs.length > 1 && msgs.at(-1)?.role === 'assistant';
+    return msgs.length > 0 && msgs.at(-1)?.role === 'assistant';
   });
   const canPickWinner = !winnerId && !someoneSending && everyoneReplied;
 
@@ -105,7 +101,7 @@ export function MultiModelTab() {
 
   return (
     <div className="pg-multimodel">
-      <p className="pg-multimodel-lede">{WELCOME_MESSAGE.text}</p>
+      <p className="pg-multimodel-lede">{LEDE}</p>
 
       <div className="pg-multimodel-grid">
         {COLUMNS.map(col => {
