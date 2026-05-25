@@ -1,6 +1,10 @@
 export type TabId =
   | 'streaming-basics'
   | 'tool-agent'
+  | 'multi-provider'
+  | 'multi-model'
+  | 'artifacts'
+  | 'generative-ui'
   | 'markdown'
   | 'attachments'
   | 'multi-conversation'

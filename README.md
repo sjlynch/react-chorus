@@ -6,7 +6,7 @@ Drop a polished, streaming AI chat experience into React — then peel back the 
 
 **[→ Try the live demo](https://sjlynch.github.io/react-chorus/)** &nbsp;·&nbsp; [![Open in StackBlitz](https://developer.stackblitz.com/img/open_in_stackblitz.svg)](https://stackblitz.com/github/sjlynch/react-chorus?file=src%2Fmain.tsx)
 
-The live demo runs entirely in your browser — no backend needed. It drives `<Chorus>` through a mock OpenAI-format SSE transport so you can see streaming replies, reasoning traces, tool calls, multi-conversation persistence, and palette theming with one click. Open it in StackBlitz if you want to edit the source side-by-side, or run `npm run dev` locally.
+The live demo runs entirely in your browser — no backend needed. It drives `<Chorus>` through mock SSE transports so you can see streaming replies, reasoning traces, tool calls with per-tool approval gates, multi-provider routing with a live cost meter, side-by-side multi-model comparison, artifact side panels, generative-UI blocks, multi-conversation persistence, and palette theming with one click. Open it in StackBlitz if you want to edit the source side-by-side, or run `npm run dev` locally.
 
 ## Contents
 
@@ -22,6 +22,14 @@ The live demo runs entirely in your browser — no backend needed. It drives `<C
 ## Why react-chorus?
 
 react-chorus is a composable React chat UI library: render a complete streaming AI conversation with a single `<Chorus>` component, or import the headless hooks and components and build your own shell. It ships SSE parsing, retry/edit/regenerate, Markdown rendering, attachment handling, tool-call rendering, local persistence, and theming so you do not rebuild the common edge cases.
+
+A single `<Chorus>` already covers:
+
+- **Multi-provider routing** in one conversation via the `providers` registry — composer model picker + `/model:<id>` slash command, each assistant message tagged with `provider` / `modelId`.
+- **Tool-call approvals** via `requiresApproval` + `toolPolicy: { default: 'ask' }` — three-button Allow once / Allow always / Deny gate before the handler runs, with per-tool, per-conversation, or global persistence.
+- **Artifacts side panel** — reserved `__artifact` tool calls aggregate into a versioned panel for long code/HTML/document/React output instead of inflating the transcript.
+- **Generative-UI blocks** — register components in `blocks` and the assistant emits `__render_block` calls that mount your component inline with streamed props plus an `emit` channel for follow-up turns or tool calls.
+- **Live cost meter** — `showCost` reads connector-emitted `metadata.usage`, looks up a model in the built-in `PRICING` snapshot, and renders a per-bubble chip plus a conversation total; `budgetAlert` trips a one-shot callback.
 
 How it compares to the alternatives:
 
@@ -133,6 +141,8 @@ Then `cd` into an example and follow its README — each has full, copy-pasteabl
 | [`examples/with-anthropic`](./examples/with-anthropic/README.md) | The `anthropic` connector parsing Anthropic Messages SSE — runs with a built-in mock stream, README documents the Express proxy |
 | [`examples/with-gemini`](./examples/with-gemini/README.md) | The `gemini` connector parsing Gemini `generateContent` SSE — runs with a built-in mock stream, README documents the Express proxy |
 | [`examples/with-vercel-ai-sdk`](./examples/with-vercel-ai-sdk/README.md) | The `ai-sdk` connector parsing a Vercel AI SDK UI-message stream — runs with a built-in mock stream, README documents the Next.js route |
+| [`examples/multi-provider`](./examples/multi-provider/README.md) | The `<Chorus providers>` registry routing one conversation through OpenAI, Anthropic, and Gemini connectors — composer model picker + `/model:<id>` slash command |
+| [`examples/multi-model`](./examples/multi-model/README.md) | Host-side composition fanning one prompt out to three parallel `<Chorus>` columns with a shared composer and "pick winner" gating; design template for a future `<MultiChorus>` export |
 
 `npm run verify:examples` recursively checks example `package.json` metadata, build-smokes every example with a `build` script, and import-resolves the `react-chorus` subpaths used by start-only proxy servers so a breaking change to `react-chorus/server` or `react-chorus/provider-requests` fails CI.
 

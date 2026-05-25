@@ -1,7 +1,11 @@
 import React from 'react';
+import { ArtifactsTab } from './tabs/ArtifactsTab';
 import { AttachmentsTab } from './tabs/AttachmentsTab';
+import { GenerativeUITab } from './tabs/GenerativeUITab';
 import { MarkdownTab } from './tabs/MarkdownTab';
 import { MultiConversationTab } from './tabs/MultiConversationTab';
+import { MultiModelTab } from './tabs/MultiModelTab';
+import { MultiProviderTab } from './tabs/MultiProviderTab';
 import { StreamingBasicsTab } from './tabs/StreamingBasicsTab';
 import { TabRail } from './tabs/TabRail';
 import { ThemingTab } from './tabs/ThemingTab';
@@ -10,7 +14,11 @@ import type { PlaygroundTab, TabId } from './tabs/types';
 
 const TABS: PlaygroundTab[] = [
   { id: 'streaming-basics', label: 'Streaming basics', subtitle: 'SSE, reasoning, retry', render: () => <StreamingBasicsTab /> },
-  { id: 'tool-agent', label: 'Tool agent', subtitle: 'autoContinueTools loop', render: () => <ToolAgentTab /> },
+  { id: 'tool-agent', label: 'Tool agent', subtitle: 'autoContinueTools + approvals', render: () => <ToolAgentTab /> },
+  { id: 'multi-provider', label: 'Multi-provider + cost', subtitle: 'providers, /model:, cost meter', render: () => <MultiProviderTab /> },
+  { id: 'multi-model', label: 'Multi-model side-by-side', subtitle: 'fan-out, pick winner', render: () => <MultiModelTab /> },
+  { id: 'artifacts', label: 'Artifacts', subtitle: '__artifact, side panel, versions', render: () => <ArtifactsTab /> },
+  { id: 'generative-ui', label: 'Generative UI', subtitle: 'blocks + tool loaders', render: () => <GenerativeUITab /> },
   { id: 'markdown', label: 'Markdown & code', subtitle: 'tables, fences, copy', render: () => <MarkdownTab /> },
   { id: 'attachments', label: 'Attachments', subtitle: 'paste, drop, picker', render: () => <AttachmentsTab /> },
   { id: 'multi-conversation', label: 'Multi-chat', subtitle: 'useConversations + storage', render: () => <MultiConversationTab /> },
