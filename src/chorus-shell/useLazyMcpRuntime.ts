@@ -16,6 +16,25 @@ export interface LazyMcpRuntime<TMeta = Record<string, unknown>> extends McpRunt
   applyPrompt: (commandName: string) => Promise<string>;
 }
 
+/**
+ * Lazily loads the MCP runtime chunk and connects the supplied servers.
+ *
+ * Change-detection semantics: server configs are diffed by **stable JSON
+ * serialization** of a normalized projection (`name`, `url`, `transport`,
+ * `headers`, and the reconnect tuning fields). This means:
+ *
+ * - Re-passing a referentially new `mcpServers` array on every render with
+ *   structurally identical contents is safe — no reconnect.
+ * - Rotating a credential by **mutating `server.headers` in place** (for
+ *   example `server.headers.Authorization = newToken`) does NOT trigger a
+ *   reconnect, because the normalized projection still stringifies to the
+ *   previous shape on the next render. To rotate a credential, re-pass the
+ *   entire `mcpServers` array with a fresh `headers` object containing the
+ *   new value.
+ * - Non-string header values are not supported by `McpServerConfig` and
+ *   should not be relied on for change detection: their `JSON.stringify`
+ *   form (e.g. ISO date strings) is not meaningful for the MCP transport.
+ */
 export function useLazyMcpRuntime<TMeta = Record<string, unknown>>(
   servers: McpServerConfig[] | undefined,
 ): LazyMcpRuntime<TMeta> {
