@@ -1238,6 +1238,105 @@ interface ToolCallBlockProps {
 
 The built-in palette knobs (`toolBorder`, `toolHeaderBg`, …) and the underlying `--chorus-tool-*` CSS variables remain the recommended way to recolor the block; reach for `className`/`style` when you need class-based theming (Tailwind, Emotion) or layout overrides that CSS variables cannot express.
 
+### `ToolApprovalCard` in a custom shell
+
+`ToolApprovalCard` renders the three-button "Allow once / Allow always / Deny" panel for a tool call whose `toolCall.approval === 'pending'`. Inside `<Chorus>` the shell already mounts a `ToolApprovalContext.Provider` and wires it to the built-in tool-policy store (`<Chorus toolPolicy>`), so the card "just works" when it lands in the default `MessageBubble`. A custom shell that exports the card directly — for example, a hand-rolled transcript built around `useChorusStream` — must mount the provider itself, otherwise every Allow/Deny click is a silent no-op (a dev-only `console.warn` flags this).
+
+`ToolApprovalContext` carries a single callback:
+
+```ts
+interface ToolApprovalContextValue {
+  respond: (
+    toolCallId: string,
+    toolName: string,
+    decision: 'allow-once' | 'allow-always' | 'deny',
+  ) => void;
+}
+```
+
+The custom shell is responsible for whatever happens behind that callback — resolving an awaiting tool handler, recording a per-tool policy, etc. A minimal pattern is a Promise registry keyed by `toolCallId` that your tool handlers await before executing:
+
+```tsx
+import React from 'react';
+import {
+  ToolApprovalCard,
+  ToolApprovalContext,
+  type ToolApprovalContextValue,
+} from 'react-chorus';
+
+type Decision = 'allow-once' | 'allow-always' | 'deny';
+
+function useApprovalRegistry() {
+  // Map of toolCallId -> resolver. Each entry is the Promise the matching
+  // tool handler is awaiting before it executes.
+  const pending = React.useRef(new Map<string, (d: Decision) => void>());
+  // Persisted "Allow always" decisions, keyed by tool name. Promote this to
+  // localStorage if you want them to outlive the page.
+  const [perTool, setPerTool] = React.useState<Record<string, 'allow' | 'deny'>>({});
+
+  const requestApproval = React.useCallback(
+    (toolCallId: string, toolName: string) =>
+      new Promise<Decision>(resolve => {
+        // A persisted policy short-circuits the gate.
+        const persisted = perTool[toolName];
+        if (persisted === 'allow') return resolve('allow-once');
+        if (persisted === 'deny') return resolve('deny');
+        pending.current.set(toolCallId, resolve);
+      }),
+    [perTool],
+  );
+
+  const respond = React.useCallback<ToolApprovalContextValue['respond']>(
+    (toolCallId, toolName, decision) => {
+      if (decision === 'allow-always') {
+        setPerTool(prev => ({ ...prev, [toolName]: 'allow' }));
+      }
+      const resolve = pending.current.get(toolCallId);
+      if (!resolve) return; // gate already resolved (timeout, duplicate click)
+      pending.current.delete(toolCallId);
+      resolve(decision);
+    },
+    [],
+  );
+
+  return { requestApproval, respond };
+}
+
+function CustomShell() {
+  const { requestApproval, respond } = useApprovalRegistry();
+
+  const approvalContextValue = React.useMemo<ToolApprovalContextValue>(
+    () => ({ respond }),
+    [respond],
+  );
+
+  // Your tool handler awaits `requestApproval(id, name)` before doing work.
+  // While the promise is pending, render the tool message with
+  // `toolCall.approval = 'pending'` so <ToolApprovalCard> appears for it.
+
+  return (
+    <ToolApprovalContext.Provider value={approvalContextValue}>
+      {/* ...your transcript, which renders <ToolApprovalCard toolCall={…}/>
+          for any tool message whose toolCall.approval === 'pending'... */}
+    </ToolApprovalContext.Provider>
+  );
+}
+```
+
+The approval id is `toolCall.id`, which is normally the provider-assigned id surfaced by the connector. Some providers/transports do not expose a stable id per call; in that case the connector may synthesize one. `ToolApprovalCard` is a no-op when `toolCall.id` is missing — there is nothing for `respond` to match against — so the host's tool-message synthesis must give every pending call an `id` for the gate to resolve. Calling `respond` for an id with no pending entry is silently ignored, which is the right behavior when the same id was already resolved by a host-side timeout or a duplicate click.
+
+If you are already using `<Chorus>` and just want the card in a non-default position, prefer the imperative `chorusRef.current.respondToApproval(id, decision)` API instead of standing up your own provider — see [`ChorusRef`](#imperative-chorusref).
+
+Labels are customizable via the `labels` prop (defaults exported as `DEFAULT_TOOL_APPROVAL_LABELS`):
+
+```tsx
+<ToolApprovalCard
+  toolCall={toolCall}
+  serverName="github"
+  labels={{ title: 'Approval needed', deny: 'Block' }}
+/>
+```
+
 ### `Markdown` component
 
 `Markdown` renders a CommonMark + GFM string with optional syntax-highlighted code blocks and per-block copy chrome. It is the same renderer `<Chorus>` uses for assistant text, exported so a custom shell can render Markdown outside a transcript — a release-notes panel, a Markdown preview of a user draft, or a tool-result viewer — without re-wiring sanitization and highlighting.
