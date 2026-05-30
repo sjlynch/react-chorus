@@ -1,5 +1,6 @@
 import React from 'react';
 import type { ToolCall } from '../../types';
+import { warnOnceInDev } from '../../utils/warnings';
 import { ToolApprovalContext } from './approvalContext';
 
 function fmtJson(value: unknown): string {
@@ -51,6 +52,21 @@ export function ToolApprovalCard({ toolCall, serverName, labels, className, styl
   const merged: ToolApprovalCardLabels = { ...DEFAULT_TOOL_APPROVAL_LABELS, ...labels };
   const id = toolCall.id;
   const name = toolCall.name;
+
+  // Surface a dev-only warning when the card is rendered against a real
+  // pending approval (it has an `id`) without a `<ToolApprovalContext.Provider>`
+  // in scope. Without the provider, the Allow/Deny buttons silently no-op
+  // because `respond` short-circuits below — which is impossible to debug
+  // from the rendered DOM. `<Chorus>` mounts the provider for the built-in
+  // shell, so this only fires for custom shells that exported the card
+  // directly. `warnOnceInDev` dedupes by key so a transcript with multiple
+  // pending approvals warns once per app session.
+  if (!ctx && id) {
+    warnOnceInDev(
+      'chorus-tool-approval-card-missing-provider',
+      '[react-chorus] <ToolApprovalCard> mounted without a <ToolApprovalContext.Provider>; the Allow/Deny buttons will not do anything. Wrap the surrounding tree in <ToolApprovalContext.Provider value={…}>, or mount the card inside <Chorus>.',
+    );
+  }
 
   const respond = (decision: 'allow-once' | 'allow-always' | 'deny') => {
     if (!ctx || !id) return;
