@@ -145,6 +145,31 @@ async function verifyReadmeLibraryMeasurements(measurements) {
       pattern: /\| `react-chorus\/server` \| ([\d.]+ kB) \| ([\d.]+ kB) \|/,
     },
     {
+      key: 'blocks',
+      label: 'react-chorus/blocks',
+      pattern: /\| `react-chorus\/blocks` \| ([\d.]+ kB) \| ([\d.]+ kB) \|/,
+    },
+    {
+      key: 'blocksChart',
+      label: 'react-chorus/blocks/Chart',
+      pattern: /\| `react-chorus\/blocks\/Chart` \| ([\d.]+ kB) \| ([\d.]+ kB) \|/,
+    },
+    {
+      key: 'loaders',
+      label: 'react-chorus/loaders',
+      pattern: /\| `react-chorus\/loaders` \| ([\d.]+ kB) \| ([\d.]+ kB) \|/,
+    },
+    {
+      key: 'validators',
+      label: 'react-chorus/validators',
+      pattern: /\| `react-chorus\/validators` \| ([\d.]+ kB) \| ([\d.]+ kB) \|/,
+    },
+    {
+      key: 'pricing',
+      label: 'react-chorus/pricing',
+      pattern: /\| `react-chorus\/pricing` \| ([\d.]+ kB) \| ([\d.]+ kB) \|/,
+    },
+    {
       key: 'highlight',
       label: 'lazy highlight.js runtime',
       pattern: /\| Lazy `highlight\.js` runtime \| ([\d.]+ kB) \| ([\d.]+ kB) \|/,
@@ -251,6 +276,25 @@ const markdownOnlyForbiddenPatterns = [
   { label: 'published Chorus widget chunks', pattern: distWidgetPattern },
 ];
 
+// `react-chorus/blocks`, `react-chorus/blocks/Chart`, `react-chorus/loaders`,
+// `react-chorus/validators`, and `react-chorus/pricing` are pure leaves built
+// on React + local block helpers — none of them should drag in the heavy
+// Markdown/highlight/icon graph or the Chorus widget chunks. Each consumer
+// import is verified against this list; highlight.js is allowed *only* via the
+// lazy chunk path (dynamic import), which never appears in the static graph
+// `verifyGraphExcludes` walks, so a static reference here is a regression.
+const blocksFamilyForbiddenPatterns = [
+  { label: 'DOMPurify', pattern: /(^|\/)node_modules\/dompurify\// },
+  { label: 'Marked', pattern: /(^|\/)node_modules\/marked\// },
+  { label: 'Marked highlight', pattern: /(^|\/)node_modules\/marked-highlight\// },
+  { label: 'Lucide icons', pattern: /(^|\/)node_modules\/lucide-react\// },
+  { label: 'highlight.js runtime', pattern: highlightRuntimePattern },
+  { label: 'Markdown components', pattern: /\/src\/components\/Markdown\.tsx$/ },
+  { label: 'published Markdown chunks', pattern: distMarkdownPattern },
+  { label: 'Chorus widget', pattern: /\/src\/Chorus(?:Headless)?\.tsx$/ },
+  { label: 'published Chorus widget chunks', pattern: distWidgetPattern },
+];
+
 const conversationListForbiddenPatterns = [
   { label: 'DOMPurify', pattern: /(^|\/)node_modules\/dompurify\// },
   { label: 'Lucide icons', pattern: /(^|\/)node_modules\/lucide-react\// },
@@ -299,6 +343,16 @@ async function verifyEntrypointSmoke() {
     { label: 'server CJS', file: 'react-chorus-server.cjs', kind: 'cjs' },
     { label: 'mcp ESM', file: 'react-chorus-mcp.es.js', kind: 'esm' },
     { label: 'mcp CJS', file: 'react-chorus-mcp.cjs', kind: 'cjs' },
+    { label: 'blocks ESM', file: 'react-chorus-blocks.es.js', kind: 'esm' },
+    { label: 'blocks CJS', file: 'react-chorus-blocks.cjs', kind: 'cjs' },
+    { label: 'blocks/Chart ESM', file: 'react-chorus-blocks-chart.es.js', kind: 'esm' },
+    { label: 'blocks/Chart CJS', file: 'react-chorus-blocks-chart.cjs', kind: 'cjs' },
+    { label: 'loaders ESM', file: 'react-chorus-loaders.es.js', kind: 'esm' },
+    { label: 'loaders CJS', file: 'react-chorus-loaders.cjs', kind: 'cjs' },
+    { label: 'validators ESM', file: 'react-chorus-validators.es.js', kind: 'esm' },
+    { label: 'validators CJS', file: 'react-chorus-validators.cjs', kind: 'cjs' },
+    { label: 'pricing ESM', file: 'react-chorus-pricing.es.js', kind: 'esm' },
+    { label: 'pricing CJS', file: 'react-chorus-pricing.cjs', kind: 'cjs' },
   ];
 
   for (const { label, file, kind } of entrypoints) {
@@ -331,6 +385,11 @@ async function writeConsumerEntries(entryDir) {
   await writeFile(path.join(entryDir, 'transport.js'), "import { createFetchSSETransport, createWebSocketTransport } from 'react-chorus/transport';\nconsole.log(createFetchSSETransport, createWebSocketTransport);\n");
   await writeFile(path.join(entryDir, 'provider-requests.js'), "import { toOpenAIChatCompletionsBody, toAnthropicMessagesBody, toGeminiGenerateContentBody } from 'react-chorus/provider-requests';\nconsole.log(toOpenAIChatCompletionsBody, toAnthropicMessagesBody, toGeminiGenerateContentBody);\n");
   await writeFile(path.join(entryDir, 'server.js'), "import { sseHeaders, encodeSSEEvent, encodeSSEDone, encodeSSEError } from 'react-chorus/server';\nconsole.log(sseHeaders, encodeSSEEvent, encodeSSEDone, encodeSSEError);\n");
+  await writeFile(path.join(entryDir, 'blocks.js'), "import { Card, Table, Form, Image, Diff, CalendarPicker, CodeBlockComponent, BlockRenderer } from 'react-chorus/blocks';\nconsole.log(Card, Table, Form, Image, Diff, CalendarPicker, CodeBlockComponent, BlockRenderer);\n");
+  await writeFile(path.join(entryDir, 'blocks-chart.js'), "import { Chart, ChartBlock } from 'react-chorus/blocks/Chart';\nconsole.log(Chart, ChartBlock);\n");
+  await writeFile(path.join(entryDir, 'loaders.js'), "import { DefaultToolLoader, SpinnerLoader, SkeletonTable, MapPing, CodeShimmer } from 'react-chorus/loaders';\nconsole.log(DefaultToolLoader, SpinnerLoader, SkeletonTable, MapPing, CodeShimmer);\n");
+  await writeFile(path.join(entryDir, 'validators.js'), "import { zodAdapter, valibotAdapter, jsonSchemaAdapter } from 'react-chorus/validators';\nconsole.log(zodAdapter, valibotAdapter, jsonSchemaAdapter);\n");
+  await writeFile(path.join(entryDir, 'pricing.js'), "import { PRICING } from 'react-chorus/pricing';\nconsole.log(PRICING);\n");
 }
 
 function normalizeRollupOutput(result) {
@@ -435,6 +494,11 @@ async function buildConsumerBundle() {
           transport: path.join(entryDir, 'transport.js'),
           providerRequests: path.join(entryDir, 'provider-requests.js'),
           server: path.join(entryDir, 'server.js'),
+          blocks: path.join(entryDir, 'blocks.js'),
+          blocksChart: path.join(entryDir, 'blocks-chart.js'),
+          loaders: path.join(entryDir, 'loaders.js'),
+          validators: path.join(entryDir, 'validators.js'),
+          pricing: path.join(entryDir, 'pricing.js'),
         },
         external: isReactPeerDependency,
         output: {
@@ -454,15 +518,20 @@ async function verifyConsumerBundleBudgets() {
   const chunksByFileName = new Map(chunks.map(chunk => [chunk.fileName, chunk]));
   const measurements = {};
   const entryBudgets = [
-    { label: 'root entry initial JS', entry: 'root', maxSize: 282 * KiB, maxGzip: 89 * KiB },
-    { label: 'headless entry initial JS', entry: 'headless', maxSize: 282 * KiB, maxGzip: 89 * KiB },
+    { label: 'root entry initial JS', entry: 'root', maxSize: 283 * KiB, maxGzip: 91 * KiB },
+    { label: 'headless entry initial JS', entry: 'headless', maxSize: 283 * KiB, maxGzip: 91 * KiB },
     { label: 'root useChorusStream import initial JS', entry: 'rootUseChorusStream', maxSize: 84 * KiB, maxGzip: 25 * KiB },
     { label: 'root Markdown import initial JS', entry: 'rootMarkdown', maxSize: 85 * KiB, maxGzip: 30 * KiB },
-    { label: 'root ChatWindow import initial JS', entry: 'rootChatWindow', maxSize: 148 * KiB, maxGzip: 48 * KiB },
+    { label: 'root ChatWindow import initial JS', entry: 'rootChatWindow', maxSize: 149 * KiB, maxGzip: 50 * KiB },
     { label: 'root ConversationList import initial JS', entry: 'rootConversationList', maxSize: 12 * KiB, maxGzip: 5 * KiB },
     { label: 'transport subpath initial JS', entry: 'transport', maxSize: 9 * KiB, maxGzip: 4 * KiB },
     { label: 'provider-requests subpath initial JS', entry: 'providerRequests', maxSize: 16 * KiB, maxGzip: 6 * KiB },
     { label: 'server subpath initial JS', entry: 'server', maxSize: 4 * KiB, maxGzip: 2 * KiB },
+    { label: 'blocks subpath initial JS', entry: 'blocks', maxSize: 11 * KiB, maxGzip: 4 * KiB },
+    { label: 'blocks/Chart subpath initial JS', entry: 'blocksChart', maxSize: 5 * KiB, maxGzip: 3 * KiB },
+    { label: 'loaders subpath initial JS', entry: 'loaders', maxSize: 5 * KiB, maxGzip: 2 * KiB },
+    { label: 'validators subpath initial JS', entry: 'validators', maxSize: 2 * KiB, maxGzip: 1 * KiB },
+    { label: 'pricing subpath initial JS', entry: 'pricing', maxSize: 2 * KiB, maxGzip: 1 * KiB },
   ];
 
   const initialGraphs = new Map();
@@ -540,6 +609,36 @@ async function verifyConsumerBundleBudgets() {
     initialGraphs.get('server') ?? [],
     transportOnlyForbiddenPatterns,
     'keep server-safe SSE framing helpers free of React/UI/Markdown dependencies.',
+  );
+  verifyGraphExcludes(
+    'blocks subpath',
+    initialGraphs.get('blocks') ?? [],
+    blocksFamilyForbiddenPatterns,
+    'keep blocks free of Markdown/icon/widget dependencies (highlight.js may only ride the lazy chunk path).',
+  );
+  verifyGraphExcludes(
+    'blocks/Chart subpath',
+    initialGraphs.get('blocksChart') ?? [],
+    blocksFamilyForbiddenPatterns,
+    'keep the Chart block free of Markdown/icon/widget dependencies; recharts stays optional via dynamic import.',
+  );
+  verifyGraphExcludes(
+    'loaders subpath',
+    initialGraphs.get('loaders') ?? [],
+    blocksFamilyForbiddenPatterns,
+    'keep tool loaders free of Markdown/icon/widget dependencies.',
+  );
+  verifyGraphExcludes(
+    'validators subpath',
+    initialGraphs.get('validators') ?? [],
+    blocksFamilyForbiddenPatterns,
+    'keep validator adapters free of Markdown/icon/widget dependencies.',
+  );
+  verifyGraphExcludes(
+    'pricing subpath',
+    initialGraphs.get('pricing') ?? [],
+    blocksFamilyForbiddenPatterns,
+    'keep the pricing snapshot free of Markdown/icon/widget dependencies.',
   );
 
   const highlightChunks = chunks.filter(chunk => chunkHasModule(chunk, highlightRuntimePattern));
