@@ -172,7 +172,7 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
    * execution until the user decides. `'allow'` runs the tool; `'deny'`
    * records a `(denied by user)` tool-error result. Tools without
    * `requiresApproval` and the reserved UI tools (`__render_block`,
-   * `__artifact`, `__run_code`) are always exempt.
+   * `__artifact`) are always exempt.
    */
   toolPolicy?: ChorusToolPolicy;
   /**
