@@ -3,6 +3,41 @@ import type { ConnectorName } from '../types';
 import type { Transport } from '../hooks/useChorusStream';
 import type { FetchTransportInit } from '../hooks/assistant-session/transport';
 import type { ChatInputModelPicker, ChatInputSlashCommand } from '../components/chat-input/types';
+import { isChorusDevMode } from '../utils/devMode';
+
+// Dedupe console.warn calls across re-mounts so a single buggy `defaultProvider`
+// prop or a single discarded active provider only spams once per key, mirroring
+// the `warnedUnknownConnectorNames` pattern in `src/connectors/registry.ts`.
+const warnedUnknownDefaultProviders = new Set<string>();
+const warnedDiscardedActiveProviders = new Set<string>();
+
+function warnUnknownDefaultProvider(
+  providers: Record<string, unknown>,
+  defaultProvider: string,
+  picked: string | undefined,
+): void {
+  if (!isChorusDevMode()) return;
+  if (warnedUnknownDefaultProviders.has(defaultProvider)) return;
+  warnedUnknownDefaultProviders.add(defaultProvider);
+  const validKeys = Object.keys(providers).join(', ');
+  console.warn(
+    `[Chorus] Unknown defaultProvider \`${defaultProvider}\`; falling back to \`${picked}\`. Valid providers: ${validKeys}.`,
+  );
+}
+
+function warnDiscardedActiveProvider(
+  providers: Record<string, unknown>,
+  discarded: string,
+  picked: string | undefined,
+): void {
+  if (!isChorusDevMode()) return;
+  if (warnedDiscardedActiveProviders.has(discarded)) return;
+  warnedDiscardedActiveProviders.add(discarded);
+  const validKeys = Object.keys(providers).join(', ');
+  console.warn(
+    `[Chorus] Active provider \`${discarded}\` is no longer in the providers map; falling back to \`${picked}\`. Valid providers: ${validKeys}.`,
+  );
+}
 
 /**
  * One entry in the `<Chorus providers>` registry. Pairs a transport (URL,
@@ -83,9 +118,18 @@ export function useMultiProviderRuntime<TMeta>({
   fallbackModelId,
 }: UseMultiProviderRuntimeArgs<TMeta>): MultiProviderRuntime<TMeta> {
   const hasProviders = Boolean(providers && Object.keys(providers).length > 0);
-  const [activeProvider, setActiveProvider] = React.useState<string | undefined>(
-    () => pickInitialActiveProvider(providers, defaultProvider),
-  );
+  const [activeProvider, setActiveProvider] = React.useState<string | undefined>(() => {
+    const picked = pickInitialActiveProvider(providers, defaultProvider);
+    if (
+      providers
+      && Object.keys(providers).length > 0
+      && defaultProvider
+      && !Object.prototype.hasOwnProperty.call(providers, defaultProvider)
+    ) {
+      warnUnknownDefaultProvider(providers, defaultProvider, picked);
+    }
+    return picked;
+  });
 
   // Keep the active provider valid if the providers map changes underneath us
   // — e.g. a host swapping which providers are configured at runtime. We only
@@ -97,7 +141,11 @@ export function useMultiProviderRuntime<TMeta>({
       return;
     }
     if (activeProvider && Object.prototype.hasOwnProperty.call(providers, activeProvider)) return;
-    setActiveProvider(pickInitialActiveProvider(providers, defaultProvider));
+    const picked = pickInitialActiveProvider(providers, defaultProvider);
+    if (activeProvider && Object.keys(providers).length > 0) {
+      warnDiscardedActiveProvider(providers, activeProvider, picked);
+    }
+    setActiveProvider(picked);
   }, [providers, defaultProvider, activeProvider]);
 
   const activeConfig = hasProviders && activeProvider && providers

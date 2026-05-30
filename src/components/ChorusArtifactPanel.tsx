@@ -150,15 +150,12 @@ function downloadArtifact(version: ArtifactVersion) {
 
 function openInNewTab(version: ArtifactVersion) {
   if (typeof window === 'undefined') return;
-  if (version.kind === 'html') {
-    const w = window.open('', '_blank', 'noopener,noreferrer');
-    if (w && w.document) {
-      w.document.open();
-      w.document.write(version.content);
-      w.document.close();
-    }
-    return;
-  }
+  // HTML artifacts are intentionally unsupported here: a new tab would run the
+  // model-generated HTML in the host origin (with cookies, localStorage, and
+  // same-origin fetch), bypassing the `sandbox="allow-scripts"` isolation that
+  // `HtmlBody` applies in-panel. The in-panel iframe already renders the HTML
+  // safely, and `Download` still produces a standalone `.html` file.
+  if (version.kind === 'html') return;
   const blob = new Blob([version.content], { type: 'text/plain;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   window.open(url, '_blank', 'noopener,noreferrer');
@@ -176,7 +173,10 @@ function copyArtifact(version: ArtifactVersion): Promise<boolean> {
  * sandboxed iframe (`allow-scripts` only, no `allow-same-origin`), react via
  * the host-supplied block registry behind an error boundary. The header shows
  * a version switcher and Copy/Download/Open-in-new-tab/Close actions; a Diff
- * toggle compares the active version with the previous one.
+ * toggle compares the active version with the previous one. Open-in-new-tab
+ * is hidden for `kind: 'html'` artifacts because a new tab would run model-
+ * generated HTML in the host origin, bypassing the iframe sandbox; download
+ * the artifact and open the file locally for a standalone view.
  */
 export function ChorusArtifactPanel({
   artifacts,
@@ -270,11 +270,13 @@ export function ChorusArtifactPanel({
               className="chorus-artifact-action"
               onClick={() => downloadArtifact(version)}
             >Download</button>
-            <button
-              type="button"
-              className="chorus-artifact-action"
-              onClick={() => openInNewTab(version)}
-            >Open in new tab</button>
+            {version.kind !== 'html' && (
+              <button
+                type="button"
+                className="chorus-artifact-action"
+                onClick={() => openInNewTab(version)}
+              >Open in new tab</button>
+            )}
           </div>
         </div>
       </header>

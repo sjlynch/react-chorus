@@ -14,15 +14,20 @@ react-chorus keeps React/ReactDOM as peer dependencies and externalizes runtime 
 
 | Entry | Initial JS | gzip | Notes |
 |-------|------------|------|-------|
-| `react-chorus` (`<Chorus>`) | 278.0 kB | 88.2 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
-| `react-chorus/headless` | 278.3 kB | 88.4 kB | Headless defaults, same behavior surface. |
+| `react-chorus` (`<Chorus>`) | 278.7 kB | 89.3 kB | Full widget path; includes Markdown parsing/sanitization and icons. |
+| `react-chorus/headless` | 279.0 kB | 89.4 kB | Headless defaults, same behavior surface. |
 | `react-chorus` (`useChorusStream`) | 83.4 kB | 24.9 kB | Root hook import; CI fails if it pulls UI, Markdown, or icon dependencies. |
-| `react-chorus` (`Markdown`) | 76.3 kB | 25.8 kB | Standalone Markdown renderer; includes Markdown parsing/sanitization, not chat icons. |
-| `react-chorus` (`ChatWindow`) | 146.1 kB | 47.6 kB | Transcript renderer with Markdown and message action icons, without the composer/widget shell. |
+| `react-chorus` (`Markdown`) | 76.3 kB | 26.1 kB | Standalone Markdown renderer; includes Markdown parsing/sanitization, not chat icons. |
+| `react-chorus` (`ChatWindow`) | 146.6 kB | 48.5 kB | Transcript renderer with Markdown and message action icons, without the composer/widget shell. |
 | `react-chorus` (`ConversationList`) | 9.0 kB | 3.1 kB | Conversation sidebar component only; no Markdown/icon graph. |
 | `react-chorus/transport` | 7.6 kB | 3.1 kB | Transport factories only; no React/UI/Markdown runtime. |
 | `react-chorus/provider-requests` | 13.0 kB | 4.2 kB | Provider request mappers and tool serializers; no React/UI/Markdown runtime. |
 | `react-chorus/server` | 0.7 kB | 0.4 kB | SSE framing helpers for proxy routes (headers, encode/format, [DONE], error envelope); no React/UI runtime. |
+| `react-chorus/blocks` | 8.6 kB | 2.9 kB | Generative-UI starter blocks + `BlockRenderer`; no Markdown/icon/widget graph. CI fails if the lazy `highlight.js` runtime is statically reachable. |
+| `react-chorus/blocks/Chart` | 2.8 kB | 1.6 kB | Standalone Chart block only; `recharts` stays an optional, runtime-resolved dependency. |
+| `react-chorus/loaders` | 2.5 kB | 1.0 kB | Built-in tool-loading presets (`SpinnerLoader`, `SkeletonTable`, `MapPing`, `CodeShimmer`, `DefaultToolLoader`). |
+| `react-chorus/validators` | 0.8 kB | 0.3 kB | Pure adapter functions for Zod / Valibot / JSON-Schema validators; no peer runtime. |
+| `react-chorus/pricing` | 0.8 kB | 0.3 kB | `PRICING` snapshot data used by the cost meter; no React or runtime helpers. |
 | Lazy `highlight.js` runtime | 891.7 kB | 296.2 kB | Async code-fence chunk, never part of initial JS. |
 
 `highlight.js` is only fetched the first time a fenced code block (` ``` ` or `~~~`) appears in rendered text. The matching GitHub dark/light token-color stylesheet is also injected on demand based on `codeBlockTheme`; code renders immediately as plain text and is re-rendered with syntax highlighting once the chunk arrives. While an assistant message is actively streaming, Chorus renders that growing message as React-escaped plain text and switches to full Markdown parsing/sanitization when the stream finalizes.
