@@ -127,6 +127,24 @@ describe('development warnings', () => {
     await waitFor(() => expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('`onStreamDone` only fires')));
   });
 
+  it('warns when showCost is enabled for an onSend-only flow', async () => {
+    process.env.NODE_ENV = 'development';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    render(<Chorus showCost onSend={vi.fn()} />);
+
+    await waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining('`showCost` reads `metadata.usage` written by the `transport` send path')));
+  });
+
+  it('does not warn when showCost is enabled with transport', async () => {
+    process.env.NODE_ENV = 'development';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    render(<Chorus showCost transport={async () => new Response(null, { status: 200 })} />);
+
+    await waitFor(() => expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('`showCost` reads `metadata.usage`')));
+  });
+
   it('warns that connectorOptions are ignored when connector is not "openai"', async () => {
     process.env.NODE_ENV = 'development';
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);

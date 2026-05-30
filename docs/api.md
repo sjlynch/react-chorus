@@ -91,6 +91,14 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `markdownSanitizer` | `MarkdownSanitizer` | — | Convenience alias for `markdownProps.sanitizer`; takes precedence when both are provided. |
 | `hiddenRoles` | `Role[]` | `['system']` | Message roles hidden from the transcript. Tool calls are visible by default in `<Chorus>`; pass `['system', 'tool']` to hide them, or `[]` to show all roles. `<Chorus>` accepts `hiddenRoles` only — `showSystemMessages` exists on `<ChatWindow>` for backwards compatibility. |
 | `labels` | `ChorusLabels` | English defaults | Localized strings for every built-in UI surface: composer placeholder/aria-labels/attach/drop-to-attach/send/stop, transcript aria-label/typing/retry/dismiss-error/jump-to-latest/empty-state title, message actions (edit/regenerate/copy/feedback/delete), per-role speaker SR labels, tool-call section headers, reasoning summary, code-fence copy chrome, conversation-list affordances, and the clear button. See [Localizing built-in strings](#localizing-built-in-strings). |
+| `blocks` | `BlockRegistry` | — | Generative-UI block registry keyed by block name. The assistant emits a `__render_block` tool call with `{ name, props }` and Chorus maps it to `message.block`. Definitions opt into a validator (`validate`, run on `'done'`) and `streamingMode: 'whole'` to defer rendering until done. See the [`react-chorus/blocks`](#react-chorusblocks) subpath. |
+| `toolLoadingComponents` | `ToolLoadingComponents` | 3-dot default loader | Per-tool loader resolution shown while a tool call is streaming and has no output yet. Pass `{ get_weather: WeatherLoader }` or `(toolName, partialInput) => ReactNode`. The [`react-chorus/loaders`](#react-chorusloaders) subpath ships starter loaders (`SpinnerLoader`, `SkeletonTable`, `MapPing`, `CodeShimmer`). |
+| `showCost` | `boolean` | `false` | Show a per-bubble `$0.003 · 412 tok` chip and a conversation total above the transcript. Reads `metadata.usage` written by the `transport` send path connectors — see the [Cost meter](#cost-meter-showcost-pricing-budgetalert) section for the `onSend`-path limitation and how to hand-roll `metadata.usage`. |
+| `pricing` | `PricingTable` | `PRICING` snapshot | Per-model pricing overrides in USD per 1k tokens. Merged on top of the built-in [`react-chorus/pricing`](#react-choruspricing) snapshot, so partial overrides win per model without dropping the defaults. |
+| `modelId` | `string` | — | Fallback model id used when an assistant message has no `metadata.modelId`. Useful for single-provider apps so the cost meter picks the right pricing entry without each message carrying the id. |
+| `costEstimator` | `(message, modelId) => number \| undefined` | — | Host-supplied per-message cost override. Returns USD cost for one assistant message, or `undefined` to fall back to the pricing-table lookup. Useful for cached-input discounts, batch pricing, or other billing not expressed by the static table. |
+| `budgetAlert` | `number` | — | Conversation budget threshold in USD. Once the running total strictly exceeds this, `onBudgetExceeded` fires once. Re-arms when the total drops back at or below the threshold (for example after `clear()`). |
+| `onBudgetExceeded` | `({ total, perModel, threshold }) => void` | — | Pure observer fired once per `budgetAlert` crossing. Throwing here does not interrupt rendering. |
 
 ### Localizing built-in strings
 
@@ -1487,6 +1495,216 @@ Helpers and constants:
 - `ChorusStreamError` — error class thrown by `useChorusStream` and the transport path.
 - `DEFAULT_CHORUS_LABELS`, `DEFAULT_ATTACHMENT_LABELS`, `DEFAULT_SOURCE_LABELS`, `resolveChorusLabels` — built-in localization helpers and label defaults (`DEFAULT_ATTACHMENT_LABELS` / `DEFAULT_SOURCE_LABELS` expose individual English slices).
 - `sourceDisplayLabel(source, fallback)` — returns the display label the default `MessageSources` UI shows for a `MessageSource` (priority order: `title || url || id || fallback`). Use it in custom source-list renderers to match the built-in label.
+
+## Subpath exports
+
+The following subpath exports ship alongside the root `react-chorus` barrel. Each is tree-shakeable so a consumer that imports only one symbol does not pay for the rest of the chunk; the heavier `Chart` block lives in its own subpath so Recharts (its optional dependency) stays out of the default blocks chunk.
+
+| Subpath | Purpose | Pairs with |
+|---------|---------|------------|
+| [`react-chorus/blocks`](#react-chorusblocks) | Built-in generative-UI blocks (`Card`, `Form`, `Table`, `Image`, `CodeBlockComponent`, `Diff`, `CalendarPicker`), `BlockRenderer`, `parseStreamingJson`, and the block runtime types. | `<Chorus blocks={...}>` |
+| [`react-chorus/blocks/Chart`](#react-chorusblockschart) | Recharts-or-sparkline `Chart` block kept out of the default blocks chunk. | `<Chorus blocks={{ chart: ChartBlock }}>` |
+| [`react-chorus/loaders`](#react-chorusloaders) | Tool-loader presets (`SpinnerLoader`, `SkeletonTable`, `MapPing`, `CodeShimmer`, `DefaultToolLoader`). | `<Chorus toolLoadingComponents={...}>` |
+| [`react-chorus/validators`](#react-chorusvalidators) | One-line `zodAdapter` / `valibotAdapter` / `jsonSchemaAdapter` adapters that turn a validator instance into a `BlockValidator`. | `BlockDefinition.validate` |
+| [`react-chorus/pricing`](#react-choruspricing) | `PRICING` snapshot + `ModelPricing` / `PricingTable` types used by the cost meter. | `<Chorus showCost pricing={...}>` |
+
+### `react-chorus/blocks`
+
+Generative-UI block registry: built-in components the model can mount inline.
+
+`<Chorus blocks={...}>` is a registry of React components the model can render inline. The assistant emits a `__render_block` tool call with `{ name, props }` and Chorus parses streamed props through [`parseStreamingJson`](#react-chorusblocks-streaming) so the registered component re-renders on every delta. Unknown names render a small fallback so old transcripts still load.
+
+```tsx
+import { Chorus } from 'react-chorus';
+import { Card, Form, Table, Image, ImageBlock } from 'react-chorus/blocks';
+import { zodAdapter } from 'react-chorus/validators';
+import { z } from 'zod';
+
+function Poll({ props, emit }: { props: { question?: string; options?: string[] }; emit: (s: string) => void }) {
+  return (
+    <div>
+      <p>{props.question ?? '…'}</p>
+      {(props.options ?? []).map(opt => (
+        <button key={opt} type="button" onClick={() => emit(`I voted ${opt}`)}>{opt}</button>
+      ))}
+    </div>
+  );
+}
+
+<Chorus
+  transport="/api/chat"
+  blocks={{
+    card: { component: Card },
+    form: { component: Form },
+    table: { component: Table },
+    image: ImageBlock,
+    poll: {
+      component: Poll,
+      validate: zodAdapter(z.object({ question: z.string(), options: z.array(z.string()).min(2) })),
+    },
+  }}
+/>
+```
+
+**Named exports:**
+
+- Starter components and their packaged definitions: `Card` / `CardBlock`, `Form` / `FormBlock`, `Table` / `TableBlock`, `Image` / `ImageBlock`, `CodeBlockComponent` / `CodeBlockBlock`, `Diff` / `DiffBlock`, `CalendarPicker` / `CalendarPickerBlock`. The packaged `*Block` exports are `BlockDefinition` instances ready to drop into the registry; the bare component exports are useful when you want to compose with your own definition (validator, `streamingMode`, or wrapper).
+- `Chart` / `ChartBlock` are re-exported here for the common case, but the implementation lives in [`react-chorus/blocks/Chart`](#react-chorusblockschart) so a consumer that does not use a chart can avoid the Recharts dependency entirely.
+- `BlockRenderer` — the same component `<Chorus>` uses internally to render a `message.block`. Useful from a fully custom transcript when you want the validator + error-boundary + streaming-mode handling without re-implementing it. Returns `null` outside a `<BlockProvider>` (i.e. outside `<Chorus>`).
+- `parseStreamingJson` — see [Streaming block-prop parsing](#react-chorusblocks-streaming) below.
+- Types: `BlockDefinition`, `BlockRegistry`, `BlockRenderProps`, `BlockValidator`, `BlockValidateResult`, `BlockEmit`, `BlockEmitPayload`, `ToolLoaderProps`, `ToolLoadingComponents`, plus the per-block `*Props` interfaces (`CardProps`, `FormProps`, `TableProps`, `ImageProps`, `CodeBlockProps`, `DiffProps`, `CalendarPickerProps`, `ChartProps`).
+
+#### Image block URL whitelist and `allowedProtocols`
+
+The built-in `Image` block treats `src` as untrusted model output, so a `javascript:` URL or any other unsafe scheme is replaced by a "Blocked image (unsafe URL scheme)" placeholder before it can reach `<img src>`. The default whitelist is **`['https:', 'data:image/']`** — strict on purpose so a model-driven URL cannot be coerced into a mixed-content fetch.
+
+`ImageProps` adds two opt-ins for hosts that need to widen or relabel that behavior:
+
+| Prop | Type | Default | Notes |
+|------|------|---------|-------|
+| `allowedProtocols` | `string[]` | `['https:', 'data:image/']` | Literal `startsWith` prefixes the block accepts in `src`. A scheme entry must include its trailing `:` (`'http:'`, `'blob:'`); a `data:` MIME prefix must include the slash (`'data:image/'`). |
+| `blockedLabel` | `string` | `'Blocked image (unsafe URL scheme)'` | Override the placeholder label — useful for localization. |
+
+Both props are part of `ImageProps`, so a malicious model output could theoretically include `allowedProtocols: ['javascript:']` and bypass the whitelist. The recommended host opt-in is to **wrap the block** so the host-supplied list is pinned *after* the model props are spread:
+
+```tsx
+import { Image } from 'react-chorus/blocks';
+import type { BlockDefinition, BlockRenderProps } from 'react-chorus/blocks';
+import type { ImageProps } from 'react-chorus/blocks';
+
+const HOST_ALLOWED = ['https:', 'data:image/', 'http://localhost'];
+
+function LocalDevImage(props: BlockRenderProps<ImageProps> & ImageProps) {
+  // Spread model props first, then pin the host whitelist so the model cannot
+  // re-open `javascript:` or other unsafe schemes by passing its own list.
+  return <Image {...props} allowedProtocols={HOST_ALLOWED} blockedLabel="Image blocked" />;
+}
+
+const LocalDevImageBlock: BlockDefinition<ImageProps> = { component: LocalDevImage };
+
+<Chorus blocks={{ image: LocalDevImageBlock }} />
+```
+
+Add `'http:'` to the whitelist only for trusted local-development hosts. In a production deployment, the model output is still untrusted, so a permissive `'http:'` entry lets the model load an arbitrary tracker pixel — keep the default unless you fully control the URL source.
+
+The `blockedLabel` prop is the simplest way to relocalize the placeholder. There is no entry for the Image block in the `labels` system yet; pass `blockedLabel` per-instance (via a wrapper) or build your own block from scratch when you need full control over the blocked-state UI.
+
+<a id="react-chorusblocks-streaming"></a>
+
+#### Streaming block-prop parsing (`parseStreamingJson`)
+
+`parseStreamingJson(buffer)` returns `StreamingJsonResult`, which is what the `BlockRenderer` uses to render partial props before the model has finished emitting the JSON. Use it from a fully custom block renderer if you want to expose intermediate values to your own UI without re-implementing the partial-JSON parser.
+
+### `react-chorus/blocks/Chart`
+
+A `Chart` block that switches between a Recharts line/bar/area/pie chart and a built-in sparkline. Recharts is loaded lazily at runtime, so a consumer that never registers `ChartBlock` does not pull Recharts into its bundle. Register it from the dedicated subpath so the Recharts chunk is only fetched when a chart actually renders:
+
+```tsx
+import { Chart, ChartBlock } from 'react-chorus/blocks/Chart';
+
+<Chorus blocks={{ chart: ChartBlock }} />
+```
+
+The bare `Chart` component lets you render charts outside `<Chorus>` for a custom shell or storybook fixture; `ChartBlock` is the matching `BlockDefinition`. Exports also include `ChartProps` for typing your own wrappers.
+
+### `react-chorus/loaders`
+
+Starter components for `toolLoadingComponents` — what to render while a tool call is streaming and has no output yet.
+
+```tsx
+import { SpinnerLoader, SkeletonTable, MapPing, CodeShimmer } from 'react-chorus/loaders';
+
+<Chorus
+  toolLoadingComponents={{
+    search_docs: SkeletonTable,
+    geocode: MapPing,
+    run_code: CodeShimmer,
+    default: SpinnerLoader,
+  }}
+/>
+```
+
+`toolLoadingComponents` also accepts a function `(toolName, partialInput) => ReactNode` if you want to branch on streamed input. `DefaultToolLoader` is the unbranded 3-dot loader Chorus falls back to when no override is registered. Each loader receives `{ toolName, input }` (`ToolLoaderProps`); they are plain components so they can be wrapped or themed like any other React element.
+
+### `react-chorus/validators`
+
+One-line adapters that turn a validator instance from a popular library into the `BlockValidator` contract from [`react-chorus/blocks`](#react-chorusblocks). The adapters are intentionally untyped against the underlying package so the core library does not peer-depend on Zod, Valibot, or Ajv; bring your own runtime and the adapter wires it up.
+
+```ts
+import { zodAdapter, valibotAdapter, jsonSchemaAdapter } from 'react-chorus/validators';
+import { z } from 'zod';
+
+const validate = zodAdapter(z.object({ city: z.string(), temp: z.number() }));
+// validate(input) returns { ok: true, props } or { ok: false, errors: string[] }
+```
+
+Each adapter returns the same `BlockValidateResult` shape — `{ ok: true, props }` or `{ ok: false, errors }` — so it plugs directly into `BlockDefinition.validate`. A failing validator renders Chorus's built-in validation-error fallback (the block name, the error list, and the raw JSON props the model emitted) instead of the component itself, so a block never receives malformed props.
+
+### `react-chorus/pricing`
+
+Built-in model pricing table read by the cost meter. USD per **1k tokens**, separated by `in` (prompt) and `out` (completion).
+
+```ts
+import { PRICING, type ModelPricing, type PricingTable } from 'react-chorus/pricing';
+
+const myTable: PricingTable = { ...PRICING, 'my-model': { in: 0, out: 0 } };
+```
+
+Exports:
+
+- `PRICING` — best-effort snapshot of provider prices at release time (OpenAI, Anthropic, and Google Gemini), reviewed periodically. Provider prices change, so treat this as a default that lets the meter surface a plausible number out of the box.
+- `ModelPricing` — `{ in: number; out: number }` per-model entry.
+- `PricingTable` — the `Record<string, ModelPricing>` shape consumed by `<Chorus pricing={...}>`.
+
+Pass `<Chorus pricing={...}>` to override per-model entries. Host overrides are merged on top of `PRICING`, so partial overrides win per model without dropping the defaults for unmentioned models. Re-export `PRICING` from your billing/config module and bump the entries from a CI cron when the snapshot drifts. See the [Cost meter](#cost-meter-showcost-pricing-budgetalert) section for the runtime wiring.
+
+### Cost meter (`showCost`, `pricing`, `budgetAlert`)
+
+When `<Chorus showCost>` is on, Chorus renders:
+
+- A `$0.003 · 412 tok` chip at the bottom-right of each assistant bubble. The streaming bubble uses a heuristic token count (`heuristicTokenCount(text)`) until the message finalizes; afterwards the chip reads `cost.byMessageId` for the precise number.
+- A conversation total + per-model breakdown above the transcript.
+
+Cost is computed from `message.metadata.usage` on each finalized assistant message, multiplied by the per-model entry in `PRICING` (merged with `pricing` overrides). The model id is resolved per-message from `message.metadata.modelId`, falling back to the `modelId` prop. Pass `costEstimator` to override the lookup entirely for billing models the static table cannot express (cached-input discounts, batch pricing, etc.).
+
+`budgetAlert` is a USD ceiling: once the running total strictly exceeds it, `onBudgetExceeded({ total, perModel, threshold })` fires exactly once and re-arms when the total drops back at or below the threshold (e.g. after `ChorusRef.clear()`).
+
+#### `transport` path (built-in)
+
+The built-in `transport` path connectors emit normalized token `usage` through `onStreamMetadata`. The cost meter wraps that callback internally and attaches `usage` onto `message.metadata` for the active streaming assistant message, so the meter "just works" with no extra wiring:
+
+```tsx
+<Chorus transport="/api/chat" showCost />
+```
+
+#### `onSend` path (silently inert without manual wiring)
+
+`showCost` reads `metadata.usage` that the **`transport`-path** connectors write through Chorus's internal `onStreamMetadata` wrapper. The `onSend` path does not run that wrapper — `onStreamMetadata` only fires on the `transport` path — so the cost chips stay at `$0` and the conversation total never advances. In development Chorus logs a one-time warning when `showCost` is set with `onSend` present and no `transport`.
+
+To make `showCost` work from `onSend`, hand-roll `metadata.usage` on each finalized assistant message yourself. The connector you call inside `onSend` knows the provider response shape, so attach `usage` either to the assistant `Message` you return, or via `helpers.finalizeAssistant({ metadata: { usage } })`:
+
+```tsx
+import { Chorus, type ChorusOnSend } from 'react-chorus';
+
+const onSend: ChorusOnSend = async (text, messages, helpers) => {
+  const response = await fetch('/api/chat', { method: 'POST', body: JSON.stringify({ text, history: messages }) });
+  const data = await response.json();
+  // Stream tokens through helpers.appendAssistant(...) as before, then:
+  helpers.finalizeAssistant({
+    text: data.text,
+    metadata: {
+      modelId: data.model, // optional — falls back to <Chorus modelId>
+      usage: { input_tokens: data.usage.prompt_tokens, output_tokens: data.usage.completion_tokens },
+    },
+  });
+};
+
+<Chorus onSend={onSend} showCost modelId="gpt-4o-mini" />
+```
+
+The `usage` shape uses the same normalization the built-in connectors emit (`input_tokens` / `output_tokens`, with `prompt_tokens` / `completion_tokens` accepted as aliases). When you cannot wrap the connector inside `onSend` (e.g. an existing custom client that streams through Chorus only for UI), prefer `transport` so the connector's `onStreamMetadata` path is restored. `helpers.streamCallbacks()` does not currently expose an `onMetadata` channel for `onSend`; track that follow-up if you need cost-meter parity without rolling your own assignment to `metadata.usage`.
+
+Types: `BudgetExceededContext`, `ModelPricing`, `PricingTable` are re-exported from the root barrel for typing `onBudgetExceeded` and `pricing` overrides.
 
 Types: every public type re-exported from the root barrel is also importable from `react-chorus/headless` — including `Message`, `AnyChorusMessage`, `UserMessage`, `AssistantMessage`, `SystemMessage`, `ToolMessage`, `Role`, `ToolCall`, `MessageSource`, `MessageCitation`, `MessageSourceType`, `Attachment`, `AttachmentError`, `AttachmentErrorReason`, `AttachmentSource`, `AttachmentUploadResult`, `UploadAttachment`, `UploadAttachmentOptions`, `StorageAdapter`, `ConnectorName`, `Connector`, `ConnectorResult`, `ConnectorToolDelta`, `Transport`, `FetchSSETransportOptions`, `FetchTransportInit`, `WebSocketTransport`, `WebSocketTransportOptions`, `SendCallbacks`, `StreamOptions`, `ChorusProps` (aliased to `ChorusHeadlessProps`), `ChorusRef`, `ChorusSendHelpers`, `ChorusSendPath`, `ChorusOnSend`, `ChorusOnFinish`, `ChorusOnAbort`, `ChorusOnStreamDone`, `ChorusOnToolCall`, `ChorusOnToolDelta`, `ChorusAbortContext`, `ChorusAbortReason`, `ChorusAbortSource`, `ChorusFinishContext`, `ChorusStreamDoneContext`, `ChorusStreamDoneReason`, `ChorusToolCallContext`, `ChorusToolDeltaContext`, `ChorusToolLoopContext`, `ChorusToolRegistry`, `ChorusToolHandler`, `ChorusConfirmClearConversation`, `ChorusClearConversationContext`, `ChorusConfirmDeleteMessage`, `ChorusDeleteMessageContext`, `ChorusShouldContinueToolLoop`, `ChorusMessagesChangeContext`, `ChorusMessagesChangeReason`, `ChorusMessagesChangeSource`, `ChorusToolDefinition`, `RenderErrorContext`, `RenderMessageContext`, `RenderMessageRootProps`, `MessageBubbleProps`, `MessageBubbleSlots`, `MessageMarkdownProps`, `MessageRenderActions`, `MessageTimestampFormatter`, `MessageCopyResult`, `MessageFeedback`, `GetMessageFeedback`, `ChatInputProps`, `ChatInputHandle`, `ChatInputFocusOptions`, `ChatWindowProps`, `ConversationListProps`, `ConfirmDeleteConversation`, `ConfirmDeleteConversationContext`, `ConversationStorageError`, `ConversationStorageOperation`, `ConversationSummary`, `RenameFromFirstMessageOptions`, `UseConversationsOptions`, `UseConversationsResult`, `ChorusPersistenceError`, `PersistenceOperation`, `PersistenceWriteOptions`, `SerializeMessages`, `DeserializeMessages`, `UseChorusPersistenceOptions`, `UseChorusPersistenceResult`, `ChorusTranscriptActions`, `ChorusTranscriptActionsOptions`, `TranscriptExportFormat`, `TranscriptFormatInfo`, `RenderAttachmentErrorContext`, `Palette`, `MarkdownProps`, `MarkdownSanitizer`, `CodeBlockCopy`, `CodeBlockCopyContext`, `CodeBlockCopyRenderer`, `ProviderToolsOption`, `ProviderToolsSource`, all `ChorusLabels` sub-shapes, and every provider request type (`AnthropicMessagesBody`, `AnthropicTool`, `OpenAIChatCompletionsBody`, `GeminiGenerateContentBody`, etc.).
 

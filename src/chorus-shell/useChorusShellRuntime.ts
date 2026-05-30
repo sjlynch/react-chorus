@@ -187,6 +187,7 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
     transport: effectiveTransport,
     onSend,
     onStreamDone,
+    showCost,
     sending: sendingProp,
     autoContinueTools,
     maxToolIterations,

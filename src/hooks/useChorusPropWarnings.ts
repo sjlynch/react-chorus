@@ -15,6 +15,7 @@ interface UseChorusPropWarningsArgs<TMeta> {
   transport: ChorusProps<TMeta>['transport'];
   onSend: ChorusProps<TMeta>['onSend'];
   onStreamDone: ChorusProps<TMeta>['onStreamDone'];
+  showCost: ChorusProps<TMeta>['showCost'];
   sending: boolean | undefined;
   autoContinueTools: ChorusProps<TMeta>['autoContinueTools'];
   maxToolIterations: ChorusProps<TMeta>['maxToolIterations'];
@@ -36,6 +37,7 @@ export function useChorusPropWarnings<TMeta>({
   transport,
   onSend,
   onStreamDone,
+  showCost,
   sending,
   autoContinueTools,
   maxToolIterations,
@@ -95,6 +97,10 @@ export function useChorusPropWarnings<TMeta>({
       console.warn('[Chorus] `onStreamDone` only fires on the `transport` send path. With `onSend` it never fires — use `onFinish` for per-message completion, or surface stream-done telemetry from your `onSend` client.');
     }
 
+    if (showCost && !isTransportPresent(transport) && onSend) {
+      console.warn('[Chorus] `showCost` reads `metadata.usage` written by the `transport` send path. With `onSend` Chorus never wraps `onStreamMetadata`, so the cost chips stay at $0 and the conversation total never updates — hand-roll `metadata.usage` on each finalized assistant message you append/return from `onSend` (see the `showCost` section in docs/api.md for the recipe), or pass `transport`.');
+    }
+
     const toolExecutionProps = [
       tools !== undefined && 'tools',
       onToolCall !== undefined && 'onToolCall',
@@ -129,5 +135,5 @@ export function useChorusPropWarnings<TMeta>({
         console.warn(`[Chorus] ${propList} ${verb} ignored without \`transport\`. The automatic tool loop runs only on the \`transport\` send path; with \`onSend\` you drive tool continuations yourself. Pass \`transport\`, or gate continuations inside your \`onSend\` client.`);
       }
     }
-  }, [messages, initialMessages, onChange, value, persistenceKey, connector, connectorOptions, transport, onSend, onStreamDone, sending, autoContinueTools, maxToolIterations, shouldContinueToolLoop, tools, onToolCall, onToolDelta, continueOnToolError]);
+  }, [messages, initialMessages, onChange, value, persistenceKey, connector, connectorOptions, transport, onSend, onStreamDone, showCost, sending, autoContinueTools, maxToolIterations, shouldContinueToolLoop, tools, onToolCall, onToolDelta, continueOnToolError]);
 }
