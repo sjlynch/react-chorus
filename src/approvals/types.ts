@@ -23,10 +23,10 @@ export const DEFAULT_APPROVAL_TIMEOUT_MS = 5 * 60 * 1000;
 
 /**
  * Reserved tool names that are exempt from approval policies — they're UI-only
- * with no side effects, so blocking them would be a footgun.
+ * carriers (Generative-UI blocks, artifact payloads) with no host-executable
+ * handler and no side effects, so blocking them would be a footgun.
  */
 export const RESERVED_UI_TOOL_NAMES: ReadonlySet<string> = new Set([
   '__render_block',
   '__artifact',
-  '__run_code',
 ]);
