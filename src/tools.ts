@@ -26,8 +26,8 @@ export interface ChorusToolDefinition<TMeta = Record<string, unknown>, TInput = 
    * tool row and pauses execution until the user (or
    * `ChorusRef.respondToApproval`) decides. `'allow'` policy bypasses the gate;
    * `'deny'` records a denied tool-error result without executing. The reserved
-   * UI tools (`__render_block`, `__artifact`, `__run_code`) are always exempt
-   * because they have no side effects.
+   * UI tools (`__render_block`, `__artifact`) are always exempt because they
+   * have no host-executable handler and no side effects.
    */
   requiresApproval?: boolean;
   /** Local executor. Receives the parsed input and the same context object as `onToolCall`. */
