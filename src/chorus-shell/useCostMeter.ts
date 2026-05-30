@@ -51,7 +51,7 @@ export interface UseCostMeterResult {
   onStreamMetadata?: (metadata: Record<string, unknown>) => void;
 }
 
-function isPositiveFinite(n: unknown): n is number {
+export function isPositiveFinite(n: unknown): n is number {
   return typeof n === 'number' && Number.isFinite(n) && n > 0;
 }
 
