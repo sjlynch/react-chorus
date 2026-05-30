@@ -31,15 +31,15 @@ describe('extractArtifacts', () => {
       }),
     ];
 
-    const [artifact] = extractArtifacts(messages);
+    const artifact = extractArtifacts(messages)[0]!;
     expect(artifact.title).toBe('Snake game');
     expect(artifact.kind).toBe('code');
     expect(artifact.versions).toHaveLength(2);
     // The version itself reflects whatever was streamed (so the panel can
     // still show the partial content); only the registry-level title is
     // sticky.
-    expect(artifact.versions[1].title).toBe('');
-    expect(artifact.versions[1].content).toBe('');
+    expect(artifact.versions[1]!.title).toBe('');
+    expect(artifact.versions[1]!.content).toBe('');
   });
 
   it('overwrites the title and kind once the next version settles with non-empty content', () => {
@@ -58,7 +58,7 @@ describe('extractArtifacts', () => {
       }),
     ];
 
-    const [artifact] = extractArtifacts(messages);
+    const artifact = extractArtifacts(messages)[0]!;
     expect(artifact.title).toBe('Snake game v2');
     expect(artifact.kind).toBe('react');
     expect(artifact.versions).toHaveLength(2);
@@ -80,7 +80,7 @@ describe('extractArtifacts', () => {
       }),
     ];
 
-    const [artifact] = extractArtifacts(messages);
+    const artifact = extractArtifacts(messages)[0]!;
     expect(artifact.title).toBe('Snake game');
   });
 });
