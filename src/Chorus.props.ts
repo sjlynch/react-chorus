@@ -101,7 +101,17 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
    */
   messages?: Message<TMeta>[];
   minAssistantDelayMs?: number;
-  /** Browser-side MCP servers to connect on mount. MCP tools are merged into the executable tool registry; prompts/resources surface in the composer. */
+  /**
+   * Browser-side MCP servers to connect on mount. MCP tools are merged into
+   * the executable tool registry; prompts/resources surface in the composer.
+   *
+   * Change detection is by stable JSON serialization of each server's
+   * `name`, `url`, `transport`, `headers`, and reconnect tuning fields, so
+   * passing a referentially new array with the same content is safe (no
+   * reconnect). To rotate a credential, re-pass the entire `mcpServers`
+   * array with a fresh `headers` object holding the new value — mutating
+   * `server.headers` in place will NOT trigger a reconnect.
+   */
   mcpServers?: McpServerConfig[];
   onAttachmentError?: (error: AttachmentError) => void;
   /**
@@ -172,7 +182,7 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
    * execution until the user decides. `'allow'` runs the tool; `'deny'`
    * records a `(denied by user)` tool-error result. Tools without
    * `requiresApproval` and the reserved UI tools (`__render_block`,
-   * `__artifact`, `__run_code`) are always exempt.
+   * `__artifact`) are always exempt.
    */
   toolPolicy?: ChorusToolPolicy;
   /**

@@ -28,7 +28,7 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `systemPrompt` | `string` | — | Hidden instruction for both send paths. With `transport`, Chorus prepends it as a `system` message in request history (using the reserved id `RESERVED_SYSTEM_PROMPT_ID`); the synthetic row is never stored on the transcript. With `onSend`, read it from `helpers.systemPrompt`; `messages` is left unchanged to avoid duplicates. The value is read at send time, so swapping it at runtime takes effect on the next Send / Retry / Regenerate — see [Changing the system prompt at runtime](guide.md#changing-the-system-prompt-at-runtime) for multi-persona toggles, Regenerate semantics, and precedence vs. a host-supplied `role: 'system'` row. |
 | `connector` | `Connector \| 'auto' \| 'openai' \| 'anthropic' \| 'gemini' \| 'ai-sdk'` | `'auto'` | SSE connector used to parse the stream. `'auto'` detects OpenAI, Anthropic, Gemini, and Vercel AI SDK frames; pass an explicit name when the format is known. |
 | `connectorOptions` | `OpenAIConnectorOptions` | — | Options forwarded to the built-in connector resolved from a `connector` string. Currently only the `'openai'` connector consumes options (e.g. `{ thinkTag }` for a custom reasoning tag pair). Ignored for other names and for custom `Connector` objects — build those with `createOpenAIConnector(options)`. |
-| `mcpServers` | `McpServerConfig[]` | — | Browser-side MCP servers (`{ name, url, transport?: 'sse' \| 'ws' }`) to connect on mount. Discovered tools are merged into Chorus tool execution as `<server>:<tool>`, prompts appear as slash commands (for example `/fs:list-dir`), resources can be attached as references, and disconnected servers show a reconnect row with exponential backoff. Import lower-level helpers from `react-chorus/mcp`. |
+| `mcpServers` | `McpServerConfig[]` | — | Browser-side MCP servers (`{ name, url, transport?: 'sse' \| 'ws' }`) to connect on mount. Discovered tools are merged into Chorus tool execution as `<server>:<tool>`, prompts appear as slash commands (for example `/fs:list-dir`), resources can be attached as references, and disconnected servers show a reconnect row with exponential backoff. Change detection is by stable JSON serialization of each server's `name`/`url`/`transport`/`headers`/reconnect tuning, so re-passing a referentially new array with structurally identical contents is safe — but rotating a credential by mutating `server.headers` in place will NOT reconnect. Re-pass the array with a fresh `headers` object to apply a new token. Import lower-level helpers from `react-chorus/mcp`. |
 | `onSend` | `(text, messages, helpers) => Message<TMeta> \| void \| Promise<Message<TMeta> \| void>` | — | Advanced path: called when the user submits a message. Use `helpers.appendAssistant`/`helpers.finalizeAssistant` to stream tokens, or return a complete assistant `Message` for non-streaming replies. |
 | `value` | `Message<TMeta>[]` | — | Controlled message list. Pair with `onChange`; Chorus renders this array as the source of truth. |
 | `onChange` | `(messages: Message<TMeta>[]) => void` | — | Called whenever Chorus wants to change the message list in controlled mode (`value` is provided). Not called for legacy `messages`-only uncontrolled state. |
@@ -1245,6 +1245,105 @@ interface ToolCallBlockProps {
 ```
 
 The built-in palette knobs (`toolBorder`, `toolHeaderBg`, …) and the underlying `--chorus-tool-*` CSS variables remain the recommended way to recolor the block; reach for `className`/`style` when you need class-based theming (Tailwind, Emotion) or layout overrides that CSS variables cannot express.
+
+### `ToolApprovalCard` in a custom shell
+
+`ToolApprovalCard` renders the three-button "Allow once / Allow always / Deny" panel for a tool call whose `toolCall.approval === 'pending'`. Inside `<Chorus>` the shell already mounts a `ToolApprovalContext.Provider` and wires it to the built-in tool-policy store (`<Chorus toolPolicy>`), so the card "just works" when it lands in the default `MessageBubble`. A custom shell that exports the card directly — for example, a hand-rolled transcript built around `useChorusStream` — must mount the provider itself, otherwise every Allow/Deny click is a silent no-op (a dev-only `console.warn` flags this).
+
+`ToolApprovalContext` carries a single callback:
+
+```ts
+interface ToolApprovalContextValue {
+  respond: (
+    toolCallId: string,
+    toolName: string,
+    decision: 'allow-once' | 'allow-always' | 'deny',
+  ) => void;
+}
+```
+
+The custom shell is responsible for whatever happens behind that callback — resolving an awaiting tool handler, recording a per-tool policy, etc. A minimal pattern is a Promise registry keyed by `toolCallId` that your tool handlers await before executing:
+
+```tsx
+import React from 'react';
+import {
+  ToolApprovalCard,
+  ToolApprovalContext,
+  type ToolApprovalContextValue,
+} from 'react-chorus';
+
+type Decision = 'allow-once' | 'allow-always' | 'deny';
+
+function useApprovalRegistry() {
+  // Map of toolCallId -> resolver. Each entry is the Promise the matching
+  // tool handler is awaiting before it executes.
+  const pending = React.useRef(new Map<string, (d: Decision) => void>());
+  // Persisted "Allow always" decisions, keyed by tool name. Promote this to
+  // localStorage if you want them to outlive the page.
+  const [perTool, setPerTool] = React.useState<Record<string, 'allow' | 'deny'>>({});
+
+  const requestApproval = React.useCallback(
+    (toolCallId: string, toolName: string) =>
+      new Promise<Decision>(resolve => {
+        // A persisted policy short-circuits the gate.
+        const persisted = perTool[toolName];
+        if (persisted === 'allow') return resolve('allow-once');
+        if (persisted === 'deny') return resolve('deny');
+        pending.current.set(toolCallId, resolve);
+      }),
+    [perTool],
+  );
+
+  const respond = React.useCallback<ToolApprovalContextValue['respond']>(
+    (toolCallId, toolName, decision) => {
+      if (decision === 'allow-always') {
+        setPerTool(prev => ({ ...prev, [toolName]: 'allow' }));
+      }
+      const resolve = pending.current.get(toolCallId);
+      if (!resolve) return; // gate already resolved (timeout, duplicate click)
+      pending.current.delete(toolCallId);
+      resolve(decision);
+    },
+    [],
+  );
+
+  return { requestApproval, respond };
+}
+
+function CustomShell() {
+  const { requestApproval, respond } = useApprovalRegistry();
+
+  const approvalContextValue = React.useMemo<ToolApprovalContextValue>(
+    () => ({ respond }),
+    [respond],
+  );
+
+  // Your tool handler awaits `requestApproval(id, name)` before doing work.
+  // While the promise is pending, render the tool message with
+  // `toolCall.approval = 'pending'` so <ToolApprovalCard> appears for it.
+
+  return (
+    <ToolApprovalContext.Provider value={approvalContextValue}>
+      {/* ...your transcript, which renders <ToolApprovalCard toolCall={…}/>
+          for any tool message whose toolCall.approval === 'pending'... */}
+    </ToolApprovalContext.Provider>
+  );
+}
+```
+
+The approval id is `toolCall.id`, which is normally the provider-assigned id surfaced by the connector. Some providers/transports do not expose a stable id per call; in that case the connector may synthesize one. `ToolApprovalCard` is a no-op when `toolCall.id` is missing — there is nothing for `respond` to match against — so the host's tool-message synthesis must give every pending call an `id` for the gate to resolve. Calling `respond` for an id with no pending entry is silently ignored, which is the right behavior when the same id was already resolved by a host-side timeout or a duplicate click.
+
+If you are already using `<Chorus>` and just want the card in a non-default position, prefer the imperative `chorusRef.current.respondToApproval(id, decision)` API instead of standing up your own provider — see [`ChorusRef`](#imperative-chorusref).
+
+Labels are customizable via the `labels` prop (defaults exported as `DEFAULT_TOOL_APPROVAL_LABELS`):
+
+```tsx
+<ToolApprovalCard
+  toolCall={toolCall}
+  serverName="github"
+  labels={{ title: 'Approval needed', deny: 'Block' }}
+/>
+```
 
 ### `Markdown` component
 

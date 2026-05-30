@@ -40,8 +40,19 @@ export function extractArtifacts<TMeta>(messages: Message<TMeta>[]): Artifact[] 
     };
     if (existing) {
       existing.versions.push(version);
-      existing.title = payload.title;
-      existing.kind = payload.kind;
+      // Guard against streaming deltas: a `__artifact` tool call's input often
+      // starts with empty `title` / `content` before the model has emitted the
+      // text, so overwriting unconditionally would clobber the prior version's
+      // identity until the next chunk catches up. Only promote the streamed
+      // title/kind to the registry once they reflect a settled (non-empty
+      // content) version.
+      const hasContent = payload.content.trim().length > 0;
+      if (payload.title.trim().length > 0) {
+        existing.title = payload.title;
+      }
+      if (hasContent && ARTIFACT_KINDS.has(payload.kind)) {
+        existing.kind = payload.kind;
+      }
     } else {
       byId.set(payload.id, {
         id: payload.id,

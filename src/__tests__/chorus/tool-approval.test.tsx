@@ -128,6 +128,30 @@ describe('Chorus tool-call approvals', () => {
     await waitFor(() => expect(handler).toHaveBeenCalledTimes(1));
   });
 
+  // Regression: `__run_code` was previously baked into RESERVED_UI_TOOL_NAMES
+  // even though no `__run_code` pipeline exists. A host that named an
+  // executable tool `__run_code` and asked for `default: 'ask'` would have its
+  // tool run without the approval card ever rendering.
+  it('gates a host tool named __run_code through the approval policy', async () => {
+    const user = userEvent.setup();
+    const handler = vi.fn(async () => ({ ran: true }));
+    const runCode = defineTool({ name: '__run_code', requiresApproval: true, handler });
+    const transport = vi.fn<Transport>(async () => sseResponse([
+      JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_rc', function: { name: '__run_code', arguments: '{"code":"print(1)"}' } }] } }] }),
+      '[DONE]',
+    ]));
+
+    render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0}
+      tools={[runCode]}
+      toolPolicy={{ default: 'ask' }}
+    />);
+
+    await sendMessage(user, 'run it');
+
+    expect(await screen.findByText(/Approval required/)).toBeInTheDocument();
+    expect(handler).not.toHaveBeenCalled();
+  });
+
   it('resolves a pending approval as denied with an (approval timed out) message when the timeout fires', async () => {
     const user = userEvent.setup();
     const handler = vi.fn(async () => ({ sent: true }));

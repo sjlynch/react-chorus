@@ -24,7 +24,7 @@ import type { ToolApprovalContextValue } from '../components/message-row/approva
 import type { BlockEmit, BlockEmitPayload } from '../blocks/types';
 import { resolveToolHandler } from '../tools';
 import { createMessageId } from '../hooks/assistant-session/messageUtils';
-import { useCostMeter } from './useCostMeter';
+import { isPositiveFinite, useCostMeter } from './useCostMeter';
 import { buildCostFooterRenderer } from './renderCostFooter';
 import { useMultiProviderRuntime } from './multiProvider';
 import type { ChatInputSlashCommand } from '../components/chat-input/types';
@@ -439,7 +439,7 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
       emit: blockEmit,
       sending: shellState.visualSending,
     },
-    costView: showCost ? { cost: costMeter.cost, budget: budgetAlert } : undefined,
+    costView: showCost ? { cost: costMeter.cost, budget: isPositiveFinite(budgetAlert) ? budgetAlert : undefined } : undefined,
     composer: buildComposerView<TMeta>({
       composer,
       composerActions,
