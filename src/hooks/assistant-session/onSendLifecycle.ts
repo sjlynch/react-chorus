@@ -27,6 +27,7 @@ export interface OnSendLifecycleDeps<TMeta> {
   appendAssistantReasoningNow: (chunk: string) => void;
   appendAssistantSourceNow: (source: MessageSource) => void;
   appendToolDeltaNow: (delta: ConnectorToolDelta) => void;
+  mergeAssistantMetadataNow: (metadata: Record<string, unknown>) => void;
   completeActiveSession: (sessionId: number, finish?: CompleteActiveSessionFinish<TMeta>) => Message<TMeta> | null;
   isAssistantSessionActive: (sessionId: number) => boolean;
   invalidateAssistantSession: (sessionId?: number) => void;
@@ -76,6 +77,7 @@ export function startOnSendLifecycle<TMeta>({
   appendAssistantReasoningNow,
   appendAssistantSourceNow,
   appendToolDeltaNow,
+  mergeAssistantMetadataNow,
   completeActiveSession,
   isAssistantSessionActive,
   invalidateAssistantSession,
@@ -122,6 +124,7 @@ export function startOnSendLifecycle<TMeta>({
     appendAssistantReasoningNow,
     appendAssistantSourceNow,
     appendToolDeltaNow,
+    mergeAssistantMetadataNow,
     safeOnStreamWarning: observers.safeOnStreamWarning,
     safeOnStreamMetadata: observers.safeOnStreamMetadata,
     completeActiveSession,

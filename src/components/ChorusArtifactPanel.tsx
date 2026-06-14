@@ -100,16 +100,28 @@ function ReactBody({ version, renderReactArtifact, labels }: { version: Artifact
       </div>
     );
   }
+  // Key the boundary on the artifact identity (id), the active version, and its
+  // content. When the reader switches artifacts/versions — or a streaming
+  // version finishes — a crash from one version no longer poisons the next.
+  const resetKey = `${version.id} ${version.version} ${version.content}`;
   return (
-    <ArtifactErrorBoundary errorLabel={labels.reactError}>
+    <ArtifactErrorBoundary resetKey={resetKey} errorLabel={labels.reactError}>
       <div className="chorus-artifact-react">{renderReactArtifact(version)}</div>
     </ArtifactErrorBoundary>
   );
 }
 
-class ArtifactErrorBoundary extends React.Component<{ children: React.ReactNode; errorLabel: (message: string) => string }, { error: Error | null }> {
+class ArtifactErrorBoundary extends React.Component<{ resetKey: string; children: React.ReactNode; errorLabel: (message: string) => string }, { error: Error | null }> {
   state = { error: null as Error | null };
   static getDerivedStateFromError(error: Error) { return { error }; }
+  componentDidUpdate(prevProps: { resetKey: string }) {
+    // Clear a latched error only when the rendered version actually changed, so
+    // a bad v1 (or a transient crash) stops blocking a valid v2 while repeated
+    // failures on the same version keep showing the placeholder.
+    if (this.state.error !== null && prevProps.resetKey !== this.props.resetKey) {
+      this.setState({ error: null });
+    }
+  }
   render() {
     if (this.state.error) {
       return <div className="chorus-artifact-placeholder">{this.props.errorLabel(this.state.error.message)}</div>;

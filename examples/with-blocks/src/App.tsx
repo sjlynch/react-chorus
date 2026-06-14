@@ -6,11 +6,10 @@ import {
   Card,
   Form,
   Table,
-  Image,
+  createImageBlock,
   type BlockDefinition,
   type BlockRegistry,
   type BlockRenderProps,
-  type ImageProps,
   type ToolLoadingComponents,
 } from 'react-chorus/blocks';
 import { SpinnerLoader, SkeletonTable } from 'react-chorus/loaders';
@@ -76,12 +75,13 @@ const pollValidator = Object.assign(
   { errors: null as { instancePath?: string; message?: string }[] | null },
 );
 
-// 2. Host-wrapped Image block: pins `allowedProtocols` AFTER the model props
-//    are spread, so the model cannot widen the whitelist by passing its own
-//    `allowedProtocols`. Add `'http://localhost'` for dev-server screenshots.
-function LocalDevImage(props: BlockRenderProps<ImageProps> & ImageProps) {
-  return <Image {...props} allowedProtocols={['https:', 'data:image/', 'http://localhost']} />;
-}
+// 2. Host-configured Image block: `createImageBlock` pins `allowedProtocols` in
+//    host code and strips any `allowedProtocols` / `blockedLabel` the model
+//    streams, so an untrusted model output can never widen the URL whitelist.
+//    Add `'http://localhost'` for dev-server screenshots.
+const imageBlock = createImageBlock({
+  allowedProtocols: ['https:', 'data:image/', 'http://localhost'],
+});
 
 const BLOCKS: BlockRegistry = {
   // Starter blocks shipped from `react-chorus/blocks` — register the packaged
@@ -90,7 +90,7 @@ const BLOCKS: BlockRegistry = {
   card: { component: Card as React.ComponentType<BlockRenderProps<unknown>> },
   form: { component: Form as React.ComponentType<BlockRenderProps<unknown>> },
   table: { component: Table as React.ComponentType<BlockRenderProps<unknown>> },
-  image: { component: LocalDevImage as React.ComponentType<BlockRenderProps<unknown>> },
+  image: imageBlock as BlockDefinition<unknown>,
   // Custom block + a validator that runs once props finish streaming. A
   // failing validator renders Chorus's built-in error fallback instead of the
   // component, so PollCard never sees malformed props.
