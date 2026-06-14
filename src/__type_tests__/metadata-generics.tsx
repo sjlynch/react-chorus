@@ -1,6 +1,6 @@
 import type { RefObject } from 'react';
 import { ChatWindow, Chorus, MessageBubble, createFetchSSETransport, createWebSocketTransport, useChorusPersistence, useChorusStream } from '../index';
-import type { ChorusOnAbort, ChorusOnSend, ChorusRef, ChorusSendHelpers, Message, Transport } from '../index';
+import type { ChorusFinalizeAssistantOptions, ChorusOnAbort, ChorusOnSend, ChorusRef, ChorusSendHelpers, Message, Transport } from '../index';
 import type {
   AttachmentError as HeadlessAttachmentError,
   AttachmentErrorReason as HeadlessAttachmentErrorReason,
@@ -97,6 +97,23 @@ const typedOnSend: ChorusOnSend<MyMeta> = async (_text, history, helpers) => {
   void history[0]?.metadata?.requestId;
   helpers.appendAssistant(String(latency ?? 0));
 };
+
+// The documented cost-meter `onSend` recipe must keep typechecking against the
+// public `ChorusSendHelpers` contract so the docs cannot drift from the code.
+const costMeterOnSend: ChorusOnSend = (_text, _messages, helpers) => {
+  helpers.finalizeAssistant(); // no-arg form still valid
+  helpers.finalizeAssistant({
+    text: 'reply',
+    metadata: { modelId: 'gpt-4o', usage: { input_tokens: 1, output_tokens: 2 } },
+  });
+  const finalizeOptions: ChorusFinalizeAssistantOptions = {
+    metadata: { usage: { prompt_tokens: 1, completion_tokens: 2 } },
+  };
+  helpers.finalizeAssistant(finalizeOptions);
+  // @ts-expect-error finalizeAssistant takes an options object, not a positional string
+  helpers.finalizeAssistant('not options');
+};
+void costMeterOnSend;
 
 const typedOnAbort: ChorusOnAbort<MyMeta> = (context) => {
   const model: string | undefined = context.message?.metadata?.model;
