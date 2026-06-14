@@ -8,6 +8,11 @@ export interface CalendarPickerProps {
   onSelectTool?: string;
   /** Label shown above the picker. */
   label?: string;
+  /**
+   * Text on the confirm button. Defaults to `'Confirm'`; pass a localized
+   * string here or relocalize through your own block registry entry.
+   */
+  confirmLabel?: string;
 }
 
 /**
@@ -16,7 +21,7 @@ export interface CalendarPickerProps {
  * block usable without adding a runtime dependency. A host that wants the
  * richer surface can register its own block using `react-day-picker`.
  */
-export function CalendarPicker({ defaultDate, onSelectTool, label, emit }: BlockRenderProps<CalendarPickerProps> & CalendarPickerProps) {
+export function CalendarPicker({ defaultDate, onSelectTool, label, confirmLabel, emit }: BlockRenderProps<CalendarPickerProps> & CalendarPickerProps) {
   const [value, setValue] = React.useState<string>(defaultDate ?? '');
   return (
     <div className="chorus-block-calendar">
@@ -32,7 +37,7 @@ export function CalendarPicker({ defaultDate, onSelectTool, label, emit }: Block
         onClick={() => emit?.({ toolCall: { name: onSelectTool || '__date_selected', input: { date: value } } })}
         disabled={!value}
       >
-        Confirm
+        {confirmLabel ?? 'Confirm'}
       </button>
     </div>
   );

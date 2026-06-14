@@ -386,11 +386,15 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
    */
   onBudgetExceeded?: (context: BudgetExceededContext) => void;
   /**
-   * Localized labels for every built-in UI string (composer placeholder/aria-labels,
+   * Localized labels for every built-in UI string: composer placeholder/aria-labels
+   * (including the slash-command palette, MCP resource picker, and model picker),
    * transcript aria-label/typing/retry/jump/empty title, message actions, speakers,
-   * tool call sections, reasoning summary, code-copy button, and the clear button).
-   * Defaults preserve the current English strings; the existing `placeholder`,
-   * `disabledReason`, and `clearLabel` props take precedence when provided.
+   * tool call sections, reasoning summary, code-copy button, the clear button, the
+   * cost meter (`cost`), artifact panel/cards (`artifacts`), MCP status line (`mcp`),
+   * and the tool-approval card (`approval`). Defaults preserve the current English
+   * strings; the existing `placeholder`, `disabledReason`, and `clearLabel` props
+   * take precedence when provided. Starter blocks (Form/Calendar/Image) localize via
+   * their own targeted props since they render content from a model-driven payload.
    */
   labels?: ChorusLabels;
   /**

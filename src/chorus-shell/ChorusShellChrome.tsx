@@ -8,7 +8,8 @@ import { joinClasses } from '../utils/className';
 import { CostHeader } from './CostHeader';
 import type { ChorusMcpStatusView, ChorusShellViewProps } from './props';
 
-function ChorusMcpStatus({ servers, reconnect }: ChorusMcpStatusView) {
+// Exported for unit tests; intentionally not re-exported from the public barrel.
+export function ChorusMcpStatus({ servers, reconnect, labels }: ChorusMcpStatusView) {
   const visibleServers = servers.filter(server => server.status !== 'connected' && server.status !== 'idle');
   if (visibleServers.length === 0) return null;
 
@@ -17,12 +18,12 @@ function ChorusMcpStatus({ servers, reconnect }: ChorusMcpStatusView) {
       {visibleServers.map(server => (
         <div key={server.name} className="chorus-mcp-status-item" data-chorus-mcp-status={server.status}>
           <span className="chorus-mcp-status-text">
-            MCP {server.name}: {server.status}
-            {server.error ? ` — ${server.error}` : ''}
-            {server.reconnectInMs ? ` (reconnecting in ${Math.ceil(server.reconnectInMs / 1000)}s)` : ''}
+            {labels.status({ name: server.name, status: server.status })}
+            {server.error ? labels.errorSuffix(server.error) : ''}
+            {server.reconnectInMs ? labels.reconnectingSuffix(Math.ceil(server.reconnectInMs / 1000)) : ''}
           </span>
           <button type="button" className="chorus-mcp-reconnect" onClick={() => reconnect(server.name)}>
-            Reconnect
+            {labels.reconnect}
           </button>
         </div>
       ))}
@@ -53,7 +54,7 @@ export function ChorusShellChrome<TMeta = Record<string, unknown>>({
       <BlockProvider blocks={blockRuntime.blocks} toolLoadingComponents={blockRuntime.toolLoadingComponents} emit={blockRuntime.emit} sending={blockRuntime.sending}>
         <div {...rootProps} className={rootClass} ref={rootRef}>
           <div className="chorus-shell-main">
-            {costView && <CostHeader cost={costView.cost} budget={costView.budget} />}
+            {costView && <CostHeader cost={costView.cost} budget={costView.budget} labels={costView.labels} />}
             {transcript}
             {clearControl.visible && (
               <div className="chorus-clear-row">
@@ -80,6 +81,7 @@ export function ChorusShellChrome<TMeta = Record<string, unknown>>({
               codeTheme={artifactPanel.codeTheme}
               markdownSanitizer={artifactPanel.markdownSanitizer}
               renderReactArtifact={artifactPanel.renderReactArtifact}
+              labels={artifactPanel.labels}
             />
           )}
         </div>

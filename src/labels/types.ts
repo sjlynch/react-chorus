@@ -2,6 +2,8 @@
 // edge in the dependency graph, so component bundles can reference the label
 // contracts without pulling sibling default constants.
 
+import type { ArtifactKind } from '../types';
+
 export interface ChorusComposerLabels {
   placeholder: string;
   ariaLabel: string;
@@ -12,6 +14,14 @@ export interface ChorusComposerLabels {
   stop: string;
   disabledReason: string;
   readOnlyReason: string;
+  /** Aria-label for the slash-command palette listbox. */
+  slashCommands: string;
+  /** Visible/aria/title label for the MCP resource attachment picker. */
+  attachResource: string;
+  /** Disabled placeholder option shown at the top of the resource picker. */
+  resourcePickerPlaceholder: string;
+  /** Fallback aria-label/title for the inline provider/model picker when the picker supplies none. */
+  modelPicker: string;
 }
 
 export interface ChorusTranscriptLabels {
@@ -52,6 +62,82 @@ export interface ChorusToolCallLabels {
   running: string;
   /** Status shown when a finished tool call produced no input and no output. */
   empty: string;
+  /** Screen-reader status announced by the default per-tool loader; receives the tool name. */
+  calling: (toolName: string) => string;
+}
+
+export interface ChorusCostLabels {
+  /** Visible "Cost" label in the conversation cost-meter header. */
+  header: string;
+  /** Tooltip breakdown shown in the header when no usage has been recorded yet. */
+  noUsage: string;
+  /** Header budget suffix, e.g. `/ $5.00 budget`; receives the formatted budget total. */
+  budgetSuffix: (formattedBudget: string) => string;
+  /** Aria-label for the per-message cost chip; receives the formatted cost and whether it is an approximate (live) estimate. */
+  chipAriaLabel: (context: { formatted: string; approximate: boolean }) => string;
+  /** Tooltip on the live (pre-finalized) per-message estimate chip. */
+  liveEstimateTitle: string;
+}
+
+export interface ChorusArtifactLabels {
+  /** Fallback title for an artifact with no title (panel heading + inline card). */
+  untitled: string;
+  /** Aria-label for the artifact side-panel root; receives the artifact title. */
+  panelAriaLabel: (title: string) => string;
+  /** Aria-label for the panel close button. */
+  close: string;
+  /** Aria-label for the previous-version button. */
+  previousVersion: string;
+  /** Aria-label for the next-version button. */
+  nextVersion: string;
+  /** Diff toggle button. */
+  diff: string;
+  /** Copy action, idle state. */
+  copy: string;
+  /** Copy action after a successful copy. */
+  copied: string;
+  /** Copy action after a failed copy. */
+  copyFailed: string;
+  /** Download action. */
+  download: string;
+  /** Open-in-new-tab action. */
+  openInNewTab: string;
+  /** Title applied to the sandboxed HTML preview iframe when the version has no title. */
+  previewTitle: string;
+  /** Placeholder shown when a `react` artifact has no `renderReactArtifact` handler. */
+  reactPlaceholder: string;
+  /** Error shown when a `react` artifact throws while rendering; receives the error message. */
+  reactError: (message: string) => string;
+  /** Inline card open-button label. */
+  open: string;
+  /** Per-kind label shown on inline artifact cards. */
+  kind: (kind: ArtifactKind) => string;
+}
+
+export interface ChorusApprovalLabels {
+  /** Card heading and aria-label, e.g. "Approval required". */
+  title: string;
+  /** Connector between the tool name and the MCP server name, e.g. "via". */
+  serverPrefix: string;
+  /** Label for the collapsible tool-input toggle. */
+  inputLabel: string;
+  /** "Allow once" button. */
+  allowOnce: string;
+  /** "Allow always for this tool" button. */
+  allowAlways: string;
+  /** "Deny" button. */
+  deny: string;
+}
+
+export interface ChorusMcpLabels {
+  /** MCP server status line; receives the server name and its status string. */
+  status: (context: { name: string; status: string }) => string;
+  /** Suffix appended to the status line when the server reports an error message. */
+  errorSuffix: (error: string) => string;
+  /** Suffix appended to the status line while a reconnect is scheduled; receives whole seconds. */
+  reconnectingSuffix: (seconds: number) => string;
+  /** Reconnect button label. */
+  reconnect: string;
 }
 
 export interface ChorusSourceLabels {
@@ -160,6 +246,10 @@ export interface ResolvedChorusLabels {
   codeCopy: ChorusCodeCopyLabels;
   conversationList: ChorusConversationListLabels;
   attachments: ChorusAttachmentLabels;
+  cost: ChorusCostLabels;
+  artifacts: ChorusArtifactLabels;
+  approval: ChorusApprovalLabels;
+  mcp: ChorusMcpLabels;
   clearConversation: string;
 }
 
@@ -191,5 +281,9 @@ export type ChorusLabels = {
   codeCopy?: Partial<ChorusCodeCopyLabels> | null;
   conversationList?: Partial<ChorusConversationListLabels> | null;
   attachments?: Partial<ChorusAttachmentLabels> | null;
+  cost?: Partial<ChorusCostLabels> | null;
+  artifacts?: Partial<ChorusArtifactLabels> | null;
+  approval?: Partial<ChorusApprovalLabels> | null;
+  mcp?: Partial<ChorusMcpLabels> | null;
   clearConversation?: string | null;
 };

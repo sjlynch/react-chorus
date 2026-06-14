@@ -1,5 +1,5 @@
 import type { Message, MessageFeedback } from '../types';
-import type { ChorusAttachmentLabels, ChorusCodeCopyLabels, ChorusMessageActionLabels, ChorusSourceLabels, ChorusSpeakerLabels, ChorusToolCallLabels } from '../labels/types';
+import type { ChorusApprovalLabels, ChorusArtifactLabels, ChorusAttachmentLabels, ChorusCodeCopyLabels, ChorusMessageActionLabels, ChorusSourceLabels, ChorusSpeakerLabels, ChorusToolCallLabels } from '../labels/types';
 import { formatMessageForClipboard } from '../hooks/transcriptFormatters';
 import { useCanWriteTextToClipboard, writeTextToClipboard } from '../utils/messageCopy';
 import type { MarkdownSanitizer } from './Markdown';
@@ -69,6 +69,10 @@ export interface MessageRowProps<TMeta = Record<string, unknown>> extends Messag
   sourceLabels?: ChorusSourceLabels;
   /** Label overrides for the tool-call block rendered for `role: 'tool'` messages. */
   toolCallLabels?: Partial<ChorusToolCallLabels>;
+  /** Label overrides for inline artifact cards rendered for `__artifact` tool messages. */
+  artifactLabels?: Partial<ChorusArtifactLabels>;
+  /** Label overrides for the pending tool-approval card. */
+  approvalLabels?: Partial<ChorusApprovalLabels>;
   /** Render the message's `createdAt` time below the bubble. Off by default. */
   showTimestamp?: boolean;
   /** Override the locale-aware default timestamp formatting. Only used when `showTimestamp` is true. */
@@ -81,7 +85,7 @@ export interface MessageRowProps<TMeta = Record<string, unknown>> extends Messag
   showSpeakerAvatars?: boolean;
 }
 
-export function MessageRow<TMeta = Record<string, unknown>>({ m, codeTheme, headless, onEdit, onRegenerate, onDelete, onCopy, onFeedback, initialFeedback, feedbackReadOnly, streaming = false, markdownProps, markdownSanitizer, messageActionLabels, speakerLabels, reasoningLabel, codeCopyLabels, attachmentLabels, sourceLabels, toolCallLabels, showTimestamp, formatTimestamp, showSpeakerAvatars, before, headerSlot, footerSlot, after }: MessageRowProps<TMeta>) {
+export function MessageRow<TMeta = Record<string, unknown>>({ m, codeTheme, headless, onEdit, onRegenerate, onDelete, onCopy, onFeedback, initialFeedback, feedbackReadOnly, streaming = false, markdownProps, markdownSanitizer, messageActionLabels, speakerLabels, reasoningLabel, codeCopyLabels, attachmentLabels, sourceLabels, toolCallLabels, artifactLabels, approvalLabels, showTimestamp, formatTimestamp, showSpeakerAvatars, before, headerSlot, footerSlot, after }: MessageRowProps<TMeta>) {
   // Drive editing state through MessageRenderStateContext when a provider is present
   // (the default ChatWindow path wraps every row in one) so a custom renderer's
   // `ctx.isEditing` reflects the row's inline editor. Falls back to local state when
@@ -138,6 +142,8 @@ export function MessageRow<TMeta = Record<string, unknown>>({ m, codeTheme, head
           attachmentLabels={attachmentLabels}
           sourceLabels={sourceLabels}
           toolCallLabels={toolCallLabels}
+          artifactLabels={artifactLabels}
+          approvalLabels={approvalLabels}
           showTimestamp={showTimestamp}
           formatTimestamp={formatTimestamp}
           showSpeakerAvatars={showSpeakerAvatars}

@@ -5,6 +5,8 @@
 // consumers a single import path for the full API.
 
 export type {
+  ChorusApprovalLabels,
+  ChorusArtifactLabels,
   ChorusAttachmentFailureContext,
   ChorusAttachmentLabels,
   ChorusAttachmentTooLargeContext,
@@ -13,7 +15,9 @@ export type {
   ChorusCodeCopyLabels,
   ChorusComposerLabels,
   ChorusConversationListLabels,
+  ChorusCostLabels,
   ChorusLabels,
+  ChorusMcpLabels,
   ChorusMessageActionLabels,
   ChorusSourceLabels,
   ChorusSpeakerLabels,
@@ -32,4 +36,8 @@ export { DEFAULT_SOURCE_LABELS } from './labels/sources';
 export { DEFAULT_CODE_COPY_LABELS } from './labels/codeCopy';
 export { DEFAULT_CONVERSATION_LIST_LABELS } from './labels/conversationList';
 export { DEFAULT_CLEAR_CONVERSATION_LABEL, DEFAULT_REASONING_LABEL } from './labels/reasoning';
+export { DEFAULT_COST_LABELS } from './labels/cost';
+export { DEFAULT_ARTIFACT_LABELS } from './labels/artifacts';
+export { DEFAULT_APPROVAL_LABELS } from './labels/approval';
+export { DEFAULT_MCP_LABELS } from './labels/mcp';
 export { DEFAULT_CHORUS_LABELS, resolveChorusLabels } from './labels/resolve';

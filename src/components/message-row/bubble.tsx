@@ -1,6 +1,6 @@
 import React from 'react';
 import type { Message } from '../../types';
-import type { ChorusAttachmentLabels, ChorusCodeCopyLabels, ChorusSourceLabels, ChorusSpeakerLabels, ChorusToolCallLabels } from '../../labels/types';
+import type { ChorusApprovalLabels, ChorusArtifactLabels, ChorusAttachmentLabels, ChorusCodeCopyLabels, ChorusSourceLabels, ChorusSpeakerLabels, ChorusToolCallLabels } from '../../labels/types';
 import { ARTIFACT_TOOL_NAME } from '../../reservedIds';
 import { isArtifactPayload } from '../../artifacts/extractArtifacts';
 import { joinClasses } from '../../utils/className';
@@ -32,6 +32,10 @@ export interface MessageBubbleLayoutProps<TMeta = Record<string, unknown>> exten
   sourceLabels?: ChorusSourceLabels;
   /** Label overrides for the tool-call block rendered for `role: 'tool'` messages. */
   toolCallLabels?: Partial<ChorusToolCallLabels>;
+  /** Label overrides for inline artifact cards rendered for `__artifact` tool messages. */
+  artifactLabels?: Partial<ChorusArtifactLabels>;
+  /** Label overrides for the pending tool-approval card. */
+  approvalLabels?: Partial<ChorusApprovalLabels>;
   /** Render the message's `createdAt` time below the bubble. Off by default. */
   showTimestamp?: boolean;
   /** Override the locale-aware default timestamp formatting. Only used when `showTimestamp` is true. */
@@ -46,7 +50,7 @@ export interface MessageBubbleLayoutProps<TMeta = Record<string, unknown>> exten
   children?: React.ReactNode;
 }
 
-export function MessageBubbleLayout<TMeta = Record<string, unknown>>({ message, codeTheme, headless, streaming = false, markdownProps, markdownSanitizer, reasoningLabel, codeCopyLabels, attachmentLabels, sourceLabels, toolCallLabels, showTimestamp = false, formatTimestamp, showSpeakerAvatars = false, before, headerSlot, footerSlot, after, children }: MessageBubbleLayoutProps<TMeta>) {
+export function MessageBubbleLayout<TMeta = Record<string, unknown>>({ message, codeTheme, headless, streaming = false, markdownProps, markdownSanitizer, reasoningLabel, codeCopyLabels, attachmentLabels, sourceLabels, toolCallLabels, artifactLabels, approvalLabels, showTimestamp = false, formatTimestamp, showSpeakerAvatars = false, before, headerSlot, footerSlot, after, children }: MessageBubbleLayoutProps<TMeta>) {
   const text = message.text ?? '';
   const hasAttachments = Boolean(message.attachments?.length);
   const hasBubbleText = text.trim().length > 0;
@@ -117,6 +121,7 @@ export function MessageBubbleLayout<TMeta = Record<string, unknown>>({ message, 
                 kind={payload.kind}
                 title={payload.title}
                 messageId={message.id}
+                labels={artifactLabels}
               />
             );
           }
@@ -129,12 +134,12 @@ export function MessageBubbleLayout<TMeta = Record<string, unknown>>({ message, 
           // card replaces the tool block — the structured call is shown again
           // once the gate resolves.
           if (message.toolCall?.approval === 'pending') {
-            return <ToolApprovalCard toolCall={message.toolCall} />;
+            return <ToolApprovalCard toolCall={message.toolCall} labels={approvalLabels} />;
           }
           return <ToolCallBlock toolCall={message.toolCall} labels={toolCallLabels} streaming={streaming} />;
         })()}
         {showToolLoader && message.role === 'tool' && (
-          <ToolLoaderSlot toolCall={message.toolCall} streaming={streaming} />
+          <ToolLoaderSlot toolCall={message.toolCall} streaming={streaming} callingLabel={toolCallLabels?.calling} />
         )}
         <MessageSources sources={message.sources} labels={sourceLabels} />
         {message.role === 'assistant' && (message.provider || message.modelId) && (
@@ -172,6 +177,10 @@ export interface MessageBubbleProps<TMeta = Record<string, unknown>> extends Mes
   sourceLabels?: ChorusSourceLabels;
   /** Label overrides for the tool-call block rendered for `role: 'tool'` messages. */
   toolCallLabels?: Partial<ChorusToolCallLabels>;
+  /** Label overrides for inline artifact cards rendered for `__artifact` tool messages. */
+  artifactLabels?: Partial<ChorusArtifactLabels>;
+  /** Label overrides for the pending tool-approval card. */
+  approvalLabels?: Partial<ChorusApprovalLabels>;
   /** Render the message's `createdAt` time below the bubble. Off by default. */
   showTimestamp?: boolean;
   /** Override the locale-aware default timestamp formatting. Only used when `showTimestamp` is true. */
@@ -184,7 +193,7 @@ export interface MessageBubbleProps<TMeta = Record<string, unknown>> extends Mes
   showSpeakerAvatars?: boolean;
 }
 
-export function MessageBubble<TMeta = Record<string, unknown>>({ message, className, style, codeTheme = 'dark', headless, streaming = false, markdownProps, markdownSanitizer, reasoningLabel, codeCopyLabels, speakerLabels, attachmentLabels, sourceLabels, toolCallLabels, showTimestamp, formatTimestamp, showSpeakerAvatars, before, headerSlot, footerSlot, after }: MessageBubbleProps<TMeta>) {
+export function MessageBubble<TMeta = Record<string, unknown>>({ message, className, style, codeTheme = 'dark', headless, streaming = false, markdownProps, markdownSanitizer, reasoningLabel, codeCopyLabels, speakerLabels, attachmentLabels, sourceLabels, toolCallLabels, artifactLabels, approvalLabels, showTimestamp, formatTimestamp, showSpeakerAvatars, before, headerSlot, footerSlot, after }: MessageBubbleProps<TMeta>) {
   const renderState = React.useContext(MessageRenderStateContext);
   if (renderState?.messageId === message.id && renderState.isEditing) return null;
 
@@ -204,6 +213,8 @@ export function MessageBubble<TMeta = Record<string, unknown>>({ message, classN
         attachmentLabels={attachmentLabels}
         sourceLabels={sourceLabels}
         toolCallLabels={toolCallLabels}
+        artifactLabels={artifactLabels}
+        approvalLabels={approvalLabels}
         showTimestamp={showTimestamp}
         formatTimestamp={formatTimestamp}
         showSpeakerAvatars={showSpeakerAvatars}

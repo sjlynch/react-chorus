@@ -15,6 +15,12 @@ interface ComposerInputRowProps {
   resourceAttachments: Attachment[];
   onResourceAttachmentChange: (e: React.ChangeEvent<HTMLSelectElement>) => void;
   canAttachResource: boolean;
+  /** Visible/aria/title label for the MCP resource attachment picker. */
+  attachResourceLabel: string;
+  /** Disabled placeholder option at the top of the resource picker. */
+  resourcePickerPlaceholder: string;
+  /** Fallback aria-label/title for the model picker when it supplies none. */
+  modelPickerFallbackLabel: string;
   // Textarea.
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   value: string;
@@ -53,6 +59,9 @@ export function ComposerInputRow({
   resourceAttachments,
   onResourceAttachmentChange,
   canAttachResource,
+  attachResourceLabel,
+  resourcePickerPlaceholder,
+  modelPickerFallbackLabel,
   textareaRef,
   value,
   onTextareaChange,
@@ -86,11 +95,11 @@ export function ComposerInputRow({
         </button>
       )}
       {showResourcePicker && (
-        <label className="chorus-resource-picker-wrap" title="Attach MCP resource">
+        <label className="chorus-resource-picker-wrap" title={attachResourceLabel}>
           <Database size={15} strokeWidth={2} aria-hidden="true" />
-          <span className="chorus-sr-only">Attach MCP resource</span>
-          <select className="chorus-resource-picker" aria-label="Attach MCP resource" defaultValue="" onChange={onResourceAttachmentChange} disabled={!canAttachResource}>
-            <option value="" disabled>Resources</option>
+          <span className="chorus-sr-only">{attachResourceLabel}</span>
+          <select className="chorus-resource-picker" aria-label={attachResourceLabel} defaultValue="" onChange={onResourceAttachmentChange} disabled={!canAttachResource}>
+            <option value="" disabled>{resourcePickerPlaceholder}</option>
             {resourceAttachments.map((attachment, index) => (
               <option key={attachment.id ?? attachment.data ?? `${attachment.name}-${index}`} value={index}>{attachment.name}</option>
             ))}
@@ -121,11 +130,11 @@ export function ComposerInputRow({
        * Send affordance, so assistive tech never hears an inert "Stop".
        */}
       {showModelPicker && modelPicker && (
-        <label className="chorus-model-picker-wrap" title={modelPicker.ariaLabel ?? 'Provider'}>
-          <span className="chorus-sr-only">{modelPicker.ariaLabel ?? 'Provider'}</span>
+        <label className="chorus-model-picker-wrap" title={modelPicker.ariaLabel ?? modelPickerFallbackLabel}>
+          <span className="chorus-sr-only">{modelPicker.ariaLabel ?? modelPickerFallbackLabel}</span>
           <select
             className="chorus-model-picker"
-            aria-label={modelPicker.ariaLabel ?? 'Provider'}
+            aria-label={modelPicker.ariaLabel ?? modelPickerFallbackLabel}
             value={modelPicker.value}
             onChange={(e) => modelPicker.onChange(e.currentTarget.value)}
             disabled={disabled || readOnly}

@@ -8,6 +8,10 @@ import { DEFAULT_SOURCE_LABELS } from './sources';
 import { DEFAULT_CODE_COPY_LABELS } from './codeCopy';
 import { DEFAULT_CONVERSATION_LIST_LABELS } from './conversationList';
 import { DEFAULT_CLEAR_CONVERSATION_LABEL, DEFAULT_REASONING_LABEL } from './reasoning';
+import { DEFAULT_COST_LABELS } from './cost';
+import { DEFAULT_ARTIFACT_LABELS } from './artifacts';
+import { DEFAULT_APPROVAL_LABELS } from './approval';
+import { DEFAULT_MCP_LABELS } from './mcp';
 import type { ChorusLabels, ResolvedChorusLabels } from './types';
 
 export const DEFAULT_CHORUS_LABELS: ResolvedChorusLabels = {
@@ -21,6 +25,10 @@ export const DEFAULT_CHORUS_LABELS: ResolvedChorusLabels = {
   codeCopy: DEFAULT_CODE_COPY_LABELS,
   conversationList: DEFAULT_CONVERSATION_LIST_LABELS,
   attachments: DEFAULT_ATTACHMENT_LABELS,
+  cost: DEFAULT_COST_LABELS,
+  artifacts: DEFAULT_ARTIFACT_LABELS,
+  approval: DEFAULT_APPROVAL_LABELS,
+  mcp: DEFAULT_MCP_LABELS,
   clearConversation: DEFAULT_CLEAR_CONVERSATION_LABEL,
 };
 
@@ -63,6 +71,10 @@ export function resolveChorusLabels(labels?: ChorusLabels): ResolvedChorusLabels
     codeCopy: mergeSection(DEFAULT_CODE_COPY_LABELS, labels.codeCopy),
     conversationList: mergeSection(DEFAULT_CONVERSATION_LIST_LABELS, labels.conversationList),
     attachments: mergeSection(DEFAULT_ATTACHMENT_LABELS, labels.attachments),
+    cost: mergeSection(DEFAULT_COST_LABELS, labels.cost),
+    artifacts: mergeSection(DEFAULT_ARTIFACT_LABELS, labels.artifacts),
+    approval: mergeSection(DEFAULT_APPROVAL_LABELS, labels.approval),
+    mcp: mergeSection(DEFAULT_MCP_LABELS, labels.mcp),
     clearConversation: mergeString(DEFAULT_CLEAR_CONVERSATION_LABEL, labels.clearConversation),
   };
 }

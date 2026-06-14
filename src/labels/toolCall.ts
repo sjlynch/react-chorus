@@ -5,4 +5,5 @@ export const DEFAULT_TOOL_CALL_LABELS: ChorusToolCallLabels = {
   output: 'Output',
   running: 'Running…',
   empty: 'No output',
+  calling: (toolName) => `Calling ${toolName}…`,
 };

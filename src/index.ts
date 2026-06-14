@@ -13,8 +13,19 @@ export type { ConfirmDeleteConversation, ConfirmDeleteConversationContext, Conve
 export { Chorus } from './Chorus';
 export { ChorusTheme } from './components/ChorusTheme';
 export type { Palette } from './components/ChorusTheme';
-export { DEFAULT_ATTACHMENT_LABELS, DEFAULT_CHORUS_LABELS, DEFAULT_SOURCE_LABELS, resolveChorusLabels } from './labels';
+export {
+  DEFAULT_APPROVAL_LABELS,
+  DEFAULT_ARTIFACT_LABELS,
+  DEFAULT_ATTACHMENT_LABELS,
+  DEFAULT_CHORUS_LABELS,
+  DEFAULT_COST_LABELS,
+  DEFAULT_MCP_LABELS,
+  DEFAULT_SOURCE_LABELS,
+  resolveChorusLabels,
+} from './labels';
 export type {
+  ChorusApprovalLabels,
+  ChorusArtifactLabels,
   ChorusAttachmentFailureContext,
   ChorusAttachmentLabels,
   ChorusAttachmentTooLargeContext,
@@ -23,7 +34,9 @@ export type {
   ChorusCodeCopyLabels,
   ChorusComposerLabels,
   ChorusConversationListLabels,
+  ChorusCostLabels,
   ChorusLabels,
+  ChorusMcpLabels,
   ChorusMessageActionLabels,
   ChorusSourceLabels,
   ChorusSpeakerLabels,

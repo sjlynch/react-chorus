@@ -1,7 +1,7 @@
 import type React from 'react';
 import type { ChatInputHandle, ChatInputModelPicker, ChatInputProps, ChatInputSlashCommand } from '../components/ChatInput';
 import type { ChatWindowProps } from '../components/ChatWindow';
-import type { ResolvedChorusLabels } from '../labels/types';
+import type { ChorusArtifactLabels, ChorusCostLabels, ChorusMcpLabels, ResolvedChorusLabels } from '../labels/types';
 import type { Artifact, ArtifactVersion, Message } from '../types';
 import type { ChorusArtifactHandle } from '../artifacts/artifactContext';
 import type { MarkdownSanitizer } from '../components/Markdown';
@@ -31,6 +31,7 @@ export interface ChorusComposerView {
 export interface ChorusMcpStatusView {
   servers: McpServerStatus[];
   reconnect: (serverName?: string) => void;
+  labels: ChorusMcpLabels;
 }
 
 export interface ChorusArtifactPanelView {
@@ -43,6 +44,8 @@ export interface ChorusArtifactPanelView {
   codeTheme: 'dark' | 'light';
   markdownSanitizer?: MarkdownSanitizer;
   renderReactArtifact?: (version: ArtifactVersion) => React.ReactNode;
+  /** Localized artifact panel strings. */
+  labels: ChorusArtifactLabels;
   /** Stable handle passed via `ChorusArtifactContext.Provider`. */
   handle: ChorusArtifactHandle;
 }
@@ -57,6 +60,7 @@ export interface ChorusShellBlockRuntime {
 export interface ChorusCostView {
   cost: ConversationCost;
   budget?: number;
+  labels: ChorusCostLabels;
 }
 
 export interface ChorusShellViewProps<TMeta> {
