@@ -1750,45 +1750,68 @@ function Poll({ props, emit }: { props: { question?: string; options?: string[] 
 **Named exports:**
 
 - Starter components and their packaged definitions: `Card` / `CardBlock`, `Form` / `FormBlock`, `Table` / `TableBlock`, `Image` / `ImageBlock`, `CodeBlockComponent` / `CodeBlockBlock`, `Diff` / `DiffBlock`, `CalendarPicker` / `CalendarPickerBlock`. The packaged `*Block` exports are `BlockDefinition` instances ready to drop into the registry; the bare component exports are useful when you want to compose with your own definition (validator, `streamingMode`, or wrapper).
+- `createImageBlock(options?)` — builds a packaged `Image` block with a host-pinned URL policy (`allowedProtocols`, `blockedLabel`). The packaged `ImageBlock` is `createImageBlock()`; both ignore any policy a model tries to stream. See [Image block URL whitelist and `createImageBlock`](#image-block-url-whitelist-and-createimageblock).
 - `Chart` / `ChartBlock` are re-exported here for the common case, but the implementation lives in [`react-chorus/blocks/Chart`](#react-chorusblockschart) so a consumer that does not use a chart can avoid the Recharts dependency entirely.
 - `BlockRenderer` — the same component `<Chorus>` uses internally to render a `message.block`. Useful from a fully custom transcript when you want the validator + error-boundary + streaming-mode handling without re-implementing it. Returns `null` outside a `<BlockProvider>` (i.e. outside `<Chorus>`).
 - `parseStreamingJson` — see [Streaming block-prop parsing](#react-chorusblocks-streaming) below.
-- Types: `BlockDefinition`, `BlockRegistry`, `BlockRenderProps`, `BlockValidator`, `BlockValidateResult`, `BlockEmit`, `BlockEmitPayload`, `ToolLoaderProps`, `ToolLoadingComponents`, plus the per-block `*Props` interfaces (`CardProps`, `FormProps`, `TableProps`, `ImageProps`, `CodeBlockProps`, `DiffProps`, `CalendarPickerProps`, `ChartProps`).
+- Types: `BlockDefinition`, `BlockRegistry`, `BlockRenderProps`, `BlockValidator`, `BlockValidateResult`, `BlockEmit`, `BlockEmitPayload`, `ToolLoaderProps`, `ToolLoadingComponents`, plus the per-block `*Props` interfaces (`CardProps`, `FormProps`, `TableProps`, `ImageProps`, `CodeBlockProps`, `DiffProps`, `CalendarPickerProps`, `ChartProps`) and the host-only `ImageBlockOptions` accepted by `createImageBlock`.
 
-#### Image block URL whitelist and `allowedProtocols`
+#### Image block URL whitelist and `createImageBlock`
 
 The built-in `Image` block treats `src` as untrusted model output, so a `javascript:` URL or any other unsafe scheme is replaced by a "Blocked image (unsafe URL scheme)" placeholder before it can reach `<img src>`. The default whitelist is **`['https:', 'data:image/']`** — strict on purpose so a model-driven URL cannot be coerced into a mixed-content fetch.
 
-`ImageProps` adds two opt-ins for hosts that need to widen or relabel that behavior:
+The packaged **`ImageBlock` is safe by default**: drop `image: ImageBlock` into your registry and the model cannot widen the whitelist. The URL policy (`allowedProtocols`) and the blocked-state label (`blockedLabel`) are **host-only** — they are *not* part of `ImageProps`, and the packaged block strips them if a model tries to stream its own. (Earlier versions exposed them as ordinary `ImageProps`, which let a model emit `allowedProtocols: ['javascript:']` and bypass the gate; that path is gone.)
 
-| Prop | Type | Default | Notes |
-|------|------|---------|-------|
-| `allowedProtocols` | `string[]` | `['https:', 'data:image/']` | Literal `startsWith` prefixes the block accepts in `src`. A scheme entry must include its trailing `:` (`'http:'`, `'blob:'`); a `data:` MIME prefix must include the slash (`'data:image/'`). |
-| `blockedLabel` | `string` | `'Blocked image (unsafe URL scheme)'` | Override the placeholder label — useful for localization. |
+To widen or relabel the policy from host code, build the block with `createImageBlock(options)`:
 
-Both props are part of `ImageProps`, so a malicious model output could theoretically include `allowedProtocols: ['javascript:']` and bypass the whitelist. The recommended host opt-in is to **wrap the block** so the host-supplied list is pinned *after* the model props are spread:
+```tsx
+import { Chorus } from 'react-chorus';
+import { createImageBlock } from 'react-chorus/blocks';
+
+// Production default — equivalent to the packaged `ImageBlock`. Model-streamed
+// `allowedProtocols` / `blockedLabel` are ignored, so the whitelist is fixed.
+<Chorus blocks={{ image: createImageBlock() }} />
+
+// Local development — also accept the dev server's localhost origin and
+// relocalize the placeholder. The host options are pinned in your code; the
+// model output stays untrusted and cannot re-open `javascript:` or any other
+// scheme by passing its own list.
+const devImageBlock = createImageBlock({
+  allowedProtocols: ['https:', 'data:image/', 'http://localhost'],
+  blockedLabel: 'Image blocked',
+});
+
+<Chorus blocks={{ image: devImageBlock }} />
+```
+
+`createImageBlock(options)` accepts:
+
+| Option | Type | Default | Notes |
+|--------|------|---------|-------|
+| `allowedProtocols` | `string[]` | `['https:', 'data:image/']` | URL entries the block accepts in `src`, matched against the **parsed URL** (not a raw `startsWith`). See the matching rules below. |
+| `blockedLabel` | `string` | `'Blocked image (unsafe URL scheme)'` | Placeholder label when `src` is rejected — useful for localization. |
+
+Each `allowedProtocols` entry is matched by kind:
+
+- A **scheme** entry ends with `:` (e.g. `'https:'`, `'http:'`, `'blob:'`) and matches when the URL's protocol equals it. Because matching is on the parsed protocol, a lookalike scheme like `httpsx:` never satisfies `'https:'`.
+- A **`data:` MIME** entry (e.g. `'data:image/'`) matches a data URL whose media type starts with it. Data URLs carry no host, so there is nothing to spoof.
+- An **origin** entry includes a host (e.g. `'http://localhost'`, `'https://cdn.example.com'`) and matches only on an exact protocol + hostname match — so `'http://localhost'` accepts `http://localhost:3000/x.png` but **rejects** `http://localhost.evil.com/x.png` (and userinfo tricks like `http://localhost@evil.example/x.png`). Pin a port (`'http://localhost:3000'`) or a path prefix (`'https://cdn.example.com/imgs/'`) to narrow further.
+
+Add `'http://localhost'` (or a bare `'http:'`) only for trusted local-development hosts. In a production deployment the model output is still untrusted, so a permissive `'http:'` entry lets the model load an arbitrary tracker pixel — keep the default unless you fully control the URL source.
+
+If you need full control over the blocked-state UI (there is no entry for the Image block in the `labels` system yet), build your own block from scratch around the exported `Image` component — but pin `allowedProtocols` / `blockedLabel` yourself *after* the model props are spread, or model-streamed values will reach the component:
 
 ```tsx
 import { Image } from 'react-chorus/blocks';
-import type { BlockDefinition, BlockRenderProps } from 'react-chorus/blocks';
-import type { ImageProps } from 'react-chorus/blocks';
+import type { BlockDefinition, BlockRenderProps, ImageProps } from 'react-chorus/blocks';
 
-const HOST_ALLOWED = ['https:', 'data:image/', 'http://localhost'];
-
-function LocalDevImage(props: BlockRenderProps<ImageProps> & ImageProps) {
-  // Spread model props first, then pin the host whitelist so the model cannot
-  // re-open `javascript:` or other unsafe schemes by passing its own list.
-  return <Image {...props} allowedProtocols={HOST_ALLOWED} blockedLabel="Image blocked" />;
+function MyImage(props: BlockRenderProps<ImageProps> & ImageProps) {
+  // Host options come AFTER the spread so the model cannot override them.
+  return <Image {...props} allowedProtocols={['https:', 'data:image/']} blockedLabel="Blocked" />;
 }
 
-const LocalDevImageBlock: BlockDefinition<ImageProps> = { component: LocalDevImage };
-
-<Chorus blocks={{ image: LocalDevImageBlock }} />
+const MyImageBlock: BlockDefinition<ImageProps> = { component: MyImage };
 ```
-
-Add `'http:'` to the whitelist only for trusted local-development hosts. In a production deployment, the model output is still untrusted, so a permissive `'http:'` entry lets the model load an arbitrary tracker pixel — keep the default unless you fully control the URL source.
-
-The `blockedLabel` prop is the simplest way to relocalize the placeholder. There is no entry for the Image block in the `labels` system yet; pass `blockedLabel` per-instance (via a wrapper) or build your own block from scratch when you need full control over the blocked-state UI.
 
 <a id="react-chorusblocks-streaming"></a>
 

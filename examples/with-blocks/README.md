@@ -7,7 +7,7 @@ This example exercises the four block-related subpath exports together:
 - [`react-chorus/blocks`](../../docs/api.md#react-chorusblocks) — `Card`, `Form`, `Table`, `Image` starter blocks plus the `BlockDefinition` / `BlockRegistry` types.
 - [`react-chorus/loaders`](../../docs/api.md#react-chorusloaders) — `SpinnerLoader` and `SkeletonTable` are wired through `toolLoadingComponents` so each tool call shows a tailored "thinking" state while it streams.
 - [`react-chorus/validators`](../../docs/api.md#react-chorusvalidators) — `jsonSchemaAdapter` adapts a hand-rolled validator function into the `BlockValidator` contract. Swap it for `zodAdapter(z.object({...}))` when your app already pulls in Zod.
-- The `Image` block is wrapped to pin a host-controlled `allowedProtocols` list AFTER the model props are spread, so an untrusted model output can never widen the URL whitelist (see the [Image block URL whitelist docs](../../docs/api.md#image-block-url-whitelist-and-allowedprotocols)).
+- The `Image` block is built with `createImageBlock({ allowedProtocols })` so the URL whitelist is pinned in host code; model-streamed `allowedProtocols` / `blockedLabel` are stripped, so an untrusted model output can never widen the whitelist (see the [Image block URL whitelist docs](../../docs/api.md#image-block-url-whitelist-and-createimageblock)).
 
 The mock transport in `src/App.tsx` emits OpenAI-shape SSE chunks with reserved `__render_block` tool calls — the same wire format a real provider would send, so swapping in `transport="/api/chat" connector="openai"` against a real backend keeps the registry wiring identical.
 
