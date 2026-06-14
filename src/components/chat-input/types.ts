@@ -4,6 +4,14 @@ import type { Attachment, AttachmentError, UploadAttachment } from '../../types'
 export interface ChatInputSlashCommand {
   name: string;
   description?: string;
+  /**
+   * When true, choosing this command from the slash palette inserts it into the
+   * composer draft (with a trailing space) so the user can append `key=value`
+   * arguments before running it, instead of running it immediately. Used for MCP
+   * prompts that declare required arguments. Typing the command followed by a
+   * space and arguments still submits the whole draft to `onSlashCommand`.
+   */
+  requiresArguments?: boolean;
 }
 
 /**

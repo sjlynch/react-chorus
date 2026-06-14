@@ -146,6 +146,45 @@ describe('ChatInput composer behavior', () => {
     expect(onSlashCommand).toHaveBeenCalledTimes(2);
     expect(onSend).not.toHaveBeenCalled();
   });
+  it('forwards the full draft (command + key=value arguments) to onSlashCommand instead of sending', async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn();
+    const onSlashCommand = vi.fn();
+    render(
+      <ControlledChatInput
+        onSend={onSend}
+        slashCommands={[{ name: '/srv:summarize', description: 'Summarize', requiresArguments: true }]}
+        onSlashCommand={onSlashCommand}
+      />,
+    );
+
+    const textbox = screen.getByRole('textbox');
+    await user.type(textbox, '/srv:summarize topic=cats{Enter}');
+
+    // The whole draft is passed through so the prompt receives its arguments;
+    // the literal command is not sent as a normal user message.
+    expect(onSlashCommand).toHaveBeenCalledWith('/srv:summarize topic=cats');
+    expect(onSend).not.toHaveBeenCalled();
+  });
+  it('prefills the draft (instead of running) when a command requiring arguments is chosen from the palette', async () => {
+    const user = userEvent.setup();
+    const onSlashCommand = vi.fn();
+    render(
+      <ControlledChatInput
+        slashCommands={[{ name: '/srv:summarize', description: 'Summarize', requiresArguments: true }]}
+        onSlashCommand={onSlashCommand}
+      />,
+    );
+
+    const textbox = screen.getByRole('textbox') as HTMLTextAreaElement;
+    await user.type(textbox, '/srv');
+    await user.click(screen.getByRole('option', { name: /\/srv:summarize/i }));
+
+    // Required-arg commands are not run on selection; the composer is primed with
+    // the command name and a trailing space so the user can append arguments.
+    expect(onSlashCommand).not.toHaveBeenCalled();
+    expect(textbox).toHaveValue('/srv:summarize ');
+  });
   it('attaches resource references from the composer resource picker', async () => {
     const user = userEvent.setup();
     const onSend = vi.fn();

@@ -29,6 +29,7 @@ import { buildCostFooterRenderer } from './renderCostFooter';
 import { useMultiProviderRuntime } from './multiProvider';
 import { useConversationMetadataSync } from './useConversationMetadataSync';
 import type { ChatInputSlashCommand } from '../components/chat-input/types';
+import { warnInDev } from '../utils/warnings';
 
 export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
   {
@@ -477,8 +478,17 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
           requestAnimationFrame(() => composer.inputRef.current?.focus({ caret: 'end' }));
           return;
         }
-        const applied = await mcp.applyPrompt(commandName);
-        composer.setDraft(applied);
+        try {
+          const applied = await mcp.applyPrompt(commandName);
+          composer.setDraft(applied);
+        } catch (error) {
+          // A prompt fetch/validation failure (e.g. a missing or invalid
+          // required argument) must not surface as an unhandled rejection. Keep
+          // the user's command text in the draft so they can correct it, and
+          // warn in dev with the underlying reason.
+          composer.setDraft(commandName);
+          warnInDev(`[Chorus] Could not apply MCP prompt "${commandName}".`, error);
+        }
         requestAnimationFrame(() => composer.inputRef.current?.focus({ caret: 'end' }));
       },
       mcpResourceAttachments: mcp.resourceAttachments,

@@ -56,12 +56,66 @@ function serverDelay(config: McpServerConfig, attempt: number): number {
   return Math.min(max, Math.round(initial * (RECONNECT_GROWTH ** Math.max(0, attempt - 1))));
 }
 
+/**
+ * Builds the `key=<value>` usage hint shown in the slash palette so users know
+ * which arguments a prompt accepts. Required arguments are listed bare and
+ * optional ones in `[brackets]`, mirroring the documented
+ * `/server:prompt key=value` syntax that `applyPrompt` parses.
+ */
+function describePromptArguments(args: McpPrompt['arguments']): string | undefined {
+  if (!args || args.length === 0) return undefined;
+  return args
+    .map(arg => (arg.required ? `${arg.name}=<value>` : `[${arg.name}=<value>]`))
+    .join(' ');
+}
+
+function describePromptCommand(prompt: McpPrompt): string | undefined {
+  const base = prompt.description ?? prompt.title;
+  const hint = describePromptArguments(prompt.arguments);
+  if (!hint) return base;
+  return base ? `${base} — ${hint}` : hint;
+}
+
 function promptToCommand(prompt: McpPrompt): McpSlashCommand {
   return {
     name: prompt.slashCommand,
-    description: prompt.description ?? prompt.title,
+    description: describePromptCommand(prompt),
+    requiresArguments: (prompt.arguments ?? []).some(arg => arg.required),
     prompt,
   };
+}
+
+/**
+ * Splits a slash-command draft into the command name and the raw argument
+ * string: `"/srv:prompt topic=cats style=brief"` →
+ * `{ command: "/srv:prompt", argString: "topic=cats style=brief" }`. A command
+ * with no arguments yields an empty `argString`.
+ */
+function splitPromptCommand(input: string): { command: string; argString: string } {
+  const trimmed = input.trim();
+  const match = /\s/.exec(trimmed);
+  if (!match) return { command: trimmed, argString: '' };
+  return {
+    command: trimmed.slice(0, match.index),
+    argString: trimmed.slice(match.index + 1).trim(),
+  };
+}
+
+/**
+ * Parses `key=value` pairs out of an MCP prompt argument string. Values may be
+ * bare (`topic=cats`), double-quoted, or single-quoted (`note="hello world"`)
+ * so they can contain spaces. Later duplicate keys win.
+ */
+function parsePromptArguments(argString: string): Record<string, string> {
+  const args: Record<string, string> = {};
+  const pattern = /([^\s=]+)=(?:"([^"]*)"|'([^']*)'|(\S+))/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(argString)) !== null) {
+    const [, key, doubleQuoted, singleQuoted, bare] = match;
+    if (!key) continue;
+    args[key] = doubleQuoted ?? singleQuoted ?? bare ?? '';
+  }
+  return args;
 }
 
 function resourceToAttachment(resource: McpResource): McpResourceAttachment {
@@ -319,12 +373,22 @@ export function createMcpRuntime<TMeta = Record<string, unknown>>(
       }
     },
     async applyPrompt(commandName: string) {
-      const normalized = commandName.startsWith('/') ? commandName : `/${commandName}`;
+      // The composer forwards the full draft (e.g. `/srv:prompt topic=cats`), so
+      // split the command name from any `key=value` arguments before matching.
+      const { command, argString } = splitPromptCommand(commandName);
+      const normalized = command.startsWith('/') ? command : `/${command}`;
       const prompt = current.prompts.find(item => item.slashCommand === normalized || item.qualifiedName === normalized.slice(1));
       if (!prompt) return commandName;
       const runtime = runtimes.find(item => resolveMcpServerName(item.config) === prompt.serverName);
       if (!runtime) return commandName;
-      const result = await runtime.client.getPrompt(prompt.name);
+      // Pass parsed arguments through to the server; preserve the no-arg call
+      // shape (no `arguments` field) so existing argument-free prompts behave
+      // exactly as before. A rejected/validation-failed getPrompt propagates to
+      // the caller, which keeps the draft and surfaces the error.
+      const args = parsePromptArguments(argString);
+      const result = Object.keys(args).length > 0
+        ? await runtime.client.getPrompt(prompt.name, { arguments: args })
+        : await runtime.client.getPrompt(prompt.name);
       return promptResultToText(result, prompt.slashCommand);
     },
   };

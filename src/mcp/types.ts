@@ -113,6 +113,13 @@ export interface McpChorusToolDefinition<TMeta = Record<string, unknown>> extend
 export interface McpSlashCommand {
   name: string;
   description?: string;
+  /**
+   * True when the underlying prompt declares at least one required argument.
+   * The composer uses this to prefill the draft (so the user can append
+   * `key=value` arguments) instead of running the prompt immediately when the
+   * command is chosen from the slash palette.
+   */
+  requiresArguments?: boolean;
   prompt: McpPrompt;
 }
 

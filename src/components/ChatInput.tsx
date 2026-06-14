@@ -8,7 +8,7 @@ import { useAttachmentQueue } from './chat-input/useAttachmentQueue';
 import { useChatInputSend } from './chat-input/useChatInputSend';
 import { useComposerTextarea } from './chat-input/useComposerTextarea';
 import { useFileIngestionHandlers } from './chat-input/useFileIngestionHandlers';
-import type { ChatInputHandle, ChatInputProps } from './chat-input/types';
+import type { ChatInputHandle, ChatInputProps, ChatInputSlashCommand } from './chat-input/types';
 import { joinClasses } from '../utils/className';
 import { styleVarsFromPalette } from '../utils/paletteVars';
 
@@ -127,8 +127,14 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(funct
     if (!trimmedValue.startsWith('/') || slashCommands.length === 0) return [];
     return slashCommands.filter(command => command.name.toLowerCase().startsWith(trimmedValue.toLowerCase()));
   }, [slashCommands, trimmedValue]);
+  // A command matches when the draft is exactly the command name OR the command
+  // name followed by a space and arguments (`/srv:prompt key=value`). The whole
+  // trimmed draft is forwarded to `onSlashCommand` so argument-taking commands
+  // (e.g. MCP prompts) receive their `key=value` pairs.
   const exactSlashCommand = React.useMemo(() => (
-    slashCommands.find(command => command.name === trimmedValue)
+    slashCommands.find(command => (
+      command.name === trimmedValue || trimmedValue.startsWith(`${command.name} `)
+    ))
   ), [slashCommands, trimmedValue]);
   const canSend = !composerInactive && (trimmedValue.length > 0 || hasSendableAttachment) && !hasPendingAttachments;
   const stopAvailable = Boolean(sending && onStop);
@@ -182,6 +188,28 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(funct
     return true;
   }, [composerInactive, onSlashCommand]);
 
+  // Choosing a command from the palette. A command that requires arguments is
+  // not run immediately — instead the draft is prefilled with the command name
+  // and a trailing space so the user can type `key=value` arguments (the
+  // command description advertises which ones). Argument-free commands run as
+  // before.
+  const selectSlashCommand = React.useCallback((command: ChatInputSlashCommand) => {
+    if (composerInactive) return;
+    if (command.requiresArguments) {
+      onChange(`${command.name} `);
+      requestAnimationFrame(() => {
+        const el = textareaRef.current;
+        if (!el) return;
+        el.focus();
+        const caret = el.value.length;
+        el.selectionStart = caret;
+        el.selectionEnd = caret;
+      });
+      return;
+    }
+    runSlashCommand(command.name);
+  }, [composerInactive, onChange, runSlashCommand, textareaRef]);
+
   const handleResourceAttachmentChange = React.useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
     const index = Number(e.currentTarget.value);
     e.currentTarget.value = '';
@@ -196,14 +224,14 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(funct
     // input) instead of sending a half-composed message.
     if (isComposingRef.current || e.nativeEvent.isComposing) return;
     e.preventDefault();
-    if (!sending && exactSlashCommand && runSlashCommand(exactSlashCommand.name)) return;
+    if (!sending && exactSlashCommand && runSlashCommand(trimmedValue)) return;
     if (!sending && canSend) handleSend();
   };
 
   const handleClick = () => {
     if (sending) {
       onStop?.();
-    } else if (exactSlashCommand && runSlashCommand(exactSlashCommand.name)) {
+    } else if (exactSlashCommand && runSlashCommand(trimmedValue)) {
       return;
     } else if (canSend) {
       handleSend();
@@ -310,7 +338,7 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(funct
               key={command.name}
               type="button"
               className="chorus-slash-command"
-              onClick={() => runSlashCommand(command.name)}
+              onClick={() => selectSlashCommand(command)}
               role="option"
             >
               <span className="chorus-slash-command-name">{command.name}</span>
