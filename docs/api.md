@@ -1790,6 +1790,16 @@ Add `'http:'` to the whitelist only for trusted local-development hosts. In a pr
 
 The `blockedLabel` prop is the simplest way to relocalize the placeholder. There is no entry for the Image block in the `labels` system yet; pass `blockedLabel` per-instance (via a wrapper) or build your own block from scratch when you need full control over the blocked-state UI.
 
+#### Streamed defaults in interactive blocks (`Form`, `CalendarPicker`)
+
+Interactive starter blocks render from streamed `__render_block` props, and those props arrive incrementally: the first delta often has `fields` empty or a `defaultDate` missing, and later deltas fill them in. The `Form` and `CalendarPicker` blocks therefore treat a streamed default as the **current** value of a field until the user touches it — a "controlled until edited" model:
+
+- **Before the user edits a field**, its value tracks the latest streamed prop. A `Form` field whose `default` (or whole field entry) only shows up in a later delta becomes visible and is included in the `__form_submitted` payload; a `CalendarPicker` whose `defaultDate` arrives late populates the `<input type="date">`. If a later delta *corrects* a default, the un-edited field updates to match.
+- **After the user edits a field**, that field is "dirty" and its value is preserved — later deltas that change the streamed default no longer clobber the active input. The user's value is what gets submitted.
+- **`Form` reconciles the field set** on every change: fields added by later deltas appear with their current default, and fields removed (or renamed) by later deltas are dropped from both the rendered form and the submitted payload, so stale keys never leak. Re-adding a previously-removed field starts it from its default again rather than resurrecting an earlier edit.
+
+This sync happens during render (the [recommended alternative](https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes) to a clobbering effect), so the default is visible on the same commit the delta arrives — there is no flash of an empty input. Block identity is positional: a fresh block instance remounts with fresh state, which resets `defaultDate`/field tracking from scratch. If you build your own interactive block, follow the same rule — derive the initial value from props but stop overwriting it once the user has interacted — so streaming deltas never overwrite something a user is actively editing.
+
 <a id="react-chorusblocks-streaming"></a>
 
 #### Streaming block-prop parsing (`parseStreamingJson`)
