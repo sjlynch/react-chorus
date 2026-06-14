@@ -1,3 +1,4 @@
+import { extractUsage } from '../connectors/usage';
 import type { Message } from '../types';
 import type { ModelPricing, PricingTable } from '../pricing';
 
@@ -41,15 +42,25 @@ function isFinitePositive(n: unknown): n is number {
  * `{ promptTokens, completionTokens, totalTokens }` shape there after each
  * turn; a host with bespoke metadata can still wire `costEstimator` to read
  * its own shape and bypass this path.
+ *
+ * The payload is run through the shared connector `extractUsage` normalizer, so
+ * an `onSend` host that hand-rolls `metadata.usage` (e.g. via
+ * `helpers.finalizeAssistant({ metadata: { usage } })`) can attach the *raw*
+ * provider field names — `input_tokens` / `output_tokens` (Anthropic, OpenAI
+ * Responses), `prompt_tokens` / `completion_tokens` (OpenAI Chat), Gemini's
+ * `promptTokenCount` / `candidatesTokenCount`, the AI SDK's `inputTokens` /
+ * `outputTokens` — and still drive the cost meter, exactly as the transport-path
+ * connectors do before they emit `metadata.usage`. Already-normalized camelCase
+ * payloads pass through unchanged. Non-finite or negative counts are dropped.
  */
 export function readMessageUsage(message: Message): CostUsage | undefined {
   const meta = message.metadata as Record<string, unknown> | undefined;
-  const usage = meta?.usage as Record<string, unknown> | undefined;
-  if (!usage || typeof usage !== 'object') return undefined;
+  const normalized = extractUsage(meta?.usage);
+  if (!normalized) return undefined;
   const out: CostUsage = {};
-  if (isFinitePositive(usage.promptTokens)) out.promptTokens = usage.promptTokens;
-  if (isFinitePositive(usage.completionTokens)) out.completionTokens = usage.completionTokens;
-  if (isFinitePositive(usage.totalTokens)) out.totalTokens = usage.totalTokens;
+  if (isFinitePositive(normalized.promptTokens)) out.promptTokens = normalized.promptTokens;
+  if (isFinitePositive(normalized.completionTokens)) out.completionTokens = normalized.completionTokens;
+  if (isFinitePositive(normalized.totalTokens)) out.totalTokens = normalized.totalTokens;
   return out.promptTokens !== undefined || out.completionTokens !== undefined || out.totalTokens !== undefined
     ? out
     : undefined;

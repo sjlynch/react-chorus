@@ -87,6 +87,27 @@ describe('readMessageUsage', () => {
     expect(readMessageUsage(asMessage({ id: 'a', role: 'assistant' }))).toBeUndefined();
     expect(readMessageUsage(asMessage({ id: 'a', role: 'assistant', metadata: {} }))).toBeUndefined();
   });
+
+  it('normalizes raw Anthropic / OpenAI-Responses field names (input_tokens / output_tokens)', () => {
+    // The documented `onSend` cost-meter recipe attaches the raw provider usage
+    // shape via `helpers.finalizeAssistant({ metadata: { usage } })`; the meter
+    // must read it, not just the normalized camelCase shape.
+    const message = asMessage({
+      id: 'a',
+      role: 'assistant',
+      metadata: { usage: { input_tokens: 10, output_tokens: 20 } },
+    });
+    expect(readMessageUsage(message)).toEqual({ promptTokens: 10, completionTokens: 20 });
+  });
+
+  it('normalizes raw OpenAI Chat field names (prompt_tokens / completion_tokens / total_tokens)', () => {
+    const message = asMessage({
+      id: 'a',
+      role: 'assistant',
+      metadata: { usage: { prompt_tokens: 5, completion_tokens: 7, total_tokens: 12 } },
+    });
+    expect(readMessageUsage(message)).toEqual({ promptTokens: 5, completionTokens: 7, totalTokens: 12 });
+  });
 });
 
 describe('readMessageModelId', () => {

@@ -36,6 +36,8 @@ export interface AssistantBuffer<TMeta> {
   appendAssistantNow: (chunk: string) => void;
   appendAssistantReasoningNow: (chunk: string) => void;
   appendAssistantSourceNow: (source: MessageSource) => void;
+  /** Shallow-merge `metadata` onto the pending assistant message's `metadata`, keyed by the live pending id. */
+  mergeAssistantMetadataNow: (metadata: Record<string, unknown>) => void;
   finalizeAssistantNow: () => Message<TMeta> | null;
 }
 
@@ -133,6 +135,37 @@ export function useAssistantBuffer<TMeta>(deps: AssistantBufferDeps<TMeta>): Ass
     );
   }, [startAssistant, updateSessionMessages]);
 
+  const mergeAssistantMetadataNow = React.useCallback((metadata: Record<string, unknown>) => {
+    if (!metadata || typeof metadata !== 'object') return;
+    // Attach to the streaming assistant message by its live `pendingAssistantIdRef`,
+    // which `startAssistant` updates synchronously — unlike the shell's
+    // render-synced `streamingMessageIdRef`, which lags a render behind and is
+    // why the cost-meter wrapper alone silently drops usage that arrives in the
+    // same tick as the first/final chunk on the `onSend` path. Start a row if
+    // none exists yet so a usage-first payload is not lost.
+    if (!pendingAssistantIdRef.current) startAssistant({});
+    const id = pendingAssistantIdRef.current;
+    if (!id) return;
+    updateSessionMessages(
+      prev => {
+        let changed = false;
+        const next = prev.map(m => {
+          if (m.id !== id || m.role !== 'assistant') return m;
+          const existing = (m.metadata ?? {}) as Record<string, unknown>;
+          // Skip the rewrite when every incoming field already matches — the
+          // transport-path cost-meter wrapper may have attached the same `usage`
+          // object a render earlier, so a redundant write would fire
+          // `onMessagesChange` twice for one metadata payload.
+          if (!Object.keys(metadata).some(key => existing[key] !== metadata[key])) return m;
+          changed = true;
+          return { ...m, metadata: { ...existing, ...metadata } as typeof m.metadata };
+        });
+        return changed ? next : prev;
+      },
+      { reason: 'assistant' },
+    );
+  }, [startAssistant, updateSessionMessages]);
+
   const finalizeAssistantNow = React.useCallback((): Message<TMeta> | null => {
     cancelPending(true);
     flushPersistence();
@@ -159,6 +192,7 @@ export function useAssistantBuffer<TMeta>(deps: AssistantBufferDeps<TMeta>): Ass
     appendAssistantNow,
     appendAssistantReasoningNow,
     appendAssistantSourceNow,
+    mergeAssistantMetadataNow,
     finalizeAssistantNow,
   };
 }
