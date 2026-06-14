@@ -33,6 +33,7 @@ export type {
   ChorusConfirmClearConversation,
   ChorusConfirmDeleteMessage,
   ChorusDeleteMessageContext,
+  ChorusFinalizeAssistantOptions,
   ChorusFinishContext,
   ChorusOnAbort,
   ChorusOnFinish,

@@ -98,7 +98,7 @@ export function useChorusPropWarnings<TMeta>({
     }
 
     if (showCost && !isTransportPresent(transport) && onSend) {
-      console.warn('[Chorus] `showCost` reads `metadata.usage` written by the `transport` send path. With `onSend` Chorus never wraps `onStreamMetadata`, so the cost chips stay at $0 and the conversation total never updates — hand-roll `metadata.usage` on each finalized assistant message you append/return from `onSend` (see the `showCost` section in docs/api.md for the recipe), or pass `transport`.');
+      console.warn('[Chorus] `showCost` reads `metadata.usage` written by the `transport` send path. With `onSend` Chorus does not attach usage automatically, so the cost chips stay at $0 and the conversation total never updates until you supply it — attach `metadata.usage` via `helpers.finalizeAssistant({ metadata: { usage } })` (or on the assistant `Message` you return), or on a bridged send wire `helpers.streamCallbacks().onMetadata`. See the `showCost` section in docs/api.md for the recipe, or pass `transport`.');
     }
 
     const toolExecutionProps = [

@@ -2,6 +2,35 @@ import type { Attachment, Message, MessageSource, ToolMessage } from '../../type
 import type { ConnectorToolDelta } from '../../connectors/connectors';
 import type { SendCallbacks } from '../useChorusStream';
 
+/**
+ * Optional arguments for `helpers.finalizeAssistant(options?)`. Both fields are
+ * applied to the pending assistant message immediately before the turn
+ * completes, so a custom `onSend` can produce a finished reply with usage
+ * telemetry in a single call (drives `<Chorus showCost>` on the `onSend` path).
+ */
+export interface ChorusFinalizeAssistantOptions {
+  /**
+   * Final assistant text appended before the turn completes. Use this for a
+   * non-streaming `onSend` that produces the whole reply at once; omit it when
+   * you already streamed the text through `helpers.appendAssistant()` (passing
+   * it again would duplicate the text).
+   */
+  text?: string;
+  /**
+   * Metadata shallow-merged onto the pending assistant message's `metadata`
+   * before completion (existing keys are overwritten). Attach `{ usage, modelId }`
+   * here to make `<Chorus showCost>` work from `onSend`: `usage` is run through the
+   * same normalizer the built-in connectors use, so the cost meter accepts the raw
+   * provider field names — `{ input_tokens, output_tokens }` (Anthropic / OpenAI
+   * Responses), `{ prompt_tokens, completion_tokens }` (OpenAI Chat), Gemini's
+   * `{ promptTokenCount, candidatesTokenCount }`, the AI SDK's
+   * `{ inputTokens, outputTokens }` — as well as the normalized
+   * `{ promptTokens, completionTokens, totalTokens }` shape. `modelId` falls back to
+   * the `<Chorus modelId>` prop when omitted.
+   */
+  metadata?: Record<string, unknown>;
+}
+
 export interface ChorusSendHelpers {
   appendAssistant: (chunk: string) => void;
   appendReasoning?: (chunk: string) => void;
@@ -20,11 +49,24 @@ export interface ChorusSendHelpers {
    * follow-up turn with `appendAssistant`.
    */
   appendToolDelta?: (delta: ConnectorToolDelta) => void;
-  finalizeAssistant: () => void;
+  /**
+   * Complete the assistant turn. Call with no arguments after streaming through
+   * `appendAssistant()`, or pass `{ text, metadata }` to set the final text
+   * and/or attach metadata to the pending assistant message in one shot — the
+   * supported recipe for driving `<Chorus showCost>` from a custom `onSend`
+   * (`finalizeAssistant({ text, metadata: { usage } })`). The merge runs before
+   * the turn closes, so the finalized `Message` (and `onFinish`) carry the usage.
+   * See {@link ChorusFinalizeAssistantOptions}.
+   */
+  finalizeAssistant: (options?: ChorusFinalizeAssistantOptions) => void;
   /**
    * Complete callback set for bridging `useChorusStream(...).send()` through
    * `onSend` — `{ onChunk, onReasoning, onSource, onToolDelta, onWarning, onMetadata,
-   * onDone, onError }`. The bundled `onError` surfaces a mid-stream failure
+   * onDone, onError }`. `onMetadata` attaches the connector's `usage` to the
+   * streaming assistant message (keyed by the live pending id, so it lands even
+   * when usage arrives in the same tick as the first/final chunk) and forwards
+   * to the `onStreamMetadata` prop — wire it for `<Chorus showCost>` parity on a
+   * streamed `onSend`. The bundled `onError` surfaces a mid-stream failure
    * (the UI banner + the `onError` prop) and drops the half-streamed partial
    * even when `onSend` does not return or await the `send()` promise, so a
    * bridged send that errors cannot vanish silently.
