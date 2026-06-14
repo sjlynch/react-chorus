@@ -744,8 +744,8 @@ async function verifyPlaygroundBudgets() {
 
   const initialGraph = await collectStaticFileGraph(entryFiles, allJsFiles);
   const initial = await measureFiles(initialGraph);
-  const initialMaxSize = 530 * KiB;
-  const initialMaxGzip = 164 * KiB;
+  const initialMaxSize = 535 * KiB;
+  const initialMaxGzip = 167 * KiB;
   const measurements = {
     initialJsGraph: createMeasurement('initial JS graph', initial.size, initial.gzip, initialMaxSize, initialMaxGzip),
   };

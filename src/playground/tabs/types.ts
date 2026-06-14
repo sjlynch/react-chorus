@@ -5,6 +5,7 @@ export type TabId =
   | 'multi-model'
   | 'artifacts'
   | 'generative-ui'
+  | 'roleplay'
   | 'markdown'
   | 'attachments'
   | 'multi-conversation'
