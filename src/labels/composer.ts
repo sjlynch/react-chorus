@@ -9,4 +9,8 @@ export const DEFAULT_COMPOSER_LABELS: ChorusComposerLabels = {
   stop: 'Stop',
   disabledReason: 'Composer is disabled.',
   readOnlyReason: 'Composer is read-only.',
+  slashCommands: 'Slash commands',
+  attachResource: 'Attach MCP resource',
+  resourcePickerPlaceholder: 'Resources',
+  modelPicker: 'Provider',
 };

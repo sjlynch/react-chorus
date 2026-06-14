@@ -1,6 +1,8 @@
 import type React from 'react';
 import { MessageCostChip } from '../components/message-row/cost';
 import { heuristicTokenCount } from '../utils/tokenize';
+import { DEFAULT_COST_LABELS } from '../labels/cost';
+import type { ChorusCostLabels } from '../labels/types';
 import type { Message } from '../types';
 import type { ConversationCost } from '../utils/cost';
 
@@ -8,6 +10,8 @@ export interface BuildCostFooterRendererArgs {
   cost: ConversationCost;
   streamingMessageId: string | null;
   defaultModelId?: string;
+  /** Localized cost strings forwarded to each per-message chip. */
+  labels?: ChorusCostLabels;
 }
 
 /**
@@ -26,11 +30,12 @@ export function buildCostFooterRenderer<TMeta>({
   cost,
   streamingMessageId,
   defaultModelId,
+  labels = DEFAULT_COST_LABELS,
 }: BuildCostFooterRendererArgs): (message: Message<TMeta>) => React.ReactNode {
   return (message: Message<TMeta>) => {
     if (message.role !== 'assistant') return null;
     const recorded = cost.byMessageId[message.id];
-    if (recorded) return <MessageCostChip cost={recorded} />;
+    if (recorded) return <MessageCostChip cost={recorded} labels={labels} />;
     if (message.id === streamingMessageId) {
       const tokens = heuristicTokenCount(message.text ?? '');
       if (tokens === 0) return null;
@@ -38,7 +43,8 @@ export function buildCostFooterRenderer<TMeta>({
         <MessageCostChip
           cost={{ usd: 0, tokens, modelId: defaultModelId }}
           approximate
-          title="Live estimate — usage not finalized yet"
+          title={labels.liveEstimateTitle}
+          labels={labels}
         />
       );
     }

@@ -312,6 +312,9 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(funct
         resourceAttachments={resourceAttachments}
         onResourceAttachmentChange={handleResourceAttachmentChange}
         canAttachResource={resourceAttachments.length > 0 && !composerInactive}
+        attachResourceLabel={labels.attachResource}
+        resourcePickerPlaceholder={labels.resourcePickerPlaceholder}
+        modelPickerFallbackLabel={labels.modelPicker}
         textareaRef={textareaRef}
         value={value}
         onTextareaChange={handleTextareaChange}
@@ -332,7 +335,7 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(funct
         modelPicker={modelPicker}
       />
       {filteredSlashCommands.length > 0 && !composerInactive && (
-        <div className="chorus-slash-palette" role="listbox" aria-label="Slash commands">
+        <div className="chorus-slash-palette" role="listbox" aria-label={labels.slashCommands}>
           {filteredSlashCommands.map(command => (
             <button
               key={command.name}

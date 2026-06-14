@@ -205,8 +205,8 @@ The `sources` slice localizes the built-in source/citation footer (`Sources`) an
 | `appendReasoning(chunk)` | Append a reasoning/thinking chunk to the current assistant message. |
 | `appendSource(source)` | Attach a source/citation to the current assistant message's `sources` array. Use this for custom RAG clients that stream citations outside a built-in connector. |
 | `appendToolDelta(delta)` | Create/update a `role: 'tool'` row from an accumulated connector tool delta. **Presentation only** — it does not execute registered `tools` handlers, fire `onToolCall`/`onToolDelta`, or drive the auto-continue loop, so `toolCall.output` stays unset. On the `onSend` path you run the tool yourself, then call `appendToolDelta` again with the same `delta.id` and an `output` to fill the row and `appendAssistant` for the follow-up turn. |
-| `streamCallbacks()` | Convenience helper returning `{ onChunk, onReasoning, onSource, onToolDelta, onWarning, onMetadata, onDone, onError }` for `useChorusStream(...).send()`. `onSource` attaches streamed citations to the assistant message, `onWarning` forwards non-fatal connector warnings to the `<Chorus onStreamWarning>` prop, and `onMetadata` forwards free-form provider metadata to the `<Chorus onStreamMetadata>` prop. `onError` surfaces a mid-stream failure (the error banner + the `onError` prop) and drops the half-streamed partial even if your `onSend` does not return or await the `send()` promise. `minAssistantDelayMs` is applied by Chorus on this path, so do not also pass `minDelayMs` to `send()` — the two first-token delays would stack. It is present at runtime; optional chaining keeps older hand-written helper mocks type-compatible. |
-| `finalizeAssistant()` | Mark the assistant message complete. If first-token chunks are still buffered, completion waits until they flush. |
+| `streamCallbacks()` | Convenience helper returning `{ onChunk, onReasoning, onSource, onToolDelta, onWarning, onMetadata, onDone, onError }` for `useChorusStream(...).send()`. `onSource` attaches streamed citations to the assistant message, `onWarning` forwards non-fatal connector warnings to the `<Chorus onStreamWarning>` prop, and `onMetadata` both forwards free-form provider metadata to the `<Chorus onStreamMetadata>` prop **and** attaches the connector's `usage` to the streaming assistant message's `metadata` (keyed by the live pending id, so it lands even when usage arrives in the same tick as the first/final chunk) — wire it for `<Chorus showCost>` parity on a bridged `onSend`. `onError` surfaces a mid-stream failure (the error banner + the `onError` prop) and drops the half-streamed partial even if your `onSend` does not return or await the `send()` promise. `minAssistantDelayMs` is applied by Chorus on this path, so do not also pass `minDelayMs` to `send()` — the two first-token delays would stack. It is present at runtime; optional chaining keeps older hand-written helper mocks type-compatible. |
+| `finalizeAssistant(options?)` | Mark the assistant message complete. If first-token chunks are still buffered, completion waits until they flush. Pass `{ text, metadata }` to set the final text and/or shallow-merge `metadata` onto the pending assistant message in one shot before the turn closes — this is the supported way to attach `metadata.usage` for `<Chorus showCost>` from a custom `onSend` (`finalizeAssistant({ text, metadata: { usage } })`). |
 | `signal` | `AbortSignal` — aborted when Stop, clear-while-sending, or a superseding session cancels the active send. |
 | `systemPrompt` | The optional `systemPrompt` prop. Use it when serializing custom `onSend` requests; Chorus does not insert it into the `messages` argument on this path. |
 
@@ -1750,45 +1750,78 @@ function Poll({ props, emit }: { props: { question?: string; options?: string[] 
 **Named exports:**
 
 - Starter components and their packaged definitions: `Card` / `CardBlock`, `Form` / `FormBlock`, `Table` / `TableBlock`, `Image` / `ImageBlock`, `CodeBlockComponent` / `CodeBlockBlock`, `Diff` / `DiffBlock`, `CalendarPicker` / `CalendarPickerBlock`. The packaged `*Block` exports are `BlockDefinition` instances ready to drop into the registry; the bare component exports are useful when you want to compose with your own definition (validator, `streamingMode`, or wrapper).
+- `createImageBlock(options?)` — builds a packaged `Image` block with a host-pinned URL policy (`allowedProtocols`, `blockedLabel`). The packaged `ImageBlock` is `createImageBlock()`; both ignore any policy a model tries to stream. See [Image block URL whitelist and `createImageBlock`](#image-block-url-whitelist-and-createimageblock).
 - `Chart` / `ChartBlock` are re-exported here for the common case, but the implementation lives in [`react-chorus/blocks/Chart`](#react-chorusblockschart) so a consumer that does not use a chart can avoid the Recharts dependency entirely.
 - `BlockRenderer` — the same component `<Chorus>` uses internally to render a `message.block`. Useful from a fully custom transcript when you want the validator + error-boundary + streaming-mode handling without re-implementing it. Returns `null` outside a `<BlockProvider>` (i.e. outside `<Chorus>`).
 - `parseStreamingJson` — see [Streaming block-prop parsing](#react-chorusblocks-streaming) below.
-- Types: `BlockDefinition`, `BlockRegistry`, `BlockRenderProps`, `BlockValidator`, `BlockValidateResult`, `BlockEmit`, `BlockEmitPayload`, `ToolLoaderProps`, `ToolLoadingComponents`, plus the per-block `*Props` interfaces (`CardProps`, `FormProps`, `TableProps`, `ImageProps`, `CodeBlockProps`, `DiffProps`, `CalendarPickerProps`, `ChartProps`).
+- Types: `BlockDefinition`, `BlockRegistry`, `BlockRenderProps`, `BlockValidator`, `BlockValidateResult`, `BlockEmit`, `BlockEmitPayload`, `ToolLoaderProps`, `ToolLoadingComponents`, plus the per-block `*Props` interfaces (`CardProps`, `FormProps`, `TableProps`, `ImageProps`, `CodeBlockProps`, `DiffProps`, `CalendarPickerProps`, `ChartProps`) and the host-only `ImageBlockOptions` accepted by `createImageBlock`.
 
-#### Image block URL whitelist and `allowedProtocols`
+#### Image block URL whitelist and `createImageBlock`
 
 The built-in `Image` block treats `src` as untrusted model output, so a `javascript:` URL or any other unsafe scheme is replaced by a "Blocked image (unsafe URL scheme)" placeholder before it can reach `<img src>`. The default whitelist is **`['https:', 'data:image/']`** — strict on purpose so a model-driven URL cannot be coerced into a mixed-content fetch.
 
-`ImageProps` adds two opt-ins for hosts that need to widen or relabel that behavior:
+The packaged **`ImageBlock` is safe by default**: drop `image: ImageBlock` into your registry and the model cannot widen the whitelist. The URL policy (`allowedProtocols`) and the blocked-state label (`blockedLabel`) are **host-only** — they are *not* part of `ImageProps`, and the packaged block strips them if a model tries to stream its own. (Earlier versions exposed them as ordinary `ImageProps`, which let a model emit `allowedProtocols: ['javascript:']` and bypass the gate; that path is gone.)
 
-| Prop | Type | Default | Notes |
-|------|------|---------|-------|
-| `allowedProtocols` | `string[]` | `['https:', 'data:image/']` | Literal `startsWith` prefixes the block accepts in `src`. A scheme entry must include its trailing `:` (`'http:'`, `'blob:'`); a `data:` MIME prefix must include the slash (`'data:image/'`). |
-| `blockedLabel` | `string` | `'Blocked image (unsafe URL scheme)'` | Override the placeholder label — useful for localization. |
+To widen or relabel the policy from host code, build the block with `createImageBlock(options)`:
 
-Both props are part of `ImageProps`, so a malicious model output could theoretically include `allowedProtocols: ['javascript:']` and bypass the whitelist. The recommended host opt-in is to **wrap the block** so the host-supplied list is pinned *after* the model props are spread:
+```tsx
+import { Chorus } from 'react-chorus';
+import { createImageBlock } from 'react-chorus/blocks';
+
+// Production default — equivalent to the packaged `ImageBlock`. Model-streamed
+// `allowedProtocols` / `blockedLabel` are ignored, so the whitelist is fixed.
+<Chorus blocks={{ image: createImageBlock() }} />
+
+// Local development — also accept the dev server's localhost origin and
+// relocalize the placeholder. The host options are pinned in your code; the
+// model output stays untrusted and cannot re-open `javascript:` or any other
+// scheme by passing its own list.
+const devImageBlock = createImageBlock({
+  allowedProtocols: ['https:', 'data:image/', 'http://localhost'],
+  blockedLabel: 'Image blocked',
+});
+
+<Chorus blocks={{ image: devImageBlock }} />
+```
+
+`createImageBlock(options)` accepts:
+
+| Option | Type | Default | Notes |
+|--------|------|---------|-------|
+| `allowedProtocols` | `string[]` | `['https:', 'data:image/']` | URL entries the block accepts in `src`, matched against the **parsed URL** (not a raw `startsWith`). See the matching rules below. |
+| `blockedLabel` | `string` | `'Blocked image (unsafe URL scheme)'` | Placeholder label when `src` is rejected — useful for localization. |
+
+Each `allowedProtocols` entry is matched by kind:
+
+- A **scheme** entry ends with `:` (e.g. `'https:'`, `'http:'`, `'blob:'`) and matches when the URL's protocol equals it. Because matching is on the parsed protocol, a lookalike scheme like `httpsx:` never satisfies `'https:'`.
+- A **`data:` MIME** entry (e.g. `'data:image/'`) matches a data URL whose media type starts with it. Data URLs carry no host, so there is nothing to spoof.
+- An **origin** entry includes a host (e.g. `'http://localhost'`, `'https://cdn.example.com'`) and matches only on an exact protocol + hostname match — so `'http://localhost'` accepts `http://localhost:3000/x.png` but **rejects** `http://localhost.evil.com/x.png` (and userinfo tricks like `http://localhost@evil.example/x.png`). Pin a port (`'http://localhost:3000'`) or a path prefix (`'https://cdn.example.com/imgs/'`) to narrow further.
+
+Add `'http://localhost'` (or a bare `'http:'`) only for trusted local-development hosts. In a production deployment the model output is still untrusted, so a permissive `'http:'` entry lets the model load an arbitrary tracker pixel — keep the default unless you fully control the URL source.
+
+If you need full control over the blocked-state UI (there is no entry for the Image block in the `labels` system yet), build your own block from scratch around the exported `Image` component — but pin `allowedProtocols` / `blockedLabel` yourself *after* the model props are spread, or model-streamed values will reach the component:
 
 ```tsx
 import { Image } from 'react-chorus/blocks';
-import type { BlockDefinition, BlockRenderProps } from 'react-chorus/blocks';
-import type { ImageProps } from 'react-chorus/blocks';
+import type { BlockDefinition, BlockRenderProps, ImageProps } from 'react-chorus/blocks';
 
-const HOST_ALLOWED = ['https:', 'data:image/', 'http://localhost'];
-
-function LocalDevImage(props: BlockRenderProps<ImageProps> & ImageProps) {
-  // Spread model props first, then pin the host whitelist so the model cannot
-  // re-open `javascript:` or other unsafe schemes by passing its own list.
-  return <Image {...props} allowedProtocols={HOST_ALLOWED} blockedLabel="Image blocked" />;
+function MyImage(props: BlockRenderProps<ImageProps> & ImageProps) {
+  // Host options come AFTER the spread so the model cannot override them.
+  return <Image {...props} allowedProtocols={['https:', 'data:image/']} blockedLabel="Blocked" />;
 }
 
-const LocalDevImageBlock: BlockDefinition<ImageProps> = { component: LocalDevImage };
-
-<Chorus blocks={{ image: LocalDevImageBlock }} />
+const MyImageBlock: BlockDefinition<ImageProps> = { component: MyImage };
 ```
 
-Add `'http:'` to the whitelist only for trusted local-development hosts. In a production deployment, the model output is still untrusted, so a permissive `'http:'` entry lets the model load an arbitrary tracker pixel — keep the default unless you fully control the URL source.
+#### Streamed defaults in interactive blocks (`Form`, `CalendarPicker`)
 
-The `blockedLabel` prop is the simplest way to relocalize the placeholder. There is no entry for the Image block in the `labels` system yet; pass `blockedLabel` per-instance (via a wrapper) or build your own block from scratch when you need full control over the blocked-state UI.
+Interactive starter blocks render from streamed `__render_block` props, and those props arrive incrementally: the first delta often has `fields` empty or a `defaultDate` missing, and later deltas fill them in. The `Form` and `CalendarPicker` blocks therefore treat a streamed default as the **current** value of a field until the user touches it — a "controlled until edited" model:
+
+- **Before the user edits a field**, its value tracks the latest streamed prop. A `Form` field whose `default` (or whole field entry) only shows up in a later delta becomes visible and is included in the `__form_submitted` payload; a `CalendarPicker` whose `defaultDate` arrives late populates the `<input type="date">`. If a later delta *corrects* a default, the un-edited field updates to match.
+- **After the user edits a field**, that field is "dirty" and its value is preserved — later deltas that change the streamed default no longer clobber the active input. The user's value is what gets submitted.
+- **`Form` reconciles the field set** on every change: fields added by later deltas appear with their current default, and fields removed (or renamed) by later deltas are dropped from both the rendered form and the submitted payload, so stale keys never leak. Re-adding a previously-removed field starts it from its default again rather than resurrecting an earlier edit.
+
+This sync happens during render (the [recommended alternative](https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes) to a clobbering effect), so the default is visible on the same commit the delta arrives — there is no flash of an empty input. Block identity is positional: a fresh block instance remounts with fresh state, which resets `defaultDate`/field tracking from scratch. If you build your own interactive block, follow the same rule — derive the initial value from props but stop overwriting it once the user has interacted — so streaming deltas never overwrite something a user is actively editing.
 
 <a id="react-chorusblocks-streaming"></a>
 
@@ -1880,9 +1913,9 @@ The built-in `transport` path connectors emit normalized token `usage` through `
 
 #### `onSend` path (silently inert without manual wiring)
 
-`showCost` reads `metadata.usage` that the **`transport`-path** connectors write through Chorus's internal `onStreamMetadata` wrapper. The `onSend` path does not run that wrapper — `onStreamMetadata` only fires on the `transport` path — so the cost chips stay at `$0` and the conversation total never advances. In development Chorus logs a one-time warning when `showCost` is set with `onSend` present and no `transport`.
+`showCost` reads `metadata.usage` that the **`transport`-path** connectors write through Chorus's internal `onStreamMetadata` wrapper. On the `onSend` path Chorus does not run that wrapper automatically, so the cost chips stay at `$0` and the conversation total never advances until you supply `metadata.usage` yourself. In development Chorus logs a one-time warning when `showCost` is set with `onSend` present and no `transport`. There are two supported ways to wire it.
 
-To make `showCost` work from `onSend`, hand-roll `metadata.usage` on each finalized assistant message yourself. The connector you call inside `onSend` knows the provider response shape, so attach `usage` either to the assistant `Message` you return, or via `helpers.finalizeAssistant({ metadata: { usage } })`:
+To make `showCost` work from `onSend`, attach `metadata.usage` to each finalized assistant message yourself. The connector you call inside `onSend` knows the provider response shape, so attach `usage` either to the assistant `Message` you return, or via `helpers.finalizeAssistant({ metadata: { usage } })`:
 
 ```tsx
 import { Chorus, type ChorusOnSend } from 'react-chorus';
@@ -1903,11 +1936,30 @@ const onSend: ChorusOnSend = async (text, messages, helpers) => {
 <Chorus onSend={onSend} showCost modelId="gpt-4o-mini" />
 ```
 
-The `usage` shape uses the same normalization the built-in connectors emit (`input_tokens` / `output_tokens`, with `prompt_tokens` / `completion_tokens` accepted as aliases). When you cannot wrap the connector inside `onSend` (e.g. an existing custom client that streams through Chorus only for UI), prefer `transport` so the connector's `onStreamMetadata` path is restored. `helpers.streamCallbacks()` does not currently expose an `onMetadata` channel for `onSend`; track that follow-up if you need cost-meter parity without rolling your own assignment to `metadata.usage`.
+The `usage` payload is run through the same normalizer the built-in connectors use, so you can attach the **raw** provider field names directly — `input_tokens` / `output_tokens` (Anthropic, OpenAI Responses), `prompt_tokens` / `completion_tokens` (OpenAI Chat), Gemini's `promptTokenCount` / `candidatesTokenCount`, the AI SDK's `inputTokens` / `outputTokens` — as well as the normalized `promptTokens` / `completionTokens` / `totalTokens` shape. `modelId` is optional and falls back to the `<Chorus modelId>` prop.
+
+##### Streamed `onSend` via `streamCallbacks().onMetadata`
+
+If your `onSend` bridges a connector through `useChorusStream(...).send()`, you do not need to assemble `usage` by hand. `helpers.streamCallbacks()` returns an `onMetadata` channel that both forwards provider metadata to the `<Chorus onStreamMetadata>` prop **and** attaches the connector-emitted `usage` to the streaming assistant message — keyed by the live pending message id, so it lands even when the `usage` payload arrives in the same tick as the first or final chunk:
+
+```tsx
+import { Chorus, type ChorusOnSend } from 'react-chorus';
+import { useChorusStream } from 'react-chorus';
+
+function Chat() {
+  const { send } = useChorusStream('/api/chat', { connector: 'openai' });
+  const onSend: ChorusOnSend = (text, messages, helpers) =>
+    // streamCallbacks().onMetadata attaches the connector's usage for you.
+    send(text, messages, helpers.streamCallbacks(), helpers.signal);
+  return <Chorus onSend={onSend} showCost modelId="gpt-4o-mini" />;
+}
+```
+
+When you cannot wrap the connector inside `onSend` at all (e.g. an existing custom client that streams through Chorus only for UI), prefer `transport` so the connector's `onStreamMetadata` path is restored automatically.
 
 Types: `BudgetExceededContext`, `ModelPricing`, `PricingTable` are re-exported from the root barrel for typing `onBudgetExceeded` and `pricing` overrides.
 
-Types: every public type re-exported from the root barrel is also importable from `react-chorus/headless` — including `Message`, `AnyChorusMessage`, `UserMessage`, `AssistantMessage`, `SystemMessage`, `ToolMessage`, `Role`, `ToolCall`, `MessageSource`, `MessageCitation`, `MessageSourceType`, `Attachment`, `AttachmentError`, `AttachmentErrorReason`, `AttachmentSource`, `AttachmentUploadResult`, `UploadAttachment`, `UploadAttachmentOptions`, `StorageAdapter`, `ConnectorName`, `Connector`, `ConnectorResult`, `ConnectorToolDelta`, `Transport`, `FetchSSETransportOptions`, `FetchTransportInit`, `WebSocketTransport`, `WebSocketTransportOptions`, `SendCallbacks`, `StreamOptions`, `ChorusProps` (aliased to `ChorusHeadlessProps`), `ChorusRef`, `ChorusSendHelpers`, `ChorusSendPath`, `ChorusOnSend`, `ChorusOnFinish`, `ChorusOnAbort`, `ChorusOnStreamDone`, `ChorusOnToolCall`, `ChorusOnToolDelta`, `ChorusAbortContext`, `ChorusAbortReason`, `ChorusAbortSource`, `ChorusFinishContext`, `ChorusStreamDoneContext`, `ChorusStreamDoneReason`, `ChorusToolCallContext`, `ChorusToolDeltaContext`, `ChorusToolLoopContext`, `ChorusToolRegistry`, `ChorusToolHandler`, `ChorusConfirmClearConversation`, `ChorusClearConversationContext`, `ChorusConfirmDeleteMessage`, `ChorusDeleteMessageContext`, `ChorusShouldContinueToolLoop`, `ChorusMessagesChangeContext`, `ChorusMessagesChangeReason`, `ChorusMessagesChangeSource`, `ChorusToolDefinition`, `RenderErrorContext`, `RenderMessageContext`, `RenderMessageRootProps`, `MessageBubbleProps`, `MessageBubbleSlots`, `MessageMarkdownProps`, `MessageRenderActions`, `MessageTimestampFormatter`, `MessageCopyResult`, `MessageFeedback`, `GetMessageFeedback`, `ChatInputProps`, `ChatInputHandle`, `ChatInputFocusOptions`, `ChatWindowProps`, `ConversationListProps`, `ConfirmDeleteConversation`, `ConfirmDeleteConversationContext`, `ConversationStorageError`, `ConversationStorageOperation`, `ConversationSummary`, `RenameFromFirstMessageOptions`, `UseConversationsOptions`, `UseConversationsResult`, `ChorusPersistenceError`, `PersistenceOperation`, `PersistenceWriteOptions`, `SerializeMessages`, `DeserializeMessages`, `UseChorusPersistenceOptions`, `UseChorusPersistenceResult`, `ChorusTranscriptActions`, `ChorusTranscriptActionsOptions`, `TranscriptExportFormat`, `TranscriptFormatInfo`, `RenderAttachmentErrorContext`, `Palette`, `MarkdownProps`, `MarkdownSanitizer`, `CodeBlockCopy`, `CodeBlockCopyContext`, `CodeBlockCopyRenderer`, `ProviderToolsOption`, `ProviderToolsSource`, all `ChorusLabels` sub-shapes, and every provider request type (`AnthropicMessagesBody`, `AnthropicTool`, `OpenAIChatCompletionsBody`, `GeminiGenerateContentBody`, etc.).
+Types: every public type re-exported from the root barrel is also importable from `react-chorus/headless` — including `Message`, `AnyChorusMessage`, `UserMessage`, `AssistantMessage`, `SystemMessage`, `ToolMessage`, `Role`, `ToolCall`, `MessageSource`, `MessageCitation`, `MessageSourceType`, `Attachment`, `AttachmentError`, `AttachmentErrorReason`, `AttachmentSource`, `AttachmentUploadResult`, `UploadAttachment`, `UploadAttachmentOptions`, `StorageAdapter`, `ConnectorName`, `Connector`, `ConnectorResult`, `ConnectorToolDelta`, `Transport`, `FetchSSETransportOptions`, `FetchTransportInit`, `WebSocketTransport`, `WebSocketTransportOptions`, `SendCallbacks`, `StreamOptions`, `ChorusProps` (aliased to `ChorusHeadlessProps`), `ChorusRef`, `ChorusSendHelpers`, `ChorusSendPath`, `ChorusOnSend`, `ChorusOnFinish`, `ChorusOnAbort`, `ChorusOnStreamDone`, `ChorusOnToolCall`, `ChorusOnToolDelta`, `ChorusAbortContext`, `ChorusAbortReason`, `ChorusAbortSource`, `ChorusFinalizeAssistantOptions`, `ChorusFinishContext`, `ChorusStreamDoneContext`, `ChorusStreamDoneReason`, `ChorusToolCallContext`, `ChorusToolDeltaContext`, `ChorusToolLoopContext`, `ChorusToolRegistry`, `ChorusToolHandler`, `ChorusConfirmClearConversation`, `ChorusClearConversationContext`, `ChorusConfirmDeleteMessage`, `ChorusDeleteMessageContext`, `ChorusShouldContinueToolLoop`, `ChorusMessagesChangeContext`, `ChorusMessagesChangeReason`, `ChorusMessagesChangeSource`, `ChorusToolDefinition`, `RenderErrorContext`, `RenderMessageContext`, `RenderMessageRootProps`, `MessageBubbleProps`, `MessageBubbleSlots`, `MessageMarkdownProps`, `MessageRenderActions`, `MessageTimestampFormatter`, `MessageCopyResult`, `MessageFeedback`, `GetMessageFeedback`, `ChatInputProps`, `ChatInputHandle`, `ChatInputFocusOptions`, `ChatWindowProps`, `ConversationListProps`, `ConfirmDeleteConversation`, `ConfirmDeleteConversationContext`, `ConversationStorageError`, `ConversationStorageOperation`, `ConversationSummary`, `RenameFromFirstMessageOptions`, `UseConversationsOptions`, `UseConversationsResult`, `ChorusPersistenceError`, `PersistenceOperation`, `PersistenceWriteOptions`, `SerializeMessages`, `DeserializeMessages`, `UseChorusPersistenceOptions`, `UseChorusPersistenceResult`, `ChorusTranscriptActions`, `ChorusTranscriptActionsOptions`, `TranscriptExportFormat`, `TranscriptFormatInfo`, `RenderAttachmentErrorContext`, `Palette`, `MarkdownProps`, `MarkdownSanitizer`, `CodeBlockCopy`, `CodeBlockCopyContext`, `CodeBlockCopyRenderer`, `ProviderToolsOption`, `ProviderToolsSource`, all `ChorusLabels` sub-shapes, and every provider request type (`AnthropicMessagesBody`, `AnthropicTool`, `OpenAIChatCompletionsBody`, `GeminiGenerateContentBody`, etc.).
 
 ## Message Shape
 

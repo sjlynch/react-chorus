@@ -4,6 +4,8 @@ import { Markdown, type MarkdownSanitizer } from './Markdown';
 import { diffLines } from '../artifacts/diffVersions';
 import { getHljs, highlightCode, isHljsLoaded, loadHljsTheme } from '../utils/hljsLoader';
 import { joinClasses } from '../utils/className';
+import { DEFAULT_ARTIFACT_LABELS } from '../labels/artifacts';
+import type { ChorusArtifactLabels } from '../labels/types';
 
 export interface ChorusArtifactPanelProps {
   /** Full artifact registry, in first-seen order. */
@@ -26,6 +28,13 @@ export interface ChorusArtifactPanelProps {
   renderReactArtifact?: (version: ArtifactVersion) => React.ReactNode;
   /** Class name applied to the panel root. */
   className?: string;
+  /**
+   * Partial overrides for the panel's built-in strings (title fallback,
+   * version/diff/copy/download actions, react placeholder/error, …). Omitted
+   * keys fall back to the English defaults. `<Chorus>` forwards
+   * `labels.artifacts` here automatically.
+   */
+  labels?: Partial<ChorusArtifactLabels>;
 }
 
 interface KindBodyProps {
@@ -33,6 +42,7 @@ interface KindBodyProps {
   codeTheme: 'dark' | 'light';
   markdownSanitizer?: MarkdownSanitizer;
   renderReactArtifact?: (version: ArtifactVersion) => React.ReactNode;
+  labels: ChorusArtifactLabels;
 }
 
 function CodeBody({ version, codeTheme }: { version: ArtifactVersion; codeTheme: 'dark' | 'light' }) {
@@ -59,7 +69,7 @@ function CodeBody({ version, codeTheme }: { version: ArtifactVersion; codeTheme:
   );
 }
 
-function HtmlBody({ version }: { version: ArtifactVersion }) {
+function HtmlBody({ version, labels }: { version: ArtifactVersion; labels: ChorusArtifactLabels }) {
   // Sandboxed iframe — `allow-scripts` *without* `allow-same-origin` means the
   // iframe runs as a unique origin, so `window.parent` / `top` are blocked from
   // touching this document by the same-origin policy. We build the iframe via
@@ -69,7 +79,7 @@ function HtmlBody({ version }: { version: ArtifactVersion }) {
       className="chorus-artifact-iframe"
       sandbox="allow-scripts"
       srcDoc={version.content}
-      title={version.title || 'Artifact preview'}
+      title={version.title || labels.previewTitle}
     />
   );
 }
@@ -82,38 +92,50 @@ function DocumentBody({ version, markdownSanitizer, codeTheme }: { version: Arti
   );
 }
 
-function ReactBody({ version, renderReactArtifact }: { version: ArtifactVersion; renderReactArtifact?: (v: ArtifactVersion) => React.ReactNode }) {
+function ReactBody({ version, renderReactArtifact, labels }: { version: ArtifactVersion; renderReactArtifact?: (v: ArtifactVersion) => React.ReactNode; labels: ChorusArtifactLabels }) {
   if (!renderReactArtifact) {
     return (
       <div className="chorus-artifact-placeholder">
-        <p>React artifacts require a host-supplied <code>renderReactArtifact</code> handler that routes through the block registry.</p>
+        <p>{labels.reactPlaceholder}</p>
       </div>
     );
   }
+  // Key the boundary on the artifact identity (id), the active version, and its
+  // content. When the reader switches artifacts/versions — or a streaming
+  // version finishes — a crash from one version no longer poisons the next.
+  const resetKey = `${version.id} ${version.version} ${version.content}`;
   return (
-    <ArtifactErrorBoundary>
+    <ArtifactErrorBoundary resetKey={resetKey} errorLabel={labels.reactError}>
       <div className="chorus-artifact-react">{renderReactArtifact(version)}</div>
     </ArtifactErrorBoundary>
   );
 }
 
-class ArtifactErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {
+class ArtifactErrorBoundary extends React.Component<{ resetKey: string; children: React.ReactNode; errorLabel: (message: string) => string }, { error: Error | null }> {
   state = { error: null as Error | null };
   static getDerivedStateFromError(error: Error) { return { error }; }
+  componentDidUpdate(prevProps: { resetKey: string }) {
+    // Clear a latched error only when the rendered version actually changed, so
+    // a bad v1 (or a transient crash) stops blocking a valid v2 while repeated
+    // failures on the same version keep showing the placeholder.
+    if (this.state.error !== null && prevProps.resetKey !== this.props.resetKey) {
+      this.setState({ error: null });
+    }
+  }
   render() {
     if (this.state.error) {
-      return <div className="chorus-artifact-placeholder">React artifact failed to render: {this.state.error.message}</div>;
+      return <div className="chorus-artifact-placeholder">{this.props.errorLabel(this.state.error.message)}</div>;
     }
     return this.props.children;
   }
 }
 
-function ArtifactBody({ version, codeTheme, markdownSanitizer, renderReactArtifact }: KindBodyProps) {
+function ArtifactBody({ version, codeTheme, markdownSanitizer, renderReactArtifact, labels }: KindBodyProps) {
   switch (version.kind) {
     case 'code': return <CodeBody version={version} codeTheme={codeTheme} />;
     case 'document': return <DocumentBody version={version} codeTheme={codeTheme} markdownSanitizer={markdownSanitizer} />;
-    case 'html': return <HtmlBody version={version} />;
-    case 'react': return <ReactBody version={version} renderReactArtifact={renderReactArtifact} />;
+    case 'html': return <HtmlBody version={version} labels={labels} />;
+    case 'react': return <ReactBody version={version} renderReactArtifact={renderReactArtifact} labels={labels} />;
   }
 }
 
@@ -188,7 +210,9 @@ export function ChorusArtifactPanel({
   markdownSanitizer,
   renderReactArtifact,
   className,
+  labels,
 }: ChorusArtifactPanelProps) {
+  const L = labels ? { ...DEFAULT_ARTIFACT_LABELS, ...labels } : DEFAULT_ARTIFACT_LABELS;
   const [showDiff, setShowDiff] = React.useState(false);
   const [copyState, setCopyState] = React.useState<'idle' | 'copied' | 'failed'>('idle');
 
@@ -217,16 +241,16 @@ export function ChorusArtifactPanel({
     <aside
       className={joinClasses('chorus-artifact-panel', className)}
       role="complementary"
-      aria-label={`Artifact: ${artifact.title}`}
+      aria-label={L.panelAriaLabel(artifact.title || L.untitled)}
     >
       <header className="chorus-artifact-header">
         <div className="chorus-artifact-header-title-row">
-          <h3 className="chorus-artifact-title">{artifact.title || 'Untitled artifact'}</h3>
+          <h3 className="chorus-artifact-title">{artifact.title || L.untitled}</h3>
           <button
             type="button"
             className="chorus-artifact-close"
             onClick={onClose}
-            aria-label="Close artifact panel"
+            aria-label={L.close}
           >×</button>
         </div>
         <div className="chorus-artifact-header-controls">
@@ -236,7 +260,7 @@ export function ChorusArtifactPanel({
               className="chorus-artifact-version-btn"
               onClick={() => onChangeVersion(activeVersion - 1)}
               disabled={!canPrev}
-              aria-label="Previous version"
+              aria-label={L.previousVersion}
             >◀</button>
             <span className="chorus-artifact-version-label">
               {activeVersion}/{artifact.versions.length}
@@ -246,7 +270,7 @@ export function ChorusArtifactPanel({
               className="chorus-artifact-version-btn"
               onClick={() => onChangeVersion(activeVersion + 1)}
               disabled={!canNext}
-              aria-label="Next version"
+              aria-label={L.nextVersion}
             >▶</button>
           </div>
           <div className="chorus-artifact-actions">
@@ -256,26 +280,26 @@ export function ChorusArtifactPanel({
                 className={joinClasses('chorus-artifact-action', showDiff && 'chorus-artifact-action--active')}
                 onClick={() => setShowDiff(s => !s)}
                 aria-pressed={showDiff}
-              >Diff</button>
+              >{L.diff}</button>
             )}
             <button
               type="button"
               className="chorus-artifact-action"
               onClick={onCopy}
             >
-              {copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Copy failed' : 'Copy'}
+              {copyState === 'copied' ? L.copied : copyState === 'failed' ? L.copyFailed : L.copy}
             </button>
             <button
               type="button"
               className="chorus-artifact-action"
               onClick={() => downloadArtifact(version)}
-            >Download</button>
+            >{L.download}</button>
             {version.kind !== 'html' && (
               <button
                 type="button"
                 className="chorus-artifact-action"
                 onClick={() => openInNewTab(version)}
-              >Open in new tab</button>
+              >{L.openInNewTab}</button>
             )}
           </div>
         </div>
@@ -289,6 +313,7 @@ export function ChorusArtifactPanel({
             codeTheme={codeTheme}
             markdownSanitizer={markdownSanitizer}
             renderReactArtifact={renderReactArtifact}
+            labels={L}
           />
         )}
       </div>

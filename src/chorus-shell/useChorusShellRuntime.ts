@@ -394,8 +394,9 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
       cost: costMeter.cost,
       streamingMessageId: session.streamingMessageId,
       defaultModelId: modelId,
+      labels: resolvedLabels.cost,
     });
-  }, [showCost, costMeter.cost, session.streamingMessageId, modelId]);
+  }, [showCost, costMeter.cost, session.streamingMessageId, modelId, resolvedLabels.cost]);
 
   return {
     rootRef,
@@ -446,6 +447,7 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
     mcpStatus: {
       servers: mcp.servers,
       reconnect: mcp.reconnect,
+      labels: resolvedLabels.mcp,
     },
     approvalContextValue,
     blockRuntime: {
@@ -454,7 +456,7 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
       emit: blockEmit,
       sending: shellState.visualSending,
     },
-    costView: showCost ? { cost: costMeter.cost, budget: isPositiveFinite(budgetAlert) ? budgetAlert : undefined } : undefined,
+    costView: showCost ? { cost: costMeter.cost, budget: isPositiveFinite(budgetAlert) ? budgetAlert : undefined, labels: resolvedLabels.cost } : undefined,
     composer: buildComposerView<TMeta>({
       composer,
       composerActions,
@@ -504,6 +506,7 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
       codeTheme: codeBlockTheme,
       markdownSanitizer,
       renderReactArtifact,
+      labels: resolvedLabels.artifacts,
       handle: artifactHandle,
     } satisfies ChorusArtifactPanelView,
   };

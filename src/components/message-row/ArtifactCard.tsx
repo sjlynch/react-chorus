@@ -1,5 +1,7 @@
 import { useChorusArtifactHandle } from '../../artifacts/artifactContext';
 import type { ArtifactKind } from '../../types';
+import { DEFAULT_ARTIFACT_LABELS } from '../../labels/artifacts';
+import type { ChorusArtifactLabels } from '../../labels/types';
 
 export interface ArtifactCardProps {
   id: string;
@@ -17,17 +19,14 @@ export interface ArtifactCardProps {
    * arrive without the host needing to pass a version explicitly.
    */
   messageId?: string;
-  /** Optional override for the open-button text. */
+  /** Optional override for the open-button text. Takes precedence over `labels.open`. */
   openLabel?: string;
-}
-
-function kindLabel(kind: ArtifactKind): string {
-  switch (kind) {
-    case 'code': return 'Code';
-    case 'document': return 'Document';
-    case 'html': return 'HTML';
-    case 'react': return 'React';
-  }
+  /**
+   * Partial overrides for the card's strings (title fallback, per-kind label,
+   * open button). Omitted keys fall back to the English defaults. `<Chorus>`
+   * forwards `labels.artifacts` here automatically.
+   */
+  labels?: Partial<ChorusArtifactLabels>;
 }
 
 /**
@@ -37,7 +36,8 @@ function kindLabel(kind: ArtifactKind): string {
  * If no handle is wired (e.g. used outside `<Chorus>`), the card stays
  * non-interactive so it never throws.
  */
-export function ArtifactCard({ id, kind, title, version, messageId, openLabel = 'Open' }: ArtifactCardProps) {
+export function ArtifactCard({ id, kind, title, version, messageId, openLabel, labels }: ArtifactCardProps) {
+  const L = labels ? { ...DEFAULT_ARTIFACT_LABELS, ...labels } : DEFAULT_ARTIFACT_LABELS;
   const handle = useChorusArtifactHandle();
   const resolvedVersion = version
     ?? (messageId && handle ? handle.getMessageVersion(id, messageId) ?? undefined : undefined)
@@ -46,9 +46,9 @@ export function ArtifactCard({ id, kind, title, version, messageId, openLabel = 
   return (
     <div className="chorus-artifact-card" data-chorus-artifact-id={id} data-chorus-artifact-kind={kind}>
       <div className="chorus-artifact-card-body">
-        <div className="chorus-artifact-card-title">{title || 'Untitled artifact'}</div>
+        <div className="chorus-artifact-card-title">{title || L.untitled}</div>
         <div className="chorus-artifact-card-meta">
-          <span className="chorus-artifact-card-kind">{kindLabel(kind)}</span>
+          <span className="chorus-artifact-card-kind">{L.kind(kind)}</span>
           {resolvedVersion > 1 && <span className="chorus-artifact-card-version">v{resolvedVersion}</span>}
         </div>
       </div>
@@ -58,7 +58,7 @@ export function ArtifactCard({ id, kind, title, version, messageId, openLabel = 
         onClick={onOpen}
         disabled={!onOpen}
       >
-        {openLabel}
+        {openLabel ?? L.open}
       </button>
     </div>
   );

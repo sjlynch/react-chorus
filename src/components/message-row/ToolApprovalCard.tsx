@@ -1,6 +1,8 @@
 import React from 'react';
 import type { ToolCall } from '../../types';
 import { warnOnceInDev } from '../../utils/warnings';
+import { DEFAULT_APPROVAL_LABELS } from '../../labels/approval';
+import type { ChorusApprovalLabels } from '../../labels/types';
 import { ToolApprovalContext } from './approvalContext';
 
 function fmtJson(value: unknown): string {
@@ -12,23 +14,15 @@ function fmtJson(value: unknown): string {
   }
 }
 
-export interface ToolApprovalCardLabels {
-  title: string;
-  serverPrefix: string;
-  inputLabel: string;
-  allowOnce: string;
-  allowAlways: string;
-  deny: string;
-}
+/**
+ * Label shape for the approval card. This is the canonical `ChorusApprovalLabels`
+ * section (also reachable as `<Chorus labels={{ approval }}>`); the alias and
+ * `DEFAULT_TOOL_APPROVAL_LABELS` re-export are kept for the standalone
+ * `<ToolApprovalCard>` public API.
+ */
+export type ToolApprovalCardLabels = ChorusApprovalLabels;
 
-export const DEFAULT_TOOL_APPROVAL_LABELS: ToolApprovalCardLabels = {
-  title: 'Approval required',
-  serverPrefix: 'via',
-  inputLabel: 'Input',
-  allowOnce: 'Allow once',
-  allowAlways: 'Allow always for this tool',
-  deny: 'Deny',
-};
+export const DEFAULT_TOOL_APPROVAL_LABELS: ChorusApprovalLabels = DEFAULT_APPROVAL_LABELS;
 
 export interface ToolApprovalCardProps {
   toolCall: ToolCall;

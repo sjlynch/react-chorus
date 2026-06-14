@@ -28,6 +28,14 @@ function ThrowingComponent(): React.ReactElement {
   throw new Error('component blew up');
 }
 
+// Throws while props are partial (no `ready` flag yet), renders once they
+// complete — the streaming → done crash-then-recover shape from the bug report.
+function FlakyBlock({ props }: BlockRenderProps<{ ready?: boolean; label?: string }> & { ready?: boolean; label?: string }): React.ReactElement {
+  const p = props as { ready?: boolean; label?: string };
+  if (!p.ready) throw new Error('props not ready');
+  return <div data-testid="flaky-block">{p.label ?? '—'}</div>;
+}
+
 function renderWithBlocks(blocks: BlockRegistry, message: Message) {
   return render(
     <BlockProvider blocks={blocks} emit={() => {}}>
@@ -112,6 +120,68 @@ describe('BlockRenderer', () => {
       renderWithBlocks({ BoomBlock: ThrowBlock }, message);
       expect(screen.getByText('block error')).toBeInTheDocument();
       expect(screen.getByText(/component blew up/)).toBeInTheDocument();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('recovers when a block crashes on partial props then succeeds after props update', () => {
+    const blocks = { FlakyBlock: { component: FlakyBlock } as BlockDefinition<unknown> };
+    const streaming: Message = {
+      id: 't1',
+      role: 'tool',
+      text: '',
+      toolCall: { id: 't1', name: '__render_block' },
+      block: { name: 'FlakyBlock', props: { ready: false }, status: 'streaming' },
+    };
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const { rerender } = renderWithBlocks(blocks, streaming);
+      // Crashed on partial props → error fallback.
+      expect(screen.getByText('block error')).toBeInTheDocument();
+      expect(screen.queryByTestId('flaky-block')).toBeNull();
+
+      // Final valid props arrive: the boundary must reset and render success.
+      const done: Message = {
+        ...streaming,
+        block: { name: 'FlakyBlock', props: { ready: true, label: 'all set' }, status: 'done' },
+      };
+      rerender(
+        <BlockProvider blocks={blocks} emit={() => {}}>
+          <MessageBubble message={done} />
+        </BlockProvider>,
+      );
+      expect(screen.queryByText('block error')).toBeNull();
+      expect(screen.getByTestId('flaky-block')).toHaveTextContent('all set');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('keeps showing the fallback when the same props keep throwing (no reset on stable input)', () => {
+    const blocks = { FlakyBlock: { component: FlakyBlock } as BlockDefinition<unknown> };
+    const props = { ready: false };
+    const message: Message = {
+      id: 't1',
+      role: 'tool',
+      text: '',
+      toolCall: { id: 't1', name: '__render_block' },
+      // Referentially stable props object reused across renders.
+      block: { name: 'FlakyBlock', props, status: 'streaming' },
+    };
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const { rerender } = renderWithBlocks(blocks, message);
+      expect(screen.getByText('block error')).toBeInTheDocument();
+      // Re-render an unrelated parent change with the same block input: the
+      // boundary must NOT reset (and re-crash) — it stays on the fallback.
+      rerender(
+        <BlockProvider blocks={blocks} emit={() => {}}>
+          <MessageBubble message={{ ...message, block: { ...message.block!, props } }} />
+        </BlockProvider>,
+      );
+      expect(screen.getByText('block error')).toBeInTheDocument();
+      expect(screen.queryByTestId('flaky-block')).toBeNull();
     } finally {
       spy.mockRestore();
     }

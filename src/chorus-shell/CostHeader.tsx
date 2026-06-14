@@ -1,10 +1,14 @@
 import { formatUsd } from '../utils/cost';
 import type { ConversationCost } from '../utils/cost';
+import { DEFAULT_COST_LABELS } from '../labels/cost';
+import type { ChorusCostLabels } from '../labels/types';
 
 export interface CostHeaderProps {
   cost: ConversationCost;
   /** Optional budget threshold — when set, the header annotates over-budget state. */
   budget?: number;
+  /** Localized cost-meter strings. Defaults to the built-in English labels. */
+  labels?: ChorusCostLabels;
 }
 
 /**
@@ -16,12 +20,12 @@ export interface CostHeaderProps {
  * that this widget does not otherwise host. A native tooltip stays accessible
  * to keyboard and screen reader users without dragging in popover plumbing.
  */
-export function CostHeader({ cost, budget }: CostHeaderProps) {
+export function CostHeader({ cost, budget, labels = DEFAULT_COST_LABELS }: CostHeaderProps) {
   const overBudget = budget !== undefined && cost.total > budget;
   const models = Object.entries(cost.perModel);
   const breakdown = models.length > 0
     ? models.map(([model, usd]) => `${model}: ${formatUsd(usd)}`).join('\n')
-    : 'No usage data yet.';
+    : labels.noUsage;
 
   return (
     <div
@@ -30,13 +34,13 @@ export function CostHeader({ cost, budget }: CostHeaderProps) {
       role="status"
       aria-live="polite"
     >
-      <span className="chorus-cost-header-label">Cost</span>
+      <span className="chorus-cost-header-label">{labels.header}</span>
       <span className="chorus-cost-header-total" title={breakdown}>
         {formatUsd(cost.total)}
       </span>
       {budget !== undefined && (
         <span className="chorus-cost-header-budget">
-          / {formatUsd(budget)} budget
+          {labels.budgetSuffix(formatUsd(budget))}
         </span>
       )}
     </div>

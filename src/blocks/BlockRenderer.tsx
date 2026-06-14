@@ -6,6 +6,15 @@ import type { BlockDefinition } from './types';
 interface BlockErrorBoundaryProps {
   blockName: string;
   rawProps: unknown;
+  /**
+   * Stable key derived from the block identity and render input. When it
+   * changes while the boundary is latched in an error state, the boundary
+   * clears the error and re-attempts rendering — so a crash on partial/
+   * streaming props does not poison the final valid props. A referentially
+   * stable (or value-equal) key leaves a latched error in place, preserving
+   * the safety behavior for repeated errors on the same inputs.
+   */
+  resetKey: string;
   children: React.ReactNode;
 }
 
@@ -28,6 +37,15 @@ class BlockErrorBoundary extends React.Component<BlockErrorBoundaryProps, BlockE
 
   componentDidCatch() {
     // Intentionally silent: surfacing through the inline error chip is enough.
+  }
+
+  componentDidUpdate(prevProps: BlockErrorBoundaryProps) {
+    // Only clear a latched error when the render input actually changed. This
+    // does not remount healthy children on every parent render (the children
+    // reconcile normally); it just lets the next valid props get a render.
+    if (this.state.error !== null && prevProps.resetKey !== this.props.resetKey) {
+      this.setState({ error: null });
+    }
   }
 
   render() {
@@ -115,6 +133,15 @@ export function BlockRenderer({ block }: BlockRendererProps) {
   const { blocks, emit } = useBlockRuntime();
   const def = blocks?.[block.name] as BlockDefinition<unknown> | undefined;
 
+  // Stable key for the error boundary: identity (name) + lifecycle (status) +
+  // a value representation of the streamed props. Memoized on `block.props` so
+  // referentially-stable props don't churn the key; the stringify also keeps
+  // the key stable when a re-render produces a value-equal-but-new props object.
+  const resetKey = React.useMemo(
+    () => `${block.name} ${block.status} ${safeStringify(block.props)}`,
+    [block.name, block.status, block.props],
+  );
+
   if (!def) {
     return <UnknownBlockFallback name={block.name} rawProps={block.props} />;
   }
@@ -153,7 +180,7 @@ export function BlockRenderer({ block }: BlockRendererProps) {
   const componentProps = (propsForRender && typeof propsForRender === 'object') ? (propsForRender as Record<string, unknown>) : {};
   return (
     <div className="chorus-block" data-chorus-block-name={block.name} data-chorus-block-status={block.status}>
-      <BlockErrorBoundary blockName={block.name} rawProps={block.props}>
+      <BlockErrorBoundary blockName={block.name} rawProps={block.props} resetKey={resetKey}>
         <Component
           {...componentProps}
           props={propsForRender}

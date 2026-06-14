@@ -13,8 +13,19 @@ export type { ConfirmDeleteConversation, ConfirmDeleteConversationContext, Conve
 export { Chorus } from './Chorus';
 export { ChorusTheme } from './components/ChorusTheme';
 export type { Palette } from './components/ChorusTheme';
-export { DEFAULT_ATTACHMENT_LABELS, DEFAULT_CHORUS_LABELS, DEFAULT_SOURCE_LABELS, resolveChorusLabels } from './labels';
+export {
+  DEFAULT_APPROVAL_LABELS,
+  DEFAULT_ARTIFACT_LABELS,
+  DEFAULT_ATTACHMENT_LABELS,
+  DEFAULT_CHORUS_LABELS,
+  DEFAULT_COST_LABELS,
+  DEFAULT_MCP_LABELS,
+  DEFAULT_SOURCE_LABELS,
+  resolveChorusLabels,
+} from './labels';
 export type {
+  ChorusApprovalLabels,
+  ChorusArtifactLabels,
   ChorusAttachmentFailureContext,
   ChorusAttachmentLabels,
   ChorusAttachmentTooLargeContext,
@@ -23,7 +34,9 @@ export type {
   ChorusCodeCopyLabels,
   ChorusComposerLabels,
   ChorusConversationListLabels,
+  ChorusCostLabels,
   ChorusLabels,
+  ChorusMcpLabels,
   ChorusMessageActionLabels,
   ChorusSourceLabels,
   ChorusSpeakerLabels,
@@ -31,7 +44,7 @@ export type {
   ChorusTranscriptLabels,
   ResolvedChorusLabels,
 } from './labels';
-export type { BudgetExceededContext, ChorusAbortContext, ChorusAbortReason, ChorusAbortSource, ChorusClearConversationContext, ChorusConfirmClearConversation, ChorusConfirmDeleteMessage, ChorusConnectorOptions, ChorusDeleteMessageContext, ChorusFinishContext, ChorusMessagesChangeContext, ChorusMessagesChangeReason, ChorusMessagesChangeSource, ChorusOnAbort, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusProps, ChorusProviderConfig, ChorusRef, ChorusSendHelpers, ChorusSendPath, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusStreamDoneReason, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolHandler, ChorusToolLoopContext, ChorusToolPolicy, ChorusToolRegistry, ChorusTransformRequest, ChorusTransformRequestContext, ChorusTransformRequestReason, ChorusTransformRequestResult, FetchTransportInit, McpServerConfig, ModelPricing, PricingTable, ToolApprovalDecision, ToolApprovalPolicy, ToolPolicyScope } from './Chorus';
+export type { BudgetExceededContext, ChorusAbortContext, ChorusAbortReason, ChorusAbortSource, ChorusClearConversationContext, ChorusConfirmClearConversation, ChorusConfirmDeleteMessage, ChorusConnectorOptions, ChorusDeleteMessageContext, ChorusFinalizeAssistantOptions, ChorusFinishContext, ChorusMessagesChangeContext, ChorusMessagesChangeReason, ChorusMessagesChangeSource, ChorusOnAbort, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusProps, ChorusProviderConfig, ChorusRef, ChorusSendHelpers, ChorusSendPath, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusStreamDoneReason, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolHandler, ChorusToolLoopContext, ChorusToolPolicy, ChorusToolRegistry, ChorusTransformRequest, ChorusTransformRequestContext, ChorusTransformRequestReason, ChorusTransformRequestResult, FetchTransportInit, McpServerConfig, ModelPricing, PricingTable, ToolApprovalDecision, ToolApprovalPolicy, ToolPolicyScope } from './Chorus';
 
 export type { Message } from './types';
 export type {
