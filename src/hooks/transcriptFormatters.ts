@@ -102,7 +102,12 @@ export function messageMatchesQuery<TMeta>(message: Message<TMeta>, needle: stri
 function exportMarkdown<TMeta>(messages: Message<TMeta>[], roleLabels?: Partial<Record<Role, string>>): string {
   return messages
     .map((message) => {
-      const label = roleLabels?.[message.role] ?? DEFAULT_ROLE_LABELS[message.role];
+      const roleLabel = roleLabels?.[message.role] ?? DEFAULT_ROLE_LABELS[message.role];
+      // A multi-character / multi-agent transcript reads "## Captain Hook" not
+      // "## Assistant"; the role label is the fallback when no speaker is set,
+      // matching what the bubble shows on-screen.
+      const speakerName = message.speaker?.name?.trim();
+      const label = speakerName || roleLabel;
       const blocks: string[] = [];
 
       if (message.role === 'tool') {

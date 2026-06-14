@@ -138,6 +138,7 @@ interface BuildTranscriptPropsArgs<TMeta> {
   renderMessage: ChorusProps<TMeta>['renderMessage'];
   showTimestamps: boolean;
   formatTimestamp: ChorusProps<TMeta>['formatTimestamp'];
+  showSpeakerAvatars: boolean;
   suggestedPrompts: ChorusProps<TMeta>['suggestedPrompts'];
   defaultHiddenRoles: NonNullable<ChorusProps<TMeta>['hiddenRoles']>;
   renderMessageFooter?: (message: Message<TMeta>) => React.ReactNode;
@@ -163,6 +164,7 @@ export function buildTranscriptProps<TMeta>({
   renderMessage,
   showTimestamps,
   formatTimestamp,
+  showSpeakerAvatars,
   suggestedPrompts,
   defaultHiddenRoles,
   renderMessageFooter,
@@ -194,6 +196,7 @@ export function buildTranscriptProps<TMeta>({
     showJumpToBottomButton: shellState.resolvedShowJumpToBottomButton,
     showTimestamps,
     formatTimestamp,
+    showSpeakerAvatars,
     streamingMessageId: session.streamingMessageId,
     suggestedPrompts: shellState.canRenderEmptyAffordance ? suggestedPrompts : undefined,
     suggestedPromptsDisabled: shellState.writesDisabled,

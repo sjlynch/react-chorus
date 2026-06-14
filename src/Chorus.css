@@ -159,6 +159,12 @@
 .chorus-assistant .chorus-msg-content { align-items: flex-start; }
 .chorus-msg-content .chorus-bubble { max-width: 100%; }
 
+/* Visible speaker badge (rendered when message.speaker is set) */
+.chorus-msg-speaker { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 4px; color: var(--chorus-chat-text, #f3f4f6); font-size: 12px; line-height: 1.2; font-weight: 600; }
+.chorus-user .chorus-msg-speaker { flex-direction: row-reverse; }
+.chorus-speaker-avatar { width: 20px; height: 20px; border-radius: 9999px; object-fit: cover; background: var(--chorus-input-bg, rgba(255,255,255,0.08)); border: 1px solid var(--chorus-border, #2a2a2a); }
+.chorus-speaker-name { color: inherit; }
+
 /* Assistant source/citation list */
 .chorus-sources { margin-top: 6px; max-width: 100%; color: var(--chorus-action-text, #a3a3a3); font-size: 12px; line-height: 1.4; }
 .chorus-sources-title { margin-bottom: 3px; font-weight: 600; color: var(--chorus-chat-text, #f3f4f6); }

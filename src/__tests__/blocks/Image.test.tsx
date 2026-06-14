@@ -42,12 +42,16 @@ describe('Image block', () => {
   });
 
   it('honors a host-supplied allowedProtocols list (e.g. http://localhost for dev)', () => {
-    renderImage({
+    const { container } = renderImage({
       ...defaultRenderProps(),
       src: 'http://localhost:3000/screenshot.png',
       allowedProtocols: ['https:', 'data:image/', 'http://localhost'],
     });
-    expect(screen.getByRole('img')).toHaveAttribute('src', 'http://localhost:3000/screenshot.png');
+    // The `<img>` has an empty default `alt`, which Testing Library treats as
+    // `role="presentation"` rather than `role="img"`. Query by tag so the
+    // whitelist assertion exercises the URL gate without requiring a host alt.
+    expect(container.querySelector('img')).toHaveAttribute('src', 'http://localhost:3000/screenshot.png');
+    expect(screen.queryByText('Blocked image (unsafe URL scheme)')).not.toBeInTheDocument();
   });
 
   it('shows a localized blockedLabel when provided', () => {

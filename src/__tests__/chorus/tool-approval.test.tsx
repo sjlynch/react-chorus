@@ -161,13 +161,17 @@ describe('Chorus tool-call approvals', () => {
     render(<Chorus transport={transport} connector="openai" minAssistantDelayMs={0}
       tools={[sendEmail]}
       toolPolicy={{ default: 'ask' }}
-      approvalTimeoutMs={50}
+      // 250ms is small enough to keep the test fast but large enough that
+      // coverage-instrumented renders can mount the approval card before the
+      // timeout fires — at 50ms the card-render race made this test flake
+      // reproducibly under `npm run test:coverage`.
+      approvalTimeoutMs={250}
     />);
 
     await sendMessage(user, 'send it');
     await screen.findByText(/Approval required/);
 
-    await waitFor(() => expect(screen.queryByText(/Approval required/)).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText(/Approval required/)).not.toBeInTheDocument(), { timeout: 2000 });
     expect(handler).not.toHaveBeenCalled();
     await user.click(screen.getByRole('button', { name: /send_email/i }));
     expect(screen.getByText(/approval timed out/i)).toBeInTheDocument();

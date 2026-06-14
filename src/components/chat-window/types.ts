@@ -76,6 +76,13 @@ export interface ChatWindowProps<TMeta = Record<string, unknown>> extends Omit<R
   showTimestamps?: boolean;
   /** Override the locale-aware default per-message timestamp formatting. Only used when `showTimestamps` is true. */
   formatTimestamp?: MessageTimestampFormatter<TMeta>;
+  /**
+   * Render `message.speaker.avatarUrl` as a small circular avatar next to the
+   * visible speaker name. The speaker name renders unconditionally when
+   * `message.speaker` is present; only the avatar image is gated. Off by
+   * default so single-character chat transcripts stay unchanged.
+   */
+  showSpeakerAvatars?: boolean;
   /** Internal optimization hint: render the active assistant message as escaped plain text until it finalizes. */
   streamingMessageId?: string | null;
   suggestedPrompts?: string[];

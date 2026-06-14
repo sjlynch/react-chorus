@@ -21,6 +21,7 @@ import type {
   ChorusOnToolCall,
   ChorusOnToolDelta,
   ChorusShouldContinueToolLoop,
+  ChorusTransformRequest,
   UpdateMessagesOptions,
 } from './assistant-session/types';
 
@@ -48,6 +49,10 @@ export type {
   ChorusToolDeltaContext,
   ChorusToolHandler,
   ChorusToolLoopContext,
+  ChorusTransformRequest,
+  ChorusTransformRequestContext,
+  ChorusTransformRequestReason,
+  ChorusTransformRequestResult,
 } from './assistant-session/types';
 export type { ChorusToolRegistry };
 
@@ -95,6 +100,13 @@ export interface UseAssistantSessionOptions<TMeta = Record<string, unknown>> {
    * multi-provider routing tags each turn with the routed provider/model id.
    */
   getNewAssistantMessageDefaults?: () => { provider?: string; modelId?: string };
+  /**
+   * Optional pre-send hook fired immediately before each outbound transport
+   * request. See `ChorusTransformRequest` for the contract; only the
+   * `transport` path runs the hook (the `onSend` path already owns the
+   * request fully).
+   */
+  transformRequest?: ChorusTransformRequest<TMeta>;
 }
 
 export interface UseAssistantSessionResult {
@@ -143,6 +155,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>(
     systemPrompt,
     minAssistantDelayMs,
     seedMessages,
+    transformRequest,
   } = options;
 
   const refs = useAssistantSessionRefs<TMeta>({
@@ -167,6 +180,7 @@ export function useAssistantSession<TMeta = Record<string, unknown>>(
     persistenceKey,
     resetToInitialMessages,
     onClear,
+    transformRequest,
     fallbackErrorMessage,
     systemPrompt,
     minAssistantDelayMs,

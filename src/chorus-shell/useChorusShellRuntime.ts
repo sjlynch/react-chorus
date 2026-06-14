@@ -27,6 +27,7 @@ import { createMessageId } from '../hooks/assistant-session/messageUtils';
 import { isPositiveFinite, useCostMeter } from './useCostMeter';
 import { buildCostFooterRenderer } from './renderCostFooter';
 import { useMultiProviderRuntime } from './multiProvider';
+import { useConversationMetadataSync } from './useConversationMetadataSync';
 import type { ChatInputSlashCommand } from '../components/chat-input/types';
 
 export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
@@ -82,6 +83,8 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
     palette,
     persistenceKey,
     persistenceStorage,
+    conversationMetadata,
+    onConversationMetadataChange,
     placeholder,
     renderError,
     renderMessage,
@@ -93,9 +96,11 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
     showJumpToBottomButton,
     showTimestamps = false,
     formatTimestamp,
+    showSpeakerAvatars = false,
     style,
     suggestedPrompts,
     systemPrompt,
+    transformRequest,
     tools,
     toolPolicy,
     toolPolicyScope,
@@ -127,6 +132,13 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
   const composer = useChorusComposerState<TMeta>({
     persistenceKey: builtInPersistenceKey,
     onClear,
+  });
+  useConversationMetadataSync({
+    persistenceKey: builtInPersistenceKey,
+    persistenceStorage,
+    conversationMetadata,
+    onConversationMetadataChange,
+    onPersistenceError,
   });
   const persisted = useChorusPersistence<TMeta>(builtInPersistenceKey, {
     storage: builtInPersistenceKey ? persistenceStorage : null,
@@ -251,6 +263,7 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
     resetToInitialMessages,
     onClear: composer.handleClearCommit,
     policyStoreRef,
+    transformRequest,
   });
 
   const shellState = useChorusShellDerivedState<TMeta>({
@@ -415,6 +428,7 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
       renderMessage,
       showTimestamps,
       formatTimestamp,
+      showSpeakerAvatars,
       suggestedPrompts,
       defaultHiddenRoles: DEFAULT_CHORUS_HIDDEN_ROLES,
       renderMessageFooter,

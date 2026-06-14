@@ -58,6 +58,7 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
   showSystemMessages,
   showTimestamps = false,
   formatTimestamp,
+  showSpeakerAvatars = false,
   streamingMessageId,
   suggestedPrompts,
   suggestedPromptsDisabled = false,
@@ -126,6 +127,7 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
         renderMessageFooter={renderMessageFooter}
         showTimestamps={showTimestamps}
         formatTimestamp={formatTimestamp}
+        showSpeakerAvatars={showSpeakerAvatars}
         resolvedLabels={resolvedLabels}
         copyAvailable={copyAvailable}
         copyMessage={copyMessage}

@@ -26,6 +26,7 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 |------|------|---------|-------------|
 | `transport` | `string \| FetchTransportInit<TMeta> \| Transport<TMeta>` | — | Simple path: a URL to POST to, a `{ url, headers, credentials, method, … }` config object (`FetchTransportInit`), or a custom Transport function. Chorus handles all streaming. |
 | `systemPrompt` | `string` | — | Hidden instruction for both send paths. With `transport`, Chorus prepends it as a `system` message in request history (using the reserved id `RESERVED_SYSTEM_PROMPT_ID`); the synthetic row is never stored on the transcript. With `onSend`, read it from `helpers.systemPrompt`; `messages` is left unchanged to avoid duplicates. The value is read at send time, so swapping it at runtime takes effect on the next Send / Retry / Regenerate — see [Changing the system prompt at runtime](guide.md#changing-the-system-prompt-at-runtime) for multi-persona toggles, Regenerate semantics, and precedence vs. a host-supplied `role: 'system'` row. |
+| `transformRequest` | `(ctx) => { messages?, systemPrompt? } \| void \| Promise<…>` | — | Pre-send hook fired immediately before each outbound `transport` request. Use it for lorebook injection, rolling summaries, RAG retrieval, author's notes — anything that augments the wire history without contaminating the persisted transcript. Fires once per turn for plain sends and once per iteration inside an `autoContinueTools` loop, with `ctx.reason` (`'initial'` / `'tool-continuation'`) distinguishing the two. See [`transformRequest`](#transformrequest). |
 | `connector` | `Connector \| 'auto' \| 'openai' \| 'anthropic' \| 'gemini' \| 'ai-sdk'` | `'auto'` | SSE connector used to parse the stream. `'auto'` detects OpenAI, Anthropic, Gemini, and Vercel AI SDK frames; pass an explicit name when the format is known. |
 | `connectorOptions` | `OpenAIConnectorOptions` | — | Options forwarded to the built-in connector resolved from a `connector` string. Currently only the `'openai'` connector consumes options (e.g. `{ thinkTag }` for a custom reasoning tag pair). Ignored for other names and for custom `Connector` objects — build those with `createOpenAIConnector(options)`. |
 | `mcpServers` | `McpServerConfig[]` | — | Browser-side MCP servers (`{ name, url, transport?: 'sse' \| 'ws' }`) to connect on mount. Discovered tools are merged into Chorus tool execution as `<server>:<tool>`, prompts appear as slash commands (for example `/fs:list-dir`), resources can be attached as references, and disconnected servers show a reconnect row with exponential backoff. Change detection is by stable JSON serialization of each server's `name`/`url`/`transport`/`headers`/reconnect tuning, so re-passing a referentially new array with structurally identical contents is safe — but rotating a credential by mutating `server.headers` in place will NOT reconnect. Re-pass the array with a fresh `headers` object to apply a new token. Import lower-level helpers from `react-chorus/mcp`. |
@@ -74,6 +75,8 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `onFinish` | `({ message, messages, reason, response }) => void` | — | Called once when an assistant message completes normally. Use it for telemetry, persistence handoff, moderation, or post-response UI. Not called for tool-only turns, aborts, Stop, or errors; use `onAbort` for cancellation telemetry and `onStreamDone`/`onToolCall` for tool-only streams. |
 | `persistenceKey` | `string` | — | Uncontrolled-mode persistence key. When set without `value`, Chorus saves/restores messages using this key (defaults to localStorage). If `value` is provided, controlled state wins and built-in persistence is not used. |
 | `persistenceStorage` | `StorageAdapter` | `localStorage` | Custom storage adapter for persistenceKey. The default `localStorage` is resolved lazily; if browser storage is blocked or unavailable, Chorus keeps working without persistence. Implement optional `removeItem(key)` to delete unseeded empty transcripts and deleted conversation keys; seeded clears persist `[]` so the clear survives reloads. |
+| `conversationMetadata` | `Record<string, unknown> \| null` | — | Conversation-scoped free-form slot persisted at `${persistenceKey}::meta` in `persistenceStorage`. Designed for roleplay/multi-agent shells that need a small object (active character id, persona id, lorebook id, author's note) per conversation. Controlled: pair with `onConversationMetadataChange`. Pass `null` to clear the slot. Without `persistenceKey`+`persistenceStorage` this is a no-op. See [`conversationMetadata`](#conversationmetadata). |
+| `onConversationMetadataChange` | `(next: Record<string, unknown>) => void` | — | Called once per `persistenceKey` when a stored metadata value is loaded and differs from the controlled prop. Hosts lift the loaded slot into state so the prop matches storage on subsequent renders. |
 | `onPersistenceError` | `(error: Error & { key?: string; operation?: string }) => void` | — | Called when a persistence read, deserialization, write, or remove operation throws/rejects. The hook also exposes the latest error as `useChorusPersistence().error`. |
 | `serializeMessages` | `(messages: Message<TMeta>[]) => string` | `JSON.stringify` | Optional persistence serializer. Use it for custom formats or to reject unsupported data explicitly. |
 | `deserializeMessages` | `(raw: string) => Message<TMeta>[]` | JSON parse + array guard | Optional persistence deserializer/reviver. Use it to validate stored payloads or revive Dates/classes. |
@@ -85,6 +88,7 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `showJumpToBottomButton` | `boolean` | `!headless` | Shows the floating “Jump to latest” button when the user scrolls away from the bottom and new activity arrives. Pass `false` to disable it (for example when you own the scroll affordance); the headless exports default `headless={true}` so the button is off by default there. |
 | `showTimestamps` | `boolean` | `false` | Render a locale-aware per-message time under each bubble, sourced from `Message.createdAt`. Messages without a `createdAt` render no time. No custom `renderMessage` is needed. |
 | `formatTimestamp` | `(timestamp: string, message: Message<TMeta>) => ReactNode` | short locale-aware time | Overrides the built-in timestamp formatting used when `showTimestamps` is enabled. Receives the message's `createdAt` string and the message; return any node (for example a relative time, or date + time). |
+| `showSpeakerAvatars` | `boolean` | `false` | Render `message.speaker.avatarUrl` as a small circular image next to the visible speaker name. The speaker name renders unconditionally whenever a message carries `speaker`; only the avatar image is gated. See [`MessageSpeaker` and `showSpeakerAvatars`](#messagespeaker-and-showspeakeravatars). |
 | `headless` | `boolean` | `false` | Strip all default styles and inline style injection. |
 | `renderMessage` | `(message: Message<TMeta>, ctx: RenderMessageContext<TMeta>) => ReactNode` | — | Custom per-message renderer. Return `null` to fall back to default rendering. `ctx` includes `isStreaming`, `isEditing` (true while the built-in inline editor is active — gate your own content on it so the editor replaces the row), `messageProps` for scroll targets, `defaultRender(slots?)`, and action callbacks/default action controls. Existing one-argument renderers continue to work. |
 | `markdownProps` | `Omit<MarkdownProps, 'text' \| 'codeTheme' \| 'headless' \| 'streaming'>` | — | Props forwarded to the built-in Markdown renderer for every message, including `sanitizer`, `markedOptions`, `markedExtensions`, `onCopyError`, and `codeBlockCopy`. |
@@ -693,6 +697,104 @@ With `showTimestamps`, the default renderer adds a locale-aware `<time>` element
 ```
 
 No custom `renderMessage` is required. The `Reasoning` disclosure, by contrast, only ever renders for `assistant` messages — a `reasoning` field on a `user`, `system`, or `tool` message is ignored by the default renderer.
+
+### `MessageSpeaker` and `showSpeakerAvatars`
+
+Every message can carry an optional `speaker` that identifies the entity that produced (or is being addressed by) the turn. Designed for roleplay / multi-agent shells where several characters share `role: 'assistant'`, or for branded multi-assistant apps that label assistant turns ("Sales Bot" vs "Support Bot"). Also valid on user turns to carry a persona identity into the transcript.
+
+```ts
+interface MessageSpeaker {
+  id: string;            // stable id (character / persona id)
+  name: string;          // visible display name
+  avatarUrl?: string;    // optional, rendered when showSpeakerAvatars is on
+  metadata?: Record<string, unknown>;  // host-defined (character card ref, etc.)
+}
+```
+
+Behaviour:
+
+- The default renderer uses `speaker.name` as the visible label above the bubble (the role-based `ChorusSpeakerLabels` defaults remain the fallback).
+- The screen-reader-only label also prefers `speaker.name` when set so a screen reader announces "Captain Hook says…" rather than "Assistant says…".
+- The visible badge is `aria-hidden` so SR users hear the name once, not twice.
+- `<Chorus showSpeakerAvatars>` (and the same prop on `<ChatWindow>` / `<MessageBubble>`) renders `speaker.avatarUrl` as a small circular `<img>` next to the name. The name still renders without this prop; only the avatar image is gated.
+- The Markdown export (`useChorusTranscriptActions`) uses `speaker.name` for the per-message heading when present so a multi-character transcript reads `## Captain Hook` instead of `## Assistant`.
+- Built-in provider request mappers ignore `speaker` — if your provider needs the name on the wire, inject it via `transformRequest` or prepend it to `text` before send.
+- Persistence round-trips the field automatically.
+
+`<Chorus>` does not auto-attach speakers to streamed assistant messages. Hosts tag turns themselves — typically with `value` + `onChange` (early-return on `m.speaker` so streaming chunks stay cheap), or by mutating the message in `onFinish`. The [`with-roleplay` example](../examples/with-roleplay) shows the controlled-mode pattern end to end.
+
+### `transformRequest`
+
+Pre-send hook fired immediately before each outbound `transport` request. Use it for lorebook injection, rolling summaries, RAG retrieval, author's notes — anything that augments the wire history without contaminating the persisted transcript. Runs on the `transport` path only; the `onSend` path already owns the request fully.
+
+```ts
+type ChorusTransformRequest<TMeta> = (ctx: {
+  messages: Message<TMeta>[];          // assembled history (no system prompt prepended yet)
+  systemPrompt: string | undefined;    // current <Chorus systemPrompt> value
+  signal: AbortSignal;                 // active turn's abort signal
+  reason: 'initial' | 'tool-continuation';
+}) => {
+  messages?: Message<TMeta>[];     // override the wire history (this request only)
+  systemPrompt?: string;           // override the system prompt (empty string suppresses it)
+} | void | Promise<…>;
+```
+
+Lifecycle:
+
+- Fires once per turn for plain sends (`reason: 'initial'`) and once per iteration inside an `autoContinueTools` loop (`reason: 'tool-continuation'`), so a lorebook scan reacts to fresh tool results, not just the original user turn.
+- The `messages` override applies to the wire request only — the persisted transcript stays clean. `systemPrompt` overrides replace the `<Chorus systemPrompt>` prop for this one request; pass an empty string to suppress it entirely.
+- Throwing/rejecting ends the turn through the normal `onError` path (no banner double-report — `onError` fires once and the partial assistant message is dropped). Aborts propagated via `ctx.signal` are silent: the orchestrator already handled the cancellation.
+- The transformer runs on retries and on every tool-loop iteration. Keep it idempotent — observation-only side effects (keyword scan, retrieval call) are fine; mutation that depends on call count is not.
+
+Minimal lorebook example:
+
+```tsx
+const LORE = [
+  { keys: ['kraken'], content: 'WORLD LORE — The Kraken: a giant cephalopod feared by all sailors.' },
+];
+
+<Chorus
+  transport="/api/chat"
+  systemPrompt="You are an old sea captain."
+  transformRequest={({ messages, systemPrompt, signal }) => {
+    const haystack = messages.filter(m => m.role === 'user').slice(-2).map(m => m.text).join('\n').toLowerCase();
+    const activated = LORE.filter(entry => entry.keys.some(k => haystack.includes(k)));
+    if (!activated.length) return; // keep configured systemPrompt as-is
+    return {
+      systemPrompt: [systemPrompt, ...activated.map(e => e.content)].filter(Boolean).join('\n\n'),
+    };
+  }}
+/>
+```
+
+### `conversationMetadata`
+
+Conversation-scoped free-form slot persisted alongside the transcript at `${persistenceKey}::meta` in `persistenceStorage`. Designed for roleplay/multi-agent shells that need a small object per conversation (active character id, persona id, lorebook id, author's note) without pinning it onto every message.
+
+Controlled prop pattern:
+
+```tsx
+const [meta, setMeta] = React.useState({ characterId: 'hook' });
+
+<Chorus
+  persistenceKey="chat-1"
+  persistenceStorage={localStorage}
+  conversationMetadata={meta}
+  onConversationMetadataChange={setMeta}   // fires with the loaded value on mount
+  transformRequest={({ messages }) => /* read activeCharacter from `meta` ref */}
+/>
+```
+
+Lifecycle:
+
+- On mount (and on `persistenceKey` change), Chorus reads `${persistenceKey}::meta` from storage. If a stored value exists and differs from the controlled prop, `onConversationMetadataChange(stored)` fires exactly once so the host can lift it into state.
+- When the prop changes afterwards, Chorus writes it through to storage. A JSON guard suppresses the load → echo round-trip so the same content does not re-persist.
+- Passing `null` clears the slot (uses `removeItem` when the adapter supports it). Passing `undefined` opts out — Chorus will not touch the slot from this side.
+- Without both `persistenceKey` and `persistenceStorage`, this is a no-op; the host owns the state entirely.
+
+For more control (e.g. wiring the persisted slot somewhere other than `<Chorus>`), use the underlying `useConversationMetadata(key, options)` hook directly. It returns `{ value, setValue, loaded, error, canPersist }` and supports sync and Promise-based storage adapters.
+
+> A clear-conversation action does **not** auto-delete the metadata slot. Hosts that want clear to drop metadata should call `setMeta(null)` (or call the underlying hook's `setValue(null)`) themselves.
 
 ### Rendering long transcripts
 

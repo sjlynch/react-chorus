@@ -29,7 +29,8 @@ export { InlineMessageEditor } from './message-row/InlineMessageEditor';
 export type { InlineMessageEditorProps } from './message-row/InlineMessageEditor';
 export { MessageRenderStateContext, MessageRenderStateProvider, useActionEditing } from './message-row/renderState';
 export type { MessageRenderStateValue } from './message-row/renderState';
-export { getMessageSpeakerLabel, MessageSpeakerLabel } from './message-row/speaker';
+export { getMessageSpeakerLabel, MessageSpeakerBadge, MessageSpeakerLabel, resolveMessageSpeakerLabel } from './message-row/speaker';
+export type { MessageSpeakerBadgeProps, MessageSpeakerLabelProps } from './message-row/speaker';
 export { defaultFormatMessageTimestamp } from './message-row/formatTimestamp';
 export type { MessageBubbleSlots, MessageCopyResult, MessageMarkdownProps, MessageRenderActions, MessageTimestampFormatter } from './message-row/types';
 
@@ -72,9 +73,15 @@ export interface MessageRowProps<TMeta = Record<string, unknown>> extends Messag
   showTimestamp?: boolean;
   /** Override the locale-aware default timestamp formatting. Only used when `showTimestamp` is true. */
   formatTimestamp?: MessageTimestampFormatter<TMeta>;
+  /**
+   * Render `message.speaker.avatarUrl` as a small circular avatar next to the
+   * speaker name. The speaker name renders unconditionally when
+   * `message.speaker` is present; only the avatar image is gated.
+   */
+  showSpeakerAvatars?: boolean;
 }
 
-export function MessageRow<TMeta = Record<string, unknown>>({ m, codeTheme, headless, onEdit, onRegenerate, onDelete, onCopy, onFeedback, initialFeedback, feedbackReadOnly, streaming = false, markdownProps, markdownSanitizer, messageActionLabels, speakerLabels, reasoningLabel, codeCopyLabels, attachmentLabels, sourceLabels, toolCallLabels, showTimestamp, formatTimestamp, before, headerSlot, footerSlot, after }: MessageRowProps<TMeta>) {
+export function MessageRow<TMeta = Record<string, unknown>>({ m, codeTheme, headless, onEdit, onRegenerate, onDelete, onCopy, onFeedback, initialFeedback, feedbackReadOnly, streaming = false, markdownProps, markdownSanitizer, messageActionLabels, speakerLabels, reasoningLabel, codeCopyLabels, attachmentLabels, sourceLabels, toolCallLabels, showTimestamp, formatTimestamp, showSpeakerAvatars, before, headerSlot, footerSlot, after }: MessageRowProps<TMeta>) {
   // Drive editing state through MessageRenderStateContext when a provider is present
   // (the default ChatWindow path wraps every row in one) so a custom renderer's
   // `ctx.isEditing` reflects the row's inline editor. Falls back to local state when
@@ -107,7 +114,7 @@ export function MessageRow<TMeta = Record<string, unknown>>({ m, codeTheme, head
 
   return (
     <div className={`chorus-msg chorus-${m.role}`} data-chorus-message-id={m.id}>
-      <MessageSpeakerLabel role={m.role} speakers={speakerLabels} />
+      <MessageSpeakerLabel role={m.role} speakers={speakerLabels} speaker={m.speaker} />
       {editing && actions.edit ? (
         <InlineMessageEditor
           initialText={m.text ?? ''}
@@ -133,6 +140,7 @@ export function MessageRow<TMeta = Record<string, unknown>>({ m, codeTheme, head
           toolCallLabels={toolCallLabels}
           showTimestamp={showTimestamp}
           formatTimestamp={formatTimestamp}
+          showSpeakerAvatars={showSpeakerAvatars}
           before={before}
           headerSlot={headerSlot}
           footerSlot={footerSlot}

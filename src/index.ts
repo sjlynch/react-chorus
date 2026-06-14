@@ -31,7 +31,7 @@ export type {
   ChorusTranscriptLabels,
   ResolvedChorusLabels,
 } from './labels';
-export type { BudgetExceededContext, ChorusAbortContext, ChorusAbortReason, ChorusAbortSource, ChorusClearConversationContext, ChorusConfirmClearConversation, ChorusConfirmDeleteMessage, ChorusConnectorOptions, ChorusDeleteMessageContext, ChorusFinishContext, ChorusMessagesChangeContext, ChorusMessagesChangeReason, ChorusMessagesChangeSource, ChorusOnAbort, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusProps, ChorusProviderConfig, ChorusRef, ChorusSendHelpers, ChorusSendPath, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusStreamDoneReason, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolHandler, ChorusToolLoopContext, ChorusToolPolicy, ChorusToolRegistry, FetchTransportInit, McpServerConfig, ModelPricing, PricingTable, ToolApprovalDecision, ToolApprovalPolicy, ToolPolicyScope } from './Chorus';
+export type { BudgetExceededContext, ChorusAbortContext, ChorusAbortReason, ChorusAbortSource, ChorusClearConversationContext, ChorusConfirmClearConversation, ChorusConfirmDeleteMessage, ChorusConnectorOptions, ChorusDeleteMessageContext, ChorusFinishContext, ChorusMessagesChangeContext, ChorusMessagesChangeReason, ChorusMessagesChangeSource, ChorusOnAbort, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusProps, ChorusProviderConfig, ChorusRef, ChorusSendHelpers, ChorusSendPath, ChorusShouldContinueToolLoop, ChorusStreamDoneContext, ChorusStreamDoneReason, ChorusToolCallContext, ChorusToolDeltaContext, ChorusToolHandler, ChorusToolLoopContext, ChorusToolPolicy, ChorusToolRegistry, ChorusTransformRequest, ChorusTransformRequestContext, ChorusTransformRequestReason, ChorusTransformRequestResult, FetchTransportInit, McpServerConfig, ModelPricing, PricingTable, ToolApprovalDecision, ToolApprovalPolicy, ToolPolicyScope } from './Chorus';
 
 export type { Message } from './types';
 export type {
@@ -53,6 +53,7 @@ export type {
   MessageCitation,
   MessageSource,
   MessageSourceType,
+  MessageSpeaker,
   StorageAdapter,
   SystemMessage,
   ToolCall,
@@ -65,6 +66,8 @@ export { ChorusStreamError, useChorusStream } from './hooks/useChorusStream';
 export type { SendCallbacks, StreamOptions, Transport } from './hooks/useChorusStream';
 export { useChorusPersistence } from './hooks/useChorusPersistence';
 export type { ChorusPersistenceError, DeserializeMessages, PersistenceOperation, PersistenceWriteOptions, SerializeMessages, UseChorusPersistenceOptions, UseChorusPersistenceResult } from './hooks/useChorusPersistence';
+export { useConversationMetadata } from './hooks/useConversationMetadata';
+export type { ConversationMetadata, UseConversationMetadataOptions, UseConversationMetadataResult } from './hooks/useConversationMetadata';
 export { useConversations } from './hooks/useConversations';
 export type { ConversationStorageError, ConversationStorageOperation, ConversationSummary, RenameFromFirstMessageOptions, UseConversationsOptions, UseConversationsResult } from './hooks/useConversations';
 export { useChorusTranscriptActions, TRANSCRIPT_FORMAT_INFO } from './hooks/useChorusTranscriptActions';

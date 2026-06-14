@@ -15,6 +15,7 @@ function createDeps(overrides: Partial<Deps> = {}): Deps {
     shouldContinueToolLoopRef: { current: undefined },
     systemPromptRef: { current: undefined },
     minAssistantDelayMsRef: { current: 0 },
+    transformRequestRef: { current: undefined },
     isAssistantSessionActive: vi.fn(() => true),
     invalidateAssistantSession: vi.fn(),
     removePendingAssistant: vi.fn(),

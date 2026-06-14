@@ -72,6 +72,7 @@ export function useAssistantSessionAssembly<TMeta>({
     systemPrompt: systemPromptRef,
     minAssistantDelayMs: minAssistantDelayMsRef,
     seedMessages: seedMessagesRef,
+    transformRequest: transformRequestRef,
   } = refs;
 
   const {
@@ -205,6 +206,7 @@ export function useAssistantSessionAssembly<TMeta>({
     shouldContinueToolLoopRef,
     systemPromptRef,
     minAssistantDelayMsRef,
+    transformRequestRef,
     isAssistantSessionActive,
     invalidateAssistantSession,
     removePendingAssistant,

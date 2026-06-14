@@ -15,7 +15,7 @@ import { MessageReasoning } from './reasoning';
 import { MessageSources } from './sources';
 import { MessageTimestamp } from './timestamp';
 import { MessageRenderStateContext } from './renderState';
-import { MessageSpeakerLabel } from './speaker';
+import { MessageSpeakerBadge, MessageSpeakerLabel } from './speaker';
 import type { MessageBubbleSlots, MessageMarkdownProps, MessageTimestampFormatter } from './types';
 
 export interface MessageBubbleLayoutProps<TMeta = Record<string, unknown>> extends MessageBubbleSlots {
@@ -36,10 +36,17 @@ export interface MessageBubbleLayoutProps<TMeta = Record<string, unknown>> exten
   showTimestamp?: boolean;
   /** Override the locale-aware default timestamp formatting. Only used when `showTimestamp` is true. */
   formatTimestamp?: MessageTimestampFormatter<TMeta>;
+  /**
+   * Render a small circular avatar (when `message.speaker.avatarUrl` is set)
+   * alongside the visible speaker name. The speaker name itself still renders
+   * whenever `message.speaker` is present; only the avatar image is gated.
+   * Off by default to keep the single-character chat surface unchanged.
+   */
+  showSpeakerAvatars?: boolean;
   children?: React.ReactNode;
 }
 
-export function MessageBubbleLayout<TMeta = Record<string, unknown>>({ message, codeTheme, headless, streaming = false, markdownProps, markdownSanitizer, reasoningLabel, codeCopyLabels, attachmentLabels, sourceLabels, toolCallLabels, showTimestamp = false, formatTimestamp, before, headerSlot, footerSlot, after, children }: MessageBubbleLayoutProps<TMeta>) {
+export function MessageBubbleLayout<TMeta = Record<string, unknown>>({ message, codeTheme, headless, streaming = false, markdownProps, markdownSanitizer, reasoningLabel, codeCopyLabels, attachmentLabels, sourceLabels, toolCallLabels, showTimestamp = false, formatTimestamp, showSpeakerAvatars = false, before, headerSlot, footerSlot, after, children }: MessageBubbleLayoutProps<TMeta>) {
   const text = message.text ?? '';
   const hasAttachments = Boolean(message.attachments?.length);
   const hasBubbleText = text.trim().length > 0;
@@ -60,6 +67,9 @@ export function MessageBubbleLayout<TMeta = Record<string, unknown>>({ message, 
     <>
       {before}
       <div className="chorus-msg-content">
+        {message.speaker && (
+          <MessageSpeakerBadge speaker={message.speaker} showAvatar={showSpeakerAvatars} />
+        )}
         {headerSlot}
         {message.role === 'assistant' && (
           <MessageReasoning
@@ -166,16 +176,22 @@ export interface MessageBubbleProps<TMeta = Record<string, unknown>> extends Mes
   showTimestamp?: boolean;
   /** Override the locale-aware default timestamp formatting. Only used when `showTimestamp` is true. */
   formatTimestamp?: MessageTimestampFormatter<TMeta>;
+  /**
+   * Render a small circular avatar (when `message.speaker.avatarUrl` is set)
+   * alongside the visible speaker name. The speaker name itself still renders
+   * whenever `message.speaker` is present; only the avatar image is gated.
+   */
+  showSpeakerAvatars?: boolean;
 }
 
-export function MessageBubble<TMeta = Record<string, unknown>>({ message, className, style, codeTheme = 'dark', headless, streaming = false, markdownProps, markdownSanitizer, reasoningLabel, codeCopyLabels, speakerLabels, attachmentLabels, sourceLabels, toolCallLabels, showTimestamp, formatTimestamp, before, headerSlot, footerSlot, after }: MessageBubbleProps<TMeta>) {
+export function MessageBubble<TMeta = Record<string, unknown>>({ message, className, style, codeTheme = 'dark', headless, streaming = false, markdownProps, markdownSanitizer, reasoningLabel, codeCopyLabels, speakerLabels, attachmentLabels, sourceLabels, toolCallLabels, showTimestamp, formatTimestamp, showSpeakerAvatars, before, headerSlot, footerSlot, after }: MessageBubbleProps<TMeta>) {
   const renderState = React.useContext(MessageRenderStateContext);
   if (renderState?.messageId === message.id && renderState.isEditing) return null;
 
   const cls = joinClasses('chorus-msg', `chorus-${message.role}`, className);
   return (
     <div className={cls} style={style} data-chorus-message-id={message.id}>
-      <MessageSpeakerLabel role={message.role} speakers={speakerLabels} />
+      <MessageSpeakerLabel role={message.role} speakers={speakerLabels} speaker={message.speaker} />
       <MessageBubbleLayout
         message={message}
         codeTheme={codeTheme}
@@ -190,6 +206,7 @@ export function MessageBubble<TMeta = Record<string, unknown>>({ message, classN
         toolCallLabels={toolCallLabels}
         showTimestamp={showTimestamp}
         formatTimestamp={formatTimestamp}
+        showSpeakerAvatars={showSpeakerAvatars}
         before={before}
         headerSlot={headerSlot}
         footerSlot={footerSlot}

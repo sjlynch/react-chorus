@@ -30,6 +30,33 @@ export interface MessageSource {
 /** Back-compat-friendly alias: sources are often presented to readers as citations. */
 export type MessageCitation = MessageSource;
 
+/**
+ * Optional identity for the entity that produced (or is being addressed by) a
+ * message. Useful for roleplay/multi-agent shells where several characters
+ * share `role: 'assistant'`, or for branded multi-assistant apps that label
+ * assistant turns ("Sales Bot" vs "Support Bot"). Also valid on user turns to
+ * carry a persona identity into the transcript.
+ *
+ * The default renderer uses `name` as the visible speaker label (the existing
+ * `ChorusSpeakerLabels` role labels are the fallback) and renders `avatarUrl`
+ * as a small circular image before the bubble when `<Chorus showSpeakerAvatars>`
+ * (or the same prop on `<ChatWindow>`) is enabled. Built-in provider request
+ * mappers ignore this field; if your provider needs the name on the wire,
+ * inject it via `transformRequest` or before send.
+ *
+ * Round-trips through built-in JSON persistence.
+ */
+export interface MessageSpeaker {
+  /** Stable id (e.g. character id, persona id). Required so renderers can key by it. */
+  id: string;
+  /** Human-readable display name shown above the bubble. */
+  name: string;
+  /** Optional avatar URL or data URI. Rendered as a small circular image when speaker avatars are enabled. */
+  avatarUrl?: string;
+  /** Free-form host metadata (e.g. character card ref, persona traits). */
+  metadata?: Record<string, unknown>;
+}
+
 export interface Attachment {
   name: string;
   type: string;
@@ -188,6 +215,15 @@ interface ChorusMessageBase<TMeta = Record<string, unknown>> {
    * block fallback. Round-tripped by JSON persistence.
    */
   block?: MessageBlock;
+  /**
+   * Optional speaker identity for this message. On assistant turns this is a
+   * character/agent that produced the response; on user turns this is a
+   * persona/user identity the model was addressing. Renderer uses
+   * `speaker.name` for the visible label and `speaker.avatarUrl` (when
+   * `showSpeakerAvatars` is on) for a small circular avatar before the bubble.
+   * Built-in JSON persistence round-trips this field. See `MessageSpeaker`.
+   */
+  speaker?: MessageSpeaker;
   /**
    * Optional provider key (from `<Chorus providers>`) that produced this
    * message. Set automatically on assistant messages when multi-provider

@@ -175,6 +175,77 @@ export interface ChorusToolLoopContext<TMeta = Record<string, unknown>>
 
 export type ChorusShouldContinueToolLoop<TMeta = Record<string, unknown>> = (context: ChorusToolLoopContext<TMeta>) => boolean | Promise<boolean>;
 
+/**
+ * Why a `transformRequest` callback is firing. `'initial'` precedes a turn
+ * triggered by user input (send, retry, regenerate). `'tool-continuation'`
+ * precedes an automatic follow-up request inside an `autoContinueTools` loop
+ * — the transformer fires once per iteration so lorebook/RAG augmentation
+ * reacts to fresh tool results, not just the original user turn.
+ */
+export type ChorusTransformRequestReason = 'initial' | 'tool-continuation';
+
+/**
+ * Read-only context passed to `transformRequest` immediately before each
+ * outbound transport request is built. `messages` is the assembled history
+ * **without** the system prompt (`historyWithSystemPrompt` runs after the
+ * transformer so an overridden `systemPrompt` still lands at position 0).
+ * `signal` is the active turn's `AbortSignal`; an async transformer must
+ * cooperate with cancellation by awaiting fetch/work that honors it.
+ */
+export interface ChorusTransformRequestContext<TMeta = Record<string, unknown>> {
+  /** Pre-request history snapshot (no system prompt prepended yet). */
+  messages: Message<TMeta>[];
+  /** The current `<Chorus systemPrompt>` value, or undefined when none is set. */
+  systemPrompt: string | undefined;
+  /** Cancellation signal for the active turn. Honor it in async work to avoid leaking transformer requests. */
+  signal: AbortSignal;
+  /** Why the transformer is firing for this request. */
+  reason: ChorusTransformRequestReason;
+}
+
+/**
+ * Optional overrides returned from `transformRequest`. Each field replaces the
+ * value the request would otherwise carry; returning `undefined` (or
+ * `void`/null) keeps the original value. Field semantics:
+ *
+ * - `messages` — replaces the outgoing history for **this request only**.
+ *   Useful for lorebook injection, rolling summaries, RAG, author's notes —
+ *   anything that augments the wire history without contaminating the
+ *   persisted transcript.
+ * - `systemPrompt` — replaces the `<Chorus systemPrompt>` value for this
+ *   request. Use an empty string to suppress the system prompt entirely;
+ *   omit the field to keep the configured value.
+ *
+ * `bodyExtras` for arbitrary request-body fields is intentionally deferred —
+ * use `FetchTransportInit.body` or a custom `Transport` wrapper for that.
+ */
+export interface ChorusTransformRequestResult<TMeta = Record<string, unknown>> {
+  messages?: Message<TMeta>[];
+  systemPrompt?: string;
+}
+
+/**
+ * Pre-send hook that mutates the outgoing transport request without
+ * contaminating the persisted transcript. Runs on the `transport` path only
+ * (the `onSend` path already has full control over the request). Fires once
+ * per turn for plain sends and once per iteration inside an
+ * `autoContinueTools` loop, with `reason` distinguishing the two.
+ *
+ * Idempotency contract: the transformer runs on retries and on every
+ * tool-loop iteration. Keep side effects observation-only or pure — a
+ * lorebook keyword scan, a rolling summary, a RAG retrieval call. Throwing
+ * (or rejecting) ends the turn through the normal `onError` path; aborts
+ * propagated via `ctx.signal` are silent.
+ *
+ * Returning `void`/`undefined` is equivalent to `{}` — keep the configured
+ * messages and systemPrompt. The result's `messages`/`systemPrompt`
+ * overrides replace the wire request only; the persisted transcript and the
+ * `<Chorus systemPrompt>` prop remain unchanged.
+ */
+export type ChorusTransformRequest<TMeta = Record<string, unknown>> = (
+  context: ChorusTransformRequestContext<TMeta>,
+) => ChorusTransformRequestResult<TMeta> | void | Promise<ChorusTransformRequestResult<TMeta> | void>;
+
 export interface UpdateMessagesOptions {
   flushPersistence?: boolean;
   removePersistenceIfEmpty?: boolean;

@@ -128,7 +128,7 @@ export function MessageActionControls<TMeta = Record<string, unknown>>({ message
     // duplicate to host code querying `[data-chorus-message-id]`.
     return (
       <div className={`chorus-msg chorus-${message.role}`}>
-        <MessageSpeakerLabel role={message.role} speakers={speakerLabels} />
+        <MessageSpeakerLabel role={message.role} speakers={speakerLabels} speaker={message.speaker} />
         <InlineMessageEditor
           initialText={message.text ?? ''}
           onSubmit={(newText) => {

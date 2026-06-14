@@ -1,7 +1,7 @@
 import React from 'react';
 import type { Message, MessageSource, ToolMessage } from '../../types';
 import type { ConnectorToolDelta } from '../../connectors/connectors';
-import { isAbortError } from '../../utils/errors';
+import { isAbortError, toError } from '../../utils/errors';
 import { isUnstartedSendError } from '../../streaming/errors';
 import type { SendCallbacks } from '../useChorusStream';
 import type { ObserverCallbacks } from './observerCallbacks';
@@ -11,7 +11,7 @@ import { historyWithSystemPrompt } from './transportHistory';
 import { createStreamDoneContext, createTerminalStreamDoneContext } from './transportStreamDone';
 import { decideTransportToolLoopContinuation, type ToolLoopDecision } from './transportToolLoop';
 import { createTransportSendCallbacks } from './transportSendCallbacks';
-import type { ChorusShouldContinueToolLoop } from './types';
+import type { ChorusShouldContinueToolLoop, ChorusTransformRequest } from './types';
 
 export type { ToolLoopDecision } from './transportToolLoop';
 
@@ -31,6 +31,12 @@ export interface TransportLifecycleDeps<TMeta> {
   shouldContinueToolLoopRef: React.MutableRefObject<ChorusShouldContinueToolLoop<TMeta> | undefined>;
   systemPromptRef: React.MutableRefObject<string | undefined>;
   minAssistantDelayMsRef: React.MutableRefObject<number>;
+  /**
+   * Optional pre-send hook ref. When set, it runs once per outbound transport
+   * request (initial + every tool-loop iteration) and may override the
+   * outgoing `messages` / `systemPrompt`. See `ChorusTransformRequest`.
+   */
+  transformRequestRef: React.MutableRefObject<ChorusTransformRequest<TMeta> | undefined>;
   isAssistantSessionActive: (sessionId: number) => boolean;
   invalidateAssistantSession: (sessionId?: number) => void;
   removePendingAssistant: () => void;
@@ -79,6 +85,7 @@ export function useTransportLifecycle<TMeta>(deps: TransportLifecycleDeps<TMeta>
     shouldContinueToolLoopRef,
     systemPromptRef,
     minAssistantDelayMsRef,
+    transformRequestRef,
     isAssistantSessionActive,
     invalidateAssistantSession,
     removePendingAssistant,
@@ -138,20 +145,65 @@ export function useTransportLifecycle<TMeta>(deps: TransportLifecycleDeps<TMeta>
       onError: finalizeError,
       minDelayMs: minAssistantDelayMsRef.current,
     });
-    void doStream(text, historyForTransport(history), callbacks, controller.signal).catch((rejection: unknown) => {
-      if (isUnstartedSendError(rejection)) {
-        // doStream rejected before the transport ran — a concurrent-send overlap
-        // (this startTransportStream raced another send still in flight) or an
-        // already-aborted externalSignal. The send never started, so the cb.onError
-        // path above never fired. Route the rejection through the standard error
-        // finalizer so the turn surfaces an error banner / onError instead of
-        // silently releasing busy state and snapping back to the Send button.
-        finalizeError(rejection);
-        return;
-      }
-      releaseTransportController({ controllerRef, controller, setTransportBusy });
-    });
-  }, [appendAssistantNow, appendAssistantReasoningNow, appendAssistantSourceNow, appendToolDeltaNow, controllerRef, doStream, historyForTransport, invalidateAssistantSession, isAssistantSessionActive, minAssistantDelayMsRef, observers, removePendingAssistant, setTransportBusy, showStreamError]);
+    const reason = iteration === 0 ? 'initial' as const : 'tool-continuation' as const;
+
+    const dispatch = (wireHistory: Message<TMeta>[]) => {
+      void doStream(text, wireHistory, callbacks, controller.signal).catch((rejection: unknown) => {
+        if (isUnstartedSendError(rejection)) {
+          // doStream rejected before the transport ran — a concurrent-send overlap
+          // (this startTransportStream raced another send still in flight) or an
+          // already-aborted externalSignal. The send never started, so the cb.onError
+          // path above never fired. Route the rejection through the standard error
+          // finalizer so the turn surfaces an error banner / onError instead of
+          // silently releasing busy state and snapping back to the Send button.
+          finalizeError(rejection);
+          return;
+        }
+        releaseTransportController({ controllerRef, controller, setTransportBusy });
+      });
+    };
+
+    const transformer = transformRequestRef.current;
+    if (!transformer) {
+      dispatch(historyForTransport(history));
+      return;
+    }
+
+    // Run the host transformer async so even a synchronous return is awaited
+    // through Promise.resolve — keeps the control flow uniform and lets
+    // throws/rejections route through the same finalizer.
+    void Promise.resolve()
+      .then(() => transformer({
+        messages: history,
+        systemPrompt: systemPromptRef.current,
+        signal: controller.signal,
+        reason,
+      }))
+      .then((result) => {
+        if (!isAssistantSessionActive(sessionId)) return;
+        // `messages`/`systemPrompt` overrides apply to the WIRE request only —
+        // `historyWithSystemPrompt` runs after the transformer so the
+        // overridden system prompt still lands at position 0. `undefined`
+        // keeps the configured value; pass an empty string to suppress the
+        // system prompt for this request.
+        const finalHistory = result && result.messages ? result.messages : history;
+        const finalSystemPrompt = result && result.systemPrompt !== undefined
+          ? result.systemPrompt
+          : systemPromptRef.current;
+        dispatch(historyWithSystemPrompt(finalHistory, finalSystemPrompt));
+      })
+      .catch((error: unknown) => {
+        if (!isAssistantSessionActive(sessionId)) return;
+        // Aborts propagated through ctx.signal are silent: the orchestrator
+        // already handled the abort path. All other transformer failures end
+        // the turn through the standard error finalizer.
+        if (isAbortError(error)) {
+          releaseTransportController({ controllerRef, controller, setTransportBusy });
+          return;
+        }
+        finalizeError(toError(error));
+      });
+  }, [appendAssistantNow, appendAssistantReasoningNow, appendAssistantSourceNow, appendToolDeltaNow, controllerRef, doStream, historyForTransport, invalidateAssistantSession, isAssistantSessionActive, minAssistantDelayMsRef, observers, removePendingAssistant, setTransportBusy, showStreamError, systemPromptRef, transformRequestRef]);
 
   const decideToolLoopContinuation = React.useCallback(async (
     iteration: number,

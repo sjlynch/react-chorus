@@ -50,6 +50,8 @@ export interface MessageListProps<TMeta = Record<string, unknown>> {
   showTimestamps: boolean;
   /** Override the locale-aware default timestamp formatting. */
   formatTimestamp?: MessageTimestampFormatter<TMeta>;
+  /** Render the optional `message.speaker.avatarUrl` as a small circular avatar. */
+  showSpeakerAvatars: boolean;
   resolvedLabels: ResolvedChorusLabels;
   copyAvailable: boolean;
   copyMessage: (message: Message<TMeta>) => MessageCopyResult;
@@ -75,6 +77,7 @@ export function MessageList<TMeta = Record<string, unknown>>({
   renderMessageFooter,
   showTimestamps,
   formatTimestamp,
+  showSpeakerAvatars,
   resolvedLabels,
   copyAvailable,
   copyMessage,
@@ -110,6 +113,7 @@ export function MessageList<TMeta = Record<string, unknown>>({
           toolStreaming,
           showTimestamps,
           formatTimestamp,
+          showSpeakerAvatars,
           onEdit,
           onRegenerate,
           onDelete,

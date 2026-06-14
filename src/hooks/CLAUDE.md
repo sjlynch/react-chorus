@@ -43,6 +43,15 @@ Loads and saves message arrays through a `StorageAdapter`. Internals mirror `use
 
 The facade keeps storage resolution, initial sync/async read coordination, pre-load `onChange` deferral, and the public result shape.
 
+## `useConversationMetadata`
+
+Low-level persistence helper for a small JSON-serializable object slot stored under a single key (defaults to none — pass a `StorageAdapter` to enable). Wired internally by `useConversationMetadataSync` to back the `<Chorus conversationMetadata>` prop at `${persistenceKey}::meta`, and re-exported from the public barrel so hosts can wire conversation-scoped state (active character id, persona id, lorebook id, author's note) outside `<Chorus>` too.
+
+- Reads synchronously on mount when the storage adapter's `getItem` is sync; defers to a mount effect when it returns a Promise. The initial-state Promise is detached with a noop `.catch` so an immediately-rejecting backend does not surface as an unhandled rejection — the effect re-issues the read and routes the error through `onError`.
+- `setValue(null)` removes the slot via the adapter's optional `removeItem`, falling back to `setItem(key, 'null')` when not present.
+- Re-seeds when `key` or `storage` changes between renders; a `readVersion` counter prevents a stale async resolve from overwriting fresher state after a key switch.
+- Malformed JSON is silently treated as "no stored value" (`value: null`, `error: null`). A *read* throw routes through `onError`.
+
 ## `useConversations`
 
 Conversation index persistence is split into focused helpers (see `conversations/CLAUDE.md` for invariants):

@@ -18,6 +18,8 @@ interface MessageDefaultRenderOptions<TMeta> {
   toolStreaming: boolean;
   showTimestamps: boolean;
   formatTimestamp?: MessageTimestampFormatter<TMeta>;
+  /** Render `message.speaker.avatarUrl` as a small circular avatar above the bubble. */
+  showSpeakerAvatars: boolean;
   onEdit?: (id: string, newText: string) => void;
   onRegenerate?: (id: string) => void;
   onDelete?: (id: string) => void;
@@ -47,6 +49,7 @@ export function buildMessageDefaultRender<TMeta = Record<string, unknown>>({
   toolStreaming,
   showTimestamps,
   formatTimestamp,
+  showSpeakerAvatars,
   onEdit,
   onRegenerate,
   onDelete,
@@ -81,6 +84,7 @@ export function buildMessageDefaultRender<TMeta = Record<string, unknown>>({
         toolCallLabels={resolvedLabels.toolCall}
         showTimestamp={showTimestamps}
         formatTimestamp={formatTimestamp}
+        showSpeakerAvatars={showSpeakerAvatars}
         onEdit={onEdit}
         onRegenerate={onRegenerate}
         onDelete={onDelete}

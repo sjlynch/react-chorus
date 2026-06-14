@@ -28,6 +28,7 @@ type RefValues<TMeta> = {
   systemPrompt: string | undefined;
   minAssistantDelayMs: number;
   seedMessages: Message<TMeta>[];
+  transformRequest: UseAssistantSessionOptions<TMeta>['transformRequest'];
 };
 
 export function useAssistantSessionRefs<TMeta>(v: RefValues<TMeta>) {
@@ -57,5 +58,6 @@ export function useAssistantSessionRefs<TMeta>(v: RefValues<TMeta>) {
     systemPrompt: useLatestRef(v.systemPrompt),
     minAssistantDelayMs: useLatestRef(v.minAssistantDelayMs),
     seedMessages: useLatestRef(v.seedMessages),
+    transformRequest: useLatestRef(v.transformRequest),
   };
 }

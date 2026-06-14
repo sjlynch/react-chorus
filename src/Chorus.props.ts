@@ -5,7 +5,7 @@ import type { Palette } from './components/ChorusTheme';
 import type { MarkdownSanitizer } from './components/Markdown';
 import type { Connector, ConnectorWarning } from './connectors/connectors';
 import type { FetchTransportInit } from './hooks/assistant-session/transport';
-import type { ChorusConfirmClearConversation, ChorusConfirmDeleteMessage, ChorusOnAbort, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusShouldContinueToolLoop, ChorusToolRegistry } from './hooks/useAssistantSession';
+import type { ChorusConfirmClearConversation, ChorusConfirmDeleteMessage, ChorusOnAbort, ChorusOnFinish, ChorusOnSend, ChorusOnStreamDone, ChorusOnToolCall, ChorusOnToolDelta, ChorusShouldContinueToolLoop, ChorusToolRegistry, ChorusTransformRequest } from './hooks/useAssistantSession';
 import type { ChorusMessagesChangeContext } from './hooks/useChorusMessages';
 import type { DeserializeMessages, SerializeMessages } from './hooks/useChorusPersistence';
 import type { Transport } from './hooks/useChorusStream';
@@ -14,6 +14,7 @@ import type { ChorusProviderConfig } from './chorus-shell/multiProvider';
 import type { ChorusLabels } from './labels/types';
 import type { ArtifactVersion, AttachmentError, ConnectorName, Message, Role, StorageAdapter, UploadAttachment } from './types';
 import type { ChorusConnectorOptions } from './Chorus.defaults';
+import type { ConversationMetadata } from './hooks/useConversationMetadata';
 import type { McpServerConfig } from './mcp/types';
 import type { ChorusToolPolicy, ToolPolicyScope } from './approvals/types';
 import type { BlockRegistry, ToolLoadingComponents } from './blocks/types';
@@ -202,6 +203,28 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
   /** Called when Chorus cannot read, deserialize, write, or remove the transcript in persistenceStorage. */
   onPersistenceError?: (error: Error) => void;
   onSend?: ChorusOnSend<TMeta>;
+  /**
+   * Free-form, conversation-scoped slot persisted alongside the transcript at
+   * `${persistenceKey}::meta` in `persistenceStorage`. Designed for
+   * roleplay/multi-agent shells that need a small object (active character id,
+   * persona id, lorebook id, author's note) per conversation without pinning
+   * it onto every message.
+   *
+   * Controlled: pair with `onConversationMetadataChange` so Chorus can lift
+   * the loaded value into host state when the conversation key changes. Pass
+   * `null` to clear the persisted slot. Pass `undefined` (or omit) to opt
+   * out — Chorus will not write a metadata slot. Persistence requires both
+   * `persistenceKey` and `persistenceStorage`; without them this prop is a
+   * no-op and host-supplied state is the only source of truth.
+   */
+  conversationMetadata?: ConversationMetadata | null;
+  /**
+   * Called once per persistenceKey when a stored conversation metadata value
+   * is loaded and differs from the current `conversationMetadata` prop. Host
+   * uses this to lift the loaded slot into state so the prop matches storage
+   * on subsequent renders. Throws are caught and warned in development.
+   */
+  onConversationMetadataChange?: (next: ConversationMetadata) => void;
   palette?: Palette;
   persistenceKey?: string;
   persistenceStorage?: StorageAdapter;
@@ -232,6 +255,15 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
    */
   showTimestamps?: boolean;
   /**
+   * Render `message.speaker.avatarUrl` as a small circular avatar next to the
+   * visible speaker name above each bubble. The speaker name itself renders
+   * unconditionally whenever a message carries `speaker`; only the avatar
+   * image is gated by this prop. Off by default so single-character chat
+   * transcripts stay unchanged. Pair with `MessageSpeaker` on messages —
+   * useful for multi-agent and roleplay shells.
+   */
+  showSpeakerAvatars?: boolean;
+  /**
    * Override the built-in locale-aware timestamp formatting used when `showTimestamps` is enabled.
    * Receives the message's `createdAt` string and the message itself. Defaults to a short,
    * locale-aware time of day.
@@ -240,6 +272,34 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
   suggestedPrompts?: string[];
   /** Hidden system prompt. Prepended to transport history; exposed as helpers.systemPrompt on the onSend path. */
   systemPrompt?: string;
+  /**
+   * Optional pre-send hook fired immediately before each outbound transport
+   * request. Use it for lorebook injection, rolling summaries, RAG retrieval,
+   * author's notes, or any other context augmentation that should NOT land in
+   * the persisted transcript. Runs on the `transport` path only — the
+   * `onSend` path already owns the request fully.
+   *
+   * Fires once per turn for plain sends and once per iteration inside an
+   * `autoContinueTools` loop, with `reason` distinguishing the two. The
+   * hook receives the assembled history (without the system prompt) plus
+   * the current `systemPrompt` value, and may return overrides:
+   *
+   * ```ts
+   * transformRequest={async ({ messages, signal }) => {
+   *   const lore = await scanLorebook(messages, signal);
+   *   return {
+   *     messages: lore.length
+   *       ? [{ role: 'system', text: lore.join('\n'), id: 'lorebook' }, ...messages]
+   *       : messages,
+   *   };
+   * }}
+   * ```
+   *
+   * Throwing/rejecting ends the turn through the normal `onError` path;
+   * aborts propagated via `ctx.signal` are silent. See
+   * `ChorusTransformRequest` for the full contract.
+   */
+  transformRequest?: ChorusTransformRequest<TMeta>;
   /** Simple path: URL string, `{ url, headers, credentials, ... }` config object, or a custom `Transport` function. */
   transport?: string | FetchTransportInit<TMeta> | Transport<TMeta>;
   /**
