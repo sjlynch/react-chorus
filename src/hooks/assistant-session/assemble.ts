@@ -131,6 +131,7 @@ export function useAssistantSessionAssembly<TMeta>({
     appendAssistantNow,
     appendAssistantReasoningNow,
     appendAssistantSourceNow,
+    mergeAssistantMetadataNow,
     finalizeAssistantNow,
   } = buffer;
 
@@ -153,6 +154,7 @@ export function useAssistantSessionAssembly<TMeta>({
     appendAssistantNow,
     appendAssistantReasoningNow,
     appendAssistantSourceNow,
+    mergeAssistantMetadataNow,
     finalizeAssistantNow,
     resetPendingAssistantState,
     resetStreamState,

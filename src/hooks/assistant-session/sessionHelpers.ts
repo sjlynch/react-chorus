@@ -2,13 +2,14 @@ import type React from 'react';
 import type { ConnectorToolDelta, ConnectorWarning } from '../../connectors/connectors';
 import type { MessageSource } from '../../types';
 import type { SendCallbacks } from '../useChorusStream';
-import type { ChorusFinishContext, ChorusSendHelpers } from './types';
+import type { ChorusFinalizeAssistantOptions, ChorusFinishContext, ChorusSendHelpers } from './types';
 
 export interface SessionHelpersDeps<TMeta> {
   appendAssistantNow: (chunk: string) => void;
   appendAssistantReasoningNow: (chunk: string) => void;
   appendAssistantSourceNow: (source: MessageSource) => void;
   appendToolDeltaNow: (delta: ConnectorToolDelta) => void;
+  mergeAssistantMetadataNow: (metadata: Record<string, unknown>) => void;
   safeOnStreamWarning: (warning: ConnectorWarning) => void;
   safeOnStreamMetadata: (metadata: Record<string, unknown>) => void;
   completeActiveSession: (
@@ -54,6 +55,7 @@ export function createSessionHelpers<TMeta>(
     appendAssistantReasoningNow,
     appendAssistantSourceNow,
     appendToolDeltaNow,
+    mergeAssistantMetadataNow,
     safeOnStreamWarning,
     safeOnStreamMetadata,
     completeActiveSession,
@@ -68,7 +70,8 @@ export function createSessionHelpers<TMeta>(
     | { type: 'text'; chunk: string }
     | { type: 'reasoning'; chunk: string }
     | { type: 'source'; source: MessageSource }
-    | { type: 'toolDelta'; delta: ConnectorToolDelta };
+    | { type: 'toolDelta'; delta: ConnectorToolDelta }
+    | { type: 'metadata'; metadata: Record<string, unknown> };
 
   let released = minAssistantDelayMsRef.current <= 0;
   let bufferedEvents: BufferedHelperEvent[] = [];
@@ -90,6 +93,7 @@ export function createSessionHelpers<TMeta>(
     if (event.type === 'text') appendAssistantNow(event.chunk);
     else if (event.type === 'reasoning') appendAssistantReasoningNow(event.chunk);
     else if (event.type === 'source') appendAssistantSourceNow(event.source);
+    else if (event.type === 'metadata') mergeAssistantMetadataNow(event.metadata);
     else appendToolDeltaNow(event.delta);
   };
 
@@ -137,6 +141,10 @@ export function createSessionHelpers<TMeta>(
   const appendReasoning = (chunk: string) => appendEvent({ type: 'reasoning', chunk });
   const appendSource = (source: MessageSource) => appendEvent({ type: 'source', source });
   const appendToolDelta = (delta: ConnectorToolDelta) => appendEvent({ type: 'toolDelta', delta });
+  // Buffered like the other events so usage attaches AFTER the text that creates
+  // the message and BEFORE the finalize completes — even when both arrive in the
+  // same tick under `minAssistantDelayMs`.
+  const appendMetadata = (metadata: Record<string, unknown>) => appendEvent({ type: 'metadata', metadata });
 
   const requestFinalize = (forceFlush: boolean) => {
     if (!isActive()) return;
@@ -152,8 +160,16 @@ export function createSessionHelpers<TMeta>(
     completeActiveSession(sessionId, { reason: 'done' });
   };
 
-  const finalizeAssistant = () => {
+  const finalizeAssistant = (options?: ChorusFinalizeAssistantOptions) => {
     finalizeCalled = true;
+    // Apply the final text/metadata as ordered buffered events first so they are
+    // delivered (text creates the message, metadata attaches to it) before
+    // `requestFinalize` completes the session — keeping the documented
+    // `finalizeAssistant({ text, metadata: { usage } })` cost-meter recipe atomic.
+    if (options) {
+      if (typeof options.text === 'string' && options.text) appendAssistant(options.text);
+      if (options.metadata) appendMetadata(options.metadata);
+    }
     requestFinalize(false);
   };
 
@@ -185,14 +201,27 @@ export function createSessionHelpers<TMeta>(
     reportStreamError(error);
   };
 
+  // Bridge connector metadata for `useChorusStream(...).send()`: notify the host
+  // `onStreamMetadata` observer (its existing behavior), then attach the payload
+  // to the streaming assistant message through the buffered metadata event. The
+  // observer routes through the shell's cost-meter wrapper, which keys off the
+  // render-synced (lagging) streaming id; the buffered attach keys off the live
+  // pending id, so usage still lands when it arrives in the same tick as the
+  // first/final chunk — the duplicate write is skipped by `mergeAssistantMetadataNow`.
+  const bridgeMetadata = (metadata: Record<string, unknown>) => {
+    safeOnStreamMetadata(metadata);
+    appendMetadata(metadata);
+  };
+
   const streamCallbacks = (): SendCallbacks => ({
     onChunk: appendAssistant,
     onReasoning: appendReasoning,
     onSource: appendSource,
     onToolDelta: appendToolDelta,
     onWarning: safeOnStreamWarning,
-    onMetadata: safeOnStreamMetadata,
-    onDone: finalizeAssistant,
+    onMetadata: bridgeMetadata,
+    // Wrap so a `Response` passed to `onDone` cannot be misread as finalize options.
+    onDone: () => finalizeAssistant(),
     onError: handleStreamError,
   });
 
