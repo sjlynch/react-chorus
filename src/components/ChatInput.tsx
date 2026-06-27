@@ -12,7 +12,7 @@ import type { ChatInputHandle, ChatInputProps, ChatInputSlashCommand } from './c
 import { joinClasses } from '../utils/className';
 import { styleVarsFromPalette } from '../utils/paletteVars';
 
-export type { ChatInputFocusOptions, ChatInputHandle, ChatInputModelPicker, ChatInputProps, ChatInputSlashCommand, RenderAttachmentErrorContext } from './chat-input/types';
+export type { ChatInputFocusOptions, ChatInputHandle, ChatInputModelPicker, ChatInputProps, ChatInputSlashCommand, ComposerFooterContext, ComposerFooterRender, RenderAttachmentErrorContext } from './chat-input/types';
 
 // Inlined dev-mode gate + once-guard for the host-`onKeyDown` warning below.
 // Importing the shared `utils/devMode`/`utils/warnings` helper here would drag
@@ -50,6 +50,7 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(funct
   onSlashCommand,
   resourceAttachments = [],
   modelPicker,
+  composerFooter,
   labels = DEFAULT_COMPOSER_LABELS,
   attachmentLabels = DEFAULT_ATTACHMENT_LABELS,
   palette,
@@ -334,6 +335,11 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(funct
         canSend={canSend}
         modelPicker={modelPicker}
       />
+      {composerFooter != null && composerFooter !== false && (
+        <div className="chorus-composer-footer">
+          {typeof composerFooter === 'function' ? composerFooter({ sending: Boolean(sending) }) : composerFooter}
+        </div>
+      )}
       {filteredSlashCommands.length > 0 && !composerInactive && (
         <div className="chorus-slash-palette" role="listbox" aria-label={labels.slashCommands}>
           {filteredSlashCommands.map(command => (

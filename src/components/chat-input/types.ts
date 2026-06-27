@@ -27,6 +27,15 @@ export interface ChatInputModelPicker {
   /** Accessible label for the `<select>` element. Defaults to "Provider". */
   ariaLabel?: string;
 }
+
+/** Render context passed to a `composerFooter` render-prop. */
+export interface ComposerFooterContext {
+  /** Whether a send is currently in flight (mirrors `ChatInput`'s `sending`). */
+  sending: boolean;
+}
+
+/** A composer footer: static node, or a render-prop reacting to `{ sending }`. */
+export type ComposerFooterRender = React.ReactNode | ((context: ComposerFooterContext) => React.ReactNode);
 import type { ChorusAttachmentLabels, ChorusComposerLabels } from '../../labels/types';
 import type { Palette } from '../ChorusTheme';
 
@@ -119,6 +128,14 @@ export interface ChatInputProps extends Omit<React.HTMLAttributes<HTMLDivElement
    * providers>` but also exposed so custom shells can hand-roll a picker.
    */
   modelPicker?: ChatInputModelPicker;
+  /**
+   * Host-supplied control(s) rendered directly beneath the composer input row,
+   * inside the composer container. Use it for a status/usage/throughput meter,
+   * a hint line, or any footer chrome. Accepts a plain `ReactNode` or a
+   * render-prop that receives `{ sending }` so the footer can react to the active
+   * send state. Wrapped in a `.chorus-composer-footer` element for styling.
+   */
+  composerFooter?: ComposerFooterRender;
   /**
    * Localized labels for the composer (placeholder, aria-labels, attach/send/stop, and
    * disabled/read-only fallback reasons). Defaults to English; the existing `placeholder`

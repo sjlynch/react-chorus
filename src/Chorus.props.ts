@@ -1,5 +1,5 @@
 import type React from 'react';
-import type { RenderAttachmentErrorContext } from './components/ChatInput';
+import type { ComposerFooterRender, RenderAttachmentErrorContext } from './components/ChatInput';
 import type { GetMessageFeedback, MessageCopyResult, MessageFeedback, MessageMarkdownProps, MessageTimestampFormatter, RenderErrorContext, RenderMessageContext } from './components/ChatWindow';
 import type { Palette } from './components/ChorusTheme';
 import type { MarkdownSanitizer } from './components/Markdown';
@@ -321,6 +321,14 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
    * a key of `providers`. Ignored when `providers` is omitted.
    */
   defaultProvider?: string;
+  /**
+   * Host control(s) rendered directly beneath the composer input row. A
+   * content-agnostic slot for a status/usage/throughput meter, a hint line, or
+   * any footer chrome. Accepts a plain `ReactNode` or a render-prop that
+   * receives `{ sending }` so the footer can react to the active send state.
+   * Wrapped in a `.chorus-composer-footer` element for styling.
+   */
+  composerFooter?: ComposerFooterRender;
   uploadAttachment?: UploadAttachment;
   value?: Message<TMeta>[];
   /**

@@ -121,6 +121,7 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
     onBudgetExceeded,
     providers,
     defaultProvider,
+    composerFooter,
     ...rest
   }: ChorusProps<TMeta>,
   ref: React.ForwardedRef<ChorusRef<TMeta>>,
@@ -495,6 +496,7 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
       },
       mcpResourceAttachments: mcp.resourceAttachments,
       modelPicker: multiProvider.modelPicker,
+      composerFooter,
     }),
     artifactPanel: {
       artifacts: artifacts.artifacts,

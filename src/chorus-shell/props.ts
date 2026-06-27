@@ -254,6 +254,8 @@ interface BuildComposerViewArgs<TMeta> {
   mcpResourceAttachments?: McpResourceAttachment[];
   /** Optional inline model/provider picker, wired by `<Chorus providers>`. */
   modelPicker?: ChatInputModelPicker;
+  /** Host control(s) rendered beneath the composer row (`<Chorus composerFooter>`). */
+  composerFooter?: ChatInputProps['composerFooter'];
 }
 
 export function buildComposerView<TMeta>({
@@ -273,6 +275,7 @@ export function buildComposerView<TMeta>({
   onMcpSlashCommand,
   mcpResourceAttachments,
   modelPicker,
+  composerFooter,
 }: BuildComposerViewArgs<TMeta>): ChorusComposerView {
   return {
     ref: composer.inputRef,
@@ -299,6 +302,7 @@ export function buildComposerView<TMeta>({
       onSlashCommand: onMcpSlashCommand,
       resourceAttachments: mcpResourceAttachments,
       modelPicker,
+      composerFooter,
     },
   };
 }

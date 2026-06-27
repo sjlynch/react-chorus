@@ -74,6 +74,11 @@
 .chorus-input { position: relative; display: flex; flex-direction: column; gap: 8px; margin-top: 12px; background: var(--chorus-input-area-bg, transparent); }
 .chorus-input--disabled, .chorus-input--readonly { opacity: .85; }
 
+/* Host composer footer slot (`<Chorus composerFooter>` / `<ChatInput composerFooter>`):
+   a content-agnostic row rendered beneath the input row inside the vertical
+   `.chorus-input` stack. Hosts style their own content; this only lays it out. */
+.chorus-composer-footer { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
 /* "Drop to attach" overlay shown while a file is dragged over the chat surface.
    It is sized `inset: 0` to its positioned ancestor: the `.chorus` widget when
    ChatInput portals it there, or the `.chorus-input` composer root standalone.

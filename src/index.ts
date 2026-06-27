@@ -1,7 +1,7 @@
 export { ChatWindow, MessageBubble } from './components/ChatWindow';
 export type { ChatWindowProps, GetMessageFeedback, MessageBubbleProps, MessageBubbleSlots, MessageCopyResult, MessageFeedback, MessageTimestampFormatter, RenderErrorContext, RenderMessageContext, RenderMessageRootProps, MessageMarkdownProps, MessageRenderActions } from './components/ChatWindow';
 export { ChatInput } from './components/ChatInput';
-export type { ChatInputFocusOptions, ChatInputHandle, ChatInputModelPicker, ChatInputProps, ChatInputSlashCommand, RenderAttachmentErrorContext } from './components/ChatInput';
+export type { ChatInputFocusOptions, ChatInputHandle, ChatInputModelPicker, ChatInputProps, ChatInputSlashCommand, ComposerFooterContext, ComposerFooterRender, RenderAttachmentErrorContext } from './components/ChatInput';
 export { ToolCallBlock } from './components/ToolCallBlock';
 export { ToolApprovalCard, DEFAULT_TOOL_APPROVAL_LABELS } from './components/message-row/ToolApprovalCard';
 export type { ToolApprovalCardLabels, ToolApprovalCardProps } from './components/message-row/ToolApprovalCard';
