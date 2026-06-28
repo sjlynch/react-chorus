@@ -74,6 +74,12 @@ export interface ChatWindowProps<TMeta = Record<string, unknown>> extends Omit<R
   showSystemMessages?: boolean;
   /** Render each message's `createdAt` time below its bubble. Defaults to false. Messages without `createdAt` render no time. */
   showTimestamps?: boolean;
+  /**
+   * Message roles whose bubbles expose the built-in inline edit action. Defaults
+   * to `['user']`. Non-user roles edit in place (no truncation/regeneration);
+   * user messages keep edit-and-resend.
+   */
+  editableRoles?: Role[];
   /** Override the locale-aware default per-message timestamp formatting. Only used when `showTimestamps` is true. */
   formatTimestamp?: MessageTimestampFormatter<TMeta>;
   /**

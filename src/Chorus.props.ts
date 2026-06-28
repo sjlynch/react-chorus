@@ -255,6 +255,15 @@ export interface ChorusProps<TMeta = Record<string, unknown>> extends Omit<React
    */
   showTimestamps?: boolean;
   /**
+   * Message roles whose bubbles expose the built-in inline edit action. Defaults
+   * to `['user']` (edit-and-resend). Add `'assistant'` (or other roles) to let
+   * users correct those bubbles in place — the text is updated without truncating
+   * the transcript or dispatching a new turn; user-message edits keep their
+   * edit-and-resend behavior. Gated the same way as the other write actions
+   * (disabled/read-only suppress it).
+   */
+  editableRoles?: Role[];
+  /**
    * Render `message.speaker.avatarUrl` as a small circular avatar next to the
    * visible speaker name above each bubble. The speaker name itself renders
    * unconditionally whenever a message carries `speaker`; only the avatar

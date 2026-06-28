@@ -1,6 +1,6 @@
 import React from 'react';
 import type { ResolvedChorusLabels } from '../../labels/types';
-import type { Message } from '../../types';
+import type { Message, Role } from '../../types';
 import type { MarkdownSanitizer } from '../Markdown';
 import { MessageActionControls, MessageRow } from '../MessageRow';
 import type { MessageBubbleSlots, MessageCopyResult, MessageFeedback, MessageMarkdownProps, MessageRenderActions, MessageTimestampFormatter } from '../MessageRow';
@@ -17,6 +17,8 @@ interface MessageDefaultRenderOptions<TMeta> {
   /** Whether a tool row belongs to the in-flight turn and may show "Running…". */
   toolStreaming: boolean;
   showTimestamps: boolean;
+  /** Message roles whose bubbles expose the inline edit action (default `['user']`). */
+  editableRoles: Role[];
   formatTimestamp?: MessageTimestampFormatter<TMeta>;
   /** Render `message.speaker.avatarUrl` as a small circular avatar above the bubble. */
   showSpeakerAvatars: boolean;
@@ -48,6 +50,7 @@ export function buildMessageDefaultRender<TMeta = Record<string, unknown>>({
   isStreaming,
   toolStreaming,
   showTimestamps,
+  editableRoles,
   formatTimestamp,
   showSpeakerAvatars,
   onEdit,
@@ -85,6 +88,7 @@ export function buildMessageDefaultRender<TMeta = Record<string, unknown>>({
         artifactLabels={resolvedLabels.artifacts}
         approvalLabels={resolvedLabels.approval}
         showTimestamp={showTimestamps}
+        editableRoles={editableRoles}
         formatTimestamp={formatTimestamp}
         showSpeakerAvatars={showSpeakerAvatars}
         onEdit={onEdit}
@@ -104,6 +108,8 @@ export function buildMessageDefaultRender<TMeta = Record<string, unknown>>({
 interface MessageRenderActionsOptions<TMeta> {
   message: Message<TMeta>;
   resolvedLabels: ResolvedChorusLabels;
+  /** Message roles whose bubbles expose the inline edit action (default `['user']`). */
+  editableRoles: Role[];
   onEdit?: (id: string, newText: string) => void;
   onRegenerate?: (id: string) => void;
   onDelete?: (id: string) => void;
@@ -122,6 +128,7 @@ interface MessageRenderActionsOptions<TMeta> {
 export function buildMessageRenderActions<TMeta = Record<string, unknown>>({
   message,
   resolvedLabels,
+  editableRoles,
   onEdit,
   onRegenerate,
   onDelete,
@@ -131,13 +138,16 @@ export function buildMessageRenderActions<TMeta = Record<string, unknown>>({
   initialFeedback,
   feedbackReadOnly,
 }: MessageRenderActionsOptions<TMeta>): MessageRenderActions {
+  const canEditRole = editableRoles.includes(message.role);
   const actions: MessageRenderActions = {
-    canEdit: Boolean(message.role === 'user' && onEdit),
+    canEdit: Boolean(canEditRole && onEdit),
     canRegenerate: Boolean(message.role === 'assistant' && onRegenerate),
     canDelete: Boolean(onDelete),
     // Pass through unchanged: trimming/empty-drop is owned solely by
-    // InlineMessageEditor.submitEdit so onEdit's contract is consistent.
-    edit: message.role === 'user' && onEdit ? (newText) => onEdit(message.id, newText) : undefined,
+    // InlineMessageEditor.submitEdit so onEdit's contract is consistent. The
+    // edit-and-resend vs. edit-in-place split (by role) is decided downstream in
+    // useEditRegenerateCommands.handleEdit, so this just exposes the action.
+    edit: canEditRole && onEdit ? (newText) => onEdit(message.id, newText) : undefined,
     regenerate: message.role === 'assistant' && onRegenerate ? () => onRegenerate(message.id) : undefined,
     delete: onDelete ? () => onDelete(message.id) : undefined,
     copy: copyAvailable ? () => copyMessage(message) : undefined,

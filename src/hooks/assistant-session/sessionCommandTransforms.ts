@@ -53,6 +53,31 @@ export function createEditedUserHistory<TMeta>(
   };
 }
 
+/**
+ * Edit a non-user message's text IN PLACE: replace the text of the row with the
+ * matching id and keep the rest of the transcript intact (no truncation, no
+ * regeneration). Returns `null` when the edit is a no-op — empty/whitespace text,
+ * an unknown id, or text identical to the current value — so callers can skip a
+ * spurious persistence write. Used for assistant/system/tool edits, which (unlike
+ * a user edit) are corrections rather than a new turn.
+ */
+export function applyInPlaceEdit<TMeta>(
+  history: Message<TMeta>[],
+  id: string,
+  newText: string,
+): Message<TMeta>[] | null {
+  const trimmed = newText.trim();
+  if (!trimmed) return null;
+
+  const idx = history.findIndex(m => m.id === id);
+  if (idx === -1) return null;
+
+  const current = history[idx];
+  if (!current || current.text === trimmed) return null;
+
+  return [...history.slice(0, idx), { ...current, text: trimmed }, ...history.slice(idx + 1)];
+}
+
 export interface RegenerateHistory<TMeta> {
   text: string;
   userIndex: number;

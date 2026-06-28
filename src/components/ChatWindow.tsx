@@ -1,5 +1,6 @@
 import React from 'react';
 import type { Message } from '../types';
+import { DEFAULT_EDITABLE_ROLES } from '../types';
 import { resolveChorusLabels } from '../labels/resolve';
 import { formatMessageForClipboard } from '../hooks/transcriptFormatters';
 import { useCanWriteTextToClipboard, writeTextToClipboard } from '../utils/messageCopy';
@@ -57,6 +58,7 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
   showJumpToBottomButton = !headless,
   showSystemMessages,
   showTimestamps = false,
+  editableRoles = DEFAULT_EDITABLE_ROLES,
   formatTimestamp,
   showSpeakerAvatars = false,
   streamingMessageId,
@@ -126,6 +128,7 @@ function ChatWindowInner<TMeta = Record<string, unknown>>({
         renderMessage={renderMessage}
         renderMessageFooter={renderMessageFooter}
         showTimestamps={showTimestamps}
+        editableRoles={editableRoles}
         formatTimestamp={formatTimestamp}
         showSpeakerAvatars={showSpeakerAvatars}
         resolvedLabels={resolvedLabels}

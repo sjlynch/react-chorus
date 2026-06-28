@@ -1,4 +1,11 @@
 export type Role = 'user' | 'assistant' | 'system' | 'tool';
+/**
+ * Roles whose message bubbles expose the built-in inline edit action by default.
+ * Editing a `user` message edits-and-resends (truncate to that turn + regenerate);
+ * editing any other role edits the text in place without re-dispatching a turn.
+ * Override via `<Chorus editableRoles={...}>` / `<ChatWindow editableRoles={...}>`.
+ */
+export const DEFAULT_EDITABLE_ROLES: Role[] = ['user'];
 export type ConnectorName = 'auto' | 'openai' | 'anthropic' | 'gemini' | 'ai-sdk';
 export type MessageFeedback = 'up' | 'down';
 export type MessageSourceType = 'url' | 'document' | 'file' | 'unknown';

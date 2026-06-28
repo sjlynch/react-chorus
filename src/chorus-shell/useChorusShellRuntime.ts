@@ -13,6 +13,7 @@ import {
   type ChorusProps,
   type ChorusRef,
 } from '../Chorus.types';
+import { DEFAULT_EDITABLE_ROLES } from '../types';
 import { resolveBuiltInPersistenceKey, useChorusShellDerivedState } from './derivedState';
 import { useChorusComposerActions, useChorusComposerState } from './useComposerActions';
 import { buildClearControl, buildComposerView, buildRootProps, buildTranscriptProps, type ChorusArtifactPanelView, type ChorusShellViewProps } from './props';
@@ -96,6 +97,7 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
     showClearButton = false,
     showJumpToBottomButton,
     showTimestamps = false,
+    editableRoles = DEFAULT_EDITABLE_ROLES,
     formatTimestamp,
     showSpeakerAvatars = false,
     style,
@@ -430,6 +432,7 @@ export function useChorusShellRuntime<TMeta = Record<string, unknown>>(
       renderError,
       renderMessage,
       showTimestamps,
+      editableRoles,
       formatTimestamp,
       showSpeakerAvatars,
       suggestedPrompts,

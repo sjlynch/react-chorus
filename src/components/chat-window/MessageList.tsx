@@ -1,6 +1,6 @@
 import React from 'react';
 import type { ResolvedChorusLabels } from '../../labels/types';
-import type { Message } from '../../types';
+import type { Message, Role } from '../../types';
 import type { MarkdownSanitizer } from '../Markdown';
 import { MessageRenderStateContext, MessageRenderStateProvider } from '../MessageRow';
 import type { MessageBubbleSlots, MessageCopyResult, MessageFeedback, MessageMarkdownProps, MessageRenderActions, MessageTimestampFormatter } from '../MessageRow';
@@ -48,6 +48,8 @@ export interface MessageListProps<TMeta = Record<string, unknown>> {
   renderMessageFooter?: (message: Message<TMeta>) => React.ReactNode;
   /** Render each message's `createdAt` time below its bubble. */
   showTimestamps: boolean;
+  /** Message roles whose bubbles expose the inline edit action (default `['user']`). */
+  editableRoles: Role[];
   /** Override the locale-aware default timestamp formatting. */
   formatTimestamp?: MessageTimestampFormatter<TMeta>;
   /** Render the optional `message.speaker.avatarUrl` as a small circular avatar. */
@@ -76,6 +78,7 @@ export function MessageList<TMeta = Record<string, unknown>>({
   renderMessage,
   renderMessageFooter,
   showTimestamps,
+  editableRoles,
   formatTimestamp,
   showSpeakerAvatars,
   resolvedLabels,
@@ -112,6 +115,7 @@ export function MessageList<TMeta = Record<string, unknown>>({
           isStreaming,
           toolStreaming,
           showTimestamps,
+          editableRoles,
           formatTimestamp,
           showSpeakerAvatars,
           onEdit,
@@ -127,6 +131,7 @@ export function MessageList<TMeta = Record<string, unknown>>({
         const actions = buildMessageRenderActions<TMeta>({
           message,
           resolvedLabels,
+          editableRoles,
           onEdit,
           onRegenerate,
           onDelete,

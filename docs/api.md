@@ -88,6 +88,7 @@ Built-in persistence uses `JSON.stringify` / `JSON.parse` by default. Message da
 | `resetToInitialMessages` | `boolean` | `false` | When clearing, restore the initial `messages`/`initialMessages` seed instead of saving an empty transcript. Restores the mount-time seed (frozen-seed contract) even if the seed prop was swapped after mount. |
 | `showJumpToBottomButton` | `boolean` | `!headless` | Shows the floating “Jump to latest” button when the user scrolls away from the bottom and new activity arrives. Pass `false` to disable it (for example when you own the scroll affordance); the headless exports default `headless={true}` so the button is off by default there. |
 | `showTimestamps` | `boolean` | `false` | Render a locale-aware per-message time under each bubble, sourced from `Message.createdAt`. Messages without a `createdAt` render no time. No custom `renderMessage` is needed. |
+| `editableRoles` | `Role[]` | `['user']` | Message roles whose bubbles expose the built-in inline edit action. Default `['user']` keeps **edit-and-resend** (the edited user turn truncates the transcript and regenerates). Add `'assistant'` (or `'system'`/`'tool'`) to let users correct those bubbles **in place** — the text is replaced without truncating the transcript or dispatching a new turn. Gated like the other write actions (suppressed by `disabled`/`readOnly`). See [Editing messages](#editing-messages). |
 | `formatTimestamp` | `(timestamp: string, message: Message<TMeta>) => ReactNode` | short locale-aware time | Overrides the built-in timestamp formatting used when `showTimestamps` is enabled. Receives the message's `createdAt` string and the message; return any node (for example a relative time, or date + time). |
 | `showSpeakerAvatars` | `boolean` | `false` | Render `message.speaker.avatarUrl` as a small circular image next to the visible speaker name. The speaker name renders unconditionally whenever a message carries `speaker`; only the avatar image is gated. See [`MessageSpeaker` and `showSpeakerAvatars`](#messagespeaker-and-showspeakeravatars). |
 | `headless` | `boolean` | `false` | Strip all default styles and inline style injection. |
@@ -296,6 +297,21 @@ On an accepted send, `send()` also resets the composer the same way a UI-driven 
 `retry()` and `regenerate(messageId)` also return `false` for the shared rejection cases — `<Chorus disabled>`, `<Chorus readOnly>`, an async built-in persistence load still pending, or controlled mode (`value` provided) with no `onChange` prop. `dismissError()` is **not** gated by `disabled`/`readOnly`/persistence-loading: clearing a stream error mutates transient state, not the transcript, so — like the built-in error banner's dismiss button — it stays available in those modes. (It is still rejected in controlled mode with no `onChange`.)
 
 `scrollToMessage(id)` returns `true` when it finds a rendered message row and `false` otherwise. A `false` is ambiguous between an id that matches no message and a valid message whose row is not currently in the DOM — windowed out by `maxRenderedMessages`, hidden by `hiddenRoles`, or drawn by a custom `renderMessage` that returns a fragment/custom component without spreading `ctx.messageProps`. To tell the two apart, cross-check the id against `getMessages()`: a `false` for an id `getMessages()` includes is the valid-but-unrendered case (a development-only one-time warning also flags it). Notably a "jump to message"/citation target older than the `maxRenderedMessages` window cannot be scrolled to until enough older rows render. `stop()` always remains available for active responses.
+
+### Editing messages
+
+The built-in per-message Edit action (and `ChorusRef`-driven edits) behaves differently by role, and which roles expose it is controlled by `editableRoles` (default `['user']`):
+
+- **User messages — edit-and-resend.** Saving an edit truncates the transcript back to the edited turn and dispatches a fresh request, so the assistant re-answers the revised question. This requires a `transport` or `onSend` handler (the edit is a no-op warning without one) and matches the familiar ChatGPT/Claude edit behavior.
+- **Other roles — edit-in-place.** When `editableRoles` includes `'assistant'` (or `'system'`/`'tool'`), saving an edit on one of those bubbles simply replaces its text. The rest of the transcript is left intact and **no new turn is generated** — it is a correction/curation, not a re-ask, so it works even with no send handler configured.
+
+```tsx
+// Let users correct the assistant's reply in place (no regeneration),
+// while user-message edits still truncate-and-resend as usual.
+<Chorus transport="/api/chat" editableRoles={['user', 'assistant']} />
+```
+
+Both paths fire `onMessagesChange` (and flush persistence) with the updated transcript. Empty/whitespace edits cancel without firing, and an in-place edit whose text is unchanged is a no-op. The action is suppressed by `disabled`/`readOnly` like the other write actions.
 
 ### Disabled and read-only states
 

@@ -2,7 +2,7 @@ import type React from 'react';
 import type { ChatInputHandle, ChatInputModelPicker, ChatInputProps, ChatInputSlashCommand } from '../components/ChatInput';
 import type { ChatWindowProps } from '../components/ChatWindow';
 import type { ChorusArtifactLabels, ChorusCostLabels, ChorusMcpLabels, ResolvedChorusLabels } from '../labels/types';
-import type { Artifact, ArtifactVersion, Message } from '../types';
+import type { Artifact, ArtifactVersion, Message, Role } from '../types';
 import type { ChorusArtifactHandle } from '../artifacts/artifactContext';
 import type { MarkdownSanitizer } from '../components/Markdown';
 import type { McpResourceAttachment, McpServerStatus } from '../mcp/types';
@@ -141,6 +141,7 @@ interface BuildTranscriptPropsArgs<TMeta> {
   renderError: ChorusProps<TMeta>['renderError'];
   renderMessage: ChorusProps<TMeta>['renderMessage'];
   showTimestamps: boolean;
+  editableRoles: Role[];
   formatTimestamp: ChorusProps<TMeta>['formatTimestamp'];
   showSpeakerAvatars: boolean;
   suggestedPrompts: ChorusProps<TMeta>['suggestedPrompts'];
@@ -167,6 +168,7 @@ export function buildTranscriptProps<TMeta>({
   renderError,
   renderMessage,
   showTimestamps,
+  editableRoles,
   formatTimestamp,
   showSpeakerAvatars,
   suggestedPrompts,
@@ -199,6 +201,7 @@ export function buildTranscriptProps<TMeta>({
     renderMessageFooter,
     showJumpToBottomButton: shellState.resolvedShowJumpToBottomButton,
     showTimestamps,
+    editableRoles,
     formatTimestamp,
     showSpeakerAvatars,
     streamingMessageId: session.streamingMessageId,

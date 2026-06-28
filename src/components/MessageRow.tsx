@@ -1,4 +1,5 @@
-import type { Message, MessageFeedback } from '../types';
+import type { Message, MessageFeedback, Role } from '../types';
+import { DEFAULT_EDITABLE_ROLES } from '../types';
 import type { ChorusApprovalLabels, ChorusArtifactLabels, ChorusAttachmentLabels, ChorusCodeCopyLabels, ChorusMessageActionLabels, ChorusSourceLabels, ChorusSpeakerLabels, ChorusToolCallLabels } from '../labels/types';
 import { formatMessageForClipboard } from '../hooks/transcriptFormatters';
 import { useCanWriteTextToClipboard, writeTextToClipboard } from '../utils/messageCopy';
@@ -73,6 +74,12 @@ export interface MessageRowProps<TMeta = Record<string, unknown>> extends Messag
   artifactLabels?: Partial<ChorusArtifactLabels>;
   /** Label overrides for the pending tool-approval card. */
   approvalLabels?: Partial<ChorusApprovalLabels>;
+  /**
+   * Message roles whose bubbles expose the inline edit action. Defaults to
+   * `['user']`. The edit-and-resend (user) vs. edit-in-place (other roles)
+   * behavior is decided by the session's `onEdit` handler.
+   */
+  editableRoles?: Role[];
   /** Render the message's `createdAt` time below the bubble. Off by default. */
   showTimestamp?: boolean;
   /** Override the locale-aware default timestamp formatting. Only used when `showTimestamp` is true. */
@@ -85,7 +92,7 @@ export interface MessageRowProps<TMeta = Record<string, unknown>> extends Messag
   showSpeakerAvatars?: boolean;
 }
 
-export function MessageRow<TMeta = Record<string, unknown>>({ m, codeTheme, headless, onEdit, onRegenerate, onDelete, onCopy, onFeedback, initialFeedback, feedbackReadOnly, streaming = false, markdownProps, markdownSanitizer, messageActionLabels, speakerLabels, reasoningLabel, codeCopyLabels, attachmentLabels, sourceLabels, toolCallLabels, artifactLabels, approvalLabels, showTimestamp, formatTimestamp, showSpeakerAvatars, before, headerSlot, footerSlot, after }: MessageRowProps<TMeta>) {
+export function MessageRow<TMeta = Record<string, unknown>>({ m, codeTheme, headless, onEdit, onRegenerate, onDelete, onCopy, onFeedback, initialFeedback, feedbackReadOnly, streaming = false, markdownProps, markdownSanitizer, messageActionLabels, speakerLabels, reasoningLabel, codeCopyLabels, attachmentLabels, sourceLabels, toolCallLabels, artifactLabels, approvalLabels, editableRoles = DEFAULT_EDITABLE_ROLES, showTimestamp, formatTimestamp, showSpeakerAvatars, before, headerSlot, footerSlot, after }: MessageRowProps<TMeta>) {
   // Drive editing state through MessageRenderStateContext when a provider is present
   // (the default ChatWindow path wraps every row in one) so a custom renderer's
   // `ctx.isEditing` reflects the row's inline editor. Falls back to local state when
@@ -102,11 +109,12 @@ export function MessageRow<TMeta = Record<string, unknown>>({ m, codeTheme, head
       ? () => writeTextToClipboard(formatMessageForClipboard(m))
       : undefined;
   const resolvedInitialFeedback = initialFeedback === undefined ? getInitialMessageFeedback(m) : initialFeedback;
+  const canEditRole = editableRoles.includes(m.role);
   const actions: MessageRenderActions = {
-    canEdit: Boolean(m.role === 'user' && onEdit),
+    canEdit: Boolean(canEditRole && onEdit),
     canRegenerate: Boolean(m.role === 'assistant' && onRegenerate),
     canDelete: Boolean(onDelete),
-    edit: m.role === 'user' && onEdit ? (newText) => onEdit(m.id, newText) : undefined,
+    edit: canEditRole && onEdit ? (newText) => onEdit(m.id, newText) : undefined,
     regenerate: m.role === 'assistant' && onRegenerate ? () => onRegenerate(m.id) : undefined,
     delete: onDelete ? () => onDelete(m.id) : undefined,
     copy,
