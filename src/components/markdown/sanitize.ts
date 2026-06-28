@@ -3,7 +3,11 @@ import DOMPurify from 'dompurify';
 export type MarkdownSanitizer = ((html: string) => string) | { sanitize: (html: string) => string };
 export type SanitizerFn = (html: string) => string;
 
-type DOMPurifyInstance = { sanitize?: SanitizerFn };
+type DOMPurifyHook = (currentNode: Element) => void;
+type DOMPurifyInstance = {
+  sanitize?: SanitizerFn;
+  addHook?: (entryPoint: 'afterSanitizeAttributes', hook: DOMPurifyHook) => void;
+};
 type DOMPurifyFactory = ((window: Window) => DOMPurifyInstance) & DOMPurifyInstance;
 
 const MAX_VALID_CODEPOINT = 0x10ffff;
@@ -136,16 +140,59 @@ function firstUrlDelimiterIndex(value: string) {
   return first;
 }
 
+// Targets that open a NEW top-level browsing context — so `window.opener` is set and
+// the opened page can navigate the opener (reverse tabnabbing, CWE-1022). The keywords
+// below reuse the current context, carry no opener, and need no hardening.
+const SAME_CONTEXT_TARGETS = new Set(['', '_self', '_parent', '_top']);
+
+// Reverse-tabnabbing hardening (CWE-1022). DOMPurify's default config STRIPS `target`,
+// so model markdown rendered through the built-in sanitizer cannot open a new browsing
+// context today. But if a resolved DOMPurify is ever configured to keep `target` (a
+// consumer's `ADD_ATTR`, or a future "open links in a new tab" feature), a surviving
+// `<a target="_blank">` would hand the opened page a usable `window.opener` — and
+// DOMPurify never injects `rel` itself. This `afterSanitizeAttributes` hook is the
+// safety net: it forces `rel="noopener noreferrer"` on any anchor that opens a new
+// browsing context, merging (not clobbering) existing `rel` tokens and dropping a
+// conflicting `opener` token that would re-enable the opener.
+function hardenNewContextLinkRel(node: Element) {
+  if (node.nodeName !== 'A' || typeof node.getAttribute !== 'function') return;
+  const target = node.getAttribute('target');
+  if (target === null || SAME_CONTEXT_TARGETS.has(target.trim().toLowerCase())) return;
+
+  const tokens = (node.getAttribute('rel') ?? '')
+    .split(/\s+/)
+    .filter((token) => token && token.toLowerCase() !== 'opener');
+  for (const required of ['noopener', 'noreferrer']) {
+    if (!tokens.some((token) => token.toLowerCase() === required)) tokens.push(required);
+  }
+  node.setAttribute('rel', tokens.join(' '));
+}
+
+// Register the link-hardening hook at most once per DOMPurify instance we resolve a
+// sanitizer from. (The mock-DOMPurify path used by some tests has no `addHook`; skip it.)
+const linkHardenedInstances = new WeakSet<object>();
+function ensureLinkHardeningHook(instance: DOMPurifyInstance) {
+  if (typeof instance.addHook !== 'function' || linkHardenedInstances.has(instance)) return;
+  linkHardenedInstances.add(instance);
+  instance.addHook('afterSanitizeAttributes', hardenNewContextLinkRel);
+}
+
 export function resolveSanitizer(sanitizer?: MarkdownSanitizer): SanitizerFn | undefined {
   if (typeof sanitizer === 'function') return sanitizer;
   if (sanitizer && typeof sanitizer.sanitize === 'function') return sanitizer.sanitize.bind(sanitizer);
 
   const domPurify = DOMPurify as unknown as DOMPurifyFactory;
-  if (typeof domPurify.sanitize === 'function') return domPurify.sanitize.bind(domPurify);
+  if (typeof domPurify.sanitize === 'function') {
+    ensureLinkHardeningHook(domPurify);
+    return domPurify.sanitize.bind(domPurify);
+  }
   if (typeof window !== 'undefined' && typeof domPurify === 'function') {
     if (!browserDOMPurifySanitizer) {
       const instance = domPurify(window);
-      if (typeof instance.sanitize === 'function') browserDOMPurifySanitizer = instance.sanitize.bind(instance);
+      if (typeof instance.sanitize === 'function') {
+        ensureLinkHardeningHook(instance);
+        browserDOMPurifySanitizer = instance.sanitize.bind(instance);
+      }
     }
     return browserDOMPurifySanitizer;
   }
