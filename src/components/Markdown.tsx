@@ -57,8 +57,28 @@ function useMarkdownStyles(headless: boolean) {
     const style = document.createElement('style');
     style.id = 'chorus-md-styles';
     applyChorusStyleNonce(style);
+    // Flow typography is stated explicitly rather than inherited from the UA
+    // stylesheet: hosts routinely ship a reset (`* { margin: 0; padding: 0 }`,
+    // normalize.css, Tailwind preflight) that strips it. Without these rules a
+    // reset host renders `list-style-position: outside` markers to the left of
+    // the list's content box — i.e. outside the bubble's padding, painted on or
+    // past its border — collapses every nesting level onto the same indent, and
+    // drops the spacing between blocks. Values are `em`-relative so they scale
+    // with the surface (14px bubbles, 13px reasoning bodies).
     style.textContent =
       `.chorus-md.chorus-md-streaming{white-space:pre-wrap}
+       .chorus-md p{margin-block:.6em}
+       .chorus-md h1,.chorus-md h2,.chorus-md h3,.chorus-md h4,.chorus-md h5,.chorus-md h6{margin-block:1em .5em;line-height:1.25}
+       .chorus-md ul,.chorus-md ol{margin-block:.6em;padding-inline-start:2em;list-style-position:outside}
+       .chorus-md ul{list-style-type:disc}
+       .chorus-md ul ul{list-style-type:circle}
+       .chorus-md ul ul ul{list-style-type:square}
+       .chorus-md ol{list-style-type:decimal}
+       .chorus-md li{margin-block:.15em}
+       .chorus-md li>ul,.chorus-md li>ol{margin-block:.25em}
+       .chorus-md li>p{margin-block:.25em}
+       .chorus-md blockquote{margin-block:.7em;margin-inline:0;padding-inline-start:1em;border-inline-start:3px solid var(--chorus-md-quote-border,rgba(128,128,128,0.45));color:var(--chorus-md-quote-text,inherit)}
+       .chorus-md hr{margin-block:1em;border:0;border-top:1px solid var(--chorus-md-rule,rgba(128,128,128,0.35))}
        .chorus-md table{border-collapse:collapse;margin:8px 0;max-width:100%;font-size:inherit;line-height:1.4}
        .chorus-md th,.chorus-md td{border:1px solid var(--chorus-md-table-border,rgba(128,128,128,0.45));padding:6px 11px;text-align:start;vertical-align:top}
        .chorus-md th{font-weight:600;background:var(--chorus-md-table-header-bg,rgba(128,128,128,0.16))}
@@ -72,7 +92,10 @@ function useMarkdownStyles(headless: boolean) {
        .chorus-md .chorus-codeblock-light .chorus-copy-btn{background:#fff;border:1px solid rgba(31,35,40,0.15);color:#24292f}
        .chorus-md .chorus-copy-btn.copied{opacity:.85}
        .chorus-md .chorus-copy-btn.copy-failed{opacity:.95;color:var(--chorus-error-text,#fca5a5);border-color:var(--chorus-error-border,rgba(220,38,38,0.4));background:var(--chorus-error-bg,rgba(220,38,38,0.15))}
-       .chorus-md .chorus-copy-status{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}`;
+       .chorus-md .chorus-copy-status{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+       /* Last: ties the specificity of .chorus-md .chorus-codeblock, so source order must break it. */
+       .chorus-md>:first-child{margin-block-start:0}
+       .chorus-md>:last-child{margin-block-end:0}`;
     document.head.appendChild(style);
   }, [headless]);
 }

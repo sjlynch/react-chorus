@@ -10,7 +10,11 @@ The provider connector singletons (`openaiConnector`, `anthropicConnector`, `gem
 
 ## Unreleased — upgrade notes
 
-These changes land in the next release off `[Unreleased]`. None break `ChorusProps` or an exported component/hook contract, but two are visible behavior changes worth checking before you upgrade.
+These changes land in the next release off `[Unreleased]`. None break `ChorusProps` or an exported component/hook contract, but three are visible behavior changes worth checking before you upgrade.
+
+### Markdown flow typography no longer depends on the browser's UA stylesheet
+
+The injected `chorus-md` sheet styled tables and code blocks but left paragraphs, headings, lists, list items, blockquotes, and `<hr>` to the UA defaults. In a host that ships a CSS reset — `* { margin: 0; padding: 0 }`, normalize.css, Tailwind preflight — those defaults are gone, so `list-style-position: outside` markers rendered to the left of the list's content box: **outside the bubble's padding, painted on or past its border.** Nesting levels collapsed onto one indent and blocks lost their vertical spacing. The sheet now declares this typography itself. **This is a visible rendering change for every `<Markdown>` / `<Chorus>` consumer** — lists gain a `2em` indent, blocks gain `em`-relative margins, and blockquotes gain an indent plus a leading rule. If you were compensating in your own stylesheet, drop the override. Three new CSS variables theme the result: `--chorus-md-quote-border`, `--chorus-md-quote-text`, and `--chorus-md-rule`. The headless build injects no stylesheet, so this typography is still yours to supply there.
 
 ### GFM tables are now styled by the bundled `chorus-md` stylesheet
 

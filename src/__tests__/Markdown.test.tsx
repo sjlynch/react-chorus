@@ -420,3 +420,86 @@ describe('Markdown', () => {
     expect(writeText).toHaveBeenCalledWith('const x = 1;');
   });
 });
+
+// Hosts routinely ship a CSS reset (`* { margin: 0; padding: 0 }`, normalize.css,
+// Tailwind preflight) that strips the UA stylesheet out from under the rendered
+// Markdown. The injected sheet must therefore state its own flow typography; jsdom
+// does no layout, so these assert the declarations that make the layout correct.
+describe('Markdown injected stylesheet (host CSS-reset resilience)', () => {
+  function injectedRules() {
+    render(<Markdown text="Hello" />);
+    const styleEl = document.getElementById('chorus-md-styles') as HTMLStyleElement | null;
+    expect(styleEl?.sheet).toBeTruthy();
+    return Array.from(styleEl!.sheet!.cssRules) as CSSStyleRule[];
+  }
+
+  const ruleFor = (rules: CSSStyleRule[], selector: string) =>
+    rules.find((rule) => rule.selectorText === selector);
+
+  it('reserves marker space inside the list content box so markers cannot escape the bubble', () => {
+    // `list-style-position: outside` paints the marker to the left of the list's
+    // content box. Without padding of its own that box starts at the bubble's
+    // content edge, so markers land on (or past) the bubble border.
+    const list = ruleFor(injectedRules(), '.chorus-md ul,.chorus-md ol');
+
+    expect(list).toBeDefined();
+    expect(list!.style.getPropertyValue('list-style-position')).toBe('outside');
+    const padding = list!.style.getPropertyValue('padding-inline-start');
+    expect(padding).toMatch(/^[\d.]+em$/);
+    expect(Number.parseFloat(padding)).toBeGreaterThan(0);
+  });
+
+  it('restores list marker glyphs a `list-style: none` reset would remove', () => {
+    const rules = injectedRules();
+
+    expect(ruleFor(rules, '.chorus-md ul')?.style.getPropertyValue('list-style-type')).toBe('disc');
+    expect(ruleFor(rules, '.chorus-md ol')?.style.getPropertyValue('list-style-type')).toBe('decimal');
+    // Nesting stays legible when every level would otherwise collapse to one glyph.
+    expect(ruleFor(rules, '.chorus-md ul ul')?.style.getPropertyValue('list-style-type')).toBe('circle');
+    expect(ruleFor(rules, '.chorus-md ul ul ul')?.style.getPropertyValue('list-style-type')).toBe('square');
+  });
+
+  it('indents nested lists relative to their parent item', () => {
+    const nested = ruleFor(injectedRules(), '.chorus-md li>ul,.chorus-md li>ol');
+
+    // The `ul,ol` padding rule supplies the indent; this only tightens the gap.
+    expect(nested?.style.getPropertyValue('margin-block')).toBeTruthy();
+  });
+
+  it('declares block spacing rather than inheriting it from the UA stylesheet', () => {
+    const rules = injectedRules();
+    const spaced = [
+      '.chorus-md p',
+      '.chorus-md h1,.chorus-md h2,.chorus-md h3,.chorus-md h4,.chorus-md h5,.chorus-md h6',
+      '.chorus-md ul,.chorus-md ol',
+      '.chorus-md li',
+      '.chorus-md blockquote',
+      '.chorus-md hr',
+    ];
+
+    for (const selector of spaced) {
+      const rule = ruleFor(rules, selector);
+      expect(rule, `missing spacing rule for ${selector}`).toBeDefined();
+      const margin = rule!.style.getPropertyValue('margin-block');
+      expect(margin, `${selector} must set its own margin-block`).toBeTruthy();
+    }
+  });
+
+  it('gives blockquote its own indent and rule, which a padding reset would erase', () => {
+    const quote = ruleFor(injectedRules(), '.chorus-md blockquote');
+
+    expect(quote?.style.getPropertyValue('padding-inline-start')).toBeTruthy();
+    expect(quote?.style.getPropertyValue('border-inline-start')).toContain('solid');
+  });
+
+  it('orders the first/last-child margin trim after the equally-specific codeblock rule', () => {
+    // `.chorus-md>:first-child` and `.chorus-md .chorus-codeblock` have the same
+    // specificity, so only source order stops a leading code block from opening
+    // the bubble with 8px of dead space.
+    const rules = injectedRules();
+    const index = (selector: string) => rules.findIndex((rule) => rule.selectorText === selector);
+
+    expect(index('.chorus-md>:first-child')).toBeGreaterThan(index('.chorus-md .chorus-codeblock'));
+    expect(index('.chorus-md>:last-child')).toBeGreaterThan(index('.chorus-md .chorus-codeblock'));
+  });
+});
